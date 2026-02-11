@@ -1,20 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import AsyncIterator
-from dataclasses import dataclass
-from typing import Any
-
-
-EOS_TOKEN = "<eos>"
-
-
-@dataclass
-class DraftBatch:
-    request_id: str
-    sequence_id: int
-    tokens: list[str]
-    peer_id: str = "unknown"
 
 
 class RustControlPlaneClient:
@@ -23,103 +11,54 @@ class RustControlPlaneClient:
     Real implementation should call gRPC over UDS `/tmp/shard-control.sock`.
     """
 
-    async def broadcast_work(
-        self,
-        *,
-        request_id: str,
-        context_window: list[str],
-        sequence_id: int,
-        min_draft_len: int,
-    ) -> None:
-        _ = (request_id, context_window, sequence_id, min_draft_len)
+    async def broadcast_work(self, request_id: str, prompt_context: str, min_tokens: int) -> None:
+        _ = (request_id, prompt_context, min_tokens)
+
+    async def try_pop_result(self) -> dict | None:
+        return None
 
 
-class FuzzyDraftVerifier:
-    """Soft verification for quantization mismatch.
+async def cooperative_generate(
+    *,
+    prompt: str,
+    local_model_generate,
+    verify_draft,
+    control_plane: RustControlPlaneClient,
+) -> AsyncIterator[str]:
+    """Hybrid speculative loop.
 
-    Accept scout token if it is in Oracle top-k (default top-3) rather than exact-only.
+    - Generate locally for baseline throughput.
+    - Every ~50ms broadcast context and accept remote draft candidates.
+    - Verify remote drafts and yield only accepted tokens.
     """
+    generated: list[str] = []
+    request_id = f"req-{int(time.time() * 1000)}"
+    last_broadcast = 0.0
 
-    def __init__(self, model_runtime: Any, k: int = 3) -> None:
-        self.model = model_runtime
-        self.k = k
-
-    async def verify_draft_batch(self, current_context: list[str], draft_tokens: list[str]) -> list[str]:
-        _ = current_context
-        accepted_tokens: list[str] = []
-
-        token_ids = [self._to_id(tok) for tok in draft_tokens]
-        self.model.eval_tokens(token_ids)
-
-        for i, token_id in enumerate(token_ids):
-            top_k = self.model.get_top_k_tokens(k=self.k)
-            if token_id in top_k:
-                accepted_tokens.append(self._from_id(token_id))
-                self.model.commit_token(token_id)
-                continue
-
-            correct_token = self.model.sample_token()
-            accepted_tokens.append(self._from_id(correct_token))
-            self.model.rollback(len(token_ids) - i)
+    while True:
+        local_token = await local_model_generate(generated, prompt)
+        if local_token is None:
             break
+        generated.append(local_token)
+        yield local_token
 
-        return accepted_tokens
+        now = time.perf_counter()
+        if (now - last_broadcast) >= 0.05:
+            context = " ".join(generated[-100:])
+            await control_plane.broadcast_work(request_id, context, min_tokens=5)
+            last_broadcast = now
 
-    @staticmethod
-    def _to_id(token: str) -> int:
-        # Placeholder encoding shim for scaffold wiring.
-        return abs(hash(token)) % 32000
+        result = await control_plane.try_pop_result()
+        if not result:
+            continue
 
-    @staticmethod
-    def _from_id(token_id: int) -> str:
-        # Placeholder decoding shim for scaffold wiring.
-        return f"tok_{token_id}"
+        draft_tokens: list[str] = result.get("draft_tokens", [])
+        accepted, correction = await verify_draft(generated, draft_tokens)
 
+        for tok in accepted:
+            generated.append(tok)
+            yield tok
 
-class CooperativeGenerator:
-    def __init__(
-        self,
-        *,
-        grpc_client: RustControlPlaneClient,
-        bid_queue: asyncio.Queue[DraftBatch],
-        verifier: FuzzyDraftVerifier,
-        model_generate_one,
-    ) -> None:
-        self.grpc_client = grpc_client
-        self.bid_queue = bid_queue
-        self.verifier = verifier
-        self.model_generate_one = model_generate_one
-
-    async def cooperative_generate(self, prompt_tokens: list[str], request_id: str) -> AsyncIterator[str]:
-        sequence_id = 0
-        tokens = list(prompt_tokens)
-
-        while not tokens or tokens[-1] != EOS_TOKEN:
-            await self.grpc_client.broadcast_work(
-                request_id=request_id,
-                context_window=tokens[-100:],
-                sequence_id=sequence_id,
-                min_draft_len=5,
-            )
-
-            try:
-                draft_batch = await asyncio.wait_for(self.bid_queue.get(), timeout=0.05)
-                if draft_batch.request_id != request_id:
-                    continue
-                if draft_batch.sequence_id != sequence_id:
-                    # Drop stale or future bids.
-                    continue
-
-                new_tokens = await self.verifier.verify_draft_batch(tokens, draft_batch.tokens)
-                for tok in new_tokens:
-                    tokens.append(tok)
-                    sequence_id += 1
-                    yield tok
-                continue
-            except asyncio.TimeoutError:
-                pass
-
-            one_token = await self.model_generate_one(tokens)
-            tokens.append(one_token)
-            sequence_id += 1
-            yield one_token
+        if correction:
+            generated.append(correction)
+            yield correction

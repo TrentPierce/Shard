@@ -33,7 +33,6 @@ struct WorkRequest {
     request_id: String,
     prompt_context: String,
     min_tokens: i32,
-    sequence_id: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -42,7 +41,6 @@ struct WorkResponse {
     peer_id: String,
     draft_tokens: Vec<String>,
     latency_ms: f32,
-    sequence_id: i64,
 }
 
 #[derive(NetworkBehaviour)]
@@ -134,7 +132,6 @@ async fn main() -> Result<()> {
             SwarmEvent::Behaviour(OracleBehaviourEvent::ControlWork(event)) => {
                 if let request_response::Event::Message { message, .. } = event {
                     if let request_response::Message::Request { request, channel, .. } = message {
-                        tracing::debug!(request_id = %request.request_id, sequence_id = request.sequence_id, "publishing shard-work request");
                         if let Ok(payload) = serde_json::to_vec(&request) {
                             let _ = swarm.behaviour_mut().gossipsub.publish(work_topic.clone(), payload);
                         }
@@ -150,7 +147,7 @@ async fn main() -> Result<()> {
                     if message.topic == result_topic.hash() {
                         if let Ok(result) = serde_json::from_slice::<WorkResponse>(&message.data) {
                             forward_result_to_python_callback(&result);
-                            tracing::info!(request_id = %result.request_id, sequence_id = result.sequence_id, "forwarded WorkResponse to python callback shim");
+                            tracing::info!(request_id = %result.request_id, "forwarded WorkResponse to python callback shim");
                         }
                     }
                 }

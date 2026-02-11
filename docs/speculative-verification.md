@@ -1,35 +1,32 @@
-# Distributed Speculative Verification Loop (Phase 4: Fuzzy Judge)
+# Distributed Speculative Verification Loop (Phase 3)
 
 ## Control-Plane Messages (Proto)
 
-- `WorkRequest { request_id, prompt_context, min_tokens, sequence_id }`
-- `WorkResponse { request_id, peer_id, draft_tokens[], latency_ms, sequence_id }`
-
-## Soft Verification Rule
-
-Instead of exact token matching, accept a scout token if it appears in Oracle top-k (k=3).
+- `WorkRequest { request_id, prompt_context, min_tokens }`
+- `WorkResponse { request_id, peer_id, draft_tokens[], latency_ms }`
 
 ## Cooperative Loop (Python Driver)
 
 ```text
-async cooperative_generate(prompt_tokens):
-    sequence_id = 0
+async cooperative_generate(prompt):
+    generated = []
+    request_id = new_request_id()
 
-    while not eos:
-        broadcast_work(context=tokens[-100:], sequence_id=sequence_id, min_draft_len=5)
+    while not done:
+        local_token = local_model.next_token(generated, prompt)
+        yield local_token
+        generated.append(local_token)
 
-        try bid in 50ms:
-            if bid.sequence_id == sequence_id:
-                accepted = verify_draft_batch(top_k=3)
-                stream(accepted)
-                sequence_id += len(accepted)
-                continue
-            else:
-                discard stale/future bid
+        every 50ms:
+            context = last_100_tokens(generated)
+            rust.broadcast_work(request_id, context, min_tokens=5)
 
-        fallback_token = local_generate_one()
-        stream(fallback_token)
-        sequence_id += 1
+        draft = rust.try_pop_result(request_id)
+        if draft:
+            accepted, correction = verify_with_bitnet(generated, draft.draft_tokens)
+            yield accepted...
+            if correction:
+                yield correction
 ```
 
 ## Rust Sidecar Behavior
@@ -37,10 +34,11 @@ async cooperative_generate(prompt_tokens):
 1. Receives `BroadcastWork` from Python control plane.
 2. Publishes `WorkRequest` onto gossipsub topic `shard-work`.
 3. Collects `WorkResponse` from peers (`shard-work-result`).
-4. Forwards responses (with sequence_id) to Python callback queue.
+4. Forwards first valid response to Python callback queue.
 
 ## Browser Scout Behavior
 
-1. Service worker checks local Oracle topology at startup.
-2. If local Oracle exists, stop scout inference (double-dip lock).
-3. Otherwise, process `shard-work`, generate draft tokens, and return `WorkResponse` with sequence_id.
+1. Subscribe to `shard-work`.
+2. If local double-dip lock is active, ignore work.
+3. Run WebLLM draft generation for 5 tokens.
+4. Publish `WorkResponse` on `shard-work-result`.
