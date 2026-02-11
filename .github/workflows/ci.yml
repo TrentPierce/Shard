@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  python-tests:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: desktop/python
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install Python deps
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+      - name: Unit + failure tests
+        run: |
+          cd ../..
+          pytest -q tests/inference_unit_test.py tests/control_plane_failure_test.py tests/bitnet_runtime_integration_test.py
+
+  web-lockfile:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: web/package-lock.json
+      - name: Verify reproducible install
+        run: npm ci --ignore-scripts
+
+  release-smoke-contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Run release bundle contract tests
+        run: pytest -q tests/release_test.py
