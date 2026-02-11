@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import time
 import uuid
@@ -17,29 +18,32 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 import httpx
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from bitnet.ctypes_bridge import BitNetConfig, BitNetRuntime
-from inference import cooperative_generate, RustControlPlaneClient
+from inference import RustControlPlaneClient, cooperative_generate
+
+LOGGER = logging.getLogger("shard.oracle_api")
 
 # ─── App & Config ────────────────────────────────────────────────────────────
 
-app = FastAPI(title="Shard Oracle API", version="0.3.0")
+app = FastAPI(title="Shard Oracle API", version="0.4.0")
 
+cors_origins = [o.strip() for o in os.getenv("SHARD_CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000").split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=cors_origins,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization"],
 )
 
 RUST_URL = os.getenv("SHARD_RUST_URL", "http://127.0.0.1:9091")
 
-
 # ─── State ───────────────────────────────────────────────────────────────────
+
 
 class NodeState:
     def __init__(self) -> None:
@@ -74,10 +78,12 @@ def maybe_load_bitnet() -> BitNetRuntime | None:
         return None
 
     BITNET = BitNetRuntime(BitNetConfig(lib_path=lib_path, model_path=model_path))
+    LOGGER.info("Loaded BitNet runtime from %s using model %s", lib_path, model_path)
     return BITNET
 
 
 # ─── Models ──────────────────────────────────────────────────────────────────
+
 
 class Message(BaseModel):
     role: str
@@ -105,38 +111,31 @@ class ChatResponse(BaseModel):
     usage: dict[str, int]
 
 
-# ─── Stub Local Model ───────────────────────────────────────────────────────
+# ─── Local Model + Verification ─────────────────────────────────────────────
 
-async def _stub_local_generate(generated: list[str], prompt: str) -> str | None:
-    """Placeholder local model generation.
 
-    When BitNet is loaded, this would call the real model.
-    For now it produces a finite scaffold response.
-    """
+async def _local_generate(generated: list[str], prompt: str) -> str | None:
     runtime = maybe_load_bitnet()
-    if runtime is not None:
-        # Real model — would call runtime.generate_next_token(...)
-        # For now still a scaffold since the C ABI only exposes verify_prefix
-        pass
+    if runtime is None:
+        return None
 
-    scaffold_tokens = (
-        "This is a scaffold response from the Shard hybrid inference network. "
-        "Once BitNet is loaded and Scout peers are connected, this will produce "
-        "real model output verified through speculative decoding."
-    ).split()
+    if not generated and prompt:
+        # Prime deterministic token map with prompt words for stable decoding.
+        runtime.encode_text(prompt)
 
-    idx = len(generated)
-    if idx < len(scaffold_tokens):
-        return scaffold_tokens[idx]
-    return None
+    return runtime.generate_next_token(generated)
 
 
-async def _stub_verify(generated: list[str], draft: list[str]) -> tuple[list[str], str | None]:
-    """Placeholder draft verification. Accepts all tokens for now."""
-    return draft, None
+async def _verify_draft(generated: list[str], draft: list[str]) -> tuple[list[str], str | None]:
+    runtime = maybe_load_bitnet()
+    if runtime is None:
+        # No runtime loaded: deterministic fallback is strict reject.
+        return [], None
+    return runtime.verify_prefix(generated, draft)
 
 
 # ─── Endpoints ───────────────────────────────────────────────────────────────
+
 
 @app.get("/health")
 async def health() -> dict[str, Any]:
@@ -146,8 +145,8 @@ async def health() -> dict[str, Any]:
         r = await client.get("/health")
         if r.status_code == 200:
             rust_status = "connected"
-    except Exception:
-        pass
+    except httpx.HTTPError as exc:
+        LOGGER.warning("Rust sidecar health check failed: %s", exc)
 
     return {
         "status": "ok",
@@ -155,7 +154,8 @@ async def health() -> dict[str, Any]:
         "accepting_swarm_jobs": STATE.is_idle,
         "rust_sidecar": rust_status,
         "rust_url": RUST_URL,
-        "bitnet_loaded": BITNET is not None,
+        "bitnet_loaded": maybe_load_bitnet() is not None,
+        "cors_origins": cors_origins,
     }
 
 
@@ -167,8 +167,8 @@ async def system_topology() -> dict[str, Any]:
         if r.status_code == 200:
             data = r.json()
             return {"status": "ok", "source": "rust-sidecar", **data}
-    except Exception:
-        pass
+    except httpx.HTTPError as exc:
+        LOGGER.warning("Topology fetch failed: %s", exc)
     return {
         "status": "degraded",
         "source": "fallback",
@@ -185,8 +185,8 @@ async def system_peers() -> dict[str, Any]:
         r = await client.get("/peers")
         if r.status_code == 200:
             return r.json()
-    except Exception:
-        pass
+    except httpx.HTTPError as exc:
+        LOGGER.warning("Peers fetch failed: %s", exc)
     return {"peers": [], "count": 0}
 
 
@@ -212,14 +212,17 @@ async def chat_completions(payload: ChatRequest) -> Any:
     # ── non-streaming ──
     control = RustControlPlaneClient(base_url=RUST_URL)
     tokens: list[str] = []
-    async for tok in cooperative_generate(
-        prompt=user_text,
-        local_model_generate=_stub_local_generate,
-        verify_draft=_stub_verify,
-        control_plane=control,
-        max_tokens=payload.max_tokens,
-    ):
-        tokens.append(tok)
+    try:
+        async for tok in cooperative_generate(
+            prompt=user_text,
+            local_model_generate=_local_generate,
+            verify_draft=_verify_draft,
+            control_plane=control,
+            max_tokens=payload.max_tokens,
+        ):
+            tokens.append(tok)
+    finally:
+        await control.close()
 
     content = " ".join(tokens)
     return ChatResponse(
@@ -240,29 +243,31 @@ async def _stream_generate(
 ) -> AsyncIterator[str]:
     """SSE stream of chat completion chunks (OpenAI-compatible)."""
     control = RustControlPlaneClient(base_url=RUST_URL)
-
-    async for token in cooperative_generate(
-        prompt=prompt,
-        local_model_generate=_stub_local_generate,
-        verify_draft=_stub_verify,
-        control_plane=control,
-        max_tokens=max_tokens,
-    ):
-        chunk = {
-            "id": completion_id,
-            "object": "chat.completion.chunk",
-            "created": int(time.time()),
-            "model": "shard-hybrid",
-            "choices": [
-                {
-                    "index": 0,
-                    "delta": {"content": token + " "},
-                    "finish_reason": None,
-                }
-            ],
-        }
-        yield f"data: {json.dumps(chunk)}\n\n"
-        await asyncio.sleep(0.01)  # Small delay for natural streaming feel
+    try:
+        async for token in cooperative_generate(
+            prompt=prompt,
+            local_model_generate=_local_generate,
+            verify_draft=_verify_draft,
+            control_plane=control,
+            max_tokens=max_tokens,
+        ):
+            chunk = {
+                "id": completion_id,
+                "object": "chat.completion.chunk",
+                "created": int(time.time()),
+                "model": "shard-hybrid",
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": {"content": token + " "},
+                        "finish_reason": None,
+                    }
+                ],
+            }
+            yield f"data: {json.dumps(chunk)}\n\n"
+            await asyncio.sleep(0.005)
+    finally:
+        await control.close()
 
     # Final chunk
     final = {

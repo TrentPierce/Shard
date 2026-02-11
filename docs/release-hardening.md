@@ -32,3 +32,38 @@ Run against binaries:
 ```bash
 pytest tests/release_test.py
 ```
+
+## Deterministic Dependency Strategy (offline/proxy-friendly)
+
+Prepare dependency artifacts once on a machine with external access:
+
+```bash
+./scripts/prepare_offline_deps.sh
+```
+
+This creates:
+
+- `.offline/python-wheels/` for pip wheelhouse installs.
+- `.offline/npm-cache/` for npm offline cache reuse.
+- `.offline/cargo-vendor/` for vendored Rust crates.
+
+Suggested install commands in restricted environments:
+
+```bash
+# Python
+python -m pip install --no-index --find-links .offline/python-wheels -r desktop/python/requirements.txt
+
+# npm
+npm ci --cache .offline/npm-cache --prefer-offline
+
+# cargo (with vendor source configured)
+cargo build --frozen
+```
+
+## CI Gates
+
+The repository CI (`.github/workflows/ci.yml`) now enforces:
+
+1. Python unit/failure-path tests for cooperative inference behavior.
+2. Reproducible web installs via `npm ci`.
+3. Release-bundle contract checks (`tests/release_test.py`).
