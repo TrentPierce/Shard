@@ -70,5 +70,5 @@ def test_loop_double_dip_and_remote_gate_contract() -> None:
         pytest.skip(f"worker asset missing at {worker}")
 
     content = worker.read_text(encoding="utf-8")
-    assert "localhost:8000/v1/system/topology" in content
-    assert "if (isLocalOracle)" in content
+    assert "INIT_SCOUT" in content
+    assert "doubleDipLocked" in content

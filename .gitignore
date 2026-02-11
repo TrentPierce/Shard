@@ -1,0 +1,62 @@
+# ─── System ───
+.DS_Store
+Thumbs.db
+*.log
+*.tmp
+
+# ─── IDEs ───
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ─── Python ───
+__pycache__/
+*.py[cod]
+*$py.class
+.env
+.venv
+env/
+venv/
+pip-log.txt
+pip-delete-this-directory.txt
+.pytest_cache/
+.coverage
+htmlcov/
+
+# ─── Rust ───
+desktop/rust/target/
+**/*.rs.bk
+
+# ─── Node.js / Next.js ───
+web/node_modules/
+web/.next/
+web/out/
+web/build/
+web/.env*.local
+web/.vercel
+web/npm-debug.log*
+web/yarn-debug.log*
+web/yarn-error.log*
+
+# ─── C++ ───
+cpp/shard-bridge/build/
+*.o
+*.a
+*.so
+*.dll
+*.dylib
+*.exe
+*.obj
+
+# ─── Shard Specific ───
+build/
+dist/
+!dist/README.md
+/tmp/shard-*.json
+/tmp/shard-control.sock
+
+# ─── PyInstaller ───
+*.spec
+build/
+dist/
