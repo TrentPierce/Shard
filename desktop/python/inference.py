@@ -7,18 +7,24 @@ and incorporating verified draft tokens from Scout peers.
 
 from __future__ import annotations
 
-import asyncio
 import time
 from collections.abc import AsyncIterator
-from typing import Any, Callable, Awaitable
+from typing import Any, Awaitable, Callable
 
-import httpx
+try:
+    import httpx  # type: ignore
+except ModuleNotFoundError:  # pragma: no cover - exercised in constrained envs
+    httpx = None
 
 
 class RustControlPlaneClient:
     """Async HTTP client for the Rust sidecar's control-plane API."""
 
     def __init__(self, base_url: str = "http://127.0.0.1:9091") -> None:
+        if httpx is None:
+            raise RuntimeError(
+                "httpx is required for RustControlPlaneClient. Install desktop/python/requirements.txt"
+            )
         self._client = httpx.AsyncClient(base_url=base_url, timeout=2.0)
 
     async def broadcast_work(
@@ -44,7 +50,7 @@ class RustControlPlaneClient:
                 data = r.json()
                 return data.get("result")
         except Exception:
-            pass
+            return None
         return None
 
     async def health(self) -> dict[str, Any] | None:
@@ -53,7 +59,7 @@ class RustControlPlaneClient:
             if r.status_code == 200:
                 return r.json()
         except Exception:
-            pass
+            return None
         return None
 
     async def close(self) -> None:
@@ -82,7 +88,6 @@ async def cooperative_generate(
     tokens_emitted = 0
 
     while tokens_emitted < max_tokens:
-        # ── local generation ──
         local_token = await local_model_generate(generated, prompt)
         if local_token is None:
             break
@@ -90,14 +95,12 @@ async def cooperative_generate(
         yield local_token
         tokens_emitted += 1
 
-        # ── periodic broadcast to swarm ──
         now = time.perf_counter()
         if (now - last_broadcast) >= 0.05:
             context = " ".join(generated[-100:])
             await control_plane.broadcast_work(request_id, context, min_tokens=5)
             last_broadcast = now
 
-        # ── check for scout results ──
         result = await control_plane.try_pop_result()
         if not result:
             continue
