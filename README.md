@@ -1,30 +1,35 @@
 # Shard: Hybrid Distributed Inference Network
 
-Shard now includes **Phase-5 production hardening scaffolds** focused on binary sealing.
+Shard now supports a **Phase-3 speculative auction scaffold**:
 
-## What is hardened
+- Browser Scouts can receive work context and return draft tokens.
+- Rust sidecar can publish work to gossipsub and forward results back to Python.
+- Python API exposes topology so browser auto-discovers local WebRTC Oracle address.
 
-- **C++ Hard Shim (`cpp/shard-bridge/`)**
-  - Exposes a strict C ABI (`shard_init`, `shard_eval`, `shard_get_logits`, `shard_rollback`, etc.).
-  - Intended to statically link BitNet internals and remove runtime symbol ambiguity.
-- **Python bridge (`desktop/python/bitnet/ctypes_bridge.py`)**
-  - Fail-fast mandatory symbol binding to `shard_engine` ABI.
-  - No optional-symbol probing path.
-- **Speculative loop (`desktop/python/inference.py`)**
-  - Fuzzy top-k verification and sequence-aware auction acceptance.
-- **Release forge (`scripts/build_release.py`)**
-  - One script for Rust release binary, C++ engine build, and Python freezing.
-- **Release gauntlet (`tests/release_test.py`)**
-  - Binary-level smoke checks for packaged artifacts.
+## Core Components
 
-## Build outputs
+- **Python Driver API** (`desktop/python/oracle_api.py`)
+  - OpenAI-compatible chat endpoint.
+  - Topology endpoint: `GET /v1/system/topology`.
+- **Rust Sidecar** (`desktop/rust/src/main.rs`)
+  - WebRTC-direct listen + handshake.
+  - Gossipsub work topics: `shard-work`, `shard-work-result`.
+- **Browser Scout** (`web/`)
+  - Auto-fetch topology from localhost.
+  - Service worker scaffold for work consumption and result publishing.
 
-- `build/bin/shard-daemon(.exe)`
-- `build/lib/libshard_engine.so` or `build/lib/shard_engine.dll`
-- `dist/ShardAI/` (PyInstaller one-dir bundle) or `dist/raw/` for skip-freeze mode
+## Phase-3 Additions
 
-## Constraints preserved
+1. **Auto-Discovery**
+   - Rust writes local WebRTC multiaddr hint.
+   - Python serves topology for browser bootstrap.
+2. **Thought Protocol**
+   - Added `WorkRequest`/`WorkResponse` to control-plane proto.
+3. **Speculative Loop Scaffold**
+   - Added `desktop/python/inference.py` cooperative generation loop with 50ms work checks.
+
+## Constraints Preserved
 
 - No central inference server.
-- Browser-to-desktop bridge over libp2p/WebRTC-direct.
-- Double-dip protection at service-worker startup.
+- Double-dip protection path for local desktop oracle.
+- Browser-to-desktop transport through libp2p WebRTC-direct.

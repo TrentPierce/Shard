@@ -1,7 +1,7 @@
 /* global self */
 
 let heartbeatTimer = null
-let isLocalOracle = false
+let doubleDipLocked = false
 
 self.addEventListener("install", () => {
   self.skipWaiting()
@@ -11,23 +11,6 @@ self.addEventListener("activate", (event) => {
   event.waitUntil(self.clients.claim())
 })
 
-async function detectLocalOracle() {
-  try {
-    const res = await fetch("http://localhost:8000/v1/system/topology")
-    if (!res.ok) {
-      isLocalOracle = false
-      return
-    }
-    const topo = await res.json()
-    isLocalOracle = Boolean(topo?.oracle_webrtc_multiaddr)
-    if (isLocalOracle) {
-      console.log("SHARD: Local Oracle detected. Disabling WebGPU Scout to save VRAM.")
-    }
-  } catch {
-    isLocalOracle = false
-  }
-}
-
 async function sendWorkResult(result) {
   const clients = await self.clients.matchAll({ type: "window" })
   clients.forEach((client) => {
@@ -36,24 +19,23 @@ async function sendWorkResult(result) {
 }
 
 async function onShardWork(msg) {
-  if (isLocalOracle) {
+  if (doubleDipLocked) {
     return
   }
 
   // Scaffold: WebLLM generation for max 5 tokens.
-  const draftTokens = ["draft", "token", "placeholder", "guess", "batch"]
+  const draftTokens = ["draft", "token", "placeholder"]
   await sendWorkResult({
     request_id: msg.request_id,
-    sequence_id: msg.sequence_id ?? 0,
     peer_id: "scout-browser",
     draft_tokens: draftTokens.slice(0, Math.max(1, msg.min_tokens ?? 5)),
     latency_ms: 12.5,
   })
 }
 
-async function initScoutRuntime(knownOracleAddr) {
-  await detectLocalOracle()
-  console.log("[swarm-worker] scout runtime initialized", { knownOracleAddr, isLocalOracle })
+async function initScoutRuntime(knownOracleAddr, hasLocalOracle) {
+  doubleDipLocked = Boolean(hasLocalOracle)
+  console.log("[swarm-worker] scout runtime initialized", { knownOracleAddr, doubleDipLocked })
 
   // TODO: connect js-libp2p and subscribe to gossipsub topic `shard-work`.
 
@@ -64,14 +46,14 @@ async function initScoutRuntime(knownOracleAddr) {
   heartbeatTimer = setInterval(async () => {
     const clients = await self.clients.matchAll({ type: "window" })
     clients.forEach((client) => {
-      client.postMessage({ type: "SW_HEARTBEAT", ts: Date.now(), isLocalOracle })
+      client.postMessage({ type: "SW_HEARTBEAT", ts: Date.now() })
     })
   }, 15000)
 }
 
 self.addEventListener("message", (event) => {
   if (event.data?.type === "INIT_SCOUT") {
-    void initScoutRuntime(event.data.knownOracleAddr)
+    void initScoutRuntime(event.data.knownOracleAddr, event.data.hasLocalOracle)
   }
 
   if (event.data?.type === "SHARD_WORK") {

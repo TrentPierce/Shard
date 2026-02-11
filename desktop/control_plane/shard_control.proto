@@ -24,7 +24,6 @@ message WorkRequest {
   string request_id = 1;
   string prompt_context = 2;
   int32 min_tokens = 3;
-  int64 sequence_id = 4;
 }
 
 message WorkResponse {
@@ -32,7 +31,6 @@ message WorkResponse {
   string peer_id = 2;
   repeated string draft_tokens = 3;
   float latency_ms = 4;
-  int64 sequence_id = 5;
 }
 
 message TopologyUpdate {
