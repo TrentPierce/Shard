@@ -1,9 +1,9 @@
 {
   "name": "shard-web-client",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev --port 3000",
     "build": "next build",
     "start": "next start"
   },
@@ -16,5 +16,11 @@
     "@chainsafe/libp2p-noise": "^16.1.4",
     "@multiformats/multiaddr": "^12.3.3",
     "@mlc-ai/web-llm": "^0.2.78"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.4",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "@types/node": "^20.14.12"
   }
 }

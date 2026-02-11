@@ -22,7 +22,7 @@ def run(cmd: list[str], cwd: Path | None = None) -> None:
 def build_rust() -> Path:
     rust_dir = ROOT / "desktop" / "rust"
     run(["cargo", "build", "--release"], cwd=rust_dir)
-    src = rust_dir / "target" / "release" / ("shard-oracle-daemon.exe" if os.name == "nt" else "shard-oracle-daemon")
+    src = rust_dir / "target" / "release" / ("shard-daemon.exe" if os.name == "nt" else "shard-daemon")
     out = BUILD / "bin"
     out.mkdir(parents=True, exist_ok=True)
     dst = out / ("shard-daemon.exe" if os.name == "nt" else "shard-daemon")
@@ -50,7 +50,7 @@ def build_cpp() -> Path:
 
 
 def freeze_python(daemon_bin: Path, engine_lib: Path) -> Path:
-    api_entry = ROOT / "desktop" / "python" / "oracle_api.py"
+    api_entry = ROOT / "desktop" / "python" / "run.py"
     pyinstaller = shutil.which("pyinstaller")
     if not pyinstaller:
         raise RuntimeError("pyinstaller is required for release build")
@@ -59,11 +59,13 @@ def freeze_python(daemon_bin: Path, engine_lib: Path) -> Path:
     one_dir.mkdir(parents=True, exist_ok=True)
 
     data_sep = ";" if os.name == "nt" else ":"
+    python_src = ROOT / "desktop" / "python"
     add_data = [
         f"{daemon_bin}{data_sep}_internal/bin",
         f"{engine_lib}{data_sep}_internal/lib",
         f"{ROOT / 'web' / 'public'}{data_sep}_internal/web/public",
         f"{ROOT / 'web' / 'src'}{data_sep}_internal/web/src",
+        f"{python_src / 'bitnet'}{data_sep}bitnet",
     ]
 
     cmd = [
@@ -78,6 +80,11 @@ def freeze_python(daemon_bin: Path, engine_lib: Path) -> Path:
         str(one_dir),
         "--specpath",
         str(BUILD),
+        "--hidden-import", "oracle_api",
+        "--hidden-import", "inference",
+        "--hidden-import", "bitnet",
+        "--hidden-import", "bitnet.ctypes_bridge",
+        "--paths", str(python_src),
     ]
 
     for item in add_data:
