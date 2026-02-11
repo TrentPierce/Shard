@@ -1,0 +1,61 @@
+syntax = "proto3";
+
+package shard.control.v1;
+
+import "google/protobuf/empty.proto";
+
+message ScoutRequest {
+  string task_id = 1;
+  uint32 desired_scouts = 2;
+}
+
+message ScoutReservation {
+  repeated string scout_peer_ids = 1;
+  uint32 lease_seconds = 2;
+}
+
+message BroadcastVerificationTask {
+  string task_id = 1;
+  string oracle_peer_id = 2;
+  bytes payload_json = 3;
+}
+
+message WorkRequest {
+  string request_id = 1;
+  string prompt_context = 2;
+  int32 min_tokens = 3;
+  int64 sequence_id = 4;
+}
+
+message WorkResponse {
+  string request_id = 1;
+  string peer_id = 2;
+  repeated string draft_tokens = 3;
+  float latency_ms = 4;
+  int64 sequence_id = 5;
+}
+
+message TopologyUpdate {
+  string oracle_peer_id = 1;
+  string oracle_webrtc_multiaddr = 2;
+}
+
+message Ack {
+  bool ok = 1;
+  string detail = 2;
+}
+
+message HealthStatus {
+  string rust_daemon_version = 1;
+  bool connected_to_dht = 2;
+  uint32 connected_peers = 3;
+}
+
+service ShardControlPlane {
+  rpc ReserveScouts(ScoutRequest) returns (ScoutReservation);
+  rpc BroadcastTask(BroadcastVerificationTask) returns (Ack);
+  rpc BroadcastWork(WorkRequest) returns (Ack);
+  rpc SubmitResult(WorkResponse) returns (Ack);
+  rpc UpdateTopology(TopologyUpdate) returns (Ack);
+  rpc Health(google.protobuf.Empty) returns (HealthStatus);
+}

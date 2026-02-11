@@ -1,0 +1,4 @@
+app=shard-api
+daemon=shard-daemon
+engine=libshard_engine.so
+mock_build=True
