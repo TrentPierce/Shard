@@ -149,6 +149,7 @@ class RateLimiter:
 
 
 RATE_LIMITER = RateLimiter(RATE_LIMIT_PER_MINUTE)
+SCOUT_RATE_LIMITER = RateLimiter(int(os.getenv("SHARD_SCOUT_RATE_LIMIT_PER_MINUTE", "120")))
 
 
 def _get_http_client() -> httpx.AsyncClient:
@@ -561,7 +562,19 @@ async def submit_scout_draft(
     
     This endpoint accepts draft generation results from Scout nodes.
     If the work is a Golden Ticket, the response is verified for correctness.
+    
+    Rate limited to prevent spam from malicious scouts.
     """
+    client_ip = request.client.host if request.client else "unknown"
+    allowed, remaining = await SCOUT_RATE_LIMITER.check(client_ip)
+    if not allowed:
+        METRICS["rate_limited_total"] += 1
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Rate limit exceeded. Try again in {remaining}s",
+            headers={"Retry-After": str(remaining)},
+        )
+    
     try:
         data = await request.json()
     except Exception:
@@ -643,7 +656,19 @@ async def get_scout_work(
     """Get work for a scout to process.
     
     Returns a work request with potentially injected Golden Ticket.
+    
+    Rate limited to prevent spam from malicious scouts.
     """
+    client_ip = request.client.host if request.client else "unknown"
+    allowed, remaining = await SCOUT_RATE_LIMITER.check(client_ip)
+    if not allowed:
+        METRICS["rate_limited_total"] += 1
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Rate limit exceeded. Try again in {remaining}s",
+            headers={"Retry-After": str(remaining)},
+        )
+    
     # This would typically come from the Rust sidecar work queue
     # For now, return 204 No Content to indicate no work available
     return Response(status_code=status.HTTP_204_NO_CONTENT)
