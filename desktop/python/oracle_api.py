@@ -47,6 +47,14 @@ class MockBitNetRuntime:
         return "mock response"
     def tokenize(self, text):
         return [1, 2, 3]
+    def rollback(self, pos):
+        pass
+    def eval_text(self, text):
+        return len(text.split())
+    def generate_next_token(self, tokens):
+        return "test"
+    def verify_prefix(self, tokens, draft):
+        return draft, None
 
 # Check if we should use mock (for testing or when no real bitnet available)
 _use_mock = os.getenv("SHARD_TESTING") == "1" or not (os.getenv("BITNET_LIB") and os.getenv("BITNET_MODEL"))
@@ -242,7 +250,7 @@ class NodeState:
 
 
 STATE = NodeState()
-BITNET: BitNetRuntime | None = None
+
 _http_client: httpx.AsyncClient | None = None
 _bitnet_lock = asyncio.Lock()
 

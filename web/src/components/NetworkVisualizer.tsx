@@ -107,12 +107,12 @@ export default function NetworkVisualizer({ pitchMode = false, onToast }: Networ
             return {
               nodes: [
                 { id: "local", name: "Local Oracle", type: "local", status: "connected" },
-                ...prev.nodes.filter(n => n.id !== "local"),
+                ...prev.nodes.filter((n: PeerNode) => n.id !== "local"),
                 ...newNodes
               ],
               links: [
                 ...prev.links,
-                ...newNodes.map(n => ({ source: "local", target: n.id, strength: 0.5 }))
+                ...newNodes.map((n: PeerNode) => ({ source: "local", target: n.id, strength: 0.5 }))
               ]
             }
           })
