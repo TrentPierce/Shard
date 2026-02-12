@@ -10,6 +10,7 @@ interface HeaderProps {
 const modeLabels: Record<NodeMode, string> = {
     loading: "Bootstrapping",
     "local-oracle": "Oracle",
+    "scout-initializing": "Scout (Loading)",
     scout: "Scout",
     leech: "Consumer",
 }
@@ -17,6 +18,7 @@ const modeLabels: Record<NodeMode, string> = {
 const modeDescriptions: Record<NodeMode, string> = {
     loading: "Connecting to network…",
     "local-oracle": "Full model loaded — verifying drafts",
+    "scout-initializing": "Loading WebLLM model…",
     scout: "Contributing compute via WebGPU",
     leech: "Consuming inference — upgrade to Scout for priority",
 }

@@ -333,7 +333,7 @@ export async function requestWork(): Promise<WorkRequest | null> {
 export async function startScoutWorker(
     onRequest?: (work: WorkRequest) => void,
     onResult?: (result: ScoutSubmissionResult) => void
-): Promise<void> {
+): Promise<() => void> {
     const pollInterval = 2000 // Poll every 2 seconds
 
     const poll = async () => {
