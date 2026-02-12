@@ -22,17 +22,17 @@ use libp2p::{
     gossipsub::{self, IdentTopic, MessageAuthenticity},
     identity,
     kad::{store::MemoryStore, Behaviour as KadBehaviour},
-    request_response::{self, ProtocolSupport},
+    request_response::{self, OutboundRequestId, ProtocolSupport},
     swarm::{NetworkBehaviour, SwarmEvent},
     Multiaddr, PeerId, StreamProtocol, SwarmBuilder,
 };
-use rand::thread_rng;
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     net::SocketAddr,
+    path::Path,
     sync::Arc,
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tokio::sync::{mpsc, Mutex};
 use tower_http::cors::{Any, CorsLayer};
@@ -57,6 +57,14 @@ struct Cli {
     /// Bootstrap peer multiaddr (can be repeated)
     #[arg(long)]
     bootstrap: Vec<String>,
+
+    /// Path to newline-delimited bootstrap multiaddrs
+    #[arg(long)]
+    bootstrap_file: Option<String>,
+
+    /// Seconds between reconnect attempts to known peers
+    #[arg(long, default_value = "20")]
+    reconnect_seconds: u64,
 
     /// Log level (trace, debug, info, warn, error)
     #[arg(long, default_value = "info")]
@@ -94,6 +102,11 @@ pub struct WorkResponse {
     pub latency_ms: f32,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PersistedPeers {
+    peers: Vec<String>,
+}
+
 // ─── Shared State ───────────────────────────────────────────────────────────
 
 #[derive(Clone, Debug, Serialize)]
@@ -108,13 +121,17 @@ struct TopologyState {
 struct PeerInfo {
     peer_id: String,
     connected_at: u128,
+    last_seen_at: u128,
     addrs: Vec<String>,
+    verified: bool,
+    handshake_failures: u32,
 }
 
 #[derive(Clone)]
 struct SharedState {
     topology: Arc<Mutex<TopologyState>>,
     peers: Arc<Mutex<HashMap<String, PeerInfo>>>,
+    known_peers: Arc<Mutex<Vec<String>>>,
     results: Arc<Mutex<VecDeque<WorkResponse>>>,
     work_tx: mpsc::Sender<WorkRequest>,
     daemon_start: u128,
@@ -145,16 +162,79 @@ fn data_dir() -> std::path::PathBuf {
         .join("shard")
 }
 
+fn unique_addrs(addrs: Vec<String>) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut out = Vec::new();
+    for a in addrs {
+        if seen.insert(a.clone()) {
+            out.push(a);
+        }
+    }
+    out
+}
+
+async fn read_bootstrap_file(path: &str) -> Vec<String> {
+    let Ok(contents) = tokio::fs::read_to_string(path).await else {
+        return Vec::new();
+    };
+
+    contents
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .map(ToOwned::to_owned)
+        .collect()
+}
+
+async fn load_persisted_peers(path: &Path) -> Vec<String> {
+    let Ok(raw) = tokio::fs::read(path).await else {
+        return Vec::new();
+    };
+    let Ok(parsed) = serde_json::from_slice::<PersistedPeers>(&raw) else {
+        return Vec::new();
+    };
+    unique_addrs(parsed.peers)
+}
+
+async fn save_persisted_peers(path: &Path, peers: &[String]) {
+    let payload = PersistedPeers {
+        peers: unique_addrs(peers.to_vec()),
+    };
+    if let Ok(bytes) = serde_json::to_vec_pretty(&payload) {
+        let _ = tokio::fs::write(path, bytes).await;
+    }
+}
+
+fn validate_work_request(req: &WorkRequest) -> Result<(), String> {
+    if req.request_id.trim().is_empty() || req.request_id.len() > 128 {
+        return Err("request_id must be non-empty and <= 128 chars".into());
+    }
+    if req.prompt_context.trim().is_empty() {
+        return Err("prompt_context must be non-empty".into());
+    }
+    if req.prompt_context.len() > 16000 {
+        return Err("prompt_context exceeds 16000 chars".into());
+    }
+    if req.min_tokens <= 0 || req.min_tokens > 512 {
+        return Err("min_tokens must be between 1 and 512".into());
+    }
+    Ok(())
+}
+
 // ─── HTTP Control-Plane Handlers ────────────────────────────────────────────
 
 async fn health_handler(AxumState(state): AxumState<SharedState>) -> Json<serde_json::Value> {
     let topo = state.topology.lock().await;
     let peers = state.peers.lock().await;
+    let known = state.known_peers.lock().await;
+    let verified_count = peers.values().filter(|p| p.verified).count();
     Json(serde_json::json!({
         "status": "ok",
         "version": env!("CARGO_PKG_VERSION"),
         "peer_id": topo.local_peer_id,
         "connected_peers": peers.len(),
+        "verified_peers": verified_count,
+        "known_peers": known.len(),
         "uptime_ms": now_ms() - state.daemon_start,
         "listen_addrs": topo.listen_addrs,
     }))
@@ -162,6 +242,7 @@ async fn health_handler(AxumState(state): AxumState<SharedState>) -> Json<serde_
 
 async fn topology_handler(AxumState(state): AxumState<SharedState>) -> Json<serde_json::Value> {
     let topo = state.topology.lock().await;
+    let known = state.known_peers.lock().await;
     Json(serde_json::json!({
         "status": "ok",
         "source": "rust-sidecar",
@@ -169,6 +250,7 @@ async fn topology_handler(AxumState(state): AxumState<SharedState>) -> Json<serd
         "oracle_webrtc_multiaddr": topo.webrtc_addr,
         "oracle_ws_multiaddr": topo.ws_addr,
         "listen_addrs": topo.listen_addrs,
+        "known_peer_count": known.len(),
     }))
 }
 
@@ -182,6 +264,10 @@ async fn broadcast_work_handler(
     AxumState(state): AxumState<SharedState>,
     Json(req): Json<WorkRequest>,
 ) -> Json<serde_json::Value> {
+    if let Err(detail) = validate_work_request(&req) {
+        return Json(serde_json::json!({ "ok": false, "detail": detail }));
+    }
+
     match state.work_tx.send(req).await {
         Ok(_) => Json(serde_json::json!({ "ok": true, "detail": "queued for gossipsub publish" })),
         Err(e) => Json(serde_json::json!({ "ok": false, "detail": format!("channel error: {e}") })),
@@ -229,6 +315,24 @@ async fn main() -> Result<()> {
     let data = data_dir();
     tokio::fs::create_dir_all(&data).await?;
 
+    let topo_path = data.join("topology.json");
+    let known_peers_path = data.join("known_peers.json");
+
+    let file_bootstrap = if let Some(path) = &cli.bootstrap_file {
+        read_bootstrap_file(path).await
+    } else {
+        Vec::new()
+    };
+    let persisted_bootstrap = load_persisted_peers(&known_peers_path).await;
+    let bootstrap_addrs = unique_addrs(
+        cli.bootstrap
+            .iter()
+            .cloned()
+            .chain(file_bootstrap)
+            .chain(persisted_bootstrap)
+            .collect(),
+    );
+
     // ── channels ──
     let (work_tx, mut work_rx) = mpsc::channel::<WorkRequest>(256);
 
@@ -243,6 +347,7 @@ async fn main() -> Result<()> {
             ws_addr: None,
         })),
         peers: Arc::new(Mutex::new(HashMap::new())),
+        known_peers: Arc::new(Mutex::new(bootstrap_addrs.clone())),
         results: Arc::new(Mutex::new(VecDeque::new())),
         work_tx,
         daemon_start: now_ms(),
@@ -311,7 +416,7 @@ async fn main() -> Result<()> {
     swarm.listen_on(ws_addr)?;
 
     // ── bootstrap peers ──
-    for addr_str in &cli.bootstrap {
+    for addr_str in &bootstrap_addrs {
         if let Ok(addr) = addr_str.parse::<Multiaddr>() {
             tracing::info!(%addr, "dialing bootstrap peer");
             let _ = swarm.dial(addr);
@@ -333,23 +438,56 @@ async fn main() -> Result<()> {
             .expect("control-plane server crashed");
     });
 
-    // ── persist topology hint to disk (for legacy file-based readers) ──
-    let topo_path = data.join("topology.json");
-
     println!();
     println!("  ╔══════════════════════════════════════════════╗");
-    println!("  ║       Shard Oracle Daemon  v{}           ║", env!("CARGO_PKG_VERSION"));
+    println!(
+        "  ║       Shard Oracle Daemon  v{}           ║",
+        env!("CARGO_PKG_VERSION")
+    );
     println!("  ╠══════════════════════════════════════════════╣");
-    println!("  ║  Peer ID      : {}…  ║", &local_peer_id.to_string()[..20]);
-    println!("  ║  Control API  : http://0.0.0.0:{}          ║", control_port);
-    println!("  ║  TCP          : /ip4/0.0.0.0/tcp/{}        ║", cli.tcp_port);
-    println!("  ║  WebSocket    : /ip4/0.0.0.0/tcp/{}/ws   ║", cli.tcp_port + 100);
+    println!(
+        "  ║  Peer ID      : {}…  ║",
+        &local_peer_id.to_string()[..20]
+    );
+    println!(
+        "  ║  Control API  : http://0.0.0.0:{}          ║",
+        control_port
+    );
+    println!(
+        "  ║  TCP          : /ip4/0.0.0.0/tcp/{}        ║",
+        cli.tcp_port
+    );
+    println!(
+        "  ║  WebSocket    : /ip4/0.0.0.0/tcp/{}/ws   ║",
+        cli.tcp_port + 100
+    );
     println!("  ╚══════════════════════════════════════════════╝");
     println!();
+
+    let mut reconnect_tick = tokio::time::interval(Duration::from_secs(cli.reconnect_seconds));
+    let mut pending_handshakes: HashMap<OutboundRequestId, PeerId> = HashMap::new();
 
     // ── main event loop ──
     loop {
         tokio::select! {
+            _ = reconnect_tick.tick() => {
+                let known = state.known_peers.lock().await.clone();
+                let connected: HashSet<String> = state.peers.lock().await.keys().cloned().collect();
+                for addr_str in known {
+                    if let Ok(addr) = addr_str.parse::<Multiaddr>() {
+                        let is_self = addr.to_string().contains(&local_peer_id.to_string());
+                        if !is_self {
+                            // Attempt periodic redial for resilience.
+                            if let Err(err) = swarm.dial(addr.clone()) {
+                                tracing::debug!(%addr, %err, "reconnect dial skipped/failed");
+                            } else {
+                                tracing::debug!(%addr, connected = connected.len(), "reconnect dial attempted");
+                            }
+                        }
+                    }
+                }
+            }
+
             // ── inbound work from Python driver (HTTP → gossipsub) ──
             Some(work_req) = work_rx.recv() => {
                 match serde_json::to_vec(&work_req) {
@@ -378,7 +516,6 @@ async fn main() -> Result<()> {
                                 );
                                 let mut q = state.results.lock().await;
                                 q.push_back(result);
-                                // Cap queue at 128 entries
                                 while q.len() > 128 { q.pop_front(); }
                             }
                         }
@@ -411,10 +548,24 @@ async fn main() -> Result<()> {
                                     tracing::info!(%peer, %latency, "PING → PONG");
                                     let pong = Heartbeat { kind: "PONG".into(), sent_at_ms: now_ms() };
                                     let _ = swarm.behaviour_mut().handshake.send_response(channel, pong);
+
+                                    let mut peers = state.peers.lock().await;
+                                    if let Some(info) = peers.get_mut(&peer.to_string()) {
+                                        info.verified = true;
+                                        info.last_seen_at = now_ms();
+                                    }
                                 }
                             }
-                            request_response::Message::Response { response, .. } => {
+                            request_response::Message::Response { response, request_id } => {
                                 tracing::info!(%peer, kind = %response.kind, "handshake response");
+                                pending_handshakes.remove(&request_id);
+                                let mut peers = state.peers.lock().await;
+                                if let Some(info) = peers.get_mut(&peer.to_string()) {
+                                    info.last_seen_at = now_ms();
+                                    if response.kind == "PONG" {
+                                        info.verified = true;
+                                    }
+                                }
                             }
                         }
                     }
@@ -434,7 +585,9 @@ async fn main() -> Result<()> {
                         tracing::info!(%address, "listening on");
                         let addr_str = address.to_string();
                         let mut topo = state.topology.lock().await;
-                        topo.listen_addrs.push(addr_str.clone());
+                        if !topo.listen_addrs.iter().any(|a| a == &addr_str) {
+                            topo.listen_addrs.push(addr_str.clone());
+                        }
 
                         if addr_str.contains("/ws") {
                             topo.ws_addr = Some(format!("{}/p2p/{}", addr_str, local_peer_id));
@@ -443,7 +596,6 @@ async fn main() -> Result<()> {
                             topo.webrtc_addr = Some(format!("{}/p2p/{}", addr_str, local_peer_id));
                         }
 
-                        // Persist topology hint
                         let topo_json = serde_json::json!({
                             "oracle_peer_id": topo.local_peer_id,
                             "oracle_webrtc_multiaddr": topo.webrtc_addr,
@@ -456,25 +608,81 @@ async fn main() -> Result<()> {
                     // ── peer connections ──
                     SwarmEvent::ConnectionEstablished { peer_id, endpoint, .. } => {
                         tracing::info!(%peer_id, ?endpoint, "peer connected");
-                        let mut peers = state.peers.lock().await;
-                        peers.insert(
-                            peer_id.to_string(),
-                            PeerInfo {
-                                peer_id: peer_id.to_string(),
-                                connected_at: now_ms(),
-                                addrs: vec![endpoint.get_remote_address().to_string()],
-                            },
-                        );
+                        let remote_addr = endpoint.get_remote_address().to_string();
+
+                        {
+                            let mut peers = state.peers.lock().await;
+                            peers.insert(
+                                peer_id.to_string(),
+                                PeerInfo {
+                                    peer_id: peer_id.to_string(),
+                                    connected_at: now_ms(),
+                                    last_seen_at: now_ms(),
+                                    addrs: vec![remote_addr.clone()],
+                                    verified: false,
+                                    handshake_failures: 0,
+                                },
+                            );
+                        }
+
+                        {
+                            let mut known = state.known_peers.lock().await;
+                            known.push(remote_addr);
+                            *known = unique_addrs(known.clone());
+                            save_persisted_peers(&known_peers_path, &known).await;
+                        }
+
+                        let req = Heartbeat { kind: "PING".into(), sent_at_ms: now_ms() };
+                        let id = swarm.behaviour_mut().handshake.send_request(&peer_id, req);
+                        pending_handshakes.insert(id, peer_id);
                     }
+
                     SwarmEvent::ConnectionClosed { peer_id, .. } => {
                         tracing::info!(%peer_id, "peer disconnected");
                         let mut peers = state.peers.lock().await;
                         peers.remove(&peer_id.to_string());
                     }
 
+                    SwarmEvent::OutgoingConnectionError { peer_id, error, .. } => {
+                        tracing::warn!(?peer_id, %error, "outgoing connection error");
+                    }
+
                     _ => {}
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{unique_addrs, validate_work_request, WorkRequest};
+
+    #[test]
+    fn unique_addrs_removes_duplicates() {
+        let in_addrs = vec![
+            "/ip4/127.0.0.1/tcp/4001".to_string(),
+            "/ip4/127.0.0.1/tcp/4001".to_string(),
+            "/ip4/127.0.0.1/tcp/4101/ws".to_string(),
+        ];
+        let out = unique_addrs(in_addrs);
+        assert_eq!(out.len(), 2);
+    }
+
+    #[test]
+    fn work_request_validation_enforces_bounds() {
+        let ok = WorkRequest {
+            request_id: "abc".into(),
+            prompt_context: "hello".into(),
+            min_tokens: 4,
+        };
+        assert!(validate_work_request(&ok).is_ok());
+
+        let bad = WorkRequest {
+            request_id: "".into(),
+            prompt_context: "hello".into(),
+            min_tokens: 0,
+        };
+        assert!(validate_work_request(&bad).is_err());
     }
 }

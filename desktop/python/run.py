@@ -14,6 +14,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 import sys
 
@@ -28,6 +29,12 @@ def main() -> None:
         help="Rust sidecar control-plane URL (default: http://127.0.0.1:9091)",
     )
     parser.add_argument("--reload", action="store_true", help="Enable auto-reload for development")
+    parser.add_argument(
+        "--log-level",
+        default=os.getenv("SHARD_LOG_LEVEL", "INFO"),
+        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+        help="Application log level",
+    )
     args = parser.parse_args()
 
     # Expose sidecar URL as env var so oracle_api can read it
@@ -47,12 +54,17 @@ def main() -> None:
     print(f"  ╚══════════════════════════════════════════╝")
     print()
 
+    logging.basicConfig(
+        level=getattr(logging, args.log_level.upper(), logging.INFO),
+        format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+    )
+
     uvicorn.run(
         "oracle_api:app",
         host=args.host,
         port=args.port,
         reload=args.reload,
-        log_level="info",
+        log_level=args.log_level.lower(),
     )
 
 
