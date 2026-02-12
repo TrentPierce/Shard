@@ -49,9 +49,21 @@ export default function RootLayout({
                 />
             </head>
             <body>
-                <Providers>
+                 <Providers>
                     <ErrorBoundary>{children}</ErrorBoundary>
                 </Providers>
+                {/* Service Worker Registration */}
+                <script
+                    dangerouslySetInnerHTML={{
+                        __html: `
+                            if ('serviceWorker' in navigator) {
+                                navigator.serviceWorker.register('/sw.js').catch((err) => {
+                                    console.error('[SW] Service Worker registration failed:', err);
+                                });
+                            }
+                        `
+                    }}
+                />
             </body>
         </html>
     )

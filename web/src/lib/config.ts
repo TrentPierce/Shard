@@ -12,52 +12,18 @@
  * Configurable via NEXT_PUBLIC_API_URL environment variable.
  * @default "http://127.0.0.1:8000"
  */
-export const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000"
+export const API_BASE = process.env.NEXT_PUBLIC_API_URL || ""
+export const RUST_BASE = process.env.NEXT_PUBLIC_RUST_URL || ""
 
 /**
- * Base URL for the Rust sidecar control plane.
- * Configurable via NEXT_PUBLIC_RUST_URL environment variable.
- * @default "http://127.0.0.1:9091"
+ * Get the API URL for the Python Oracle API.
+ * Returns relative URL for same-origin requests, full URL for absolute requests.
  */
-export const RUST_BASE = process.env.NEXT_PUBLIC_RUST_URL || "http://127.0.0.1:9091"
-
-// ─── Feature Flags ───────────────────────────────────────────────────────────
-
-/**
- * Enable/disable debug logging.
- * @default false
- */
-export const DEBUG = process.env.NEXT_PUBLIC_DEBUG === "true"
-
-/**
- * Polling interval for topology updates (in milliseconds).
- * @default 10000 (10 seconds)
- */
-export const TOPOLOGY_POLL_INTERVAL = parseInt(
-    process.env.NEXT_PUBLIC_TOPOLOGY_POLL_INTERVAL || "10000",
-    10
-)
-
-/**
- * Polling interval for peer updates (in milliseconds).
- * @default 8000 (8 seconds)
- */
-export const PEER_POLL_INTERVAL = parseInt(
-    process.env.NEXT_PUBLIC_PEER_POLL_INTERVAL || "8000",
-    10
-)
-
-// ─── Validation ──────────────────────────────────────────────────────────────
-
-/**
- * Validate that required configuration is present.
- * Throws an error if critical config is missing in production.
- */
-export function validateConfig(): void {
-    if (typeof window === "undefined") {
-        // Server-side - skip validation
-        return
-    }
+export function apiUrl(path: string = "/v1"): string {
+  const base = API_BASE || new URL("/v1").toString()
+  const cleanPath = path.startsWith("/") ? path : `/${path}`
+  return `${base}${cleanPath}`
+}
 
     // In production, require explicit API URL
     if (process.env.NODE_ENV === "production" && !process.env.NEXT_PUBLIC_API_URL) {

@@ -184,6 +184,11 @@ app = FastAPI(
     },
 )
 
+# Public API configuration from environment
+PUBLIC_API = os.getenv("SHARD_PUBLIC_API", "false").lower() == "true"
+PUBLIC_HOST = os.getenv("SHARD_PUBLIC_HOST", "auto-detect")
+
+# CORS: allow any origin for decentralized access
 cors_origins = ["*"]
 app.add_middleware(
     CORSMiddleware,

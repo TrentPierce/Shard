@@ -18,10 +18,15 @@ use axum::{
 };
 use clap::Parser;
 use libp2p::{
+    autonat,
+    dcutr,
     futures::StreamExt,
     gossipsub::{self, IdentTopic, MessageAuthenticity},
+    identify,
     identity,
     kad::{store::MemoryStore, Behaviour as KadBehaviour},
+    ping,
+    relay,
     request_response::{self, OutboundRequestId, ProtocolSupport},
     swarm::{NetworkBehaviour, SwarmEvent},
     Multiaddr, PeerId, StreamProtocol, SwarmBuilder,
@@ -31,7 +36,10 @@ use std::{
     collections::{HashMap, HashSet, VecDeque},
     net::SocketAddr,
     path::Path,
-    sync::Arc,
+    sync::{
+        atomic::{AtomicU32, AtomicF32, Ordering},
+        Arc,
+    },
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tokio::sync::{mpsc, Mutex};
@@ -69,6 +77,26 @@ struct Cli {
     /// Log level (trace, debug, info, warn, error)
     #[arg(long, default_value = "info")]
     log_level: String,
+
+    /// Expose API publicly (allow external connections)
+    #[arg(long, default_value = "false")]
+    public_api: bool,
+
+    /// Public hostname/IP for API exposure (auto-detected if not set)
+    #[arg(long)]
+    public_host: Option<String>,
+
+    /// Run as circuit relay server (help other peers behind NAT)
+    #[arg(long, default_value = "false")]
+    relay_server: bool,
+
+    /// Contribute compute to the network (run as Oracle node)
+    #[arg(long, default_value = "true")]
+    contribute: bool,
+
+    /// Enable NAT traversal (circuit relay + hole punching)
+    #[arg(long, default_value = "true")]
+    nat_traversal: bool,
 }
 
 // ─── Protocol Messages ─────────────────────────────────────────────────────
@@ -115,6 +143,13 @@ struct TopologyState {
     listen_addrs: Vec<String>,
     webrtc_addr: Option<String>,
     ws_addr: Option<String>,
+    public_api_addr: Option<String>,
+    is_public: bool,
+    relay_server_enabled: bool,
+    contribute_enabled: bool,
+    capacity: u32,        // tokens per second
+    load: u32,            // current active requests
+    latency_ms: f32,      // average response latency in ms
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -135,6 +170,9 @@ struct SharedState {
     results: Arc<Mutex<VecDeque<WorkResponse>>>,
     work_tx: mpsc::Sender<WorkRequest>,
     daemon_start: u128,
+    capacity: Arc<AtomicU32>,
+    current_load: Arc<AtomicU32>,
+    avg_latency_ms: Arc<AtomicF32>,
 }
 
 // ─── libp2p Behaviour ───────────────────────────────────────────────────────
@@ -146,6 +184,12 @@ struct OracleBehaviour {
     handshake: request_response::cbor::Behaviour<Heartbeat, Heartbeat>,
     verify: request_response::cbor::Behaviour<DraftSubmission, String>,
     control_work: request_response::cbor::Behaviour<WorkRequest, String>,
+    relay_client: relay::client::Behaviour,
+    relay_server: relay::Behaviour,
+    dcutr: dcutr::Behaviour,
+    autonat: autonat::v1::Behaviour,
+    identify: identify::Behaviour,
+    ping: ping::Behaviour,
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -228,6 +272,9 @@ async fn health_handler(AxumState(state): AxumState<SharedState>) -> Json<serde_
     let peers = state.peers.lock().await;
     let known = state.known_peers.lock().await;
     let verified_count = peers.values().filter(|p| p.verified).count();
+    let capacity = state.capacity.load(Ordering::Relaxed);
+    let load = state.current_load.load(Ordering::Relaxed);
+    let latency_ms = state.avg_latency_ms.load(Ordering::Relaxed);
     Json(serde_json::json!({
         "status": "ok",
         "version": env!("CARGO_PKG_VERSION"),
@@ -237,12 +284,22 @@ async fn health_handler(AxumState(state): AxumState<SharedState>) -> Json<serde_
         "known_peers": known.len(),
         "uptime_ms": now_ms() - state.daemon_start,
         "listen_addrs": topo.listen_addrs,
+        "public_api": topo.is_public,
+        "public_api_addr": topo.public_api_addr,
+        "relay_server": topo.relay_server_enabled,
+        "contribute": topo.contribute_enabled,
+        "capacity": capacity,
+        "load": load,
+        "latency_ms": latency_ms,
     }))
 }
 
 async fn topology_handler(AxumState(state): AxumState<SharedState>) -> Json<serde_json::Value> {
     let topo = state.topology.lock().await;
     let known = state.known_peers.lock().await;
+    let capacity = state.capacity.load(Ordering::Relaxed);
+    let load = state.current_load.load(Ordering::Relaxed);
+    let latency_ms = state.avg_latency_ms.load(Ordering::Relaxed);
     Json(serde_json::json!({
         "status": "ok",
         "source": "rust-sidecar",
@@ -251,6 +308,13 @@ async fn topology_handler(AxumState(state): AxumState<SharedState>) -> Json<serd
         "oracle_ws_multiaddr": topo.ws_addr,
         "listen_addrs": topo.listen_addrs,
         "known_peer_count": known.len(),
+        "public_api": topo.is_public,
+        "public_api_addr": topo.public_api_addr,
+        "relay_server": topo.relay_server_enabled,
+        "contribute": topo.contribute_enabled,
+        "capacity": capacity,
+        "load": load,
+        "latency_ms": latency_ms,
     }))
 }
 
@@ -345,12 +409,22 @@ async fn main() -> Result<()> {
             listen_addrs: Vec::new(),
             webrtc_addr: None,
             ws_addr: None,
+            public_api_addr: cli.public_host.clone(),
+            is_public: cli.public_api,
+            relay_server_enabled: cli.relay_server,
+            contribute_enabled: cli.contribute,
+            capacity: 100,  // Default: 100 tokens/sec
+            load: 0,
+            latency_ms: 0.0,
         })),
         peers: Arc::new(Mutex::new(HashMap::new())),
         known_peers: Arc::new(Mutex::new(bootstrap_addrs.clone())),
         results: Arc::new(Mutex::new(VecDeque::new())),
         work_tx,
         daemon_start: now_ms(),
+        capacity: Arc::new(AtomicU32::new(100)),  // Default: 100 tokens/sec
+        current_load: Arc::new(AtomicU32::new(0)),
+        avg_latency_ms: Arc::new(AtomicF32::new(0.0)),
     };
 
     // ── build swarm ──
@@ -363,6 +437,7 @@ async fn main() -> Result<()> {
         )?
         .with_websocket(libp2p::noise::Config::new, libp2p::yamux::Config::default)
         .await?
+        .with_relay_client(libp2p::noise::Config::new, libp2p::yamux::Config::default)?
         .with_behaviour(|key| {
             let local_peer_id = PeerId::from(key.public());
             let gossipsub = gossipsub::Behaviour::new(
@@ -391,12 +466,27 @@ async fn main() -> Result<()> {
                 )],
                 request_response::Config::default(),
             );
+            let relay_client = relay::client::Behaviour::new(local_peer_id);
+            let relay_server = relay::Behaviour::new(local_peer_id, Default::default());
+            let dcutr = dcutr::Behaviour::new(local_peer_id);
+            let autonat = autonat::v1::Behaviour::new(local_peer_id, autonat::v1::Config::default());
+            let identify = identify::Behaviour::new(identify::Config::new(
+                "/shard/1.0.0".to_string(),
+                key.public(),
+            ));
+            let ping = ping::Behaviour::new(ping::Config::new());
             Ok(OracleBehaviour {
                 gossipsub,
                 kad,
                 handshake,
                 verify,
                 control_work,
+                relay_client,
+                relay_server,
+                dcutr,
+                autonat,
+                identify,
+                ping,
             })
         })?
         .build();
@@ -460,6 +550,22 @@ async fn main() -> Result<()> {
     println!(
         "  ║  WebSocket    : /ip4/0.0.0.0/tcp/{}/ws   ║",
         cli.tcp_port + 100
+    );
+    println!(
+        "  ║  Public API   : {}                              ║",
+        if cli.public_api { "enabled" } else { "disabled" }
+    );
+    println!(
+        "  ║  Public Host  : {}                       ║",
+        cli.public_host.as_deref().unwrap_or("auto-detect")
+    );
+    println!(
+        "  ║  Relay Server : {}                              ║",
+        if cli.relay_server { "enabled" } else { "disabled" }
+    );
+    println!(
+        "  ║  Contribute   : {}                              ║",
+        if cli.contribute { "enabled" } else { "disabled" }
     );
     println!("  ╚══════════════════════════════════════════════╝");
     println!();
@@ -580,6 +686,104 @@ async fn main() -> Result<()> {
                         tracing::debug!(?event, "kademlia event");
                     }
 
+                    // ── relay client ──
+                    SwarmEvent::Behaviour(OracleBehaviourEvent::RelayClient(event)) => {
+                        match event {
+                            relay::client::Event::ReservationReqAccepted { .. } => {
+                                tracing::info!("relay reservation accepted");
+                            }
+                            relay::client::Event::ReservationReqDenied { .. } => {
+                                tracing::warn!("relay reservation denied");
+                            }
+                            relay::client::Event::ReservationTimedOut { .. } => {
+                                tracing::warn!("relay reservation timed out");
+                            }
+                            _ => {}
+                        }
+                    }
+
+                    // ── relay server ──
+                    SwarmEvent::Behaviour(OracleBehaviourEvent::RelayServer(event)) => {
+                        match event {
+                            relay::Event::ReservationReqAccepted { src_peer_id, .. } => {
+                                tracing::info!(%src_peer_id, "relay server: reservation accepted");
+                            }
+                            relay::Event::ReservationReqDenied { src_peer_id, .. } => {
+                                tracing::warn!(%src_peer_id, "relay server: reservation denied");
+                            }
+                            _ => {}
+                        }
+                    }
+
+                    // ── dcutr ──
+                    SwarmEvent::Behaviour(OracleBehaviourEvent::Dcutr(event)) => {
+                        match event {
+                            dcutr::Event::RemoteInitiatedDirectConnectionUpgrade { remote_peer_id, .. } => {
+                                tracing::info!(%remote_peer_id, "remote initiated direct connection upgrade");
+                            }
+                            dcutr::Event::DirectConnectionUpgradeSucceeded { remote_peer_id, .. } => {
+                                tracing::info!(%remote_peer_id, "direct connection upgrade succeeded");
+                            }
+                            dcutr::Event::DirectConnectionUpgradeFailed { remote_peer_id, .. } => {
+                                tracing::warn!(%remote_peer_id, "direct connection upgrade failed");
+                            }
+                            _ => {}
+                        }
+                    }
+
+                    // ── autonat ──
+                    SwarmEvent::Behaviour(OracleBehaviourEvent::Autonat(event)) => {
+                        match event {
+                            autonat::Event::StatusChanged { old, new } => {
+                                tracing::info!(?old, ?new, "AutoNAT status changed");
+                            }
+                            autonat::Event::InboundProbeRequest { .. } => {
+                                // Probe request handled internally
+                            }
+                            _ => {}
+                        }
+                    }
+
+                    // ── identify ──
+                    SwarmEvent::Behaviour(OracleBehaviourEvent::Identify(event)) => {
+                        match event {
+                            identify::Event::Received { peer_id, info, .. } => {
+                                tracing::info!(%peer_id, protocol_version = %info.protocol_version, "identify info received");
+                                if let Some(observed_addr) = info.observed_addr {
+                                    tracing::info!(%peer_id, %observed_addr, "observed address");
+                                    let mut topo = state.topology.lock().await;
+                                    // Update with observed public address if behind NAT
+                                    if topo.public_api_addr.is_none() && !observed_addr.to_string().starts_with("/ip4/127.0.0.1") && !observed_addr.to_string().starts_with("/ip6/::1") {
+                                        topo.public_api_addr = Some(format!("{}/p2p/{}", observed_addr, local_peer_id));
+                                    }
+                                }
+                            }
+                            identify::Event::Sent { .. } => {
+                                // Identification sent to peer
+                            }
+                            identify::Event::Pushed { .. } => {
+                                // Identification pushed to peer
+                            }
+                            identify::Event::Error { peer_id, error } => {
+                                tracing::warn!(%peer_id, %error, "identify protocol error");
+                            }
+                            _ => {}
+                        }
+                    }
+
+                    // ── ping ──
+                    SwarmEvent::Behaviour(OracleBehaviourEvent::Ping(event)) => {
+                        match event {
+                            ping::Event::Success { peer, result, .. } => {
+                                tracing::debug!(%peer, rtt = %result.rtt, "ping success");
+                            }
+                            ping::Event::Failure { peer, error, .. } => {
+                                tracing::debug!(%peer, %error, "ping failure");
+                            }
+                            _ => {}
+                        }
+                    }
+
                     // ── new listen addresses → update topology ──
                     SwarmEvent::NewListenAddr { address, .. } => {
                         tracing::info!(%address, "listening on");
@@ -601,6 +805,13 @@ async fn main() -> Result<()> {
                             "oracle_webrtc_multiaddr": topo.webrtc_addr,
                             "oracle_ws_multiaddr": topo.ws_addr,
                             "listen_addrs": topo.listen_addrs,
+                            "public_api": topo.is_public,
+                            "public_api_addr": topo.public_api_addr,
+                            "relay_server": topo.relay_server_enabled,
+                            "contribute": topo.contribute_enabled,
+                            "capacity": topo.capacity,
+                            "load": topo.load,
+                            "latency_ms": topo.latency_ms,
                         });
                         let _ = tokio::fs::write(&topo_path, topo_json.to_string()).await;
                     }

@@ -19,6 +19,7 @@ hex = "0.4"
 libp2p = { version = "0.54", features = [
     "tokio", "kad", "gossipsub", "request-response",
     "noise", "yamux", "tcp", "websocket", "dns", "macros", "cbor",
+    "relay", "dcutr", "autonat", "identify", "ping", "mdns",
 ] }
 rand = "0.8"
 serde = { version = "1", features = ["derive"] }

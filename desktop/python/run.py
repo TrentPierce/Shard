@@ -35,23 +35,35 @@ def main() -> None:
         choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
         help="Application log level",
     )
+    parser.add_argument("--public-api", action="store_true", help="Expose API publicly to internet")
+    parser.add_argument("--public-host", type=str, default=None, help="Public hostname/IP for API (auto-detect if not set)")
+    parser.add_argument("--https", action="store_true", help="Enable HTTPS with Let's Encrypt")
     args = parser.parse_args()
 
     # Expose sidecar URL as env var so oracle_api can read it
     os.environ.setdefault("SHARD_RUST_URL", args.rust_url)
+    # Pass public API flags to API
+    if args.public_api:
+        os.environ["SHARD_PUBLIC_API"] = "true"
+    if args.public_host:
+        os.environ["SHARD_PUBLIC_HOST"] = args.public_host
+    if args.https:
+        os.environ["SHARD_HTTPS"] = "true"
 
     try:
         import uvicorn
     except ImportError:
         print("ERROR: uvicorn not installed.  Run:  pip install -r requirements.txt", file=sys.stderr)
         sys.exit(1)
-
-    print(f"  ╔══════════════════════════════════════════╗")
+    
+    print(f"  ╔══════════════════════════════════════╗")
     print(f"  ║       Shard Oracle API  v0.3.0           ║")
-    print(f"  ╠══════════════════════════════════════════╣")
-    print(f"  ║  API        → http://{args.host}:{args.port}       ║")
+    print(f"  ╠══════════════════════════════════════╣")
+    print(f"  ║  API        → http{'s' if args.https else ''}://{args.host}:{args.port}       ║")
+    print(f"  ║  Public API  : {'enabled' if args.public_api else 'disabled'}          ║")
+    print(f"  ║  Public Host : {args.public_host or 'auto-detect'}      ║")
     print(f"  ║  Rust Sidecar → {args.rust_url}  ║")
-    print(f"  ╚══════════════════════════════════════════╝")
+    print(f"  ╚══════════════════════════════════════╝")
     print()
 
     logging.basicConfig(

@@ -6,6 +6,11 @@
  */
 
 import { apiUrl } from "./config"
+import {
+  getAllOracleNodes,
+  selectFastestOracle,
+  type OracleNode
+} from "./discovery"
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -37,12 +42,66 @@ export async function sendMessage(
     onToken: (token: string) => void,
     onDone: () => void
 ): Promise<void> {
+    const apiEndpoint = await getBestOracleApiUrl()
     const body: ChatCompletionRequest = {
         model: "shard-hybrid",
         messages: history.map((m) => ({ role: m.role, content: m.content })),
         stream: true,
         max_tokens: 256,
     }
+
+    const res = await fetch(`${apiEndpoint}/v1/chat/completions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+    })
+
+    if (!res.ok) {
+        throw new Error(`API error: ${res.status} ${res.statusText}`)
+    }
+
+    const reader = res.body?.getReader()
+    if (!reader) {
+        throw new Error("ReadableStream not supported")
+    }
+
+    const decoder = new TextDecoder()
+    let buffer = ""
+
+    while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+
+        // Process SSE lines
+        const lines = buffer.split("\n")
+        buffer = lines.pop() ?? "" // Keep incomplete line in buffer
+
+        for (const line of lines) {
+            const trimmed = line.trim()
+            if (!trimmed || !trimmed.startsWith("data: ")) continue
+
+            const data = trimmed.slice(6) // Remove "data: " prefix
+            if (data === "[DONE]") {
+                onDone()
+                return
+            }
+
+            try {
+                const parsed = JSON.parse(data)
+                const delta = parsed?.choices?.[0]?.delta?.content
+                if (delta) {
+                    onToken(delta)
+                }
+            } catch {
+                // Skip malformed JSON chunks
+            }
+        }
+    }
+
+    onDone()
+}
 
         const res = await fetch(apiUrl("/v1/chat/completions"), {
         method: "POST",
