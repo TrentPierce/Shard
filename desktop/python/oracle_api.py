@@ -41,8 +41,8 @@ BITNET = None  # Will be initialized at startup if lib/model available
 BitNetRuntime = None  # type: ignore
 BitNetConfig = None  # type: ignore
 
-# For testing: if TESTING env var is set and no BITNET env vars, use mock
-if os.getenv("SHARD_TESTING") == "1" and not os.getenv("BITNET_LIB"):
+# For testing: if SHARD_TESTING env var is set, use mock
+if os.getenv("SHARD_TESTING") == "1":
     # Mock BITNET for testing - allows API security tests to pass
     class MockBitNetRuntime:
         def generate(self, prompt, max_tokens):
@@ -50,7 +50,8 @@ if os.getenv("SHARD_TESTING") == "1" and not os.getenv("BITNET_LIB"):
         def tokenize(self, text):
             return [1, 2, 3]
     BITNET = MockBitNetRuntime()
-else:
+elif os.getenv("BITNET_LIB") and os.getenv("BITNET_MODEL"):
+    # Only try to load real BitNet if env vars are set
     try:
         from bitnet.ctypes_bridge import BitNetConfig as _BitNetConfig, BitNetRuntime as _BitNetRuntime
         BitNetConfig = _BitNetConfig
