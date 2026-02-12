@@ -5,6 +5,7 @@ import type { NodeMode } from "@/app/page"
 import type { Topology } from "@/lib/swarm"
 import { heartbeatOracle } from "@/lib/swarm"
 import type { ModelProgress } from "@/lib/webllm"
+import { apiUrl } from "@/lib/config"
 
 interface NetworkStatusProps {
     mode: NodeMode
@@ -34,7 +35,7 @@ export default function NetworkStatus({
     useEffect(() => {
         const fetchPeers = async () => {
             try {
-                const res = await fetch("http://127.0.0.1:8000/v1/system/peers")
+                const res = await fetch(apiUrl("/v1/system/peers"))
                 if (res.ok) {
                     const data = await res.json()
                     setPeers(data.peers ?? [])

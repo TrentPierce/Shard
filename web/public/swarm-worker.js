@@ -15,6 +15,15 @@
  * handles coordination and posts INFERENCE_REQUEST to the page.
  */
 
+// ─── Configuration ───────────────────────────────────────────────────────────
+
+/**
+ * Control plane URL for the Rust sidecar.
+ * Override via message from main thread or set globally before SW registration.
+ * @type {string}
+ */
+const CONTROL_PLANE_URL = self.SHARD_CONTROL_PLANE_URL || "http://127.0.0.1:9091";
+
 // Import js-libp2p and related modules from CDN
 // These are loaded dynamically when P2P is initialized
 let libp2pModules = null;
@@ -241,7 +250,7 @@ async function onInferenceResult(result) {
 
   // Fallback: Forward to the Oracle API HTTP endpoint
   try {
-    const response = await fetch("http://127.0.0.1:9091/broadcast-work", {
+    const response = await fetch(`${CONTROL_PLANE_URL}/broadcast-work`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

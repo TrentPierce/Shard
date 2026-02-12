@@ -17,6 +17,7 @@
  */
 
 import { generateDraftTokens } from "./webllm"
+import { apiUrl } from "./config"
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -270,8 +271,6 @@ export async function processWorkRequest(
 
 // ─── API Integration ─────────────────────────────────────────────────────────
 
-const API_BASE = "http://127.0.0.1:8000"
-
 /**
  * Submit a work result to the Oracle API.
  *
@@ -285,7 +284,7 @@ export async function submitWorkResult(
     result: WorkResult
 ): Promise<{ success: boolean; detail: string }> {
     try {
-        const res = await fetch(`${API_BASE}/v1/scout/draft`, {
+        const res = await fetch(apiUrl("/v1/scout/draft"), {
             method: "POST",
             headers: {
                 "Content-Type": "application/json",
@@ -328,7 +327,7 @@ export async function submitWorkResult(
  */
 export async function fetchWork(): Promise<WorkRequest | null> {
     try {
-        const res = await fetch(`${API_BASE}/v1/scout/work`)
+        const res = await fetch(apiUrl("/v1/scout/work"))
 
         if (res.status === 204) {
             return null

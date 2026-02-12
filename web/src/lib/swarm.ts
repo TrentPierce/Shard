@@ -7,6 +7,8 @@
  * - P2P networking via js-libp2p (browser Scout nodes)
  */
 
+import { apiUrl, RUST_BASE } from "./config"
+
 // Re-export P2P functions for convenience
 export {
     initP2P,
@@ -64,10 +66,6 @@ export type ScoutSubmissionResult = {
     detail: string
 }
 
-// ─── Python API base ────────────────────────────────────────────────────────
-
-const API_BASE = "http://127.0.0.1:8000"
-
 // ─── Functions ──────────────────────────────────────────────────────────────
 
 /**
@@ -76,7 +74,7 @@ const API_BASE = "http://127.0.0.1:8000"
  * Oracle (double-dip prevention per the agents.md spec).
  */
 export async function probeLocalOracle(): Promise<LocalOracleProbe> {
-    const endpoint = `${API_BASE}/health`
+    const endpoint = apiUrl("/health")
     try {
         const res = await fetch(endpoint, { method: "GET" })
         if (!res.ok) return { available: false, endpoint }
@@ -254,7 +252,7 @@ export async function handleScoutWork(work: WorkRequest): Promise<ScoutSubmissio
  */
 async function submitDraftResult(result: WorkResult): Promise<ScoutSubmissionResult> {
     try {
-        const res = await fetch(`${API_BASE}/v1/scout/draft`, {
+        const res = await fetch(apiUrl("/v1/scout/draft"), {
             method: "POST",
             headers: {
                 "Content-Type": "application/json",
@@ -301,7 +299,7 @@ function generateScoutId(): string {
  */
 export async function requestWork(): Promise<WorkRequest | null> {
     try {
-        const res = await fetch(`${API_BASE}/v1/scout/work`, {
+        const res = await fetch(apiUrl("/v1/scout/work"), {
             method: "GET",
         })
 

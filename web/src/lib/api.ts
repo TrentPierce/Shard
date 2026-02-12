@@ -5,7 +5,7 @@
  * Supports both streaming (SSE) and non-streaming chat completions.
  */
 
-const API_BASE = "http://127.0.0.1:8000"
+import { apiUrl } from "./config"
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -44,7 +44,7 @@ export async function sendMessage(
         max_tokens: 256,
     }
 
-    const res = await fetch(`${API_BASE}/v1/chat/completions`, {
+        const res = await fetch(apiUrl("/v1/chat/completions"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -112,7 +112,7 @@ export async function sendMessageSync(
         max_tokens: 256,
     }
 
-    const res = await fetch(`${API_BASE}/v1/chat/completions`, {
+        const res = await fetch(apiUrl("/v1/chat/completions"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -137,7 +137,7 @@ export async function checkHealth(): Promise<{
     bitnetLoaded: boolean
 }> {
     try {
-        const res = await fetch(`${API_BASE}/health`)
+        const res = await fetch(apiUrl("/health"))
         if (!res.ok) return { ok: false, rustSidecar: "unreachable", bitnetLoaded: false }
         const data = await res.json()
         return {
