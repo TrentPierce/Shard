@@ -13,14 +13,14 @@
 
 import { createLibp2p } from 'libp2p';
 import { webSockets } from '@libp2p/websockets';
-import { webTransport } from '@libp2p/webtransport';
 import { noise } from '@chainsafe/libp2p-noise';
 import { yamux } from '@chainsafe/libp2p-yamux';
 import { mplex } from '@libp2p/mplex';
-import { gossipsub } from '@chainsafe/libp2p-gossipsub';
+import { gossipsub as createGossipSub } from '@chainsafe/libp2p-gossipsub';
 import { bootstrap } from '@libp2p/bootstrap';
 import type { Libp2p } from 'libp2p';
 import type { GossipSub } from '@chainsafe/libp2p-gossipsub';
+import type { Message } from '@libp2p/interface';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -45,7 +45,7 @@ export type P2PConfig = {
 export type P2PMessage = {
   topic: string;
   data: Uint8Array;
-  from: string;
+  from: string | undefined;
 };
 
 export type WorkMessage = {
@@ -101,10 +101,7 @@ export async function initP2P(config: P2PConfig = {}): Promise<string> {
     // Create libp2p node
     p2pNode = await createLibp2p({
       // Transports
-      transports: [
-        webSockets(),
-        webTransport(),
-      ],
+      transports: [webSockets()],
 
       // Connection encryption
       connectionEncryption: [noise()],
@@ -119,17 +116,14 @@ export async function initP2P(config: P2PConfig = {}): Promise<string> {
       peerDiscovery: [
         bootstrap({
           list: bootstrapPeers,
-          interval: reconnectInterval,
         }),
       ],
 
       // Services
       services: {
-        pubsub: gossipsub({
+        pubsub: createGossipSub({
           emitSelf: config.emitSelf ?? false,
-          gossipIncoming: true,
           fallbackToFloodsub: true,
-          allowPublishToZeroPeers: true,
         }),
       },
     });
@@ -299,7 +293,7 @@ async function subscribeToTopic(
     const p2pMessage: P2PMessage = {
       topic: message.topic,
       data: message.data,
-      from: message.from.toString(),
+      from: 'from' in message ? message.from?.toString() : undefined,
     };
 
     handler(p2pMessage);

@@ -18,13 +18,21 @@ from collections.abc import AsyncIterator
 from typing import Annotated, Any, Literal
 
 import httpx
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from bitnet.ctypes_bridge import BitNetConfig, BitNetRuntime
 from inference import RustControlPlaneClient, cooperative_generate
+from golden_ticket import (
+    get_generator as get_gt_generator,
+    is_scout_banned,
+    get_scout_reputation,
+    get_all_banned_scouts,
+    unban_scout,
+    reset_scout_reputation,
+)
 
 LOGGER = logging.getLogger("shard.oracle_api")
 
@@ -69,7 +77,14 @@ METRICS: dict[str, int] = {
     "chat_failures_total": 0,
     "auth_failures_total": 0,
     "rate_limited_total": 0,
+    "golden_tickets_injected": 0,
+    "golden_tickets_verified": 0,
+    "golden_tickets_failed": 0,
+    "scouts_banned": 0,
 }
+
+# Initialize Golden Ticket generator singleton
+GT_GENERATOR = get_gt_generator()
 
 
 class RateLimiter:
@@ -435,8 +450,167 @@ async def metrics() -> str:
         "# HELP shard_rate_limited_total Total rate-limited requests",
         "# TYPE shard_rate_limited_total counter",
         f"shard_rate_limited_total {METRICS['rate_limited_total']}",
+        "# HELP shard_golden_tickets_injected_total Total Golden Tickets injected",
+        "# TYPE shard_golden_tickets_injected_total counter",
+        f"shard_golden_tickets_injected_total {METRICS['golden_tickets_injected']}",
+        "# HELP shard_golden_tickets_verified_total Total Golden Tickets verified",
+        "# TYPE shard_golden_tickets_verified_total counter",
+        f"shard_golden_tickets_verified_total {METRICS['golden_tickets_verified']}",
+        "# HELP shard_golden_tickets_failed_total Total Golden Tickets failed",
+        "# TYPE shard_golden_tickets_failed_total counter",
+        f"shard_golden_tickets_failed_total {METRICS['golden_tickets_failed']}",
+        "# HELP shard_scouts_banned_total Total scouts banned",
+        "# TYPE shard_scouts_banned_total counter",
+        f"shard_scouts_banned_total {METRICS['scouts_banned']}",
     ]
     return "\n".join(lines) + "\n"
+
+
+# ─── Golden Ticket & Reputation Endpoints ────────────────────────────────────
+
+
+@app.get("/v1/scout/reputation/{peer_id}")
+async def get_reputation(
+    peer_id: str,
+    _principal: str = Depends(require_api_key),
+) -> dict[str, object]:
+    """Get reputation information for a specific scout."""
+    return get_scout_reputation(peer_id)
+
+
+@app.get("/v1/scout/banned")
+async def list_banned_scouts(
+    _principal: str = Depends(require_api_key),
+) -> dict[str, object]:
+    """List all currently banned scouts."""
+    return {
+        "banned_scouts": get_all_banned_scouts(),
+        "count": len(get_all_banned_scouts()),
+    }
+
+
+@app.post("/v1/scout/unban/{peer_id}")
+async def admin_unban_scout(
+    peer_id: str,
+    _principal: str = Depends(require_api_key),
+) -> dict[str, object]:
+    """Manually unban a scout (admin override)."""
+    success = unban_scout(peer_id)
+    return {
+        "peer_id": peer_id,
+        "unbanned": success,
+        "detail": "Scout unbanned" if success else "Scout not found in ban list",
+    }
+
+
+@app.post("/v1/scout/reset-reputation/{peer_id}")
+async def admin_reset_reputation(
+    peer_id: str,
+    _principal: str = Depends(require_api_key),
+) -> dict[str, object]:
+    """Reset a scout's reputation (admin override)."""
+    success = reset_scout_reputation(peer_id)
+    return {
+        "peer_id": peer_id,
+        "reset": success,
+        "detail": "Reputation reset" if success else "Scout not found",
+    }
+
+
+@app.post("/v1/scout/draft")
+async def submit_scout_draft(
+    request: Request,
+) -> dict[str, object]:
+    """Submit draft tokens from a scout for verification.
+    
+    This endpoint accepts draft generation results from Scout nodes.
+    If the work is a Golden Ticket, the response is verified for correctness.
+    """
+    try:
+        data = await request.json()
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid JSON payload",
+        )
+    
+    work_id = data.get("workId") or data.get("request_id")
+    scout_id = data.get("scoutId") or data.get("scout_id")
+    draft_text = data.get("draftText") or data.get("draft_text") or ""
+    
+    if not work_id or not scout_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Missing workId or scoutId",
+        )
+    
+    # Check if scout is banned
+    if is_scout_banned(scout_id):
+        LOGGER.warning("Rejected draft from banned scout: %s", scout_id)
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Scout is banned from the network",
+        )
+    
+    # Check if this is a Golden Ticket verification
+    gt_result = GT_GENERATOR.verify_response(
+        request_id=work_id,
+        scout_peer_id=scout_id,
+        scout_response=draft_text,
+    )
+    
+    if gt_result is True:
+        # Golden Ticket verified successfully
+        METRICS["golden_tickets_verified"] += 1
+        LOGGER.info("Golden Ticket verified: scout=%s work=%s", scout_id, work_id)
+        return {
+            "success": True,
+            "detail": "Golden Ticket verified successfully",
+            "verified": True,
+        }
+    elif gt_result is False:
+        # Golden Ticket failed
+        METRICS["golden_tickets_failed"] += 1
+        METRICS["scouts_banned"] = len(get_all_banned_scouts())
+        LOGGER.warning("Golden Ticket FAILED: scout=%s work=%s", scout_id, work_id)
+        return {
+            "success": False,
+            "detail": "Golden Ticket verification failed",
+            "verified": False,
+        }
+    
+    # Not a Golden Ticket - normal draft submission
+    # Forward to Rust sidecar via control plane
+    try:
+        control = RustControlPlaneClient(base_url=RUST_URL)
+        # Store the result for the cooperative_generate loop to pick up
+        await control.submit_draft_result(work_id, scout_id, draft_text)
+        await control.close()
+        
+        return {
+            "success": True,
+            "detail": "Draft submitted for verification",
+            "verified": None,
+        }
+    except Exception as exc:
+        LOGGER.exception("Failed to submit draft to control plane")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Failed to process draft: {exc}",
+        )
+
+
+@app.get("/v1/scout/work", response_model=None)
+async def get_scout_work(
+    request: Request,
+) -> Response:
+    """Get work for a scout to process.
+    
+    Returns a work request with potentially injected Golden Ticket.
+    """
+    # This would typically come from the Rust sidecar work queue
+    # For now, return 204 No Content to indicate no work available
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @app.get("/v1/models")

@@ -4,7 +4,25 @@
  * - Local Oracle detection (double-dip prevention)
  * - Topology fetch from Python API
  * - Oracle heartbeat over local Driver API
+ * - P2P networking via js-libp2p (browser Scout nodes)
  */
+
+// Re-export P2P functions for convenience
+export {
+    initP2P,
+    subscribeToWork,
+    subscribeToResults,
+    publishResult,
+    getPeerId,
+    getPeerCount,
+    isReady,
+    stopP2P,
+    type P2PConfig,
+    type WorkMessage,
+    type WorkResultMessage,
+    type WorkHandler,
+    type ResultHandler,
+} from "./p2p"
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -131,7 +149,8 @@ export async function heartbeatOracle(
  */
 export async function initSwarmWorker(
     knownOracleAddr: string | null,
-    hasLocalOracle = false
+    hasLocalOracle = false,
+    topology: Topology | null = null
 ): Promise<ServiceWorkerRegistration | null> {
     if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) {
         return null
@@ -142,10 +161,31 @@ export async function initSwarmWorker(
     )
     await navigator.serviceWorker.ready
 
+    // Parse bootstrap addresses from topology
+    let bootstrapAddrs: string[] | undefined
+    if (topology?.listen_addrs) {
+        bootstrapAddrs = topology.listen_addrs
+            .filter(addr => addr.includes('/ws/') || addr.startsWith('ws://') || addr.startsWith('wss://'))
+            .map(addr => {
+                if (addr.startsWith('ws://') || addr.startsWith('wss://')) {
+                    return addr
+                }
+                // Parse multiaddr format
+                const hostMatch = addr.match(/(?:ip4|dns4)\/([^/]+)/)
+                const portMatch = addr.match(/tcp\/(\d+)/)
+                if (hostMatch && portMatch) {
+                    return `ws://${hostMatch[1]}:${portMatch[1]}`
+                }
+                return null
+            })
+            .filter((addr): addr is string => addr !== null)
+    }
+
     registration.active?.postMessage({
         type: "INIT_SCOUT",
         knownOracleAddr,
         hasLocalOracle,
+        bootstrapAddrs,
     })
 
     return registration
