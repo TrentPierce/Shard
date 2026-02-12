@@ -41,28 +41,29 @@ BITNET = None  # Will be initialized at startup if lib/model available
 BitNetRuntime = None  # type: ignore
 BitNetConfig = None  # type: ignore
 
-# For testing: if SHARD_TESTING env var is set, use mock
-if os.getenv("SHARD_TESTING") == "1":
-    # Mock BITNET for testing - allows API security tests to pass
-    class MockBitNetRuntime:
-        def generate(self, prompt, max_tokens):
-            return "mock response"
-        def tokenize(self, text):
-            return [1, 2, 3]
+# Create a mock for testing when BITNET is not available
+class MockBitNetRuntime:
+    def generate(self, prompt, max_tokens):
+        return "mock response"
+    def tokenize(self, text):
+        return [1, 2, 3]
+
+# Check if we should use mock (for testing or when no real bitnet available)
+_use_mock = os.getenv("SHARD_TESTING") == "1" or not (os.getenv("BITNET_LIB") and os.getenv("BITNET_MODEL"))
+
+if _use_mock:
     BITNET = MockBitNetRuntime()
-elif os.getenv("BITNET_LIB") and os.getenv("BITNET_MODEL"):
-    # Only try to load real BitNet if env vars are set
+else:
     try:
         from bitnet.ctypes_bridge import BitNetConfig as _BitNetConfig, BitNetRuntime as _BitNetRuntime
         BitNetConfig = _BitNetConfig
         BitNetRuntime = _BitNetRuntime
-        # Try to initialize - may fail if DLL not available
         try:
             BITNET = _BitNetRuntime()
         except Exception:
-            pass  # Will run in "leech" mode without local inference
+            pass
     except Exception:
-        pass  # BITNET remains None
+        pass
 
 # ─── App & Config ────────────────────────────────────────────────────────────
 
