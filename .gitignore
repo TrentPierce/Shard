@@ -56,6 +56,11 @@ dist/
 /tmp/shard-*.json
 /tmp/shard-control.sock
 
+# ─── Model Files ───
+*.gguf
+*.bin
+*.safetensors
+
 # ─── PyInstaller ───
 *.spec
 build/
