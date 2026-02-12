@@ -68,29 +68,48 @@ export async function sendMessage(
 
         buffer += decoder.decode(value, { stream: true })
 
-        // Process SSE lines
-        const lines = buffer.split("\n")
-        buffer = lines.pop() ?? "" // Keep incomplete line in buffer
+        // Process complete SSE frames
+        // SSE format: lines ending with \n\n, with [DONE] as final message
+        let lines: string[] = []
+        let remaining = buffer
 
-        for (const line of lines) {
-            const trimmed = line.trim()
-            if (!trimmed || !trimmed.startsWith("data: ")) continue
+        // Split on newlines and process
+        const allLines = buffer.split("\n")
+        buffer = "" // Reset buffer for incomplete lines
 
-            const data = trimmed.slice(6) // Remove "data: " prefix
-            if (data === "[DONE]") {
-                onDone()
-                return
-            }
+        for (let i = 0; i < allLines.length; i++) {
+            const line = allLines[i]
 
-            try {
-                const parsed = JSON.parse(data)
-                const delta = parsed?.choices?.[0]?.delta?.content
-                if (delta) {
-                    onToken(delta)
+            // Empty line indicates end of SSE frame
+            if (line === "" && lines.length > 0) {
+                // Process complete frame
+                const frame = lines.join("\n")
+                if (frame === "[DONE]") {
+                    onDone()
+                    return
                 }
-            } catch {
-                // Skip malformed JSON chunks
+
+                if (frame.startsWith("data: ")) {
+                    try {
+                        const data = frame.slice(6) // Remove "data: " prefix
+                        const parsed = JSON.parse(data)
+                        const delta = parsed?.choices?.[0]?.delta?.content
+                        if (delta) {
+                            onToken(delta)
+                        }
+                    } catch {
+                        // Skip malformed JSON chunks
+                    }
+                }
+                lines = [] // Reset for next frame
+            } else {
+                lines.push(line)
             }
+        }
+
+        // Keep incomplete lines in buffer
+        if (lines.length > 0) {
+            buffer = lines.join("\n")
         }
     }
 

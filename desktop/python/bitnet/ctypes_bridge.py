@@ -113,7 +113,10 @@ class BitNetRuntime:
             buf = ctypes.create_string_buffer(128)
             n = self._lib.shard_token_to_piece(self._handle, token_id, buf, 128)
             if n > 0:
-                return buf.value.decode("utf-8", errors="ignore")
+                # Use ctypes.string_at to get exactly n bytes (safely handles null-termination)
+                raw = ctypes.string_at(buf, n)
+                # Decode with replacement for invalid sequences (preserves valid chars)
+                return raw.decode("utf-8", errors="replace")
             return f"tok_{token_id}"
         return self._reverse_token_map.get(token_id, f"tok_{token_id}")
 
