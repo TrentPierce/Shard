@@ -563,13 +563,18 @@ async def health() -> dict[str, Any]:
     except httpx.HTTPError as exc:
         LOGGER.warning("Rust sidecar health check failed: %s", exc)
 
+    # Check if BitNet is loaded (don't try to load, just check)
+    bitnet_loaded = BITNET is not None
+    
     return {
         "status": "ok",
         "idle": STATE.is_idle,
         "accepting_swarm_jobs": STATE.is_idle,
         "rust_sidecar": rust_status,
         "rust_url": RUST_URL,
-        "bitnet_loaded": BITNET is not None,
+        "bitnet_loaded": bitnet_loaded,
+        "bitnet_lib": os.getenv("BITNET_LIB", ""),
+        "bitnet_model": os.getenv("BITNET_MODEL", ""),
         "cors_origins": cors_origins,
     }
 
@@ -679,7 +684,25 @@ async def chat_completions(
     METRICS["chat_requests_total"] += 1
     await enforce_rate_limit(request, principal)
 
-    user_text = "\n".join(m.content for m in payload.messages if m.role == "user")
+    # Check if BitNet model is loaded - return clear error if not
+    if BITNET is None:
+        bitnet_lib = os.getenv("BITNET_LIB", "")
+        bitnet_model = os.getenv("BITNET_MODEL", "")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "BitNet model not loaded. Please set BITNET_LIB and BITNET_MODEL "
+                "environment variables and restart the server. "
+                f"Current: BITNET_LIB='{bitnet_lib}', BITNET_MODEL='{bitnet_model}'"
+            ),
+        )
+
+    prompt_parts: list[str] = ["<|begin_of_text|>"]
+    for m in payload.messages:
+        prompt_parts.append(f"<|start_header_id|>{m.role}<|end_header_id|>\n\n{m.content}<|eot_id|>")
+    prompt_parts.append("<|start_header_id|>assistant<|end_header_id|>\n\n")
+    user_text = "".join(prompt_parts)
+
     if len(user_text) > MAX_PROMPT_CHARS:
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
@@ -743,6 +766,24 @@ async def _stream_generate(
     max_tokens: int,
 ) -> AsyncIterator[str]:
     """SSE stream of chat completion chunks (OpenAI-compatible)."""
+    
+    # Check if BitNet model is loaded
+    if BITNET is None:
+        bitnet_lib = os.getenv("BITNET_LIB", "")
+        bitnet_model = os.getenv("BITNET_MODEL", "")
+        error = {
+            "error": {
+                "message": (
+                    f"BitNet model not loaded. Please set BITNET_LIB and BITNET_MODEL "
+                    f"environment variables. Current: BITNET_LIB='{bitnet_lib}', BITNET_MODEL='{bitnet_model}'"
+                ),
+                "type": "model_not_loaded"
+            }
+        }
+        yield f"data: {json.dumps(error)}\n\n"
+        yield "data: [DONE]\n\n"
+        return
+    
     try:
         control = RustControlPlaneClient(base_url=RUST_URL)
     except RuntimeError as exc:

@@ -62,15 +62,6 @@ export function useBrowserScout({ onTokenGenerated, onStatusChange }: BrowserSco
         selectedModel,
         {
           initProgressCallback,
-          appConfig: {
-            model_list: [
-              {
-                model_url: "https://huggingface.co/mlc-ai/Llama-3.1-1B-Instruct-Q4_K_M-GGUF/resolve/main/",
-                model_id: selectedModel,
-                model_name: "Llama 3.1 1B",
-              }
-            ]
-          }
         }
       )
 
@@ -98,9 +89,9 @@ export function useBrowserScout({ onTokenGenerated, onStatusChange }: BrowserSco
       })
 
       const content = output.choices[0]?.message?.content || ""
-      const tokens = content.split(/\s+/).filter(Boolean)
+      const tokens: string[] = content.split(/\s+/).filter(Boolean)
       
-      tokens.forEach(token => onTokenGenerated?.(token))
+      tokens.forEach((token: string) => onTokenGenerated?.(token))
       
       return tokens
     } catch (err) {

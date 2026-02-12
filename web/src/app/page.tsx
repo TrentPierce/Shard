@@ -1,10 +1,11 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, useCallback } from "react"
 import { useQuery } from "@tanstack/react-query"
 import Header from "@/components/Header"
 import ChatPanel from "@/components/ChatPanel"
 import NetworkStatus from "@/components/NetworkStatus"
+import NetworkVisualizer from "@/components/NetworkVisualizer"
 import {
     fetchTopology,
     probeLocalOracle,
@@ -28,6 +29,8 @@ export default function HomePage() {
     const [mode, setMode] = useState<NodeMode>("loading")
     const [webLLMProgress, setWebLLMProgress] = useState<ModelProgress | null>(null)
     const [webLLMError, setWebLLMError] = useState<string | null>(null)
+    const [pitchMode, setPitchMode] = useState(false)
+    const [toastMessage, setToastMessage] = useState<string | null>(null)
 
     // React Query for topology polling
     const { data: topology } = useQuery({
@@ -94,9 +97,68 @@ export default function HomePage() {
         boot()
     }, [])
 
+    // Pitch Mode keyboard shortcut (Ctrl+Shift+P)
+    useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.ctrlKey && e.shiftKey && e.key === "P") {
+                e.preventDefault()
+                setPitchMode(prev => !prev)
+            }
+        }
+        
+        window.addEventListener("keydown", handleKeyDown)
+        return () => window.removeEventListener("keydown", handleKeyDown)
+    }, [])
+
+    // Toast notification handler
+    const handleToast = useCallback((message: string) => {
+        setToastMessage(message)
+        setTimeout(() => setToastMessage(null), 4000)
+    }, [])
+
     return (
         <div className="app-shell">
             <Header mode={mode} rustStatus={rustStatus} />
+            
+            {/* Toast Notification */}
+            {toastMessage && (
+                <div
+                    style={{
+                        position: "fixed",
+                        top: "80px",
+                        left: "50%",
+                        transform: "translateX(-50%)",
+                        background: "linear-gradient(135deg, #1e293b, #0f172a)",
+                        border: "1px solid rgba(100, 200, 255, 0.3)",
+                        borderRadius: "8px",
+                        padding: "12px 24px",
+                        color: "#fff",
+                        fontSize: "13px",
+                        fontFamily: "var(--font-mono, monospace)",
+                        zIndex: 1000,
+                        boxShadow: "0 4px 20px rgba(0, 0, 0, 0.5)",
+                        animation: "fadeIn 0.3s ease"
+                    }}
+                >
+                    {toastMessage}
+                </div>
+            )}
+            
+            {/* Network Visualizer - shown in pitch mode or when in local-oracle mode */}
+            {(pitchMode || mode === "local-oracle") && (
+                <div
+                    style={{
+                        padding: "16px",
+                        borderBottom: "1px solid rgba(100, 200, 255, 0.1)"
+                    }}
+                >
+                    <NetworkVisualizer 
+                        pitchMode={pitchMode} 
+                        onToast={handleToast}
+                    />
+                </div>
+            )}
+            
             <NetworkStatus
                 mode={mode}
                 topology={topologyData}
