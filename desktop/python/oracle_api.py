@@ -38,7 +38,43 @@ LOGGER = logging.getLogger("shard.oracle_api")
 
 # ─── App & Config ────────────────────────────────────────────────────────────
 
-app = FastAPI(title="Shard Oracle API", version="0.4.0")
+app = FastAPI(
+    title="Shard Oracle API",
+    version="0.4.0",
+    description="""
+    OpenAI-compatible API for the Shard distributed inference network.
+    
+    ## Features
+    
+    - **Chat Completions**: OpenAI-compatible streaming and non-streaming chat
+    - **Scout Network**: Distributed draft token generation via browser-based Scouts
+    - **Golden Ticket Security**: Sybil attack prevention through verification prompts
+    - **P2P Networking**: libp2p-based mesh networking for Oracle nodes
+    
+    ## Authentication
+    
+    When `SHARD_API_KEYS` is configured, include the API key in the header:
+    - `Authorization: Bearer <api_key>` OR
+    - `X-API-Key: <api_key>`
+    
+    ## Node Modes
+    
+    - **Oracle**: Full model host that verifies draft tokens
+    - **Scout**: Browser node that generates draft tokens via WebLLM
+    - **Leech**: Consumer-only node (lowest priority)
+    """,
+    docs_url="/docs",
+    redoc_url="/redoc",
+    openapi_url="/openapi.json",
+    contact={
+        "name": "Shard Network",
+        "url": "https://github.com/TrentPierce/Shard",
+    },
+    license_info={
+        "name": "MIT",
+        "url": "https://opensource.org/licenses/MIT",
+    },
+)
 
 cors_origins = [o.strip() for o in os.getenv("SHARD_CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000").split(",") if o.strip()]
 app.add_middleware(
