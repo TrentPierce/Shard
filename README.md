@@ -3,6 +3,21 @@
 > **Free, unlimited LLM access** powered by a decentralized P2P inference mesh.
 > Contribute compute, earn priority.
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![Rust 1.75+](https://img.shields.io/badge/rust-1.75+-orange.svg)](https://www.rust-lang.org/)
+[![Node.js 18+](https://img.shields.io/badge/node-18+-green.svg)](https://nodejs.org/)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](http://makeapullrequest.com)
+
+---
+
+## Demo
+
+> [!VIDEO]
+> A quick demo showing Shard's hybrid inference in action (coming soon!)
+
+*The demo showcases a browser Scout joining the network, generating draft tokens via WebLLM, and an Oracle verifying them in real-time.*
+
 ---
 
 ## Architecture
@@ -19,6 +34,8 @@
 │         (ctypes bridge)          (WebLLM + libp2p)            │
 └──────────────────────────────────────────────────────────────┘
 ```
+
+For a detailed system diagram, see [`docs/system-diagram.md`](docs/system-diagram.md).
 
 ### Node Classes
 
@@ -211,6 +228,57 @@ Currently implemented as HTTP/JSON for simplicity. gRPC can be added later.
 - **Double-dip prevention** — browser detects local .exe and routes to it
 - **Verify, Don't Trust** — Oracles verify all Scout drafts
 - **Heavier is Truth** — GPU nodes always override browser drafts
+
+---
+
+## Contributing
+
+We welcome contributions! Whether you're fixing bugs, adding features, improving documentation, or sharing ideas, we'd love your help.
+
+- 📖 **[Contributing Guide](CONTRIBUTING.md)** — Learn how to contribute
+- 🐛 **[Report Issues](https://github.com/ShardNetwork/Shard/issues)** — Found a bug? Let us know
+- 💡 **[Feature Requests](https://github.com/ShardNetwork/Shard/discussions)** — Share your ideas
+
+Quick ways to contribute:
+
+- Fix typos or improve documentation
+- Report bugs with detailed steps to reproduce
+- Submit pull requests for bug fixes or new features
+- Help answer questions in GitHub Discussions
+
+---
+
+## Roadmap
+
+### Current Focus (v0.4.0 - v0.5.0)
+
+- [x] P2P networking with libp2p
+- [x] OpenAI-compatible API endpoint
+- [x] SSE streaming support
+- [x] Basic Scout-Oracle verification
+- [ ] Full WebLLM integration in browser
+- [ ] Real BitNet model loading
+- [ ] Reputation scoring system
+
+### Upcoming Features (v0.6.0+)
+
+- Golden Ticket testing for Sybil attack prevention
+- gRPC control plane (replacing HTTP/JSON)
+- Mobile Scout client (iOS/Android)
+- Model marketplace and versioning
+- Advanced load balancing strategies
+- Encrypted peer-to-peer communication
+- Federation with other P2P networks
+
+### Long-term Vision
+
+- **Massive Scale**: Support for millions of concurrent Scouts
+- **Multi-Model**: Support for multiple LLM architectures
+- **Incentives**: Token-based rewards system
+- **Enterprise**: Enterprise-grade compliance and monitoring
+- **Edge Deployment**: Ultra-low latency edge inference
+
+See [`CHANGELOG.md`](CHANGELOG.md) for version history and [`docs/production-readiness-plan.md`](docs/production-readiness-plan.md) for detailed planning.
 
 ---
 
