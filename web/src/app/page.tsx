@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import { useQuery } from "@tanstack/react-query"
 import Header from "@/components/Header"
 import ChatPanel from "@/components/ChatPanel"
 import NetworkStatus from "@/components/NetworkStatus"
@@ -25,10 +26,19 @@ export type NodeMode =
 
 export default function HomePage() {
     const [mode, setMode] = useState<NodeMode>("loading")
-    const [topology, setTopology] = useState<Topology | null>(null)
-    const [rustStatus, setRustStatus] = useState<"connected" | "unreachable">("unreachable")
     const [webLLMProgress, setWebLLMProgress] = useState<ModelProgress | null>(null)
     const [webLLMError, setWebLLMError] = useState<string | null>(null)
+
+    // React Query for topology polling
+    const { data: topology } = useQuery({
+        queryKey: ["topology"],
+        queryFn: fetchTopology,
+        refetchInterval: 10000, // Poll every 10 seconds
+        staleTime: 5000,
+    })
+
+    const rustStatus: "connected" | "unreachable" = topology?.status === "ok" ? "connected" : "unreachable"
+    const topologyData: Topology | null = topology ?? null
 
     useEffect(() => {
         const boot = async () => {
@@ -37,14 +47,6 @@ export default function HomePage() {
             if (probe.available) {
                 setMode("local-oracle")
                 return
-            }
-
-            // 2. Fetch topology from Python API
-            const topo = await fetchTopology()
-            setTopology(topo)
-
-            if (topo.status === "ok") {
-                setRustStatus("connected")
             }
 
             // If no local oracle was found, initialize WebLLM for Scout mode
@@ -90,15 +92,6 @@ export default function HomePage() {
         }
 
         boot()
-
-        // Poll topology every 10s
-        const interval = setInterval(async () => {
-            const topo = await fetchTopology()
-            setTopology(topo)
-            setRustStatus(topo.status === "ok" ? "connected" : "unreachable")
-        }, 10000)
-
-        return () => clearInterval(interval)
     }, [])
 
     return (
@@ -106,7 +99,7 @@ export default function HomePage() {
             <Header mode={mode} rustStatus={rustStatus} />
             <NetworkStatus
                 mode={mode}
-                topology={topology}
+                topology={topologyData}
                 rustStatus={rustStatus}
                 webLLMProgress={webLLMProgress}
                 webLLMError={webLLMError}

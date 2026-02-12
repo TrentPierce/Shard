@@ -1,6 +1,7 @@
 "use client"
 
 import type { NodeMode } from "@/app/page"
+import { ThemeToggle } from "./ThemeToggle"
 
 interface HeaderProps {
     mode: NodeMode
@@ -46,6 +47,7 @@ export default function Header({ mode, rustStatus }: HeaderProps) {
                     <span className={`status-dot ${dotClass}`} aria-hidden="true" />
                     <span aria-label={`Current mode: ${modeLabels[mode]}`}>{modeLabels[mode]}</span>
                 </div>
+                <ThemeToggle />
             </div>
         </header>
     )

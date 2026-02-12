@@ -1,6 +1,7 @@
 import type { Metadata } from "next"
 import "./globals.css"
 import ErrorBoundary from "@/components/ErrorBoundary"
+import { Providers } from "@/components/Providers"
 
 export const metadata: Metadata = {
     title: "Shard — Distributed Inference Network",
@@ -47,7 +48,11 @@ export default function RootLayout({
                     rel="stylesheet"
                 />
             </head>
-            <body><ErrorBoundary>{children}</ErrorBoundary></body>
+            <body>
+                <Providers>
+                    <ErrorBoundary>{children}</ErrorBoundary>
+                </Providers>
+            </body>
         </html>
     )
 }

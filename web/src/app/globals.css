@@ -3,7 +3,7 @@
    ═══════════════════════════════════════════════════════════════════════════ */
 
 :root {
-  /* ── Palette ── */
+  /* ── Palette ── Dark Mode (Default) ── */
   --bg-primary: #06060e;
   --bg-secondary: #0c0c1a;
   --bg-card: rgba(14, 14, 30, 0.65);
@@ -56,6 +56,50 @@
   --transition-normal: 250ms cubic-bezier(0.4, 0, 0.2, 1);
   --transition-slow: 400ms cubic-bezier(0.4, 0, 0.2, 1);
 }
+
+/* ── Light Mode ── */
+
+:root[data-theme="light"] {
+  --bg-primary: #ffffff;
+  --bg-secondary: #f5f5f5;
+  --bg-card: rgba(255, 255, 255, 0.8);
+  --bg-card-hover: rgba(240, 240, 240, 0.9);
+  --bg-input: rgba(245, 245, 245, 0.9);
+
+  --border-subtle: rgba(0, 0, 0, 0.1);
+  --border-glow: rgba(0, 212, 255, 0.15);
+  --border-active: rgba(0, 212, 255, 0.3);
+
+  --text-primary: #1a1a2e;
+  --text-secondary: #4a4a5a;
+  --text-muted: #6b7280;
+  --text-accent: #0066cc;
+
+  --accent-cyan: #0099cc;
+  --accent-violet: #6366f1;
+  --accent-emerald: #059669;
+  --accent-amber: #d97706;
+  --accent-rose: #e11d48;
+
+  --gradient-primary: linear-gradient(135deg, #0099cc 0%, #6366f1 100%);
+  --gradient-bg: radial-gradient(
+      ellipse 80% 60% at 50% 0%,
+      rgba(0, 153, 204, 0.04) 0%,
+      transparent 60%
+    ),
+    radial-gradient(
+      ellipse 60% 50% at 80% 100%,
+      rgba(99, 102, 241, 0.03) 0%,
+      transparent 60%
+    );
+
+  --glass-bg: rgba(255, 255, 255, 0.7);
+  --glass-border: rgba(0, 0, 0, 0.1);
+
+  --shadow-glow: 0 0 30px rgba(0, 153, 204, 0.1);
+  --shadow-card: 0 4px 24px rgba(0, 0, 0, 0.15);
+}
+
 
 /* ── Reset ── */
 
@@ -754,3 +798,44 @@ body {
 .animate-slide-up {
   animation: slide-up 0.5s ease-out;
 }
+
+/* ═══ Theme Toggle ═══ */
+
+.theme-toggle {
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur));
+  border: 1px solid var(--border-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  z-index: 1000;
+}
+
+.theme-toggle:hover {
+  border-color: var(--border-glow);
+  transform: scale(1.05);
+  box-shadow: 0 0 15px rgba(0, 212, 255, 0.2);
+}
+
+.theme-toggle:active {
+  transform: scale(0.95);
+}
+
+.theme-toggle__icon {
+  font-size: 20px;
+  line-height: 1;
+  filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.2));
+}
+
+[data-theme="light"] .theme-toggle__icon {
+  content: "🌞";
+}
+
