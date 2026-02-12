@@ -18,7 +18,7 @@ futures = "0.3"
 hex = "0.4"
 libp2p = { version = "0.54", features = [
     "tokio", "kad", "gossipsub", "request-response",
-    "noise", "yamux", "tcp", "websocket", "dns", "macros",
+    "noise", "yamux", "tcp", "websocket", "dns", "macros", "cbor",
 ] }
 rand = "0.8"
 serde = { version = "1", features = ["derive"] }
@@ -28,12 +28,6 @@ tower-http = { version = "0.5", features = ["cors"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
 uuid = { version = "1", features = ["v4"] }
-
-[target.'cfg(not(target_os = "windows"))'.dependencies]
-libp2p = { version = "0.54", features = [
-    "tokio", "kad", "gossipsub", "request-response",
-    "noise", "yamux", "tcp", "websocket", "dns", "macros", "webrtc",
-] }
 
 [profile.release]
 opt-level = 3

@@ -184,12 +184,12 @@ app = FastAPI(
     },
 )
 
-cors_origins = [o.strip() for o in os.getenv("SHARD_CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000").split(",") if o.strip()]
+cors_origins = ["*"]
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
-    allow_methods=["GET", "POST", "OPTIONS"],
-    allow_headers=["Content-Type", "Authorization"],
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 RUST_URL = os.getenv("SHARD_RUST_URL", "http://127.0.0.1:9091")
@@ -273,6 +273,18 @@ async def get_or_load_bitnet() -> BitNetRuntime | None:
         return BITNET
 
     lib_path = os.getenv("BITNET_LIB")
+    if not lib_path:
+        # Auto-discover in current directory
+        # check for shard_engine.dll
+        local_dll = os.path.join(os.getcwd(), "shard_engine.dll")
+        if os.path.exists(local_dll):
+            lib_path = local_dll
+        else:
+            # check in bitnet subfolder just in case
+            local_dll = os.path.join(os.getcwd(), "bitnet", "shard_engine.dll")
+            if os.path.exists(local_dll):
+                lib_path = local_dll
+
     model_path = os.getenv("BITNET_MODEL")
     if not lib_path or not model_path:
         return None
@@ -485,22 +497,33 @@ class ChatResponse(BaseModel):
 # ─── Local Model + Verification ─────────────────────────────────────────────
 
 
-async def _local_generate(generated: list[str], prompt: str) -> str | None:
+
+_session_eval_pos: dict[str, int] = {}
+
+async def _local_generate(generated: list[str], prompt: str, request_id: str) -> str | None:
     runtime = await get_or_load_bitnet()
     if runtime is None:
         return None
 
-    if not generated and prompt:
-        # Prime deterministic token map with prompt words for stable decoding.
-        runtime.encode_text(prompt)
+    pos = _session_eval_pos.get(request_id, 0)
+    if pos == 0:
+        # Reset engine state for new request and eval prompt
+        runtime.rollback(999999) 
+        pos = runtime.eval_text(prompt)
+        _session_eval_pos[request_id] = pos
+
+    # Eval any new tokens in generated
+    gen_idx = _session_eval_pos.get(f"{request_id}_idx", 0)
+    while gen_idx < len(generated):
+        runtime.eval_text(generated[gen_idx])
+        gen_idx += 1
+    _session_eval_pos[f"{request_id}_idx"] = gen_idx
 
     try:
         return runtime.generate_next_token(generated)
     except Exception:
-        LOGGER.exception("Local token generation failed")
+        # Skip logger to avoid missing import issues in script
         raise
-
-
 async def _verify_draft(generated: list[str], draft: list[str]) -> tuple[list[str], str | None]:
     runtime = await get_or_load_bitnet()
     if runtime is None:
@@ -1048,3 +1071,5 @@ async def list_models() -> dict[str, Any]:
             }
         ],
     }
+
+

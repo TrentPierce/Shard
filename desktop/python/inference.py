@@ -116,7 +116,7 @@ class RustControlPlaneClient:
 async def cooperative_generate(
     *,
     prompt: str,
-    local_model_generate: Callable[[list[str], str], Awaitable[str | None]],
+    local_model_generate: Callable[[list[str], str, str], Awaitable[str | None]],
     verify_draft: Callable[
         [list[str], list[str]], Awaitable[tuple[list[str], str | None]]
     ],
@@ -137,7 +137,7 @@ async def cooperative_generate(
     tokens_emitted = 0
 
     while tokens_emitted < max_tokens:
-        local_token = await local_model_generate(generated, prompt)
+        local_token = await local_model_generate(generated, prompt, request_id)
         if local_token is None:
             break
         generated.append(local_token)
