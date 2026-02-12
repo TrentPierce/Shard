@@ -22,7 +22,7 @@ jobs:
       - name: Unit + failure tests
         run: |
           cd ../..
-          pytest -q tests/inference_unit_test.py tests/control_plane_failure_test.py tests/bitnet_runtime_integration_test.py
+          pytest -q tests/inference_unit_test.py tests/control_plane_failure_test.py tests/bitnet_runtime_integration_test.py tests/oracle_api_security_test.py
 
   web-lockfile:
     runs-on: ubuntu-latest
@@ -48,3 +48,22 @@ jobs:
           python-version: '3.11'
       - name: Run release bundle contract tests
         run: pytest -q tests/release_test.py
+
+
+  rust-checks:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: desktop/rust
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Cargo tests
+        run: cargo test --all-targets
+
+  docker-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build container image
+        run: docker build -t shard:ci .
