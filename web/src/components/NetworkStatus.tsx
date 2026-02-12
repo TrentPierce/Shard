@@ -4,11 +4,14 @@ import { useEffect, useState } from "react"
 import type { NodeMode } from "@/app/page"
 import type { Topology } from "@/lib/swarm"
 import { heartbeatOracle } from "@/lib/swarm"
+import type { ModelProgress } from "@/lib/webllm"
 
 interface NetworkStatusProps {
     mode: NodeMode
     topology: Topology | null
     rustStatus: "connected" | "unreachable"
+    webLLMProgress: ModelProgress | null
+    webLLMError: string | null
 }
 
 interface PeerData {
@@ -21,6 +24,8 @@ export default function NetworkStatus({
     mode,
     topology,
     rustStatus,
+    webLLMProgress,
+    webLLMError,
 }: NetworkStatusProps) {
     const [peers, setPeers] = useState<PeerData[]>([])
     const [heartbeat, setHeartbeat] = useState("idle")
@@ -88,7 +93,9 @@ export default function NetworkStatus({
                             ? "Oracle"
                             : mode === "scout"
                                 ? "Scout"
-                                : mode}
+                                : mode === "scout-initializing"
+                                    ? "Scout (Initializing…)"
+                                    : mode}
                     </span>
                 </div>
                 <div className="stat-row">
@@ -104,6 +111,64 @@ export default function NetworkStatus({
                     </span>
                 </div>
             </div>
+
+            {/* ── WebLLM Status (Scout Mode) ── */}
+            {(mode === "scout" || mode === "scout-initializing" || webLLMError) && (
+                <div className="sidebar__section">
+                    <div className="sidebar__section-title">
+                        <span className="sidebar__section-icon">🧠</span>
+                        WebLLM (Scout)
+                    </div>
+                    {webLLMError ? (
+                        <div
+                            style={{
+                                fontSize: "11px",
+                                color: "var(--accent-rose)",
+                                marginBottom: "8px",
+                                lineHeight: "1.4",
+                            }}
+                        >
+                            {webLLMError}
+                        </div>
+                    ) : webLLMProgress ? (
+                        <>
+                            <div className="stat-row">
+                                <span className="stat-label">Status</span>
+                                <span className="stat-value">
+                                    {Math.round(webLLMProgress.progress * 100)}%
+                                </span>
+                            </div>
+                            <div
+                                style={{
+                                    fontSize: "10px",
+                                    color: "var(--text-muted)",
+                                    marginBottom: "6px",
+                                    lineHeight: "1.3",
+                                    maxHeight: "60px",
+                                    overflow: "hidden",
+                                }}
+                            >
+                                {webLLMProgress.text}
+                            </div>
+                            <div className="stat-row">
+                                <span className="stat-label">Elapsed</span>
+                                <span className="stat-value" style={{ fontSize: "10px" }}>
+                                    {(webLLMProgress.timeElapsed / 1000).toFixed(1)}s
+                                </span>
+                            </div>
+                        </>
+                    ) : (
+                        <div
+                            style={{
+                                fontSize: "11px",
+                                color: "var(--accent-emerald)",
+                            }}
+                        >
+                            ✓ Ready (Llama-3.2-1B)
+                        </div>
+                    )}
+                </div>
+            )}
 
             {/* ── Topology ── */}
             <div className="sidebar__section">
@@ -175,6 +240,83 @@ export default function NetworkStatus({
                     </ul>
                 )}
             </div>
+
+            {/* ── Queue Status (Leech Mode) ── */}
+            {mode === "leech" && (
+                <div className="sidebar__section">
+                    <div className="sidebar__section-title">
+                        <span className="sidebar__section-icon">⏳</span>
+                        Queue Status
+                    </div>
+                    <div className="stat-row">
+                        <span className="stat-label">Priority</span>
+                        <span className="stat-value" style={{ color: "#f59e0b" }}>Low</span>
+                    </div>
+                    <div
+                        style={{
+                            fontSize: "11px",
+                            color: "var(--text-muted)",
+                            marginTop: "8px",
+                            padding: "10px",
+                            background: "rgba(245, 158, 11, 0.1)",
+                            borderRadius: "6px",
+                            border: "1px solid rgba(245, 158, 11, 0.2)",
+                            lineHeight: "1.4",
+                        }}
+                    >
+                        <strong style={{ color: "#f59e0b" }}>Leech Mode Active</strong>
+                        <br />
+                        You have lowest priority. Enable Scout mode to skip the queue and earn priority tokens.
+                    </div>
+                    <button
+                        className="btn-ping"
+                        style={{
+                            background: "linear-gradient(135deg, #f59e0b, #d97706)",
+                            marginTop: "12px",
+                            width: "100%",
+                        }}
+                        onClick={() => {
+                            window.location.reload();
+                        }}
+                    >
+                        Enable Scout Mode
+                    </button>
+                </div>
+            )}
+
+            {/* ── Scout Status ── */}
+            {(mode === "scout" || mode === "scout-initializing") && (
+                <div className="sidebar__section">
+                    <div className="sidebar__section-title">
+                        <span className="sidebar__section-icon">🔍</span>
+                        Scout Status
+                    </div>
+                    <div className="stat-row">
+                        <span className="stat-label">Priority</span>
+                        <span className="stat-value stat-value--accent">High</span>
+                    </div>
+                    <div className="stat-row">
+                        <span className="stat-label">Contribution</span>
+                        <span className="stat-value" style={{ color: "#10b981" }}>Active</span>
+                    </div>
+                    <div
+                        style={{
+                            fontSize: "11px",
+                            color: "var(--text-muted)",
+                            marginTop: "8px",
+                            padding: "10px",
+                            background: "rgba(16, 185, 129, 0.1)",
+                            borderRadius: "6px",
+                            border: "1px solid rgba(16, 185, 129, 0.2)",
+                            lineHeight: "1.4",
+                        }}
+                    >
+                        <strong style={{ color: "#10b981" }}>Scout Mode Active</strong>
+                        <br />
+                        Your browser is generating draft tokens and contributing to the network. You have high priority access.
+                    </div>
+                </div>
+            )}
 
             {/* ── Heartbeat ── */}
             <div className="sidebar__section">
