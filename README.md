@@ -59,6 +59,9 @@ The compiled binary will be at `desktop/rust/target/release/shard-daemon.exe` (W
 # Connect to a bootstrap peer
 ./target/release/shard-daemon --bootstrap /ip4/192.168.1.10/tcp/4001
 
+# Use bootstrap list file + periodic reconnection
+./target/release/shard-daemon --bootstrap-file ./bootstrap.txt --reconnect-seconds 15
+
 # Debug logging
 ./target/release/shard-daemon --log-level debug
 ```
@@ -87,6 +90,16 @@ npm run dev
 Open [http://localhost:3000](http://localhost:3000) in your browser.
 
 ---
+
+
+### API Security Controls
+
+The Oracle API supports production hardening controls via environment variables:
+
+- `SHARD_API_KEYS` — comma-separated valid API keys. When set, clients must send `Authorization: Bearer <key>` or `X-API-Key: <key>` for `/v1/chat/completions`.
+- `SHARD_RATE_LIMIT_PER_MINUTE` — per-client request budget for the chat endpoint (default `60`).
+- `SHARD_MAX_PROMPT_CHARS` — hard cap on prompt length in characters (default `16000`).
+- `SHARD_LOG_LEVEL` — runtime log level for the Python API (`DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`).
 
 ## Distribution
 
@@ -200,6 +213,16 @@ Currently implemented as HTTP/JSON for simplicity. gRPC can be added later.
 - **Heavier is Truth** — GPU nodes always override browser drafts
 
 ---
+
+## Operations Documentation
+
+- Deployment guide: [`docs/deployment-guide.md`](docs/deployment-guide.md)
+- Troubleshooting: [`docs/troubleshooting.md`](docs/troubleshooting.md)
+- Network topology and scaling: [`docs/network-topology-and-scaling.md`](docs/network-topology-and-scaling.md)
+
+## Production Readiness Roadmap
+
+See [`docs/production-readiness-plan.md`](docs/production-readiness-plan.md) for the phased production plan and review deliverables.
 
 ## Next Steps
 
