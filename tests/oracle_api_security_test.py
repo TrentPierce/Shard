@@ -12,10 +12,13 @@ TestClient = pytest.importorskip("fastapi.testclient").TestClient
 sys.path.append(str(Path(__file__).resolve().parents[1] / "desktop" / "python"))
 
 
-def _load_client(monkeypatch, *, api_keys: str = "", rate_limit: str = "60", max_prompt: str = "16000") -> TestClient:
+def _load_client(monkeypatch, api_keys="", rate_limit="60", max_prompt="16000"):
     monkeypatch.setenv("SHARD_API_KEYS", api_keys)
     monkeypatch.setenv("SHARD_RATE_LIMIT_PER_MINUTE", rate_limit)
     monkeypatch.setenv("SHARD_MAX_PROMPT_CHARS", max_prompt)
+    # Mock BitNet as not loaded to test API security without runtime
+    monkeypatch.setenv("BITNET_LIB", "")
+    monkeypatch.setenv("BITNET_MODEL", "")
 
     module = importlib.import_module("oracle_api")
     module = importlib.reload(module)

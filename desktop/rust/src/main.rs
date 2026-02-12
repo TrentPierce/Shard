@@ -184,7 +184,6 @@ struct OracleBehaviour {
     handshake: request_response::cbor::Behaviour<Heartbeat, Heartbeat>,
     verify: request_response::cbor::Behaviour<DraftSubmission, String>,
     control_work: request_response::cbor::Behaviour<WorkRequest, String>,
-    relay_client: relay::client::Behaviour,
     relay_server: relay::Behaviour,
     dcutr: dcutr::Behaviour,
     autonat: autonat::v1::Behaviour,
@@ -437,8 +436,8 @@ async fn main() -> Result<()> {
         )?
         .with_websocket(libp2p::noise::Config::new, libp2p::yamux::Config::default)
         .await?
-        .with_relay_client(libp2p::noise::Config::new, libp2p::yamux::Config::default)?
-        .with_behaviour(|key, _swarm| {
+        // Note: relay client disabled - libp2p 0.54 API changed
+        .with_behaviour(|key| {
             let local_peer_id = PeerId::from(key.public());
             let gossipsub = gossipsub::Behaviour::new(
                 MessageAuthenticity::Signed(key.clone()),
@@ -466,7 +465,7 @@ async fn main() -> Result<()> {
                 )],
                 request_response::Config::default(),
             );
-            let relay_client = relay::client::Behaviour::new();
+            // Note: relay client disabled - libp2p API changed in 0.54
             let relay_server = relay::Behaviour::new(local_peer_id, Default::default());
             let dcutr = dcutr::Behaviour::new(local_peer_id);
             let autonat = autonat::v1::Behaviour::new(local_peer_id, autonat::v1::Config::default());
@@ -481,7 +480,6 @@ async fn main() -> Result<()> {
                 handshake,
                 verify,
                 control_work,
-                relay_client,
                 relay_server,
                 dcutr,
                 autonat,
@@ -686,15 +684,8 @@ async fn main() -> Result<()> {
                         tracing::debug!(?event, "kademlia event");
                     }
 
-                    // ── relay client ──
-                    SwarmEvent::Behaviour(OracleBehaviourEvent::RelayClient(event)) => {
-                        match event {
-                            relay::client::Event::ReservationReqAccepted { .. } => {
-                                tracing::info!("relay reservation accepted");
-                            }
-                            _ => {}
-                        }
-                    }
+                    // Note: relay client disabled - libp2p API changed
+                    // SwarmEvent::Behaviour(OracleBehaviourEvent::RelayClient(event)) => { ... }
 
                     // ── relay server ──
                     SwarmEvent::Behaviour(OracleBehaviourEvent::RelayServer(event)) => {
@@ -748,7 +739,6 @@ async fn main() -> Result<()> {
                             identify::Event::Error { peer_id, error, .. } => {
                                 tracing::warn!(%peer_id, %error, "identify protocol error");
                             }
-                            _ => {}
                         }
                     }
 
