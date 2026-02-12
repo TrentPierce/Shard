@@ -28,22 +28,23 @@ export default function Header({ mode, rustStatus }: HeaderProps) {
         rustStatus === "connected" ? "status-dot--live" : "status-dot--dead"
 
     return (
-        <header className="header">
-            <div className="header__brand">
-                <div className="header__logo">S</div>
+        <header className="header" role="banner">
+            <div className="header__brand" aria-label="Application brand">
+                <div className="header__logo" aria-label="Shard logo" role="img">S</div>
                 <div>
                     <div className="header__title">Shard</div>
                     <div className="header__subtitle">Distributed Inference Network</div>
                 </div>
             </div>
 
-            <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "16px" }} role="status" aria-live="polite">
                 <div
                     className={`header__mode header__mode--${mode === "local-oracle" ? "oracle" : mode}`}
                     title={modeDescriptions[mode]}
+                    role="status"
                 >
-                    <span className={`status-dot ${dotClass}`} />
-                    {modeLabels[mode]}
+                    <span className={`status-dot ${dotClass}`} aria-hidden="true" />
+                    <span aria-label={`Current mode: ${modeLabels[mode]}`}>{modeLabels[mode]}</span>
                 </div>
             </div>
         </header>

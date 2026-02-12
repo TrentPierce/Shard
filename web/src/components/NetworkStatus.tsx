@@ -69,27 +69,28 @@ export default function NetworkStatus({
     }
 
     return (
-        <aside className="sidebar animate-fade-in">
+        <aside className="sidebar animate-fade-in" role="complementary" aria-label="Network status and information">
             {/* ── Daemon ── */}
             <div className="sidebar__section">
                 <div className="sidebar__section-title">
-                    <span className="sidebar__section-icon">⚡</span>
+                    <span className="sidebar__section-icon" aria-hidden="true">⚡</span>
                     Daemon Status
                 </div>
                 <div className="stat-row">
-                    <span className="stat-label">Rust Sidecar</span>
+                    <span className="stat-label" id="rust-status-label">Rust Sidecar</span>
                     <span
                         className={`stat-value ${rustStatus === "connected"
                                 ? "stat-value--accent"
                                 : "stat-value--error"
                             }`}
+                        aria-labelledby="rust-status-label"
                     >
                         {rustStatus}
                     </span>
                 </div>
                 <div className="stat-row">
-                    <span className="stat-label">Node Mode</span>
-                    <span className="stat-value">
+                    <span className="stat-label" id="node-mode-label">Node Mode</span>
+                    <span className="stat-value" aria-labelledby="node-mode-label">
                         {mode === "local-oracle"
                             ? "Oracle"
                             : mode === "scout"
@@ -338,6 +339,10 @@ export default function NetworkStatus({
                         marginBottom: "10px",
                         minHeight: "18px",
                     }}
+                    role="status"
+                    aria-live="polite"
+                    aria-atomic="true"
+                    id="heartbeat-status"
                 >
                     {heartbeat}
                 </div>
@@ -345,6 +350,9 @@ export default function NetworkStatus({
                     className="btn-ping"
                     onClick={doPing}
                     disabled={pinging}
+                    type="button"
+                    aria-label="Send network ping"
+                    aria-describedby="heartbeat-status"
                 >
                     {pinging ? "Pinging…" : "Send PING"}
                 </button>

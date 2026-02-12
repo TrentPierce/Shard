@@ -101,9 +101,9 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
     }
 
     return (
-        <div className="chat">
+        <div className="chat" role="main" aria-label="Chat interface">
             {/* ── Messages ── */}
-            <div className="chat__messages">
+            <div className="chat__messages" role="log" aria-live="polite" aria-atomic="false" aria-label="Chat messages">
                 {messages.length === 0 ? (
                     <div className="chat__empty animate-slide-up">
                         <div className="chat__empty-icon">⬡</div>
@@ -119,12 +119,14 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
                         <div
                             key={i}
                             className={`message message--${msg.role}`}
+                            role="article"
+                            aria-labelledby={`msg-sender-${i}`}
                         >
-                            <div className="message__avatar">
+                            <div className="message__avatar" id={`msg-sender-${i}`} aria-hidden="true">
                                 {msg.role === "user" ? "U" : "S"}
                             </div>
                             <div>
-                                <div className="message__bubble">
+                                <div className="message__bubble" role="alert" aria-live="off">
                                     {msg.content || (
                                         <div className="typing">
                                             <div className="typing__dot" />
@@ -150,6 +152,8 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
                     <textarea
                         ref={textareaRef}
                         className="chat__input"
+                        id="chat-input"
+                        name="chat-input"
                         placeholder={
                             mode === "loading"
                                 ? "Connecting to network…"
@@ -160,14 +164,18 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
                         onKeyDown={handleKeyDown}
                         disabled={mode === "loading"}
                         rows={1}
+                        aria-label="Type your message here"
+                        aria-describedby="chat-hint"
                     />
                     <button
                         className="chat__send-btn"
                         onClick={handleSend}
                         disabled={!input.trim() || streaming || mode === "loading"}
-                        title="Send message (Enter)"
+                        title="Send message"
+                        type="submit"
+                        aria-label="Send message"
                     >
-                        ↑
+                        <span aria-hidden="true">↑</span>
                     </button>
                 </div>
             </div>
