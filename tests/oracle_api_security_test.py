@@ -16,9 +16,11 @@ def _load_client(monkeypatch, api_keys="", rate_limit="60", max_prompt="16000"):
     monkeypatch.setenv("SHARD_API_KEYS", api_keys)
     monkeypatch.setenv("SHARD_RATE_LIMIT_PER_MINUTE", rate_limit)
     monkeypatch.setenv("SHARD_MAX_PROMPT_CHARS", max_prompt)
-    # Mock BitNet as not loaded to test API security without runtime
-    monkeypatch.setenv("BITNET_LIB", "")
-    monkeypatch.setenv("BITNET_MODEL", "")
+    # Enable testing mode - uses mock BitNet for tests
+    monkeypatch.setenv("SHARD_TESTING", "1")
+    # Clear BITNET env vars to trigger mock mode
+    monkeypatch.delenv("BITNET_LIB", raising=False)
+    monkeypatch.delenv("BITNET_MODEL", raising=False)
 
     module = importlib.import_module("oracle_api")
     module = importlib.reload(module)
