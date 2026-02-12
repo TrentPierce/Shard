@@ -38,41 +38,149 @@ LOGGER = logging.getLogger("shard.oracle_api")
 
 # ─── App & Config ────────────────────────────────────────────────────────────
 
+# Define OpenAPI tags for organized endpoint grouping
+tags_metadata = [
+    {
+        "name": "chat",
+        "description": (
+            "Chat completion endpoints for inference generation. "
+            "Supports both streaming and non-streaming modes with OpenAI-compatible API."
+        ),
+    },
+    {
+        "name": "scouts",
+        "description": (
+            "Scout management endpoints for browser Scout nodes. "
+            "Manage scout reputation, bans, and task assignments."
+        ),
+    },
+    {
+        "name": "system",
+        "description": (
+            "System management endpoints. "
+            "Get network topology, peer list, and health status."
+        ),
+    },
+    {
+        "name": "admin",
+        "description": (
+            "Administrative endpoints. "
+            "Scout bans and reputation resets require authentication."
+        ),
+    },
+]
+
 app = FastAPI(
     title="Shard Oracle API",
     version="0.4.0",
-    description="""
+    description=r"""
     OpenAI-compatible API for the Shard distributed inference network.
-    
+
+    ## Overview
+
+    The Shard Oracle API provides server-grade LLM inference through a hybrid
+    P2P network. It combines:
+    - **Oracle nodes** with full models that verify draft tokens
+    - **Scout nodes** with draft models that generate token predictions
+    - **Distributed inference** for free, unlimited access
+
+    ## Architecture
+
+    ```
+    User Request
+         ↓
+    Scout Nodes (WebLLM) → Draft Token Generation
+         ↓
+    Oracle Nodes (BitNet) → Draft Verification
+         ↓
+    Final Response
+    ```
+
     ## Features
-    
+
+    ### Inference
     - **Chat Completions**: OpenAI-compatible streaming and non-streaming chat
-    - **Scout Network**: Distributed draft token generation via browser-based Scouts
-    - **Golden Ticket Security**: Sybil attack prevention through verification prompts
-    - **P2P Networking**: libp2p-based mesh networking for Oracle nodes
-    
+    - **Distributed Generation**: Hybrid Oracle+Scout inference for quality
+    - **Golden Ticket Security**: Sybil attack prevention through verification
+
+    ### Network
+    - **P2P Networking**: libp2p-based mesh networking
+    - **Gossipsub Protocol**: Efficient task distribution
+    - **Kademlia DHT**: Peer discovery and routing
+
+    ### Quality
+    - **Verify, Don't Trust**: All Scout drafts verified by Oracles
+    - **Heavier is Truth**: GPU nodes always override browser drafts
+    - **Reputation System**: Scout accuracy tracked and scored
+
     ## Authentication
-    
+
     When `SHARD_API_KEYS` is configured, include the API key in the header:
+
     - `Authorization: Bearer <api_key>` OR
     - `X-API-Key: <api_key>`
-    
+
+    See [Authentication Guide](https://shard.network/docs/authentication) for details.
+
     ## Node Modes
-    
-    - **Oracle**: Full model host that verifies draft tokens
-    - **Scout**: Browser node that generates draft tokens via WebLLM
-    - **Leech**: Consumer-only node (lowest priority)
+
+    - **Oracle**: Full model host that verifies draft tokens (desktop GPU recommended)
+    - **Scout**: Browser node that generates draft tokens (WebGPU recommended)
+    - **Leech**: Consumer-only node (lowest priority, queued behind contributors)
+
+    ## API Versioning
+
+    - Current version: v1 (URL path: /api/v1/)
+    - Major version changes require consultation with maintainers
+    - See [Changelog](CHANGELOG.md) for version history
+
+    ## Production Hardening
+
+    Environment variables:
+    - `SHARD_API_KEYS`: Comma-separated valid API keys
+    - `SHARD_RATE_LIMIT_PER_MINUTE`: Request limit per client (default: 60)
+    - `SHARD_MAX_PROMPT_CHARS`: Maximum prompt length (default: 16000)
+    - `SHARD_LOG_LEVEL`: Log level (DEBUG/INFO/WARNING/ERROR)
+
+    ## Rate Limiting
+
+    Requests are rate-limited per client IP:
+    - Default: 60 requests per minute
+    - Scout endpoints: 120 requests per minute
+    - Rate limit headers: `X-RateLimit-Limit`, `X-RateLimit-Remaining`
+
+    ## Error Handling
+
+    All errors return JSON with the following structure:
+
+    \`\`\`json
+    {
+      "error": {
+        "message": "Error description",
+        "type": "error_type",
+        "param": "parameter_name"
+      }
+    }
+    \`\`\`
+
+    See [Error Codes](https://shard.network/docs/errors) for details.
     """,
     docs_url="/docs",
     redoc_url="/redoc",
     openapi_url="/openapi.json",
+    openapi_tags=tags_metadata,
     contact={
         "name": "Shard Network",
         "url": "https://github.com/TrentPierce/Shard",
+        "email": "contact@shard.network",
     },
     license_info={
         "name": "MIT",
         "url": "https://opensource.org/licenses/MIT",
+        "x-logo": {
+            "url": "https://shard.network/static/shard-logo.svg",
+            "altText": "Shard Logo",
+        },
     },
 )
 
@@ -234,29 +342,144 @@ async def enforce_rate_limit(request: Request, principal: str) -> None:
 
 
 class Message(BaseModel):
+    """
+    Represents a message in a conversation.
+
+    Messages form the conversation history for chat completions.
+    The first message typically has role="system" to set system instructions.
+    """
     role: Literal["system", "user", "assistant"]
-    content: str = Field(min_length=1, max_length=8000)
+    content: str = Field(
+        ...,
+        min_length=1,
+        max_length=8000,
+        description=(
+            "The text content of the message. "
+            "System messages define instructions for the model, "
+            "user messages are the input prompt, "
+            "assistant messages are model responses."
+        ),
+        examples=[
+            {"role": "system", "content": "You are a helpful assistant."},
+            {"role": "user", "content": "Explain quantum computing"},
+        ],
+    )
 
 
 class ChatRequest(BaseModel):
-    model: str = Field(default="shard-hybrid")
-    messages: list[Message] = Field(min_length=1, max_length=64)
-    temperature: float = Field(default=0.7, ge=0.0, le=2.0)
-    max_tokens: int = Field(default=256, ge=1, le=2048)
-    stream: bool = Field(default=False)
+    """
+    Request for chat completion generation.
+
+    This follows the OpenAI-compatible chat completion API specification.
+    Uses distributed inference via Scout nodes and local Oracle verification.
+    """
+    model: str = Field(
+        default="shard-hybrid",
+        description=(
+            "Model identifier to use. Currently supports: "
+            "shard-hybrid (hybrid Oracle+Scout inference)"
+        ),
+        examples=["shard-hybrid", "gpt-4", "claude-3"],
+    )
+    messages: list[Message] = Field(
+        ...,
+        min_length=1,
+        max_length=64,
+        description=(
+            "Array of message objects containing the conversation history. "
+            "Must include at least one message from the user."
+        ),
+        examples=[
+            [
+                {"role": "system", "content": "You are a helpful AI assistant."},
+                {"role": "user", "content": "What is the capital of France?"},
+            ]
+        ],
+    )
+    temperature: float = Field(
+        default=0.7,
+        ge=0.0,
+        le=2.0,
+        description=(
+            "Sampling temperature for text generation. "
+            "Lower values (0.0) produce more deterministic outputs, "
+            "higher values (2.0) produce more creative outputs."
+        ),
+        examples=[0.3, 0.7, 1.0],
+    )
+    max_tokens: int = Field(
+        default=256,
+        ge=1,
+        le=2048,
+        description=(
+            "Maximum number of tokens to generate in the response. "
+            "Shorter responses are faster and more focused."
+        ),
+        examples=[64, 256, 512, 1024],
+    )
+    stream: bool = Field(
+        default=False,
+        description=(
+            "Enable Server-Sent Events (SSE) streaming for real-time token generation. "
+            "When true, chunks are sent incrementally rather than all at once."
+        ),
+        examples=[True, False],
+    )
 
 
 class Choice(BaseModel):
-    index: int
-    message: dict[str, str]
-    finish_reason: str = "stop"
+    """
+    A single completion choice in a chat completion response.
+
+    Responses may contain multiple choices (n parameter), but this API
+    currently returns a single choice with index 0.
+    """
+    index: int = Field(
+        description="Index of this choice (0 for the primary completion)"
+    )
+    message: dict[str, str] = Field(
+        description=(
+            "Message content containing the generated response. "
+            "Fields: 'role' (assistant), 'content' (text)"
+        ),
+        examples=[{"role": "assistant", "content": "Paris is the capital of France."}],
+    )
+    finish_reason: str = Field(
+        default="stop",
+        description=(
+            "Reason why generation stopped. "
+            "Values: 'stop' (normal stop), 'length' (max tokens reached)"
+        ),
+        examples=["stop", "length"],
+    )
 
 
 class ChatResponse(BaseModel):
-    id: str
-    object: str = "chat.completion"
-    choices: list[Choice]
-    usage: dict[str, int]
+    """
+    Chat completion response matching OpenAI API specification.
+    """
+    id: str = Field(
+        description="Unique identifier for this completion (e.g., 'chatcmpl-abc123')",
+        examples=["chatcmpl-abc123def456"],
+    )
+    object: str = Field(
+        default="chat.completion",
+        description="Object type, always 'chat.completion'",
+    )
+    choices: list[Choice] = Field(
+        description="Array of generated completion choices",
+        examples=[[{"index": 0, "message": {"role": "assistant", "content": "Hello!"}, "finish_reason": "stop"}]],
+    )
+    usage: dict[str, int] = Field(
+        description="Token usage statistics for this request",
+        examples=[
+            {
+                "prompt_tokens": 10,
+                "completion_tokens": 5,
+                "total_tokens": 15,
+            }
+        ],
+    )
 
 
 # ─── Local Model + Verification ─────────────────────────────────────────────
@@ -293,7 +516,15 @@ async def _verify_draft(generated: list[str], draft: list[str]) -> tuple[list[st
 # ─── Endpoints ───────────────────────────────────────────────────────────────
 
 
-@app.get("/health")
+@app.get(
+    "/health",
+    tags=["system"],
+    summary="Health check endpoint",
+    description=(
+        "Returns the health status of the API and its dependencies. "
+        "Use this for monitoring and load balancer health checks."
+    ),
+)
 async def health() -> dict[str, Any]:
     client = _get_http_client()
     rust_status = "unreachable"
@@ -315,7 +546,15 @@ async def health() -> dict[str, Any]:
     }
 
 
-@app.get("/v1/system/topology")
+@app.get(
+    "/v1/system/topology",
+    tags=["system"],
+    summary="Get network topology",
+    description=(
+        "Retrieves the network topology for browser Scout auto-discovery. "
+        "Scouts use this endpoint to find Oracle nodes to connect to."
+    ),
+)
 async def system_topology() -> dict[str, Any]:
     client = _get_http_client()
     try:
@@ -334,7 +573,15 @@ async def system_topology() -> dict[str, Any]:
     }
 
 
-@app.get("/v1/system/peers")
+@app.get(
+    "/v1/system/peers",
+    tags=["system"],
+    summary="List connected peers",
+    description=(
+        "Returns information about currently connected peers in the network. "
+        "Use for monitoring and debugging."
+    ),
+)
 async def system_peers() -> dict[str, Any]:
     client = _get_http_client()
     try:
@@ -346,7 +593,55 @@ async def system_peers() -> dict[str, Any]:
     return {"peers": [], "count": 0}
 
 
-@app.post("/v1/chat/completions")
+@app.post(
+    "/v1/chat/completions",
+    tags=["chat"],
+    summary="Create chat completion",
+    description=(
+        "Creates a model response for the given chat conversation. "
+        "Uses distributed inference with Scout nodes and Oracle verification. "
+        "Supports both streaming and non-streaming modes."
+    ),
+    responses={
+        200: {
+            "description": "Chat completion created successfully",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "id": "chatcmpl-abc123def456",
+                        "object": "chat.completion",
+                        "created": 1704062400,
+                        "model": "shard-hybrid",
+                        "choices": [
+                            {
+                                "index": 0,
+                                "message": {"role": "assistant", "content": "Paris is the capital of France."},
+                                "finish_reason": "stop",
+                            }
+                        ],
+                        "usage": {
+                            "prompt_tokens": 10,
+                            "completion_tokens": 5,
+                            "total_tokens": 15,
+                        },
+                    }
+                }
+            },
+        },
+        429: {
+            "description": "Rate limit exceeded",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "detail": "Rate limit exceeded",
+                        "X-RateLimit-Limit": "60",
+                        "X-RateLimit-Remaining": "0",
+                    }
+                }
+            },
+        },
+    },
+)
 async def chat_completions(
     payload: ChatRequest,
     request: Request,
@@ -471,7 +766,15 @@ async def _stream_generate(
     yield "data: [DONE]\n\n"
 
 
-@app.get("/metrics", response_class=PlainTextResponse)
+@app.get(
+    "/metrics",
+    tags=["system"],
+    summary="Prometheus metrics",
+    description=(
+        "Returns Prometheus-style plaintext metrics for monitoring. "
+        "Format: `# HELP <metric_name> <help_text>` and `# TYPE <metric_name> <type>`"
+    ),
+)
 async def metrics() -> str:
     """Prometheus-style plaintext counters for lightweight monitoring."""
     lines = [
@@ -506,7 +809,12 @@ async def metrics() -> str:
 # ─── Golden Ticket & Reputation Endpoints ────────────────────────────────────
 
 
-@app.get("/v1/scout/reputation/{peer_id}")
+@app.get(
+    "/v1/scout/reputation/{peer_id}",
+    tags=["scouts"],
+    summary="Get scout reputation",
+    description="Retrieves reputation information for a specific scout node.",
+)
 async def get_reputation(
     peer_id: str,
     _principal: str = Depends(require_api_key),
@@ -515,7 +823,12 @@ async def get_reputation(
     return get_scout_reputation(peer_id)
 
 
-@app.get("/v1/scout/banned")
+@app.get(
+    "/v1/scout/banned",
+    tags=["scouts"],
+    summary="List banned scouts",
+    description="Returns a list of all currently banned scout peer IDs.",
+)
 async def list_banned_scouts(
     _principal: str = Depends(require_api_key),
 ) -> dict[str, object]:
@@ -526,7 +839,29 @@ async def list_banned_scouts(
     }
 
 
-@app.post("/v1/scout/unban/{peer_id}")
+@app.post(
+    "/v1/scout/unban/{peer_id}",
+    tags=["admin"],
+    summary="Unban a scout (admin override)",
+    description=(
+        "Manually unbans a scout node that has been banned from the network. "
+        "Requires authentication. Only use for legitimate recovery scenarios."
+    ),
+    responses={
+        200: {
+            "description": "Scout unbanned successfully",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "peer_id": "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG",
+                        "unbanned": True,
+                        "detail": "Scout unbanned",
+                    }
+                }
+            },
+        }
+    },
+)
 async def admin_unban_scout(
     peer_id: str,
     _principal: str = Depends(require_api_key),
@@ -554,7 +889,16 @@ async def admin_reset_reputation(
     }
 
 
-@app.post("/v1/scout/draft")
+@app.post(
+    "/v1/scout/draft",
+    tags=["scouts"],
+    summary="Submit scout draft tokens",
+    description=(
+        "Accepts draft generation results from Scout nodes. "
+        "If the work is a Golden Ticket, the response is verified for correctness. "
+        "Rate limited to prevent spam."
+    ),
+)
 async def submit_scout_draft(
     request: Request,
 ) -> dict[str, object]:
@@ -649,7 +993,16 @@ async def submit_scout_draft(
         )
 
 
-@app.get("/v1/scout/work", response_model=None)
+@app.get(
+    "/v1/scout/work",
+    tags=["scouts"],
+    summary="Get work for scouts",
+    description=(
+        "Retrieves work assignments for scouts to process. "
+        "May include Golden Ticket verification tasks. "
+        "Returns 204 No Content if no work is available."
+    ),
+)
 async def get_scout_work(
     request: Request,
 ) -> Response:
@@ -674,7 +1027,15 @@ async def get_scout_work(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@app.get("/v1/models")
+@app.get(
+    "/v1/models",
+    tags=["chat"],
+    summary="List available models",
+    description=(
+        "Returns a list of available models for use with the API. "
+        "Use the 'shard-hybrid' model for hybrid inference."
+    ),
+)
 async def list_models() -> dict[str, Any]:
     return {
         "object": "list",

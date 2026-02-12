@@ -1,0 +1,87 @@
+# ============================================================================
+# Buf Code Generation Configuration - Shard Control Plane
+#
+# This file configures code generation from protobuf definitions.
+# It defines which plugins to use and what output formats to generate.
+#
+# For documentation: https://buf.build/docs/configuration/v2/buf-gen-yaml
+# ============================================================================
+
+version: v2
+
+# Clean output directories before generation
+clean: true
+
+# Managed mode - sets default values for protobuf options during code generation
+managed:
+  enabled: true
+  disable:
+    - option: go_package_prefix
+      value: "github.com/ShardNetwork/Shard"
+  override:
+    # Go package prefix for generated Go code
+    - option: go_package
+      value: "github.com/ShardNetwork/Shard/desktop/control-plane/generated;control"
+    # Java package for generated Java code
+    - option: java_package
+      value: "com.shardnetwork.shard.control.v1"
+    # Multiple files for Java (one per top-level message/service)
+    - option: java_multiple_files
+      value: true
+
+# Code generation plugins
+plugins:
+  # ============================================================================
+  # protoc-gen-doc - Generate markdown/human-readable documentation
+  # ============================================================================
+  - local: protoc-gen-doc
+    out: ../../docs
+    opt:
+      - markdown,index.md
+      - source_relative
+
+  # ============================================================================
+  # gRPC Go Plugin - Generate Go client/stub code
+  # ============================================================================
+  - remote: buf.build/grpc/go:v1.65.1
+    out: ../python/generated
+    opt:
+      - paths=source_relative
+      - require_unimplemented_servers=false
+
+  # ============================================================================
+  # Python Plugin - Generate Python code from protobuf definitions
+  # ============================================================================
+  - remote: buf.build/protocolbuffers/python:v27.1
+    out: ../python/generated
+    opt:
+      - paths=source_relative
+
+  # ============================================================================
+  # Rust Plugin - Generate Rust client/stub code
+  # ============================================================================
+  - remote: buf.build/grpc/rust:v1.67.0
+    out: ../rust/src/generated
+    opt:
+      - paths=source_relative
+      - generate_module_name=true
+
+  # ============================================================================
+  # TypeScript Plugin - Generate TypeScript code
+  # ============================================================================
+  - remote: buf.build/grpc/web:v1.6.0
+    out: ../web/src/generated
+    opt:
+      - paths=source_relative
+      - import_extension=.ts
+      - grpc_gateway
+
+# ============================================================================
+# Custom Plugin: Generate OpenAPI 3.x specification from protobuf
+# ============================================================================
+# Uncomment to enable OpenAPI generation:
+# - local: protoc-gen-openapiv2
+#   out: ../../docs
+#   opt:
+#     - log_name=shard-control.openapi.yaml
+#     - grpc_gateway

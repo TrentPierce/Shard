@@ -1,59 +1,507 @@
+// ============================================================================
+// Shard Control Plane API - Protocol Buffer Definition
+//
+// This file defines the control plane gRPC service for the Shard distributed
+// inference network. It coordinates task distribution, result collection,
+// and topology management between Oracle nodes, Browser Scout nodes, and
+// the control plane daemon.
+//
+// Version: 1.0
+// Package: shard.control.v1
+// Status: Active
+//
+// Architecture:
+//   - Uses Protobuf 3.x for binary serialization
+//   - gRPC for RPC communication (transport layer)
+//   - Google's RPC status codes for error handling
+//   - Field numbers reserved for future use (1-100)
+//
+// Documentation:
+//   - https://shard.network/docs/specs/control-plane-v1
+//   - https://shard.network/docs/architecture/control-plane
+//
+// Backward Compatibility:
+//   - All versions are backward compatible
+//   - Adding new fields: OK (new clients ignore them)
+//   - Removing fields: NOT OK (breaking change)
+//   - Changing field types: NOT OK (breaking change)
+// ============================================================================
+
 syntax = "proto3";
 
 package shard.control.v1;
 
-import "google/protobuf/empty.proto";
+// Language-specific package options
+option go_package = "github.com/ShardNetwork/Shard/desktop/control-plane/generated;control";
+option java_package = "com.shardnetwork.shard.control.v1";
+option java_multiple_files = true;
 
+// Standard imports
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+
+// ============================================================================
+// Request Messages
+// ============================================================================
+
+// ScoutRequest represents a request to reserve scout nodes for a specific task.
+//
+// Scouts are browser-based nodes that generate draft tokens using WebGPU and
+// WebLLM. This request asks an Oracle to allocate scouts for inference tasks.
+//
+// Lifecycle:
+//   1. Oracle requests scouts via ReserveScouts
+//   2. Control plane selects scouts based on load/capabilities
+//   3. Returns reservation with lease duration and scout IDs
+//
+// Example:
+//   task_id: "abc123"
+//   desired_scouts: 10
 message ScoutRequest {
+  // task_id is a unique identifier for the inference task.
+  // Format: UUID v4 string (RFC 4122)
+  // Used for correlating request-response pairs and Golden Ticket verification.
   string task_id = 1;
+
+  // desired_scouts is the count of browser scouts to reserve.
+  // Valid range: 1 to 100
+  // Recommended values: 1, 5, 10, 25, 50
   uint32 desired_scouts = 2;
 }
 
+// ScoutReservation contains the allocated scouts and lease duration.
+//
+// This reservation includes:
+//   - List of scout peer IDs that are assigned
+//   - Lease duration in seconds before expiration
+//   - Timestamp of when reservation was created
+//
+// After the lease expires, the reservation is released and scouts may be
+// reassigned to other tasks. Reservations are cleaned up by the control plane.
+//
+// Example:
+//   scout_peer_ids: ["peer1", "peer2", "peer3"]
+//   lease_seconds: 300
+//   created_at: 2024-12-20T12:00:00Z
 message ScoutReservation {
+  // scout_peer_ids contains the libp2p peer IDs of allocated scouts.
+  // Empty list indicates no scouts were available.
   repeated string scout_peer_ids = 1;
+
+  // lease_seconds is how long the reservation is valid.
+  // Valid range: 30 to 3600 seconds (30s to 1 hour)
+  // Recommended: 300 seconds (5 minutes)
   uint32 lease_seconds = 2;
+
+  // created_at is when this reservation was issued.
+  google.protobuf.Timestamp created_at = 3;
 }
 
+// BroadcastVerificationTask contains a verification task for scouts.
+//
+// The payload_json field contains the verification task specification.
+// It can be:
+//   - Golden Ticket (pre-solved prompt for verification)
+//   - Standard inference task (for normal operation)
+//
+// Golden Tickets are injected to test Scout accuracy and enforce
+// Sybil attack prevention.
 message BroadcastVerificationTask {
+  // task_id uniquely identifies this verification task.
   string task_id = 1;
+
+  // oracle_peer_id identifies which oracle node should verify these tasks.
+  // Used to route responses back to the correct oracle.
   string oracle_peer_id = 2;
+
+  // payload_json contains the verification task as JSON-encoded data.
+  // Schema: See Shard Verification Task specification
+  // For Golden Tickets, this contains a pre-solved prompt and expected answer.
   bytes payload_json = 3;
 }
 
+// WorkRequest represents a distributed inference work assignment.
+//
+// This is sent by Oracles to broadcast work across the network.
+// The control plane uses gossipsub to distribute this to Scouts.
+//
+// Load balancing:
+//   - Scouted peers are selected based on:
+//     * Network topology (geographic proximity)
+//     * Historical performance (latency, accuracy)
+//     * Current capacity (idle or busy status)
+//     * Model compatibility (Scout can run the model)
+//
+// Example:
+//   request_id: "req-123"
+//   prompt_context: "Explain quantum physics"
+//   min_tokens: 256
 message WorkRequest {
+  // request_id uniquely identifies this work assignment.
+  // Format: Short UUID (e.g., "req-123")
   string request_id = 1;
+
+  // prompt_context is the user prompt to process.
+  // Max length: 16,000 characters (enforced by API)
   string prompt_context = 2;
+
+  // min_tokens specifies minimum tokens to generate.
+  // Typical range: 10-1000 tokens
+  // Lower values reduce network overhead and latency.
   int32 min_tokens = 3;
 }
 
+// WorkResponse contains draft tokens generated by a scout.
+//
+// Responses are validated by Oracle nodes using the full model.
+// Valid results contribute to scout reputation; invalid results reduce it.
+//
+// Latency tracking:
+//   The latency_ms field measures end-to-end request/response time.
+//   Used for:
+//     * Performance monitoring
+//     * Adaptive load balancing
+//     * Timeout detection
+//   Typical values: 100-1000ms for local networks
+//
+// Example:
+//   request_id: "req-123"
+//   peer_id: "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG"
+//   draft_tokens: ["The", " quantum", " physics"]
+//   latency_ms: 450.0
 message WorkResponse {
+  // request_id matches the original WorkRequest.
+  // Used for correlation and verification.
   string request_id = 1;
+
+  // peer_id identifies which scout generated these tokens.
   string peer_id = 2;
+
+  // draft_tokens are the generated token predictions.
+  // Each token is represented as a separate string element.
+  // Empty list indicates no tokens were generated.
   repeated string draft_tokens = 3;
+
+  // latency_ms is the round-trip time in milliseconds.
+  // Measured from work assignment to result submission.
+  // Zero indicates the latency was not tracked.
   float latency_ms = 4;
 }
 
+// TopologyUpdate contains network topology changes.
+//
+// Called when:
+//   - Oracle node changes its listen address
+//   - New node joins the network
+//   - Node capabilities change
+//   - Node status changes (offline/online)
+//
+// Scouts use topology updates to discover Oracle nodes and connect.
+// Oracles use them to inform the control plane of network state.
 message TopologyUpdate {
+  // oracle_peer_id identifies the oracle reporting this update.
+  // Must match the peer ID of an active oracle.
   string oracle_peer_id = 1;
+
+  // oracle_webrtc_multiaddr is the WebRTC multiaddr for direct connections.
+  // Format: libp2p multiaddr string (e.g., "/ip4/192.168.1.10/tcp/9090/p2p/QmXw...")
+  // Used by Scouts to establish direct P2P connections.
   string oracle_webrtc_multiaddr = 2;
 }
 
+// Ack indicates success or failure of an operation.
+//
+// Always returns an Ack message to indicate:
+//   - Whether the operation succeeded (ok field)
+//   - Human-readable status or error details (detail field)
+//   - Structured error information if applicable (errors field)
+//
+// Success examples: "Scouts reserved", "Task broadcast"
+// Error examples: "No scouts available", "Invalid task ID"
+//
+// All RPCs return Ack to maintain consistent error handling.
 message Ack {
+  // ok is true for success, false for failure.
   bool ok = 1;
+
+  // detail provides a human-readable status message.
+  // Success messages are brief and positive.
+  // Error messages are descriptive and actionable.
   string detail = 2;
+
+  // errors contains structured error details for failure cases.
+  // Empty on success.
+  // Format: "field_name: error_message"
+  repeated string errors = 3;
 }
 
+// HealthStatus reports the control plane's current state.
+//
+// Used by:
+//   - Monitoring systems for metrics collection
+//   - Load balancers for health checking
+//   - Clients for connectivity verification
+//   - CI/CD pipelines for deployment verification
+//
+// Example response:
+//   rust_daemon_version: "0.4.0"
+//   connected_to_dht: true
+//   connected_peers: 5
 message HealthStatus {
+  // rust_daemon_version is the version of the Rust daemon.
+  // Format: Semantic version (e.g., "0.4.0", "0.5.0-alpha.1")
   string rust_daemon_version = 1;
+
+  // connected_to_dht indicates if the Kademlia DHT is operational.
+  // true = DHT is active and can route queries
+  // false = DHT is not available or partitioned
   bool connected_to_dht = 2;
+
+  // connected_peers is the current number of connected peers.
+  // Includes both Oracles and Scouts.
+  // Typical values: 5-50 in active networks
   uint32 connected_peers = 3;
 }
 
+// ============================================================================
+// Services
+// ============================================================================
+
+// ShardControlPlane provides the control plane gRPC API.
+//
+// This service coordinates distributed inference across Oracle and Scout nodes.
+// It handles task distribution, result collection, and topology management.
+//
+// Authentication:
+//   - Production: mTLS certificates required
+//   - Development: API keys in metadata (X-API-Key header)
+//   - See: https://shard.network/docs/security/authentication
+//
+// Rate limiting:
+//   - Per-peer rate limits apply (default: 60 requests/min)
+//   - Scout endpoints: 120 requests/min
+//   - Rate limit headers: `X-RateLimit-Limit`, `X-RateLimit-Remaining`
+//   - Returns: RESOURCE_EXHAUSTED (8) if limits exceeded
+//
+// Version:
+//   Current version: v1
+//   Backward compatible with: v1.x (all versions)
+//   Breaking changes: None planned before v2 (2026-Q3)
+//
+// Error handling:
+//   All methods return Ack with ok field set to true/false.
+//   Failure codes:
+//     - INVALID_ARGUMENT (3): Invalid parameters
+//     - NOT_FOUND (5): Resource doesn't exist
+//     - UNAUTHENTICATED (16): Missing credentials
+//     - PERMISSION_DENIED (7): Insufficient permissions
+//     - UNAVAILABLE (14): Service temporarily unavailable
+//     - INTERNAL (13): Internal server error
+//
+// Documentation:
+//   - API reference: https://shard.network/docs/api/control-plane
+//   - Architecture: https://shard.network/docs/architecture/control-plane
+//   - Example implementations: See companion web client code
 service ShardControlPlane {
+  option (google.api.default_host) = "api.shard.network:9091";
+
+  // ReserveScouts allocates browser scouts for an inference task.
+  //
+  // Flow:
+  //   1. Oracle requests scouts
+  //   2. Control plane selects scouts based on:
+  //      * Current load and availability
+  //      * Network topology (geographic proximity)
+  //      * Scout capabilities (model compatibility)
+  //      * Historical performance (reputation scores)
+  //   3. Returns reservation with lease duration
+  //   4. Scouts are assigned and can receive work
+  //
+  // Errors:
+  //   INVALID_ARGUMENT (3):
+  //     - task_id is empty or invalid
+  //     - desired_scouts out of range (1-100)
+  //   RESOURCE_EXHAUSTED (8):
+  //     - No scouts available in network
+  //     - Network capacity at max capacity
+  //   UNAVAILABLE (14):
+  //     - Control plane is shutting down
+  //     - Network is unreachable
+  //
+  // Example request:
+  //   task_id: "abc-123-def"
+  //   desired_scouts: 10
+  //
+  // Example response:
+  //   scout_peer_ids: ["peer1", "peer2", ..., "peer10"]
+  //   lease_seconds: 300
+  //   created_at: 2024-12-20T12:00:00Z
   rpc ReserveScouts(ScoutRequest) returns (ScoutReservation);
+
+  // BroadcastTask sends a verification task to all subscribed scouts.
+  //
+  // Uses gossipsub pub/sub protocol for reliable delivery across P2P network.
+  // Scouts that acknowledge receipt are tracked for reputation scoring.
+  //
+  // Task types:
+  //   - Normal inference task: Scout generates tokens
+  //   - Golden Ticket: Scout must verify correctness (for reputation testing)
+  //
+  // Golden Tickets are injected automatically:
+  //   - Random prompts with known answers
+  //   - Verification at acceptance time
+  //   - Failed Golden Tickets result in scout bans
+  //
+  // Errors:
+  //   UNAUTHENTICATED (16):
+  //     - Missing or invalid authentication credentials
+  //     - Peer ID not verified
+  //   PERMISSION_DENIED (7):
+  //     - Insufficient privileges to broadcast
+  //   UNAVAILABLE (14):
+  //     - No scouts connected
+  //     - Gossipsub topic not subscribed
+  //
+  // Example request:
+  //   task_id: "verify-task-456"
+  //   oracle_peer_id: "QmXw..."
+  //   payload_json: "{...JSON verification task...}"
+  //
   rpc BroadcastTask(BroadcastVerificationTask) returns (Ack);
+
+  // BroadcastWork distributes inference work across the network.
+  //
+  // Load balancing strategy:
+  //   1. Select target Orion(s) (1-3 oracles per request)
+  //   2. Select scouts for each oracle based on:
+  //      * Geographic proximity (lower latency)
+  //      * Model compatibility
+  //      * Current capacity
+  //      * Reputation score (better scouts get more work)
+  //   3. Send work to selected scouts via gossipsub
+  //
+  // Work assignment flow:
+  //   - Oracle calls BroadcastWork with work request
+  //   - Control plane finds compatible scouts
+  //   - Work is published to shard-work topic
+  //   - Scouts receive and process work
+  //   - Scouts submit results via SubmitResult
+  //
+  // Latency tracking:
+  //   - Response latency is tracked for each Scout
+  //   - Lower latency = better scout (gets more work)
+  //   - Higher latency = penalized (gets less work)
+  //
+  // Errors:
+  //   INVALID_ARGUMENT (3):
+  //     - request_id is empty
+  //     - prompt_context too long (max 16000 chars)
+  //     - min_tokens out of range (1-10000)
+  //   UNAVAILABLE (14):
+  //     - No scouts available
+  //     - Network unreachable
+  //
+  // Example request:
+  //   request_id: "work-789"
+  //   prompt_context: "Explain quantum computing"
+  //   min_tokens: 256
+  //
   rpc BroadcastWork(WorkRequest) returns (Ack);
+
+  // SubmitResult allows scouts to return generated tokens.
+  //
+  // This RPC is called by Scout nodes after generating draft tokens.
+  // Results are validated by Oracle nodes using the full model.
+  //
+  // Validation process:
+  //   1. Oracle receives result via gossipsub
+  //   2. Oracle verifies tokens against full model
+  //   3. If valid:
+  //      * Tokens accepted for speculation
+  //      * Scout reputation increased
+  //      * Result included in final response
+  //   4. If invalid:
+  //      * Tokens rejected
+  //      * Scout reputation decreased
+  //      * Scout flagged for investigation
+  //
+  // Golden Ticket verification:
+  //   - If request is a Golden Ticket, answer is checked
+  //   - Correct answer: Reputation +1, result accepted
+  //   - Incorrect answer: Reputation -1, scout banned
+  //
+  // Errors:
+  //   INVALID_ARGUMENT (3):
+  //     - request_id doesn't match any work assignment
+  //     - peer_id not verified
+  //     - draft_tokens empty
+  //   RESOURCE_EXHAUSTED (8):
+  //     - Rate limit exceeded (per-scout rate limiting)
+  //     - Network capacity exceeded
+  //
+  // Example request:
+  //   request_id: "work-789"
+  //   peer_id: "QmYw..."
+  //   draft_tokens: ["The", " quantum", " physics"]
+  //   latency_ms: 450.0
+  //
   rpc SubmitResult(WorkResponse) returns (Ack);
+
+  // UpdateTopology notifies the control plane of network changes.
+  //
+  // Called when:
+  //   - Oracle changes listen address
+  //   - New node joins the network
+  //   - Node capabilities change
+  //   - Node status changes (offline/online)
+  //
+  // Should be called:
+  //   - On node startup (initial registration)
+  //   - When address changes (migration/redeployment)
+  //   - Periodically (every 30-60 seconds for status monitoring)
+  //
+  // Scouts use topology updates to discover Oracle nodes and connect.
+  // Updates are broadcast to all subscribed peers.
+  //
+  // Errors:
+  //   INVALID_ARGUMENT (3):
+  //     - oracle_peer_id not verified
+  //     - oracle_webrtc_multiaddr not valid
+  //   UNAVAILABLE (14):
+  //     - Network unreachable
+  //
+  // Example request:
+  //   oracle_peer_id: "QmXw..."
+  //   oracle_webrtc_multiaddr: "/ip4/192.168.1.10/tcp/9090/p2p/QmXw..."
+  //
   rpc UpdateTopology(TopologyUpdate) returns (Ack);
+
+  // Health returns the current status of the control plane.
+  //
+  // Used for:
+  //   - Health checks by monitoring systems
+  //   - Connectivity verification by clients
+  //   - Version compatibility checks
+  //   - Capacity planning
+  //
+  // Status codes (in detail field):
+  //   "ok" - All systems operational
+  //   "degraded" - Some components unhealthy
+  //   "error" - Critical failure
+  //   "shutdown" - Graceful shutdown in progress
+  //
+  // Versioning:
+  //   - rust_daemon_version indicates Rust daemon version
+  //   - Should match README version (e.g., "0.4.0")
+  //   - Changes should be documented in CHANGELOG.md
+  //
+  // Errors:
+  //   Not applicable - Health is informational only
+  //
+  // Example response:
+  //   rust_daemon_version: "0.4.0"
+  //   connected_to_dht: true
+  //   connected_peers: 5
+  //
   rpc Health(google.protobuf.Empty) returns (HealthStatus);
 }

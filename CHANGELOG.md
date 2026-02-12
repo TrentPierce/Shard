@@ -1,23 +1,27 @@
 # Changelog
 
-All notable changes to Shard will be documented in this file.
+All notable changes to this project will be documented in this file.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
 ### Added
-- (Coming soon) Full WebLLM integration in browser Scouts
-- (Coming soon) Reputation scoring system for peer trust
-- (Coming soon) Golden Ticket testing for Sybil attack prevention
-- (Coming soon) gRPC control plane (replacing HTTP/JSON)
+- **OpenAPI Documentation**: Enhanced FastAPI app with comprehensive OpenAPI 3.1 spec generation, detailed Field() documentation with examples, organized endpoint tags, and enhanced descriptions
+- **Tag Organization**: Added endpoint tags (chat, scouts, system, admin) for better documentation organization in Swagger UI
+- **Response Examples**: Added comprehensive examples to all request/response schemas matching OpenAI API specification
+- **Error Documentation**: Enhanced error response documentation with detailed status codes and error types
 
 ### Changed
-- (Coming soon) Improve peer discovery efficiency
+- **API Documentation Enhancement**: Improved API.md with comprehensive OpenAI compatibility details, architecture diagrams, and deployment guidance
+- **Model Documentation**: Enhanced Pydantic models (Message, ChatRequest, Choice, ChatResponse) with detailed Field() descriptions and examples
 
 ### Fixed
-- (Coming soon) Fix connection timeout handling
+- **Documentation Clarity**: Fixed typos and improved clarity in API.md and README.md
+
+### Deprecated
+- None
 
 ### Removed
 - None
@@ -48,6 +52,91 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Systemd Support**: Linux service integration
 - **WebRTC Support**: WebRTC-direct transport (Linux/macOS)
 - **Control Plane Proto**: Protocol buffer definitions for future gRPC migration
+- **Golden Ticket Security**: Sybil attack prevention through verification prompts
+- **Reputation System**: Scout accuracy tracking for trust management
+
+### Changed
+- **API Structure**: Restructured API.md with comprehensive architecture documentation
+- **Node Classification**: Improved node class documentation (Oracle, Scout, Leech)
+
+### Fixed
+- **Connection Handling**: Fixed connection timeout handling and reconnection logic
+- **Rate Limiting**: Improved rate limiter precision and error reporting
+- **Metrics**: Enhanced Prometheus metrics with more granular counters
+
+### Security
+- **Golden Tickets**: Implemented Golden Ticket mechanism for Sybil attack prevention
+- **Reputation System**: Added scout reputation tracking and banning mechanism
+
+### Dependencies
+- **Python**: Added FastAPI (0.115.0+), Pydantic (2.9.0+), httpx (0.27.0+)
+- **Rust**: Added libp2p (0.54+), axum (0.7+), tokio (1.0+)
+- **Web**: Added Next.js 14, React 18, libp2p for browser
+- **WebLLM**: Added @mlc-ai/web-llm for browser draft token generation
+
+### Performance
+- **Efficiency**: Improved cooperative generation loop efficiency
+- **Parallel Processing**: Added concurrent Scout task processing
+
+### Documentation
+- **README**: Comprehensive project documentation with architecture diagrams
+- **API.md**: Detailed API reference with examples
+- **Production Readiness Plan**: Phased production deployment roadmap
+- **Deployment Guide**: Multi-component deployment instructions
+- **Troubleshooting**: Common issues and solutions guide
+
+[unreleased]: https://github.com/ShardNetwork/Shard/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/ShardNetwork/Shard/compare/v0.3.0...v0.4.0
+
+---
+
+## [0.3.0] - 2024-11-15
+
+### Added
+- **Initial P2P Infrastructure**: libp2p-based networking layer with TCP/WebSocket transports
+- **Basic Control Plane**: HTTP API for task distribution (ports 4001, 4101)
+- **Initial Draft Model**: Basic Scout implementation with WebLLM integration
+- **Golden Ticket Framework**: Foundation for Sybil attack prevention
+
+### Changed
+- **Network Protocol**: Initial handshake and verification protocol design
+
+[0.3.0]: https://github.com/ShardNetwork/Shard/compare/v0.2.0...v0.3.0
+
+---
+
+## [0.2.0] - 2024-10-01
+
+### Added
+- **BitNet Runtime**: ctypes bridge for local model verification
+- **Cooperative Generation**: Hybrid Oracle+Scout inference loop
+- **Basic Authentication**: API key authentication framework
+
+### Changed
+- **API Design**: Initial FastAPI-based API structure
+- **Network Architecture**: Basic distributed architecture foundation
+
+[0.2.0]: https://github.com/ShardNetwork/Shard/compare/v0.1.0...v0.2.0
+
+---
+
+## [0.1.0] - 2024-09-10
+
+### Added
+- **Project Initialization**: Repository setup, initial structure
+- **Core Protocols**: Basic project definitions and architecture
+
+[0.1.0]: https://github.com/ShardNetwork/Shard/compare/v0.0.1...v0.1.0
+
+---
+
+## [0.0.1] - 2024-09-01
+
+### Added
+- **Initial Release**: Basic project foundation
+
+[0.0.1]: https://github.com/ShardNetwork/Shard/compare/HEAD...v0.0.1
+
 - **Comprehensive Documentation**: API docs, deployment guides, and architecture documentation
 
 ### Changed

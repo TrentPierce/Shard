@@ -92,7 +92,7 @@ export async function probeLocalOracle(): Promise<LocalOracleProbe> {
  */
 export async function fetchTopology(): Promise<Topology> {
     try {
-        const res = await fetch(`${API_BASE}/v1/system/topology`)
+        const res = await fetch(apiUrl("/v1/system/topology"))
         if (!res.ok) return { status: "degraded", oracle_webrtc_multiaddr: null }
         return (await res.json()) as Topology
     } catch {
@@ -112,7 +112,7 @@ export async function heartbeatOracle(
 ): Promise<HandshakeResult> {
     try {
         const started = performance.now()
-        const res = await fetch(`${API_BASE}/health`, { method: "GET" })
+        const res = await fetch(apiUrl("/health"), { method: "GET" })
         const rttMs = performance.now() - started
 
         if (!res.ok) {

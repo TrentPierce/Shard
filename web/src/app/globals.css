@@ -592,6 +592,125 @@ body {
 
 /* ═══ Responsive ═══ */
 
+/* ═══ Error Boundary ═══ */
+
+.error-boundary {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 24px;
+  background: var(--bg-primary);
+  background-image: var(--gradient-bg);
+}
+
+.error-boundary__content {
+  max-width: 480px;
+  text-align: center;
+  background: var(--bg-card);
+  border: 1px solid var(--border-glow);
+  border-radius: var(--radius-lg);
+  padding: 32px;
+  box-shadow: var(--shadow-card);
+}
+
+.error-boundary__icon {
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--accent-rose), var(--accent-amber));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 40px;
+  margin: 0 auto 24px;
+}
+
+.error-boundary__title {
+  font-size: 24px;
+  font-weight: 700;
+  margin-bottom: 12px;
+  color: var(--text-primary);
+}
+
+.error-boundary__message {
+  font-size: 15px;
+  color: var(--text-secondary);
+  margin-bottom: 20px;
+  line-height: 1.6;
+}
+
+.error-boundary__details {
+  margin: 20px 0;
+  text-align: left;
+}
+
+.error-boundary__details summary {
+  cursor: pointer;
+  color: var(--accent-cyan);
+  font-weight: 600;
+  padding: 8px 12px;
+  background: rgba(0, 212, 255, 0.05);
+  border-radius: var(--radius-sm);
+  user-select: none;
+}
+
+.error-boundary__details summary:hover {
+  background: rgba(0, 212, 255, 0.1);
+}
+
+.error-boundary__details pre {
+  margin-top: 12px;
+  padding: 12px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+  overflow-x: auto;
+  max-height: 200px;
+}
+
+.error-boundary__actions {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.error-boundary__button {
+  padding: 12px 24px;
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.error-boundary__button--primary {
+  background: var(--gradient-primary);
+  color: #fff;
+  border: none;
+}
+
+.error-boundary__button--primary:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-glow);
+}
+
+.error-boundary__button--secondary {
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid var(--border-subtle);
+}
+
+.error-boundary__button--secondary:hover {
+  background: rgba(100, 120, 255, 0.05);
+  border-color: var(--border-glow);
+}
+
+
 @media (max-width: 768px) {
   .app-shell {
     grid-template-columns: 1fr;

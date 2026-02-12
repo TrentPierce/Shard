@@ -1,0 +1,36 @@
+# ============================================================================
+# Buf Module Configuration - Shard Control Plane
+#
+# This file configures the Buf build system for the Shard control plane
+# protobuf definitions. It defines module structure, lint rules, and
+# breaking change detection.
+#
+# For documentation: https://buf.build/docs/configuration/v2/buf-yaml
+# ============================================================================
+
+version: v2
+
+# Module name for the Buf Schema Registry (BSR)
+# Uncomment to publish to BSR:
+# name: buf.build/shardnetwork/shard-control
+
+modules:
+  - path: control_plane
+    name: buf.build/shardnetwork/shard-control
+    excludes:
+      - control_plane/experimental
+
+# Lint configuration - enforces code style and quality standards
+lint:
+  use:
+    - STANDARD  # Use Google's style guide for protobuf
+  except:
+    - PACKAGE_VERSION_SUFFIX  # Allow version suffix in package names
+    - ENUM_FIELD_NAMES_PREFIX  # Not using prefixes for enum values
+
+# Breaking change detection - prevents backward incompatible changes
+breaking:
+  use:
+    - FILE  # Detect breaking changes at file level
+  except:
+    - FIELD_NUMBER_RANGE  # Allow field number reclamation (protobuf convention)
