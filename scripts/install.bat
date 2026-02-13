@@ -2,27 +2,49 @@
 setlocal enabledelayedexpansion
 
 :: Shard Node Installer
-:: Run as Administrator for full installation
+:: Run from the extracted folder
 
 title Shard Node Installer
 color 0b
 
 echo ============================================
 echo   Shard Node Installer
-echo   Version 0.4.2
+echo   Version 0.4.3
 echo ============================================
 echo.
 
-:: Check for admin privileges
-net session >nul 2>&1
-if %errorLevel% neq 0 (
-    echo This installer requires Administrator privileges.
-    echo Please right-click and select "Run as administrator"
+:: Find the ShardAI folder - it might be in a subfolder from the zip
+set "SOURCE_DIR=%~dp0"
+if exist "%~dp0ShardAI" (
+    set "SOURCE_DIR=%~dp0ShardAI"
+) else (
+    :: Check if we're in the zip root folder
+    for /d %%d in ("%~dp0*") do (
+        if exist "%%d\ShardAI.exe" set "SOURCE_DIR=%%d"
+    )
+)
+
+echo Using source: %SOURCE_DIR%
+echo.
+
+:: Check if ShardAI.exe exists
+if not exist "%SOURCE_DIR%\ShardAI.exe" (
+    echo Error: ShardAI.exe not found in %SOURCE_DIR%
+    echo.
+    echo Make sure you've extracted the zip file completely.
     pause
     exit /b 1
 )
 
-set "INSTALL_DIR=%ProgramFiles%\ShardNode"
+:: Check for admin privileges for Program Files
+net session >nul 2>&1
+if %errorLevel% neq 0 (
+    echo Warning: Not running as administrator.
+    echo Installing to user directory instead.
+    set "INSTALL_DIR=%APPDATA%\ShardNode"
+) else (
+    set "INSTALL_DIR=%ProgramFiles%\ShardNode"
+)
 
 echo This will install Shard Node to:
 echo %INSTALL_DIR%
@@ -38,8 +60,8 @@ if "%choice%"=="1" goto install_startup
 if "%choice%"=="2" goto install_manual
 if "%choice%"=="3" goto extract_only
 
-echo Invalid option. Press any key to exit...
-pause >nul
+echo Invalid option.
+pause
 exit /b 1
 
 :install_startup
@@ -47,21 +69,12 @@ echo.
 echo Installing Shard Node with auto-start...
 echo.
 
-:: Copy files
-xcopy /E /Y /Q "%~dp0ShardAI\*" "%INSTALL_DIR%\" >nul
+xcopy /E /Y /Q "%SOURCE_DIR%\*" "%INSTALL_DIR%\" >nul
 if %errorLevel% neq 0 (
-    echo Error copying files. Make sure ShardAI folder exists next to this script.
+    echo Error copying files.
     pause
     exit /b 1
 )
-
-:: Create uninstaller
-echo @echo off > "%INSTALL_DIR%\uninstall.bat"
-echo echo Uninstalling Shard Node... >> "%INSTALL_DIR%\uninstall.bat"
-echo reg delete "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v ShardNode /f >> "%INSTALL_DIR%\uninstall.bat"
-echo rd /s /q "%INSTALL_DIR%" >> "%INSTALL_DIR%\uninstall.bat"
-echo echo Done. >> "%INSTALL_DIR%\uninstall.bat"
-echo pause >> "%INSTALL_DIR%\uninstall.bat"
 
 :: Add to startup
 reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v ShardNode /t REG_SZ /d "\"%INSTALL_DIR%\ShardAI.exe\" --background" /f >nul
@@ -71,13 +84,12 @@ echo ============================================
 echo   Installation Complete!
 echo ============================================
 echo.
-echo Shard Node has been installed to:
+echo Shard Node installed to:
 echo %INSTALL_DIR%
 echo.
-echo The node will automatically start when you log in.
+echo The node will start automatically.
 echo.
-echo To start now, run: %INSTALL_DIR%\ShardAI.exe
-echo To uninstall, run: %INSTALL_DIR%\uninstall.bat
+echo To start now: %INSTALL_DIR%\ShardAI.exe
 echo.
 pause
 exit /b 0
@@ -87,7 +99,7 @@ echo.
 echo Installing Shard Node (manual start)...
 echo.
 
-xcopy /E /Y /Q "%~dp0ShardAI\*" "%INSTALL_DIR%\" >nul
+xcopy /E /Y /Q "%SOURCE_DIR%\*" "%INSTALL_DIR%\" >nul
 if %errorLevel% neq 0 (
     echo Error copying files.
     pause
@@ -99,10 +111,10 @@ echo ============================================
 echo   Installation Complete!
 echo ============================================
 echo.
-echo Shard Node has been installed to:
+echo Shard Node installed to:
 echo %INSTALL_DIR%
 echo.
-echo To start the node, run: %INSTALL_DIR%\ShardAI.exe
+echo To start: %INSTALL_DIR%\ShardAI.exe
 echo.
 pause
 exit /b 0
@@ -112,15 +124,15 @@ echo.
 echo Extracting to: %~dp0Shard
 echo.
 if not exist "%~dp0Shard" mkdir "%~dp0Shard"
-xcopy /E /Y /Q "%~dp0ShardAI\*" "%~dp0Shard\" >nul
+xcopy /E /Y /Q "%SOURCE_DIR%\*" "%~dp0Shard\" >nul
 echo.
 echo ============================================
 echo   Extraction Complete!
 echo ============================================
 echo.
-echo Files extracted to: %~dp0Shard
+echo Files in: %~dp0Shard
 echo.
-echo To start the node, run: %~dp0Shard\ShardAI.exe
+echo To start: %~dp0Shard\ShardAI.exe
 echo.
 pause
 exit /b 0
