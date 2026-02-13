@@ -12,6 +12,7 @@ import asyncio
 import json
 import logging
 import os
+import sys
 import time
 import uuid
 from collections.abc import AsyncIterator
@@ -19,6 +20,7 @@ from typing import Annotated, Any, Literal
 
 import httpx
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response, status
+from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse, StreamingResponse
 from pydantic import BaseModel, Field
@@ -109,7 +111,7 @@ tags_metadata = [
 
 app = FastAPI(
     title="Shard Oracle API",
-    version="0.4.0",
+    version="0.4.4",
     description=r"""
     OpenAI-compatible API for the Shard distributed inference network.
 
@@ -1156,3 +1158,17 @@ async def list_models() -> dict[str, Any]:
     }
 
 
+
+# ─── Static Files (Must be last) ──────────────────────────────────────────────────
+
+# Auto-serve static files if bundled
+if getattr(sys, "frozen", False):
+    base_dir = os.path.dirname(sys.executable)
+    # In onedir mode, resources are in _internal/web relative to the exe
+    static_dir = os.path.join(base_dir, "_internal", "web")
+    
+    if os.path.exists(static_dir):
+        LOGGER.info(f"Mounting static files from {static_dir}")
+        app.mount("/", StaticFiles(directory=static_dir, html=True), name="static")
+    else:
+        LOGGER.warning(f"Static web directory not found at {static_dir}")

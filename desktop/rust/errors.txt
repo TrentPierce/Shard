@@ -1,0 +1,7 @@
+    Checking shard-oracle-daemon v0.4.4 (D:\Dev\Projects\Shard\Shard\desktop\rust)
+src\main.rs:441:32: error[E0433]: failed to resolve: could not find `tokio` in `libp2p_webrtc`: could not find `tokio` in `libp2p_webrtc`
+src\main.rs:439:28: error[E0433]: failed to resolve: could not find `tokio` in `libp2p_webrtc`: could not find `tokio` in `libp2p_webrtc`
+src\main.rs:438:10: error[E0599]: no method named `with_webrtc` found for opaque type `impl Future<Output = Result<SwarmBuilder<Tokio, ...>, ...>>` in the current scope: method not found in `impl Future<Output = Result<SwarmBuilder<Tokio, ...>, ...>>`
+src\main.rs:430:21: error[E0282]: type annotations needed: cannot infer type
+src\main.rs:446:26: error[E0282]: type annotations needed
+error: could not compile `shard-oracle-daemon` (bin "shard-daemon") due to 5 previous errors

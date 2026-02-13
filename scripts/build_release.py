@@ -50,7 +50,19 @@ def build_cpp() -> Path:
     return dst
 
 
-def freeze_python(daemon_bin: Path, engine_lib: Path) -> Path:
+def build_web() -> Path:
+    web_dir = ROOT / "web"
+    print("+ npm install (web)")
+    subprocess.run(["npm", "install"], cwd=str(web_dir), shell=True, check=True)
+    print("+ npm run build (web)")
+    subprocess.run(["npm", "run", "build"], cwd=str(web_dir), shell=True, check=True)
+    out_dir = web_dir / "out"
+    if not out_dir.exists():
+         raise RuntimeError("Web build failed to produce 'out' directory. Ensure next.config.js has output: 'export'")
+    return out_dir
+
+
+def freeze_python(daemon_bin: Path, engine_lib: Path, web_out: Path) -> Path:
     api_entry = ROOT / "desktop" / "python" / "run.py"
     pyinstaller = shutil.which("pyinstaller")
     if not pyinstaller:
@@ -62,10 +74,9 @@ def freeze_python(daemon_bin: Path, engine_lib: Path) -> Path:
     data_sep = ";" if os.name == "nt" else ":"
     python_src = ROOT / "desktop" / "python"
     add_data = [
-        f"{daemon_bin}{data_sep}_internal/bin",
-        f"{engine_lib}{data_sep}_internal/lib",
-        f"{ROOT / 'web' / 'public'}{data_sep}_internal/web/public",
-        f"{ROOT / 'web' / 'src'}{data_sep}_internal/web/src",
+        f"{daemon_bin}{data_sep}bin",
+        f"{engine_lib}{data_sep}lib",
+        f"{web_out}{data_sep}web",
         f"{python_src / 'bitnet'}{data_sep}bitnet",
     ]
 
@@ -133,7 +144,9 @@ def main() -> None:
     DIST.mkdir(parents=True, exist_ok=True)
 
     daemon_bin = build_rust()
+    daemon_bin = build_rust()
     engine_lib = build_cpp()
+    web_out = build_web()
 
     if args.skip_freeze:
         raw = DIST / "raw"
@@ -145,7 +158,7 @@ def main() -> None:
         print(f"raw bundle created at {raw}")
         return
 
-    frozen = freeze_python(daemon_bin, engine_lib)
+    frozen = freeze_python(daemon_bin, engine_lib, web_out)
     write_manifest(frozen, daemon_bin, engine_lib)
     print(f"release bundle created at {frozen}")
 

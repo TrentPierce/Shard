@@ -1,0 +1,13 @@
+    Checking shard-oracle-daemon v0.4.4 (D:\Dev\Projects\Shard\Shard\desktop\rust)
+src\main.rs:433:32: error[E0433]: failed to resolve: could not find `TokioDnsConfig` in `dns`: could not find `TokioDnsConfig` in `dns`
+src\main.rs:438:62: error[E0425]: cannot find type `X25519Spec` in crate `libp2p::noise`: not found in `libp2p::noise`
+src\main.rs:438:37: error[E0603]: struct `Keypair` is private: private struct
+src\main.rs:32:40: warning: unused import: `SwarmBuilder`
+src\main.rs:438:37: error[E0107]: struct takes 0 generic arguments but 1 generic argument was supplied: expected 0 generic arguments
+src\main.rs:438:75: error[E0624]: associated function `new` is private: private associated function
+src\main.rs:439:10: error[E0624]: method `into_authentic` is private: private method
+src\main.rs:451:7: error[E0599]: the method `boxed` exists for struct `libp2p_webrtc::tokio::Transport`, but its trait bounds were not satisfied: method cannot be called on `libp2p_webrtc::tokio::Transport` due to unsatisfied trait bounds
+src\main.rs:510:21: error[E0061]: this function takes 4 arguments but 3 arguments were supplied
+src\main.rs:465:10: error[E0277]: `?` couldn't convert the error: `str: StdError` is not satisfied: the trait `StdError` is not implemented for `str`
+warning: `shard-oracle-daemon` (bin "shard-daemon") generated 1 warning
+error: could not compile `shard-oracle-daemon` (bin "shard-daemon") due to 9 previous errors; 1 warning emitted

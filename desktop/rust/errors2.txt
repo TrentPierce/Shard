@@ -1,0 +1,6 @@
+    Checking shard-oracle-daemon v0.4.4 (D:\Dev\Projects\Shard\Shard\desktop\rust)
+src\main.rs:439:10: error[E0599]: no method named `with_other_transport` found for struct `SwarmBuilder<Tokio, RelayPhase<...>>` in the current scope: method not found in `SwarmBuilder<Tokio, RelayPhase<...>>`
+src\main.rs:439:32: error[E0282]: type annotations needed
+src\main.rs:442:85: error[E0277]: the `?` operator can only be used in a closure that returns `Result` or `Option` (or another type that implements `FromResidual`): cannot use the `?` operator in a closure that returns `libp2p_webrtc::tokio::Transport`
+src\main.rs:446:26: error[E0282]: type annotations needed
+error: could not compile `shard-oracle-daemon` (bin "shard-daemon") due to 4 previous errors

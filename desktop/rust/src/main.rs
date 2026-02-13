@@ -29,7 +29,7 @@ use libp2p::{
     relay,
     request_response::{self, OutboundRequestId, ProtocolSupport},
     swarm::{NetworkBehaviour, SwarmEvent},
-    Multiaddr, PeerId, StreamProtocol, SwarmBuilder,
+    Multiaddr, PeerId, StreamProtocol,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -427,67 +427,80 @@ async fn main() -> Result<()> {
     };
 
     // ── build swarm ──
-    let mut swarm = SwarmBuilder::with_existing_identity(id_keys)
-        .with_tokio()
-        .with_tcp(
-            Default::default(),
-            libp2p::noise::Config::new,
-            libp2p::yamux::Config::default,
-        )?
-        .with_websocket(libp2p::noise::Config::new, libp2p::yamux::Config::default)
-        .await?
-        // Note: relay client disabled - libp2p 0.54 API changed
-        .with_behaviour(|key| {
-            let local_peer_id = PeerId::from(key.public());
-            let gossipsub = gossipsub::Behaviour::new(
-                MessageAuthenticity::Signed(key.clone()),
-                gossipsub::Config::default(),
-            )?;
-            let kad = KadBehaviour::new(local_peer_id, MemoryStore::new(local_peer_id));
-            let handshake = request_response::cbor::Behaviour::new(
-                [(
-                    StreamProtocol::new("/shard/1.0.0/handshake"),
-                    ProtocolSupport::Full,
-                )],
-                request_response::Config::default(),
-            );
-            let verify = request_response::cbor::Behaviour::new(
-                [(
-                    StreamProtocol::new("/shard/oracle/verify/1.0.0"),
-                    ProtocolSupport::Full,
-                )],
-                request_response::Config::default(),
-            );
-            let control_work = request_response::cbor::Behaviour::new(
-                [(
-                    StreamProtocol::new("/shard/control/work/1.0.0"),
-                    ProtocolSupport::Full,
-                )],
-                request_response::Config::default(),
-            );
-            // Note: relay client disabled - libp2p API changed in 0.54
-            let relay_server = relay::Behaviour::new(local_peer_id, Default::default());
-            let dcutr = dcutr::Behaviour::new(local_peer_id);
-            let autonat = autonat::v1::Behaviour::new(local_peer_id, autonat::v1::Config::default());
-            let identify = identify::Behaviour::new(identify::Config::new(
-                "/shard/1.0.0".to_string(),
-                key.public(),
-            ));
-            let ping = ping::Behaviour::new(ping::Config::new());
-            Ok(OracleBehaviour {
-                gossipsub,
-                kad,
-                handshake,
-                verify,
-                control_work,
-                relay_server,
-                dcutr,
-                autonat,
-                identify,
-                ping,
-            })
-        })?
-        .build();
+    // ── build transport ──
+    let tcp_config = libp2p::tcp::Config::default().nodelay(true);
+    let dns_tcp = libp2p::dns::tokio::Transport::system(libp2p::tcp::tokio::Transport::new(tcp_config.clone()))?;
+    let ws_dns_tcp = libp2p::websocket::Config::new(libp2p::dns::tokio::Transport::system(libp2p::tcp::tokio::Transport::new(tcp_config))?);
+    
+    let tcp_ws = libp2p::core::transport::OrTransport::new(dns_tcp, ws_dns_tcp);
+    
+    let authenticated_transport = tcp_ws
+        .upgrade(libp2p::core::upgrade::Version::V1)
+        .authenticate(libp2p::noise::Config::new(&id_keys).expect("Noise config failed"))
+        .multiplex(libp2p::yamux::Config::default());
+        
+    let webrtc_cert = libp2p_webrtc::tokio::Certificate::generate(&mut rand::thread_rng())?;
+    let webrtc = libp2p_webrtc::tokio::Transport::new(id_keys.clone(), webrtc_cert);
+    
+    use libp2p::Transport;
+    let transport = authenticated_transport.or_transport(webrtc)
+        .map(|either, _| match either {
+            libp2p::futures::future::Either::Left((peer_id, muxer)) => (peer_id, libp2p::core::muxing::StreamMuxerBox::new(muxer)),
+            libp2p::futures::future::Either::Right((peer_id, muxer)) => (peer_id, libp2p::core::muxing::StreamMuxerBox::new(muxer)),
+        })
+        .boxed();
+
+    // ── build swarm ──
+    let behaviour = {
+        let gossipsub = gossipsub::Behaviour::new(
+            MessageAuthenticity::Signed(id_keys.clone()),
+            gossipsub::Config::default(),
+        ).map_err(|e| anyhow::anyhow!(e.to_string()))?;
+        let kad = KadBehaviour::new(local_peer_id, MemoryStore::new(local_peer_id));
+        let handshake = request_response::cbor::Behaviour::new(
+            [(
+                StreamProtocol::new("/shard/1.0.0/handshake"),
+                ProtocolSupport::Full,
+            )],
+            request_response::Config::default(),
+        );
+        let verify = request_response::cbor::Behaviour::new(
+            [(
+                StreamProtocol::new("/shard/oracle/verify/1.0.0"),
+                ProtocolSupport::Full,
+            )],
+            request_response::Config::default(),
+        );
+        let control_work = request_response::cbor::Behaviour::new(
+            [(
+                StreamProtocol::new("/shard/control/work/1.0.0"),
+                ProtocolSupport::Full,
+            )],
+            request_response::Config::default(),
+        );
+        let relay_server = relay::Behaviour::new(local_peer_id, Default::default());
+        let dcutr = dcutr::Behaviour::new(local_peer_id);
+        let autonat = autonat::v1::Behaviour::new(local_peer_id, autonat::v1::Config::default());
+        let identify = identify::Behaviour::new(identify::Config::new(
+            "/shard/1.0.0".to_string(),
+            id_keys.public(),
+        ));
+        let ping = ping::Behaviour::new(ping::Config::new());
+        OracleBehaviour {
+            gossipsub,
+            kad,
+            handshake,
+            verify,
+            control_work,
+            relay_server,
+            dcutr,
+            autonat,
+            identify,
+            ping,
+        }
+    };
+    
+    let mut swarm = libp2p::Swarm::new(transport, behaviour, local_peer_id, libp2p::swarm::Config::with_tokio_executor());
 
     // ── gossipsub topics ──
     let work_topic = IdentTopic::new("shard-work");
@@ -502,6 +515,8 @@ async fn main() -> Result<()> {
     let ws_addr: Multiaddr = format!("/ip4/0.0.0.0/tcp/{}/ws", cli.tcp_port + 100).parse()?;
     swarm.listen_on(tcp_addr)?;
     swarm.listen_on(ws_addr)?;
+    let webrtc_addr: Multiaddr = format!("/ip4/0.0.0.0/udp/{}/webrtc-direct", cli.webrtc_port).parse()?;
+    swarm.listen_on(webrtc_addr)?;
 
     // ── bootstrap peers ──
     for addr_str in &bootstrap_addrs {
@@ -560,6 +575,10 @@ async fn main() -> Result<()> {
     println!(
         "  ║  Relay Server : {}                              ║",
         if cli.relay_server { "enabled" } else { "disabled" }
+    );
+    println!(
+        "  ║  WebRTC       : /ip4/0.0.0.0/udp/{}/p2p-webrtc-direct ║",
+        cli.webrtc_port
     );
     println!(
         "  ║  Contribute   : {}                              ║",
