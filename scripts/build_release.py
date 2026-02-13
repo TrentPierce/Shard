@@ -6,6 +6,7 @@ import os
 import platform
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 
@@ -37,7 +38,7 @@ def build_cpp() -> Path:
     run(["cmake", "-S", str(cpp_dir), "-B", str(cmake_build), "-DCMAKE_BUILD_TYPE=Release"])
     run(["cmake", "--build", str(cmake_build), "--config", "Release"])
 
-    lib_name = "shard_engine.dll" if os.name == "nt" else "libshard_engine.so"
+    lib_name = "shard_engine.dll" if os.name == "nt" else ("libshard_engine.dylib" if sys.platform == "darwin" else "libshard_engine.so")
     candidate = list(cmake_build.rglob(lib_name))
     if not candidate:
         raise FileNotFoundError(f"built library {lib_name} not found under {cmake_build}")
