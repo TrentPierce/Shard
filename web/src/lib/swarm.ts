@@ -72,14 +72,40 @@ export type ScoutSubmissionResult = {
  * Probe localhost for a running native Oracle exe.
  * If detected, the browser MUST disable WebGPU and route to the local
  * Oracle (double-dip prevention per the agents.md spec).
+ * 
+ * Detection criteria:
+ * 1. Health endpoint responds with "ok"
+ * 2. Latency is < 2ms (indicates same machine)
+ * 
+ * If both conditions are met, WebGPU must be disabled to prevent
+ * GPU OOM crashes from Scout and Oracle fighting for VRAM.
  */
 export async function probeLocalOracle(): Promise<LocalOracleProbe> {
     const endpoint = apiUrl("/health")
+    const LATENCY_THRESHOLD_MS = 2  // Same-machine detection threshold
+    
     try {
+        const startTime = performance.now()
         const res = await fetch(endpoint, { method: "GET" })
+        const rttMs = performance.now() - startTime
+        
         if (!res.ok) return { available: false, endpoint }
+        
         const json = await res.json()
-        return { available: Boolean(json?.status === "ok"), endpoint }
+        const isHealthy = Boolean(json?.status === "ok")
+        
+        // Double-dip prevention: if latency < 2ms, we're on same machine
+        // Must disable WebGPU to prevent VRAM conflicts
+        if (isHealthy && rttMs < LATENCY_THRESHOLD_MS) {
+            console.log(
+                `[Double-Dip Guard] Local Oracle detected at ${endpoint} ` +
+                `(RTT: ${rttMs.toFixed(2)}ms < ${LATENCY_THRESHOLD_MS}ms threshold). ` +
+                `Disabling WebGPU to prevent VRAM conflicts.`
+            )
+            return { available: true, endpoint }
+        }
+        
+        return { available: isHealthy, endpoint }
     } catch {
         return { available: false, endpoint }
     }

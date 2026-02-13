@@ -770,4 +770,4 @@ For API-related issues:
 
 ## Changelog
 
-For API changes and version history, see [`CHANGELOG.md`](CHANGELOG.md).
+For API changes and version history, see [`CHANGELOG.md`](../CHANGELOG.md).

@@ -1,0 +1,990 @@
+gguf_init_from_file_impl: tensor 'blk.0.ffn_sub_norm.weight' has offset 661104672, expected 661104640. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.0.ffn_up.weight' has offset 665556032, expected 665556000. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.0.ffn_norm.weight' has offset 669979744, expected 669979712. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.0.attn_output.weight' has offset 670409856, expected 670409824. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.0.attn_q.weight' has offset 672048288, expected 672048256. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.0.attn_v.weight' has offset 673686720, expected 673686688. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.1.attn_norm.weight' has offset 674096352, expected 674096320. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.1.ffn_sub_norm.weight' has offset 678530304, expected 678530272. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.1.ffn_up.weight' has offset 682981664, expected 682981632. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.1.ffn_norm.weight' has offset 687405376, expected 687405344. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.1.attn_output.weight' has offset 687835488, expected 687835456. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.1.attn_q.weight' has offset 689473920, expected 689473888. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.1.attn_v.weight' has offset 691112352, expected 691112320. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.10.attn_norm.weight' has offset 691521984, expected 691521952. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.10.ffn_sub_norm.weight' has offset 695955936, expected 695955904. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.10.ffn_up.weight' has offset 700407296, expected 700407264. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.10.ffn_norm.weight' has offset 704831008, expected 704830976. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.10.attn_output.weight' has offset 705261120, expected 705261088. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.10.attn_q.weight' has offset 706899552, expected 706899520. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.10.attn_v.weight' has offset 708537984, expected 708537952. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.11.attn_norm.weight' has offset 708947616, expected 708947584. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.11.ffn_sub_norm.weight' has offset 713381568, expected 713381536. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.11.ffn_up.weight' has offset 717832928, expected 717832896. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.11.ffn_norm.weight' has offset 722256640, expected 722256608. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.11.attn_output.weight' has offset 722686752, expected 722686720. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.11.attn_q.weight' has offset 724325184, expected 724325152. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.11.attn_v.weight' has offset 725963616, expected 725963584. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.12.attn_norm.weight' has offset 726373248, expected 726373216. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.12.ffn_sub_norm.weight' has offset 730807200, expected 730807168. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.12.ffn_up.weight' has offset 735258560, expected 735258528. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.12.ffn_norm.weight' has offset 739682272, expected 739682240. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.12.attn_output.weight' has offset 740112384, expected 740112352. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.12.attn_q.weight' has offset 741750816, expected 741750784. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.12.attn_v.weight' has offset 743389248, expected 743389216. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.13.attn_norm.weight' has offset 743798880, expected 743798848. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.13.ffn_sub_norm.weight' has offset 748232832, expected 748232800. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.13.ffn_up.weight' has offset 752684192, expected 752684160. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.13.ffn_norm.weight' has offset 757107904, expected 757107872. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.13.attn_output.weight' has offset 757538016, expected 757537984. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.13.attn_q.weight' has offset 759176448, expected 759176416. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.13.attn_v.weight' has offset 760814880, expected 760814848. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.14.attn_norm.weight' has offset 761224512, expected 761224480. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.14.ffn_sub_norm.weight' has offset 765658464, expected 765658432. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.14.ffn_up.weight' has offset 770109824, expected 770109792. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.14.ffn_norm.weight' has offset 774533536, expected 774533504. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.14.attn_output.weight' has offset 774963648, expected 774963616. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.14.attn_q.weight' has offset 776602080, expected 776602048. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.14.attn_v.weight' has offset 778240512, expected 778240480. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.15.attn_norm.weight' has offset 778650144, expected 778650112. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.15.ffn_sub_norm.weight' has offset 783084096, expected 783084064. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.15.ffn_up.weight' has offset 787535456, expected 787535424. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.15.ffn_norm.weight' has offset 791959168, expected 791959136. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.15.attn_output.weight' has offset 792389280, expected 792389248. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.15.attn_q.weight' has offset 794027712, expected 794027680. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.15.attn_v.weight' has offset 795666144, expected 795666112. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.16.attn_norm.weight' has offset 796075776, expected 796075744. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.16.ffn_sub_norm.weight' has offset 800509728, expected 800509696. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.16.ffn_up.weight' has offset 804961088, expected 804961056. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.16.ffn_norm.weight' has offset 809384800, expected 809384768. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.16.attn_output.weight' has offset 809814912, expected 809814880. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.16.attn_q.weight' has offset 811453344, expected 811453312. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.16.attn_v.weight' has offset 813091776, expected 813091744. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.17.attn_norm.weight' has offset 813501408, expected 813501376. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.17.ffn_sub_norm.weight' has offset 817935360, expected 817935328. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.17.ffn_up.weight' has offset 822386720, expected 822386688. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.17.ffn_norm.weight' has offset 826810432, expected 826810400. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.17.attn_output.weight' has offset 827240544, expected 827240512. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.17.attn_q.weight' has offset 828878976, expected 828878944. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.17.attn_v.weight' has offset 830517408, expected 830517376. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.18.attn_norm.weight' has offset 830927040, expected 830927008. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.18.ffn_sub_norm.weight' has offset 835360992, expected 835360960. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.18.ffn_up.weight' has offset 839812352, expected 839812320. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.18.ffn_norm.weight' has offset 844236064, expected 844236032. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.18.attn_output.weight' has offset 844666176, expected 844666144. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.18.attn_q.weight' has offset 846304608, expected 846304576. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.18.attn_v.weight' has offset 847943040, expected 847943008. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.19.attn_norm.weight' has offset 848352672, expected 848352640. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.19.ffn_sub_norm.weight' has offset 852786624, expected 852786592. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.19.ffn_up.weight' has offset 857237984, expected 857237952. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.19.ffn_norm.weight' has offset 861661696, expected 861661664. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.19.attn_output.weight' has offset 862091808, expected 862091776. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.19.attn_q.weight' has offset 863730240, expected 863730208. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.19.attn_v.weight' has offset 865368672, expected 865368640. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.2.attn_norm.weight' has offset 865778304, expected 865778272. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.2.ffn_sub_norm.weight' has offset 870212256, expected 870212224. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.2.ffn_up.weight' has offset 874663616, expected 874663584. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.2.ffn_norm.weight' has offset 879087328, expected 879087296. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.2.attn_output.weight' has offset 879517440, expected 879517408. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.2.attn_q.weight' has offset 881155872, expected 881155840. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.2.attn_v.weight' has offset 882794304, expected 882794272. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.20.attn_norm.weight' has offset 883203936, expected 883203904. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.20.ffn_sub_norm.weight' has offset 887637888, expected 887637856. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.20.ffn_up.weight' has offset 892089248, expected 892089216. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.20.ffn_norm.weight' has offset 896512960, expected 896512928. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.20.attn_output.weight' has offset 896943072, expected 896943040. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.20.attn_q.weight' has offset 898581504, expected 898581472. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.20.attn_v.weight' has offset 900219936, expected 900219904. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.21.attn_norm.weight' has offset 900629568, expected 900629536. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.21.ffn_sub_norm.weight' has offset 905063520, expected 905063488. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.21.ffn_up.weight' has offset 909514880, expected 909514848. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.21.ffn_norm.weight' has offset 913938592, expected 913938560. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.21.attn_output.weight' has offset 914368704, expected 914368672. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.21.attn_q.weight' has offset 916007136, expected 916007104. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.21.attn_v.weight' has offset 917645568, expected 917645536. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.22.attn_norm.weight' has offset 918055200, expected 918055168. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.22.ffn_sub_norm.weight' has offset 922489152, expected 922489120. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.22.ffn_up.weight' has offset 926940512, expected 926940480. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.22.ffn_norm.weight' has offset 931364224, expected 931364192. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.22.attn_output.weight' has offset 931794336, expected 931794304. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.22.attn_q.weight' has offset 933432768, expected 933432736. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.22.attn_v.weight' has offset 935071200, expected 935071168. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.23.attn_norm.weight' has offset 935480832, expected 935480800. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.23.ffn_sub_norm.weight' has offset 939914784, expected 939914752. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.23.ffn_up.weight' has offset 944366144, expected 944366112. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.23.ffn_norm.weight' has offset 948789856, expected 948789824. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.23.attn_output.weight' has offset 949219968, expected 949219936. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.23.attn_q.weight' has offset 950858400, expected 950858368. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.23.attn_v.weight' has offset 952496832, expected 952496800. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.24.attn_norm.weight' has offset 952906464, expected 952906432. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.24.ffn_sub_norm.weight' has offset 957340416, expected 957340384. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.24.ffn_up.weight' has offset 961791776, expected 961791744. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.24.ffn_norm.weight' has offset 966215488, expected 966215456. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.24.attn_output.weight' has offset 966645600, expected 966645568. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.24.attn_q.weight' has offset 968284032, expected 968284000. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.24.attn_v.weight' has offset 969922464, expected 969922432. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.25.attn_norm.weight' has offset 970332096, expected 970332064. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.25.ffn_sub_norm.weight' has offset 974766048, expected 974766016. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.25.ffn_up.weight' has offset 979217408, expected 979217376. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.25.ffn_norm.weight' has offset 983641120, expected 983641088. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.25.attn_output.weight' has offset 984071232, expected 984071200. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.25.attn_q.weight' has offset 985709664, expected 985709632. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.25.attn_v.weight' has offset 987348096, expected 987348064. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.26.attn_norm.weight' has offset 987757728, expected 987757696. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.26.ffn_sub_norm.weight' has offset 992191680, expected 992191648. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.26.ffn_up.weight' has offset 996643040, expected 996643008. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.26.ffn_norm.weight' has offset 1001066752, expected 1001066720. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.26.attn_output.weight' has offset 1001496864, expected 1001496832. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.26.attn_q.weight' has offset 1003135296, expected 1003135264. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.26.attn_v.weight' has offset 1004773728, expected 1004773696. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.27.attn_norm.weight' has offset 1005183360, expected 1005183328. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.27.ffn_sub_norm.weight' has offset 1009617312, expected 1009617280. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.27.ffn_up.weight' has offset 1014068672, expected 1014068640. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.27.ffn_norm.weight' has offset 1018492384, expected 1018492352. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.27.attn_output.weight' has offset 1018922496, expected 1018922464. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.27.attn_q.weight' has offset 1020560928, expected 1020560896. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.27.attn_v.weight' has offset 1022199360, expected 1022199328. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.28.attn_norm.weight' has offset 1022608992, expected 1022608960. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.28.ffn_sub_norm.weight' has offset 1027042944, expected 1027042912. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.28.ffn_up.weight' has offset 1031494304, expected 1031494272. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.28.ffn_norm.weight' has offset 1035918016, expected 1035917984. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.28.attn_output.weight' has offset 1036348128, expected 1036348096. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.28.attn_q.weight' has offset 1037986560, expected 1037986528. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.28.attn_v.weight' has offset 1039624992, expected 1039624960. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.29.attn_norm.weight' has offset 1040034624, expected 1040034592. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.29.ffn_sub_norm.weight' has offset 1044468576, expected 1044468544. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.29.ffn_up.weight' has offset 1048919936, expected 1048919904. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.29.ffn_norm.weight' has offset 1053343648, expected 1053343616. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.29.attn_output.weight' has offset 1053773760, expected 1053773728. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.29.attn_q.weight' has offset 1055412192, expected 1055412160. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.29.attn_v.weight' has offset 1057050624, expected 1057050592. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.3.attn_norm.weight' has offset 1057460256, expected 1057460224. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.3.ffn_sub_norm.weight' has offset 1061894208, expected 1061894176. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.3.ffn_up.weight' has offset 1066345568, expected 1066345536. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.3.ffn_norm.weight' has offset 1070769280, expected 1070769248. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.3.attn_output.weight' has offset 1071199392, expected 1071199360. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.3.attn_q.weight' has offset 1072837824, expected 1072837792. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.3.attn_v.weight' has offset 1074476256, expected 1074476224. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.4.attn_norm.weight' has offset 1074885888, expected 1074885856. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.4.ffn_sub_norm.weight' has offset 1079319840, expected 1079319808. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.4.ffn_up.weight' has offset 1083771200, expected 1083771168. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.4.ffn_norm.weight' has offset 1088194912, expected 1088194880. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.4.attn_output.weight' has offset 1088625024, expected 1088624992. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.4.attn_q.weight' has offset 1090263456, expected 1090263424. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.4.attn_v.weight' has offset 1091901888, expected 1091901856. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.5.attn_norm.weight' has offset 1092311520, expected 1092311488. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.5.ffn_sub_norm.weight' has offset 1096745472, expected 1096745440. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.5.ffn_up.weight' has offset 1101196832, expected 1101196800. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.5.ffn_norm.weight' has offset 1105620544, expected 1105620512. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.5.attn_output.weight' has offset 1106050656, expected 1106050624. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.5.attn_q.weight' has offset 1107689088, expected 1107689056. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.5.attn_v.weight' has offset 1109327520, expected 1109327488. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.6.attn_norm.weight' has offset 1109737152, expected 1109737120. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.6.ffn_sub_norm.weight' has offset 1114171104, expected 1114171072. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.6.ffn_up.weight' has offset 1118622464, expected 1118622432. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.6.ffn_norm.weight' has offset 1123046176, expected 1123046144. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.6.attn_output.weight' has offset 1123476288, expected 1123476256. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.6.attn_q.weight' has offset 1125114720, expected 1125114688. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.6.attn_v.weight' has offset 1126753152, expected 1126753120. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.7.attn_norm.weight' has offset 1127162784, expected 1127162752. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.7.ffn_sub_norm.weight' has offset 1131596736, expected 1131596704. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.7.ffn_up.weight' has offset 1136048096, expected 1136048064. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.7.ffn_norm.weight' has offset 1140471808, expected 1140471776. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.7.attn_output.weight' has offset 1140901920, expected 1140901888. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.7.attn_q.weight' has offset 1142540352, expected 1142540320. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.7.attn_v.weight' has offset 1144178784, expected 1144178752. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.8.attn_norm.weight' has offset 1144588416, expected 1144588384. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.8.ffn_sub_norm.weight' has offset 1149022368, expected 1149022336. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.8.ffn_up.weight' has offset 1153473728, expected 1153473696. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.8.ffn_norm.weight' has offset 1157897440, expected 1157897408. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.8.attn_output.weight' has offset 1158327552, expected 1158327520. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.8.attn_q.weight' has offset 1159965984, expected 1159965952. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.8.attn_v.weight' has offset 1161604416, expected 1161604384. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.9.attn_norm.weight' has offset 1162014048, expected 1162014016. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.9.ffn_sub_norm.weight' has offset 1166448000, expected 1166447968. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.9.ffn_up.weight' has offset 1170899360, expected 1170899328. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.9.ffn_norm.weight' has offset 1175323072, expected 1175323040. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.9.attn_output.weight' has offset 1175753184, expected 1175753152. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.9.attn_q.weight' has offset 1177391616, expected 1177391584. Trusting file offset.
+gguf_init_from_file_impl: tensor 'blk.9.attn_v.weight' has offset 1179030048, expected 1179030016. Trusting file offset.
+gguf_init_from_file_impl: tensor 'output_norm.weight' has offset 1179439680, expected 1179439648. Trusting file offset.
+llama_model_loader: loaded meta data with 24 key-value pairs and 332 tensors from E:\ggml-model-i2_s.gguf (version GGUF V3 (latest))
+llama_model_loader: unknown type bitnet_2b
+llama_model_loader: Dumping metadata keys/values. Note: KV overrides do not apply in this output.
+llama_model_loader: - kv   0:                       general.architecture str              = bitnet-b1.58
+llama_model_loader: - kv   1:                               general.name str              = bitnet2b
+llama_model_loader: - kv   2:                    bitnet-b1.58.vocab_size u32              = 128256
+llama_model_loader: - kv   3:                bitnet-b1.58.context_length u32              = 4096
+llama_model_loader: - kv   4:              bitnet-b1.58.embedding_length u32              = 2560
+llama_model_loader: - kv   5:                   bitnet-b1.58.block_count u32              = 30
+llama_model_loader: - kv   6:           bitnet-b1.58.feed_forward_length u32              = 6912
+llama_model_loader: - kv   7:          bitnet-b1.58.rope.dimension_count u32              = 128
+llama_model_loader: - kv   8:          bitnet-b1.58.attention.head_count u32              = 20
+llama_model_loader: - kv   9:       bitnet-b1.58.attention.head_count_kv u32              = 5
+llama_model_loader: - kv  10:               tokenizer.ggml.add_bos_token bool             = true
+llama_model_loader: - kv  11: bitnet-b1.58.attention.layer_norm_rms_epsilon f32              = 0.000010
+llama_model_loader: - kv  12:                bitnet-b1.58.rope.freq_base f32              = 500000.000000
+llama_model_loader: - kv  13:                          general.file_type u32              = 40
+llama_model_loader: - kv  14:                       tokenizer.ggml.model str              = gpt2
+llama_model_loader: - kv  15:                      tokenizer.ggml.tokens arr[str,128256]  = ["!", "\"", "#", "$", "%", "&", "'", ...
+llama_model_loader: - kv  16:                      tokenizer.ggml.scores arr[f32,128256]  = [0.000000, 0.000000, 0.000000, 0.0000...
+llama_model_loader: - kv  17:                  tokenizer.ggml.token_type arr[i32,128256]  = [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, ...
+llama_model_loader: - kv  18:                      tokenizer.ggml.merges arr[str,280147]  = ["Ġ Ġ", "Ġ ĠĠĠ", "ĠĠ ĠĠ", "...
+llama_model_loader: - kv  19:                tokenizer.ggml.bos_token_id u32              = 128000
+llama_model_loader: - kv  20:                tokenizer.ggml.eos_token_id u32              = 128001
+llama_model_loader: - kv  21:            tokenizer.ggml.padding_token_id u32              = 128001
+llama_model_loader: - kv  22:                    tokenizer.chat_template str              = {% for message in messages %}{% if lo...
+llama_model_loader: - kv  23:               general.quantization_version u32              = 2
+llama_model_loader: - type  f32:  121 tensors
+llama_model_loader: - type  f16:    1 tensors
+llama_model_loader: - type bitnet_2b:  210 tensors
+print_info: file format = GGUF V3 (latest)
+print_info: file type   = unknown, may not work
+print_info: file size   = 1.10 GiB (3.91 BPW) 
+load: missing pre-tokenizer type, using: 'default'
+load:                                             
+load: ************************************        
+load: GENERATION QUALITY WILL BE DEGRADED!        
+load: CONSIDER REGENERATING THE MODEL             
+load: ************************************        
+load:                                             
+init_tokenizer: initializing tokenizer for type 2
+load: 0 unused tokens
+load: control token: 128095 '<|reserved_special_token_90|>' is not marked as EOG
+load: control token: 128188 '<|reserved_special_token_183|>' is not marked as EOG
+load: control token: 128127 '<|reserved_special_token_122|>' is not marked as EOG
+load: control token: 128116 '<|reserved_special_token_111|>' is not marked as EOG
+load: control token: 128133 '<|reserved_special_token_128|>' is not marked as EOG
+load: control token: 128152 '<|reserved_special_token_147|>' is not marked as EOG
+load: control token: 128193 '<|reserved_special_token_188|>' is not marked as EOG
+load: control token: 128098 '<|reserved_special_token_93|>' is not marked as EOG
+load: control token: 128135 '<|reserved_special_token_130|>' is not marked as EOG
+load: control token: 128178 '<|reserved_special_token_173|>' is not marked as EOG
+load: control token: 128031 '<|reserved_special_token_26|>' is not marked as EOG
+load: control token: 128206 '<|reserved_special_token_201|>' is not marked as EOG
+load: control token: 128028 '<|reserved_special_token_23|>' is not marked as EOG
+load: control token: 128047 '<|reserved_special_token_42|>' is not marked as EOG
+load: control token: 128241 '<|reserved_special_token_236|>' is not marked as EOG
+load: control token: 128145 '<|reserved_special_token_140|>' is not marked as EOG
+load: control token: 128195 '<|reserved_special_token_190|>' is not marked as EOG
+load: control token: 128226 '<|reserved_special_token_221|>' is not marked as EOG
+load: control token: 128162 '<|reserved_special_token_157|>' is not marked as EOG
+load: control token: 128243 '<|reserved_special_token_238|>' is not marked as EOG
+load: control token: 128014 '<|reserved_special_token_9|>' is not marked as EOG
+load: control token: 128213 '<|reserved_special_token_208|>' is not marked as EOG
+load: control token: 128158 '<|reserved_special_token_153|>' is not marked as EOG
+load: control token: 128221 '<|reserved_special_token_216|>' is not marked as EOG
+load: control token: 128079 '<|reserved_special_token_74|>' is not marked as EOG
+load: control token: 128246 '<|reserved_special_token_241|>' is not marked as EOG
+load: control token: 128104 '<|reserved_special_token_99|>' is not marked as EOG
+load: control token: 128076 '<|reserved_special_token_71|>' is not marked as EOG
+load: control token: 128222 '<|reserved_special_token_217|>' is not marked as EOG
+load: control token: 128172 '<|reserved_special_token_167|>' is not marked as EOG
+load: control token: 128220 '<|reserved_special_token_215|>' is not marked as EOG
+load: control token: 128179 '<|reserved_special_token_174|>' is not marked as EOG
+load: control token: 128065 '<|reserved_special_token_60|>' is not marked as EOG
+load: control token: 128249 '<|reserved_special_token_244|>' is not marked as EOG
+load: control token: 128175 '<|reserved_special_token_170|>' is not marked as EOG
+load: control token: 128218 '<|reserved_special_token_213|>' is not marked as EOG
+load: control token: 128049 '<|reserved_special_token_44|>' is not marked as EOG
+load: control token: 128119 '<|reserved_special_token_114|>' is not marked as EOG
+load: control token: 128148 '<|reserved_special_token_143|>' is not marked as EOG
+load: control token: 128118 '<|reserved_special_token_113|>' is not marked as EOG
+load: control token: 128155 '<|reserved_special_token_150|>' is not marked as EOG
+load: control token: 128093 '<|reserved_special_token_88|>' is not marked as EOG
+load: control token: 128087 '<|reserved_special_token_82|>' is not marked as EOG
+load: control token: 128235 '<|reserved_special_token_230|>' is not marked as EOG
+load: control token: 128136 '<|reserved_special_token_131|>' is not marked as EOG
+load: control token: 128173 '<|reserved_special_token_168|>' is not marked as EOG
+load: control token: 128074 '<|reserved_special_token_69|>' is not marked as EOG
+load: control token: 128211 '<|reserved_special_token_206|>' is not marked as EOG
+load: control token: 128168 '<|reserved_special_token_163|>' is not marked as EOG
+load: control token: 128109 '<|reserved_special_token_104|>' is not marked as EOG
+load: control token: 128177 '<|reserved_special_token_172|>' is not marked as EOG
+load: control token: 128057 '<|reserved_special_token_52|>' is not marked as EOG
+load: control token: 128000 '<|begin_of_text|>' is not marked as EOG
+load: control token: 128149 '<|reserved_special_token_144|>' is not marked as EOG
+load: control token: 128113 '<|reserved_special_token_108|>' is not marked as EOG
+load: control token: 128069 '<|reserved_special_token_64|>' is not marked as EOG
+load: control token: 128056 '<|reserved_special_token_51|>' is not marked as EOG
+load: control token: 128091 '<|reserved_special_token_86|>' is not marked as EOG
+load: control token: 128184 '<|reserved_special_token_179|>' is not marked as EOG
+load: control token: 128100 '<|reserved_special_token_95|>' is not marked as EOG
+load: control token: 128124 '<|reserved_special_token_119|>' is not marked as EOG
+load: control token: 128020 '<|reserved_special_token_15|>' is not marked as EOG
+load: control token: 128034 '<|reserved_special_token_29|>' is not marked as EOG
+load: control token: 128225 '<|reserved_special_token_220|>' is not marked as EOG
+load: control token: 128002 '<|reserved_special_token_0|>' is not marked as EOG
+load: control token: 128006 '<|start_header_id|>' is not marked as EOG
+load: control token: 128088 '<|reserved_special_token_83|>' is not marked as EOG
+load: control token: 128041 '<|reserved_special_token_36|>' is not marked as EOG
+load: control token: 128215 '<|reserved_special_token_210|>' is not marked as EOG
+load: control token: 128208 '<|reserved_special_token_203|>' is not marked as EOG
+load: control token: 128070 '<|reserved_special_token_65|>' is not marked as EOG
+load: control token: 128165 '<|reserved_special_token_160|>' is not marked as EOG
+load: control token: 128180 '<|reserved_special_token_175|>' is not marked as EOG
+load: control token: 128231 '<|reserved_special_token_226|>' is not marked as EOG
+load: control token: 128232 '<|reserved_special_token_227|>' is not marked as EOG
+load: control token: 128064 '<|reserved_special_token_59|>' is not marked as EOG
+load: control token: 128036 '<|reserved_special_token_31|>' is not marked as EOG
+load: control token: 128103 '<|reserved_special_token_98|>' is not marked as EOG
+load: control token: 128247 '<|reserved_special_token_242|>' is not marked as EOG
+load: control token: 128170 '<|reserved_special_token_165|>' is not marked as EOG
+load: control token: 128123 '<|reserved_special_token_118|>' is not marked as EOG
+load: control token: 128044 '<|reserved_special_token_39|>' is not marked as EOG
+load: control token: 128237 '<|reserved_special_token_232|>' is not marked as EOG
+load: control token: 128042 '<|reserved_special_token_37|>' is not marked as EOG
+load: control token: 128192 '<|reserved_special_token_187|>' is not marked as EOG
+load: control token: 128075 '<|reserved_special_token_70|>' is not marked as EOG
+load: control token: 128134 '<|reserved_special_token_129|>' is not marked as EOG
+load: control token: 128183 '<|reserved_special_token_178|>' is not marked as EOG
+load: control token: 128045 '<|reserved_special_token_40|>' is not marked as EOG
+load: control token: 128073 '<|reserved_special_token_68|>' is not marked as EOG
+load: control token: 128026 '<|reserved_special_token_21|>' is not marked as EOG
+load: control token: 128010 '<|reserved_special_token_5|>' is not marked as EOG
+load: control token: 128194 '<|reserved_special_token_189|>' is not marked as EOG
+load: control token: 128053 '<|reserved_special_token_48|>' is not marked as EOG
+load: control token: 128120 '<|reserved_special_token_115|>' is not marked as EOG
+load: control token: 128092 '<|reserved_special_token_87|>' is not marked as EOG
+load: control token: 128086 '<|reserved_special_token_81|>' is not marked as EOG
+load: control token: 128054 '<|reserved_special_token_49|>' is not marked as EOG
+load: control token: 128160 '<|reserved_special_token_155|>' is not marked as EOG
+load: control token: 128005 '<|reserved_special_token_3|>' is not marked as EOG
+load: control token: 128050 '<|reserved_special_token_45|>' is not marked as EOG
+load: control token: 128157 '<|reserved_special_token_152|>' is not marked as EOG
+load: control token: 128219 '<|reserved_special_token_214|>' is not marked as EOG
+load: control token: 128032 '<|reserved_special_token_27|>' is not marked as EOG
+load: control token: 128159 '<|reserved_special_token_154|>' is not marked as EOG
+load: control token: 128202 '<|reserved_special_token_197|>' is not marked as EOG
+load: control token: 128106 '<|reserved_special_token_101|>' is not marked as EOG
+load: control token: 128182 '<|reserved_special_token_177|>' is not marked as EOG
+load: control token: 128111 '<|reserved_special_token_106|>' is not marked as EOG
+load: control token: 128156 '<|reserved_special_token_151|>' is not marked as EOG
+load: control token: 128176 '<|reserved_special_token_171|>' is not marked as EOG
+load: control token: 128112 '<|reserved_special_token_107|>' is not marked as EOG
+load: control token: 128084 '<|reserved_special_token_79|>' is not marked as EOG
+load: control token: 128110 '<|reserved_special_token_105|>' is not marked as EOG
+load: control token: 128051 '<|reserved_special_token_46|>' is not marked as EOG
+load: control token: 128027 '<|reserved_special_token_22|>' is not marked as EOG
+load: control token: 128167 '<|reserved_special_token_162|>' is not marked as EOG
+load: control token: 128008 '<|reserved_special_token_4|>' is not marked as EOG
+load: control token: 128061 '<|reserved_special_token_56|>' is not marked as EOG
+load: control token: 128115 '<|reserved_special_token_110|>' is not marked as EOG
+load: control token: 128203 '<|reserved_special_token_198|>' is not marked as EOG
+load: control token: 128096 '<|reserved_special_token_91|>' is not marked as EOG
+load: control token: 128130 '<|reserved_special_token_125|>' is not marked as EOG
+load: control token: 128187 '<|reserved_special_token_182|>' is not marked as EOG
+load: control token: 128094 '<|reserved_special_token_89|>' is not marked as EOG
+load: control token: 128083 '<|reserved_special_token_78|>' is not marked as EOG
+load: control token: 128117 '<|reserved_special_token_112|>' is not marked as EOG
+load: control token: 128190 '<|reserved_special_token_185|>' is not marked as EOG
+load: control token: 128046 '<|reserved_special_token_41|>' is not marked as EOG
+load: control token: 128239 '<|reserved_special_token_234|>' is not marked as EOG
+load: control token: 128139 '<|reserved_special_token_134|>' is not marked as EOG
+load: control token: 128185 '<|reserved_special_token_180|>' is not marked as EOG
+load: control token: 128141 '<|reserved_special_token_136|>' is not marked as EOG
+load: control token: 128244 '<|reserved_special_token_239|>' is not marked as EOG
+load: control token: 128062 '<|reserved_special_token_57|>' is not marked as EOG
+load: control token: 128114 '<|reserved_special_token_109|>' is not marked as EOG
+load: control token: 128030 '<|reserved_special_token_25|>' is not marked as EOG
+load: control token: 128181 '<|reserved_special_token_176|>' is not marked as EOG
+load: control token: 128037 '<|reserved_special_token_32|>' is not marked as EOG
+load: control token: 128201 '<|reserved_special_token_196|>' is not marked as EOG
+load: control token: 128207 '<|reserved_special_token_202|>' is not marked as EOG
+load: control token: 128242 '<|reserved_special_token_237|>' is not marked as EOG
+load: control token: 128132 '<|reserved_special_token_127|>' is not marked as EOG
+load: control token: 128068 '<|reserved_special_token_63|>' is not marked as EOG
+load: control token: 128150 '<|reserved_special_token_145|>' is not marked as EOG
+load: control token: 128191 '<|reserved_special_token_186|>' is not marked as EOG
+load: control token: 128174 '<|reserved_special_token_169|>' is not marked as EOG
+load: control token: 128233 '<|reserved_special_token_228|>' is not marked as EOG
+load: control token: 128245 '<|reserved_special_token_240|>' is not marked as EOG
+load: control token: 128238 '<|reserved_special_token_233|>' is not marked as EOG
+load: control token: 128209 '<|reserved_special_token_204|>' is not marked as EOG
+load: control token: 128204 '<|reserved_special_token_199|>' is not marked as EOG
+load: control token: 128003 '<|reserved_special_token_1|>' is not marked as EOG
+load: control token: 128004 '<|reserved_special_token_2|>' is not marked as EOG
+load: control token: 128007 '<|end_header_id|>' is not marked as EOG
+load: control token: 128011 '<|reserved_special_token_6|>' is not marked as EOG
+load: control token: 128012 '<|reserved_special_token_7|>' is not marked as EOG
+load: control token: 128013 '<|reserved_special_token_8|>' is not marked as EOG
+load: control token: 128015 '<|reserved_special_token_10|>' is not marked as EOG
+load: control token: 128016 '<|reserved_special_token_11|>' is not marked as EOG
+load: control token: 128017 '<|reserved_special_token_12|>' is not marked as EOG
+load: control token: 128018 '<|reserved_special_token_13|>' is not marked as EOG
+load: control token: 128019 '<|reserved_special_token_14|>' is not marked as EOG
+load: control token: 128021 '<|reserved_special_token_16|>' is not marked as EOG
+load: control token: 128022 '<|reserved_special_token_17|>' is not marked as EOG
+load: control token: 128023 '<|reserved_special_token_18|>' is not marked as EOG
+load: control token: 128024 '<|reserved_special_token_19|>' is not marked as EOG
+load: control token: 128025 '<|reserved_special_token_20|>' is not marked as EOG
+load: control token: 128029 '<|reserved_special_token_24|>' is not marked as EOG
+load: control token: 128033 '<|reserved_special_token_28|>' is not marked as EOG
+load: control token: 128035 '<|reserved_special_token_30|>' is not marked as EOG
+load: control token: 128038 '<|reserved_special_token_33|>' is not marked as EOG
+load: control token: 128039 '<|reserved_special_token_34|>' is not marked as EOG
+load: control token: 128040 '<|reserved_special_token_35|>' is not marked as EOG
+load: control token: 128043 '<|reserved_special_token_38|>' is not marked as EOG
+load: control token: 128048 '<|reserved_special_token_43|>' is not marked as EOG
+load: control token: 128052 '<|reserved_special_token_47|>' is not marked as EOG
+load: control token: 128055 '<|reserved_special_token_50|>' is not marked as EOG
+load: control token: 128058 '<|reserved_special_token_53|>' is not marked as EOG
+load: control token: 128059 '<|reserved_special_token_54|>' is not marked as EOG
+load: control token: 128060 '<|reserved_special_token_55|>' is not marked as EOG
+load: control token: 128063 '<|reserved_special_token_58|>' is not marked as EOG
+load: control token: 128066 '<|reserved_special_token_61|>' is not marked as EOG
+load: control token: 128067 '<|reserved_special_token_62|>' is not marked as EOG
+load: control token: 128071 '<|reserved_special_token_66|>' is not marked as EOG
+load: control token: 128072 '<|reserved_special_token_67|>' is not marked as EOG
+load: control token: 128077 '<|reserved_special_token_72|>' is not marked as EOG
+load: control token: 128078 '<|reserved_special_token_73|>' is not marked as EOG
+load: control token: 128080 '<|reserved_special_token_75|>' is not marked as EOG
+load: control token: 128081 '<|reserved_special_token_76|>' is not marked as EOG
+load: control token: 128082 '<|reserved_special_token_77|>' is not marked as EOG
+load: control token: 128085 '<|reserved_special_token_80|>' is not marked as EOG
+load: control token: 128089 '<|reserved_special_token_84|>' is not marked as EOG
+load: control token: 128090 '<|reserved_special_token_85|>' is not marked as EOG
+load: control token: 128097 '<|reserved_special_token_92|>' is not marked as EOG
+load: control token: 128099 '<|reserved_special_token_94|>' is not marked as EOG
+load: control token: 128101 '<|reserved_special_token_96|>' is not marked as EOG
+load: control token: 128102 '<|reserved_special_token_97|>' is not marked as EOG
+load: control token: 128105 '<|reserved_special_token_100|>' is not marked as EOG
+load: control token: 128107 '<|reserved_special_token_102|>' is not marked as EOG
+load: control token: 128108 '<|reserved_special_token_103|>' is not marked as EOG
+load: control token: 128121 '<|reserved_special_token_116|>' is not marked as EOG
+load: control token: 128122 '<|reserved_special_token_117|>' is not marked as EOG
+load: control token: 128125 '<|reserved_special_token_120|>' is not marked as EOG
+load: control token: 128126 '<|reserved_special_token_121|>' is not marked as EOG
+load: control token: 128128 '<|reserved_special_token_123|>' is not marked as EOG
+load: control token: 128129 '<|reserved_special_token_124|>' is not marked as EOG
+load: control token: 128131 '<|reserved_special_token_126|>' is not marked as EOG
+load: control token: 128137 '<|reserved_special_token_132|>' is not marked as EOG
+load: control token: 128138 '<|reserved_special_token_133|>' is not marked as EOG
+load: control token: 128140 '<|reserved_special_token_135|>' is not marked as EOG
+load: control token: 128142 '<|reserved_special_token_137|>' is not marked as EOG
+load: control token: 128143 '<|reserved_special_token_138|>' is not marked as EOG
+load: control token: 128144 '<|reserved_special_token_139|>' is not marked as EOG
+load: control token: 128146 '<|reserved_special_token_141|>' is not marked as EOG
+load: control token: 128147 '<|reserved_special_token_142|>' is not marked as EOG
+load: control token: 128151 '<|reserved_special_token_146|>' is not marked as EOG
+load: control token: 128153 '<|reserved_special_token_148|>' is not marked as EOG
+load: control token: 128154 '<|reserved_special_token_149|>' is not marked as EOG
+load: control token: 128161 '<|reserved_special_token_156|>' is not marked as EOG
+load: control token: 128163 '<|reserved_special_token_158|>' is not marked as EOG
+load: control token: 128164 '<|reserved_special_token_159|>' is not marked as EOG
+load: control token: 128166 '<|reserved_special_token_161|>' is not marked as EOG
+load: control token: 128169 '<|reserved_special_token_164|>' is not marked as EOG
+load: control token: 128171 '<|reserved_special_token_166|>' is not marked as EOG
+load: control token: 128186 '<|reserved_special_token_181|>' is not marked as EOG
+load: control token: 128189 '<|reserved_special_token_184|>' is not marked as EOG
+load: control token: 128196 '<|reserved_special_token_191|>' is not marked as EOG
+load: control token: 128197 '<|reserved_special_token_192|>' is not marked as EOG
+load: control token: 128198 '<|reserved_special_token_193|>' is not marked as EOG
+load: control token: 128199 '<|reserved_special_token_194|>' is not marked as EOG
+load: control token: 128200 '<|reserved_special_token_195|>' is not marked as EOG
+load: control token: 128205 '<|reserved_special_token_200|>' is not marked as EOG
+load: control token: 128210 '<|reserved_special_token_205|>' is not marked as EOG
+load: control token: 128212 '<|reserved_special_token_207|>' is not marked as EOG
+load: control token: 128214 '<|reserved_special_token_209|>' is not marked as EOG
+load: control token: 128216 '<|reserved_special_token_211|>' is not marked as EOG
+load: control token: 128217 '<|reserved_special_token_212|>' is not marked as EOG
+load: control token: 128223 '<|reserved_special_token_218|>' is not marked as EOG
+load: control token: 128224 '<|reserved_special_token_219|>' is not marked as EOG
+load: control token: 128227 '<|reserved_special_token_222|>' is not marked as EOG
+load: control token: 128228 '<|reserved_special_token_223|>' is not marked as EOG
+load: control token: 128229 '<|reserved_special_token_224|>' is not marked as EOG
+load: control token: 128230 '<|reserved_special_token_225|>' is not marked as EOG
+load: control token: 128234 '<|reserved_special_token_229|>' is not marked as EOG
+load: control token: 128236 '<|reserved_special_token_231|>' is not marked as EOG
+load: control token: 128240 '<|reserved_special_token_235|>' is not marked as EOG
+load: control token: 128248 '<|reserved_special_token_243|>' is not marked as EOG
+load: control token: 128250 '<|reserved_special_token_245|>' is not marked as EOG
+load: control token: 128251 '<|reserved_special_token_246|>' is not marked as EOG
+load: control token: 128252 '<|reserved_special_token_247|>' is not marked as EOG
+load: control token: 128253 '<|reserved_special_token_248|>' is not marked as EOG
+load: control token: 128254 '<|reserved_special_token_249|>' is not marked as EOG
+load: control token: 128255 '<|reserved_special_token_250|>' is not marked as EOG
+load: printing all EOG tokens:
+load:   - 128001 ('<|end_of_text|>')
+load:   - 128009 ('<|eot_id|>')
+load: special tokens cache size = 256
+load: token to piece cache size = 0.8000 MB
+print_info: arch                  = bitnet-b1.58
+print_info: vocab_only            = 0
+print_info: no_alloc              = 0
+print_info: n_ctx_train           = 4096
+print_info: n_embd                = 2560
+print_info: n_embd_inp            = 2560
+print_info: n_layer               = 30
+print_info: n_head                = 20
+print_info: n_head_kv             = 5
+print_info: n_rot                 = 128
+print_info: n_swa                 = 0
+print_info: is_swa_any            = 0
+print_info: n_embd_head_k         = 128
+print_info: n_embd_head_v         = 128
+print_info: n_gqa                 = 4
+print_info: n_embd_k_gqa          = 640
+print_info: n_embd_v_gqa          = 640
+print_info: f_norm_eps            = 0.0e+00
+print_info: f_norm_rms_eps        = 1.0e-05
+print_info: f_clamp_kqv           = 0.0e+00
+print_info: f_max_alibi_bias      = 0.0e+00
+print_info: f_logit_scale         = 0.0e+00
+print_info: f_attn_scale          = 0.0e+00
+print_info: n_ff                  = 6912
+print_info: n_expert              = 0
+print_info: n_expert_used         = 0
+print_info: n_expert_groups       = 0
+print_info: n_group_used          = 0
+print_info: causal attn           = 1
+print_info: pooling type          = 0
+print_info: rope type             = 2
+print_info: rope scaling          = linear
+print_info: freq_base_train       = 500000.0
+print_info: freq_scale_train      = 1
+print_info: n_ctx_orig_yarn       = 4096
+print_info: rope_yarn_log_mul     = 0.0000
+print_info: rope_finetuned        = unknown
+print_info: model type            = ?B
+print_info: model params          = 2.41 B
+print_info: general.name          = bitnet2b
+print_info: vocab type            = BPE
+print_info: n_vocab               = 128256
+print_info: n_merges              = 280147
+print_info: BOS token             = 128000 '<|begin_of_text|>'
+print_info: EOS token             = 128001 '<|end_of_text|>'
+print_info: EOT token             = 128009 '<|eot_id|>'
+print_info: PAD token             = 128001 '<|end_of_text|>'
+print_info: LF token              = 198 'Ċ'
+print_info: EOG token             = 128001 '<|end_of_text|>'
+print_info: EOG token             = 128009 '<|eot_id|>'
+print_info: max token length      = 256
+load_tensors: loading model tensors, this can take a while... (mmap = false, direct_io = false)
+load_tensors: layer   0 assigned to device CPU, is_swa = 0
+load_tensors: layer   1 assigned to device CPU, is_swa = 0
+load_tensors: layer   2 assigned to device CPU, is_swa = 0
+load_tensors: layer   3 assigned to device CPU, is_swa = 0
+load_tensors: layer   4 assigned to device CPU, is_swa = 0
+load_tensors: layer   5 assigned to device CPU, is_swa = 0
+load_tensors: layer   6 assigned to device CPU, is_swa = 0
+load_tensors: layer   7 assigned to device CPU, is_swa = 0
+load_tensors: layer   8 assigned to device CPU, is_swa = 0
+load_tensors: layer   9 assigned to device CPU, is_swa = 0
+load_tensors: layer  10 assigned to device CPU, is_swa = 0
+load_tensors: layer  11 assigned to device CPU, is_swa = 0
+load_tensors: layer  12 assigned to device CPU, is_swa = 0
+load_tensors: layer  13 assigned to device CPU, is_swa = 0
+load_tensors: layer  14 assigned to device CPU, is_swa = 0
+load_tensors: layer  15 assigned to device CPU, is_swa = 0
+load_tensors: layer  16 assigned to device CPU, is_swa = 0
+load_tensors: layer  17 assigned to device CPU, is_swa = 0
+load_tensors: layer  18 assigned to device CPU, is_swa = 0
+load_tensors: layer  19 assigned to device CPU, is_swa = 0
+load_tensors: layer  20 assigned to device CPU, is_swa = 0
+load_tensors: layer  21 assigned to device CPU, is_swa = 0
+load_tensors: layer  22 assigned to device CPU, is_swa = 0
+load_tensors: layer  23 assigned to device CPU, is_swa = 0
+load_tensors: layer  24 assigned to device CPU, is_swa = 0
+load_tensors: layer  25 assigned to device CPU, is_swa = 0
+load_tensors: layer  26 assigned to device CPU, is_swa = 0
+load_tensors: layer  27 assigned to device CPU, is_swa = 0
+load_tensors: layer  28 assigned to device CPU, is_swa = 0
+load_tensors: layer  29 assigned to device CPU, is_swa = 0
+load_tensors: layer  30 assigned to device CPU, is_swa = 0
+create_tensor: loading tensor token_embd.weight
+create_tensor: loading tensor output_norm.weight
+create_tensor: loading tensor blk.0.attn_norm.weight
+create_tensor: loading tensor blk.0.attn_sub_norm.weight
+create_tensor: loading tensor blk.0.attn_q.weight
+create_tensor: loading tensor blk.0.attn_k.weight
+create_tensor: loading tensor blk.0.attn_v.weight
+create_tensor: loading tensor blk.0.attn_output.weight
+create_tensor: loading tensor blk.0.ffn_norm.weight
+create_tensor: loading tensor blk.0.ffn_sub_norm.weight
+create_tensor: loading tensor blk.0.ffn_gate.weight
+create_tensor: loading tensor blk.0.ffn_down.weight
+create_tensor: loading tensor blk.0.ffn_up.weight
+create_tensor: loading tensor blk.1.attn_norm.weight
+create_tensor: loading tensor blk.1.attn_sub_norm.weight
+create_tensor: loading tensor blk.1.attn_q.weight
+create_tensor: loading tensor blk.1.attn_k.weight
+create_tensor: loading tensor blk.1.attn_v.weight
+create_tensor: loading tensor blk.1.attn_output.weight
+create_tensor: loading tensor blk.1.ffn_norm.weight
+create_tensor: loading tensor blk.1.ffn_sub_norm.weight
+create_tensor: loading tensor blk.1.ffn_gate.weight
+create_tensor: loading tensor blk.1.ffn_down.weight
+create_tensor: loading tensor blk.1.ffn_up.weight
+create_tensor: loading tensor blk.2.attn_norm.weight
+create_tensor: loading tensor blk.2.attn_sub_norm.weight
+create_tensor: loading tensor blk.2.attn_q.weight
+create_tensor: loading tensor blk.2.attn_k.weight
+create_tensor: loading tensor blk.2.attn_v.weight
+create_tensor: loading tensor blk.2.attn_output.weight
+create_tensor: loading tensor blk.2.ffn_norm.weight
+create_tensor: loading tensor blk.2.ffn_sub_norm.weight
+create_tensor: loading tensor blk.2.ffn_gate.weight
+create_tensor: loading tensor blk.2.ffn_down.weight
+create_tensor: loading tensor blk.2.ffn_up.weight
+create_tensor: loading tensor blk.3.attn_norm.weight
+create_tensor: loading tensor blk.3.attn_sub_norm.weight
+create_tensor: loading tensor blk.3.attn_q.weight
+create_tensor: loading tensor blk.3.attn_k.weight
+create_tensor: loading tensor blk.3.attn_v.weight
+create_tensor: loading tensor blk.3.attn_output.weight
+create_tensor: loading tensor blk.3.ffn_norm.weight
+create_tensor: loading tensor blk.3.ffn_sub_norm.weight
+create_tensor: loading tensor blk.3.ffn_gate.weight
+create_tensor: loading tensor blk.3.ffn_down.weight
+create_tensor: loading tensor blk.3.ffn_up.weight
+create_tensor: loading tensor blk.4.attn_norm.weight
+create_tensor: loading tensor blk.4.attn_sub_norm.weight
+create_tensor: loading tensor blk.4.attn_q.weight
+create_tensor: loading tensor blk.4.attn_k.weight
+create_tensor: loading tensor blk.4.attn_v.weight
+create_tensor: loading tensor blk.4.attn_output.weight
+create_tensor: loading tensor blk.4.ffn_norm.weight
+create_tensor: loading tensor blk.4.ffn_sub_norm.weight
+create_tensor: loading tensor blk.4.ffn_gate.weight
+create_tensor: loading tensor blk.4.ffn_down.weight
+create_tensor: loading tensor blk.4.ffn_up.weight
+create_tensor: loading tensor blk.5.attn_norm.weight
+create_tensor: loading tensor blk.5.attn_sub_norm.weight
+create_tensor: loading tensor blk.5.attn_q.weight
+create_tensor: loading tensor blk.5.attn_k.weight
+create_tensor: loading tensor blk.5.attn_v.weight
+create_tensor: loading tensor blk.5.attn_output.weight
+create_tensor: loading tensor blk.5.ffn_norm.weight
+create_tensor: loading tensor blk.5.ffn_sub_norm.weight
+create_tensor: loading tensor blk.5.ffn_gate.weight
+create_tensor: loading tensor blk.5.ffn_down.weight
+create_tensor: loading tensor blk.5.ffn_up.weight
+create_tensor: loading tensor blk.6.attn_norm.weight
+create_tensor: loading tensor blk.6.attn_sub_norm.weight
+create_tensor: loading tensor blk.6.attn_q.weight
+create_tensor: loading tensor blk.6.attn_k.weight
+create_tensor: loading tensor blk.6.attn_v.weight
+create_tensor: loading tensor blk.6.attn_output.weight
+create_tensor: loading tensor blk.6.ffn_norm.weight
+create_tensor: loading tensor blk.6.ffn_sub_norm.weight
+create_tensor: loading tensor blk.6.ffn_gate.weight
+create_tensor: loading tensor blk.6.ffn_down.weight
+create_tensor: loading tensor blk.6.ffn_up.weight
+create_tensor: loading tensor blk.7.attn_norm.weight
+create_tensor: loading tensor blk.7.attn_sub_norm.weight
+create_tensor: loading tensor blk.7.attn_q.weight
+create_tensor: loading tensor blk.7.attn_k.weight
+create_tensor: loading tensor blk.7.attn_v.weight
+create_tensor: loading tensor blk.7.attn_output.weight
+create_tensor: loading tensor blk.7.ffn_norm.weight
+create_tensor: loading tensor blk.7.ffn_sub_norm.weight
+create_tensor: loading tensor blk.7.ffn_gate.weight
+create_tensor: loading tensor blk.7.ffn_down.weight
+create_tensor: loading tensor blk.7.ffn_up.weight
+create_tensor: loading tensor blk.8.attn_norm.weight
+create_tensor: loading tensor blk.8.attn_sub_norm.weight
+create_tensor: loading tensor blk.8.attn_q.weight
+create_tensor: loading tensor blk.8.attn_k.weight
+create_tensor: loading tensor blk.8.attn_v.weight
+create_tensor: loading tensor blk.8.attn_output.weight
+create_tensor: loading tensor blk.8.ffn_norm.weight
+create_tensor: loading tensor blk.8.ffn_sub_norm.weight
+create_tensor: loading tensor blk.8.ffn_gate.weight
+create_tensor: loading tensor blk.8.ffn_down.weight
+create_tensor: loading tensor blk.8.ffn_up.weight
+create_tensor: loading tensor blk.9.attn_norm.weight
+create_tensor: loading tensor blk.9.attn_sub_norm.weight
+create_tensor: loading tensor blk.9.attn_q.weight
+create_tensor: loading tensor blk.9.attn_k.weight
+create_tensor: loading tensor blk.9.attn_v.weight
+create_tensor: loading tensor blk.9.attn_output.weight
+create_tensor: loading tensor blk.9.ffn_norm.weight
+create_tensor: loading tensor blk.9.ffn_sub_norm.weight
+create_tensor: loading tensor blk.9.ffn_gate.weight
+create_tensor: loading tensor blk.9.ffn_down.weight
+create_tensor: loading tensor blk.9.ffn_up.weight
+create_tensor: loading tensor blk.10.attn_norm.weight
+create_tensor: loading tensor blk.10.attn_sub_norm.weight
+create_tensor: loading tensor blk.10.attn_q.weight
+create_tensor: loading tensor blk.10.attn_k.weight
+create_tensor: loading tensor blk.10.attn_v.weight
+create_tensor: loading tensor blk.10.attn_output.weight
+create_tensor: loading tensor blk.10.ffn_norm.weight
+create_tensor: loading tensor blk.10.ffn_sub_norm.weight
+create_tensor: loading tensor blk.10.ffn_gate.weight
+create_tensor: loading tensor blk.10.ffn_down.weight
+create_tensor: loading tensor blk.10.ffn_up.weight
+create_tensor: loading tensor blk.11.attn_norm.weight
+create_tensor: loading tensor blk.11.attn_sub_norm.weight
+create_tensor: loading tensor blk.11.attn_q.weight
+create_tensor: loading tensor blk.11.attn_k.weight
+create_tensor: loading tensor blk.11.attn_v.weight
+create_tensor: loading tensor blk.11.attn_output.weight
+create_tensor: loading tensor blk.11.ffn_norm.weight
+create_tensor: loading tensor blk.11.ffn_sub_norm.weight
+create_tensor: loading tensor blk.11.ffn_gate.weight
+create_tensor: loading tensor blk.11.ffn_down.weight
+create_tensor: loading tensor blk.11.ffn_up.weight
+create_tensor: loading tensor blk.12.attn_norm.weight
+create_tensor: loading tensor blk.12.attn_sub_norm.weight
+create_tensor: loading tensor blk.12.attn_q.weight
+create_tensor: loading tensor blk.12.attn_k.weight
+create_tensor: loading tensor blk.12.attn_v.weight
+create_tensor: loading tensor blk.12.attn_output.weight
+create_tensor: loading tensor blk.12.ffn_norm.weight
+create_tensor: loading tensor blk.12.ffn_sub_norm.weight
+create_tensor: loading tensor blk.12.ffn_gate.weight
+create_tensor: loading tensor blk.12.ffn_down.weight
+create_tensor: loading tensor blk.12.ffn_up.weight
+create_tensor: loading tensor blk.13.attn_norm.weight
+create_tensor: loading tensor blk.13.attn_sub_norm.weight
+create_tensor: loading tensor blk.13.attn_q.weight
+create_tensor: loading tensor blk.13.attn_k.weight
+create_tensor: loading tensor blk.13.attn_v.weight
+create_tensor: loading tensor blk.13.attn_output.weight
+create_tensor: loading tensor blk.13.ffn_norm.weight
+create_tensor: loading tensor blk.13.ffn_sub_norm.weight
+create_tensor: loading tensor blk.13.ffn_gate.weight
+create_tensor: loading tensor blk.13.ffn_down.weight
+create_tensor: loading tensor blk.13.ffn_up.weight
+create_tensor: loading tensor blk.14.attn_norm.weight
+create_tensor: loading tensor blk.14.attn_sub_norm.weight
+create_tensor: loading tensor blk.14.attn_q.weight
+create_tensor: loading tensor blk.14.attn_k.weight
+create_tensor: loading tensor blk.14.attn_v.weight
+create_tensor: loading tensor blk.14.attn_output.weight
+create_tensor: loading tensor blk.14.ffn_norm.weight
+create_tensor: loading tensor blk.14.ffn_sub_norm.weight
+create_tensor: loading tensor blk.14.ffn_gate.weight
+create_tensor: loading tensor blk.14.ffn_down.weight
+create_tensor: loading tensor blk.14.ffn_up.weight
+create_tensor: loading tensor blk.15.attn_norm.weight
+create_tensor: loading tensor blk.15.attn_sub_norm.weight
+create_tensor: loading tensor blk.15.attn_q.weight
+create_tensor: loading tensor blk.15.attn_k.weight
+create_tensor: loading tensor blk.15.attn_v.weight
+create_tensor: loading tensor blk.15.attn_output.weight
+create_tensor: loading tensor blk.15.ffn_norm.weight
+create_tensor: loading tensor blk.15.ffn_sub_norm.weight
+create_tensor: loading tensor blk.15.ffn_gate.weight
+create_tensor: loading tensor blk.15.ffn_down.weight
+create_tensor: loading tensor blk.15.ffn_up.weight
+create_tensor: loading tensor blk.16.attn_norm.weight
+create_tensor: loading tensor blk.16.attn_sub_norm.weight
+create_tensor: loading tensor blk.16.attn_q.weight
+create_tensor: loading tensor blk.16.attn_k.weight
+create_tensor: loading tensor blk.16.attn_v.weight
+create_tensor: loading tensor blk.16.attn_output.weight
+create_tensor: loading tensor blk.16.ffn_norm.weight
+create_tensor: loading tensor blk.16.ffn_sub_norm.weight
+create_tensor: loading tensor blk.16.ffn_gate.weight
+create_tensor: loading tensor blk.16.ffn_down.weight
+create_tensor: loading tensor blk.16.ffn_up.weight
+create_tensor: loading tensor blk.17.attn_norm.weight
+create_tensor: loading tensor blk.17.attn_sub_norm.weight
+create_tensor: loading tensor blk.17.attn_q.weight
+create_tensor: loading tensor blk.17.attn_k.weight
+create_tensor: loading tensor blk.17.attn_v.weight
+create_tensor: loading tensor blk.17.attn_output.weight
+create_tensor: loading tensor blk.17.ffn_norm.weight
+create_tensor: loading tensor blk.17.ffn_sub_norm.weight
+create_tensor: loading tensor blk.17.ffn_gate.weight
+create_tensor: loading tensor blk.17.ffn_down.weight
+create_tensor: loading tensor blk.17.ffn_up.weight
+create_tensor: loading tensor blk.18.attn_norm.weight
+create_tensor: loading tensor blk.18.attn_sub_norm.weight
+create_tensor: loading tensor blk.18.attn_q.weight
+create_tensor: loading tensor blk.18.attn_k.weight
+create_tensor: loading tensor blk.18.attn_v.weight
+create_tensor: loading tensor blk.18.attn_output.weight
+create_tensor: loading tensor blk.18.ffn_norm.weight
+create_tensor: loading tensor blk.18.ffn_sub_norm.weight
+create_tensor: loading tensor blk.18.ffn_gate.weight
+create_tensor: loading tensor blk.18.ffn_down.weight
+create_tensor: loading tensor blk.18.ffn_up.weight
+create_tensor: loading tensor blk.19.attn_norm.weight
+create_tensor: loading tensor blk.19.attn_sub_norm.weight
+create_tensor: loading tensor blk.19.attn_q.weight
+create_tensor: loading tensor blk.19.attn_k.weight
+create_tensor: loading tensor blk.19.attn_v.weight
+create_tensor: loading tensor blk.19.attn_output.weight
+create_tensor: loading tensor blk.19.ffn_norm.weight
+create_tensor: loading tensor blk.19.ffn_sub_norm.weight
+create_tensor: loading tensor blk.19.ffn_gate.weight
+create_tensor: loading tensor blk.19.ffn_down.weight
+create_tensor: loading tensor blk.19.ffn_up.weight
+create_tensor: loading tensor blk.20.attn_norm.weight
+create_tensor: loading tensor blk.20.attn_sub_norm.weight
+create_tensor: loading tensor blk.20.attn_q.weight
+create_tensor: loading tensor blk.20.attn_k.weight
+create_tensor: loading tensor blk.20.attn_v.weight
+create_tensor: loading tensor blk.20.attn_output.weight
+create_tensor: loading tensor blk.20.ffn_norm.weight
+create_tensor: loading tensor blk.20.ffn_sub_norm.weight
+create_tensor: loading tensor blk.20.ffn_gate.weight
+create_tensor: loading tensor blk.20.ffn_down.weight
+create_tensor: loading tensor blk.20.ffn_up.weight
+create_tensor: loading tensor blk.21.attn_norm.weight
+create_tensor: loading tensor blk.21.attn_sub_norm.weight
+create_tensor: loading tensor blk.21.attn_q.weight
+create_tensor: loading tensor blk.21.attn_k.weight
+create_tensor: loading tensor blk.21.attn_v.weight
+create_tensor: loading tensor blk.21.attn_output.weight
+create_tensor: loading tensor blk.21.ffn_norm.weight
+create_tensor: loading tensor blk.21.ffn_sub_norm.weight
+create_tensor: loading tensor blk.21.ffn_gate.weight
+create_tensor: loading tensor blk.21.ffn_down.weight
+create_tensor: loading tensor blk.21.ffn_up.weight
+create_tensor: loading tensor blk.22.attn_norm.weight
+create_tensor: loading tensor blk.22.attn_sub_norm.weight
+create_tensor: loading tensor blk.22.attn_q.weight
+create_tensor: loading tensor blk.22.attn_k.weight
+create_tensor: loading tensor blk.22.attn_v.weight
+create_tensor: loading tensor blk.22.attn_output.weight
+create_tensor: loading tensor blk.22.ffn_norm.weight
+create_tensor: loading tensor blk.22.ffn_sub_norm.weight
+create_tensor: loading tensor blk.22.ffn_gate.weight
+create_tensor: loading tensor blk.22.ffn_down.weight
+create_tensor: loading tensor blk.22.ffn_up.weight
+create_tensor: loading tensor blk.23.attn_norm.weight
+create_tensor: loading tensor blk.23.attn_sub_norm.weight
+create_tensor: loading tensor blk.23.attn_q.weight
+create_tensor: loading tensor blk.23.attn_k.weight
+create_tensor: loading tensor blk.23.attn_v.weight
+create_tensor: loading tensor blk.23.attn_output.weight
+create_tensor: loading tensor blk.23.ffn_norm.weight
+create_tensor: loading tensor blk.23.ffn_sub_norm.weight
+create_tensor: loading tensor blk.23.ffn_gate.weight
+create_tensor: loading tensor blk.23.ffn_down.weight
+create_tensor: loading tensor blk.23.ffn_up.weight
+create_tensor: loading tensor blk.24.attn_norm.weight
+create_tensor: loading tensor blk.24.attn_sub_norm.weight
+create_tensor: loading tensor blk.24.attn_q.weight
+create_tensor: loading tensor blk.24.attn_k.weight
+create_tensor: loading tensor blk.24.attn_v.weight
+create_tensor: loading tensor blk.24.attn_output.weight
+create_tensor: loading tensor blk.24.ffn_norm.weight
+create_tensor: loading tensor blk.24.ffn_sub_norm.weight
+create_tensor: loading tensor blk.24.ffn_gate.weight
+create_tensor: loading tensor blk.24.ffn_down.weight
+create_tensor: loading tensor blk.24.ffn_up.weight
+create_tensor: loading tensor blk.25.attn_norm.weight
+create_tensor: loading tensor blk.25.attn_sub_norm.weight
+create_tensor: loading tensor blk.25.attn_q.weight
+create_tensor: loading tensor blk.25.attn_k.weight
+create_tensor: loading tensor blk.25.attn_v.weight
+create_tensor: loading tensor blk.25.attn_output.weight
+create_tensor: loading tensor blk.25.ffn_norm.weight
+create_tensor: loading tensor blk.25.ffn_sub_norm.weight
+create_tensor: loading tensor blk.25.ffn_gate.weight
+create_tensor: loading tensor blk.25.ffn_down.weight
+create_tensor: loading tensor blk.25.ffn_up.weight
+create_tensor: loading tensor blk.26.attn_norm.weight
+create_tensor: loading tensor blk.26.attn_sub_norm.weight
+create_tensor: loading tensor blk.26.attn_q.weight
+create_tensor: loading tensor blk.26.attn_k.weight
+create_tensor: loading tensor blk.26.attn_v.weight
+create_tensor: loading tensor blk.26.attn_output.weight
+create_tensor: loading tensor blk.26.ffn_norm.weight
+create_tensor: loading tensor blk.26.ffn_sub_norm.weight
+create_tensor: loading tensor blk.26.ffn_gate.weight
+create_tensor: loading tensor blk.26.ffn_down.weight
+create_tensor: loading tensor blk.26.ffn_up.weight
+create_tensor: loading tensor blk.27.attn_norm.weight
+create_tensor: loading tensor blk.27.attn_sub_norm.weight
+create_tensor: loading tensor blk.27.attn_q.weight
+create_tensor: loading tensor blk.27.attn_k.weight
+create_tensor: loading tensor blk.27.attn_v.weight
+create_tensor: loading tensor blk.27.attn_output.weight
+create_tensor: loading tensor blk.27.ffn_norm.weight
+create_tensor: loading tensor blk.27.ffn_sub_norm.weight
+create_tensor: loading tensor blk.27.ffn_gate.weight
+create_tensor: loading tensor blk.27.ffn_down.weight
+create_tensor: loading tensor blk.27.ffn_up.weight
+create_tensor: loading tensor blk.28.attn_norm.weight
+create_tensor: loading tensor blk.28.attn_sub_norm.weight
+create_tensor: loading tensor blk.28.attn_q.weight
+create_tensor: loading tensor blk.28.attn_k.weight
+create_tensor: loading tensor blk.28.attn_v.weight
+create_tensor: loading tensor blk.28.attn_output.weight
+create_tensor: loading tensor blk.28.ffn_norm.weight
+create_tensor: loading tensor blk.28.ffn_sub_norm.weight
+create_tensor: loading tensor blk.28.ffn_gate.weight
+create_tensor: loading tensor blk.28.ffn_down.weight
+create_tensor: loading tensor blk.28.ffn_up.weight
+create_tensor: loading tensor blk.29.attn_norm.weight
+create_tensor: loading tensor blk.29.attn_sub_norm.weight
+create_tensor: loading tensor blk.29.attn_q.weight
+create_tensor: loading tensor blk.29.attn_k.weight
+create_tensor: loading tensor blk.29.attn_v.weight
+create_tensor: loading tensor blk.29.attn_output.weight
+create_tensor: loading tensor blk.29.ffn_norm.weight
+create_tensor: loading tensor blk.29.ffn_sub_norm.weight
+create_tensor: loading tensor blk.29.ffn_gate.weight
+create_tensor: loading tensor blk.29.ffn_down.weight
+create_tensor: loading tensor blk.29.ffn_up.weight
+load_tensors: tensor 'token_embd.weight' (f16) (and 331 others) cannot be used with preferred buffer type CPU_REPACK, using CPU instead
+load_tensors:          CPU model buffer size =  1124.80 MiB
+load_all_data: no device found for buffer type CPU for async uploads
+..............................................
+llama_context: constructing llama_context
+llama_context: n_seq_max     = 1
+llama_context: n_ctx         = 4096
+llama_context: n_ctx_seq     = 4096
+llama_context: n_batch       = 2048
+llama_context: n_ubatch      = 512
+llama_context: causal_attn   = 1
+llama_context: flash_attn    = auto
+llama_context: kv_unified    = false
+llama_context: freq_base     = 500000.0
+llama_context: freq_scale    = 1
+set_abort_callback: call
+llama_context:        CPU  output buffer size =     0.49 MiB
+llama_kv_cache: layer   0: dev = CPU
+llama_kv_cache: layer   1: dev = CPU
+llama_kv_cache: layer   2: dev = CPU
+llama_kv_cache: layer   3: dev = CPU
+llama_kv_cache: layer   4: dev = CPU
+llama_kv_cache: layer   5: dev = CPU
+llama_kv_cache: layer   6: dev = CPU
+llama_kv_cache: layer   7: dev = CPU
+llama_kv_cache: layer   8: dev = CPU
+llama_kv_cache: layer   9: dev = CPU
+llama_kv_cache: layer  10: dev = CPU
+llama_kv_cache: layer  11: dev = CPU
+llama_kv_cache: layer  12: dev = CPU
+llama_kv_cache: layer  13: dev = CPU
+llama_kv_cache: layer  14: dev = CPU
+llama_kv_cache: layer  15: dev = CPU
+llama_kv_cache: layer  16: dev = CPU
+llama_kv_cache: layer  17: dev = CPU
+llama_kv_cache: layer  18: dev = CPU
+llama_kv_cache: layer  19: dev = CPU
+llama_kv_cache: layer  20: dev = CPU
+llama_kv_cache: layer  21: dev = CPU
+llama_kv_cache: layer  22: dev = CPU
+llama_kv_cache: layer  23: dev = CPU
+llama_kv_cache: layer  24: dev = CPU
+llama_kv_cache: layer  25: dev = CPU
+llama_kv_cache: layer  26: dev = CPU
+llama_kv_cache: layer  27: dev = CPU
+llama_kv_cache: layer  28: dev = CPU
+llama_kv_cache: layer  29: dev = CPU
+llama_kv_cache:        CPU KV buffer size =   300.00 MiB
+llama_kv_cache: size =  300.00 MiB (  4096 cells,  30 layers,  1/1 seqs), K (f16):  150.00 MiB, V (f16):  150.00 MiB
+llama_context: enumerating backends
+llama_context: backend_ptrs.size() = 1
+sched_reserve: reserving ...
+sched_reserve: max_nodes = 2656
+sched_reserve: reserving full memory module
+sched_reserve: worst-case: n_tokens = 512, n_seqs = 1, n_outputs = 1
+graph_reserve: reserving a graph for ubatch with n_tokens =    1, n_seqs =  1, n_outputs =    1
+sched_reserve: Flash Attention was auto, set to enabled
+graph_reserve: reserving a graph for ubatch with n_tokens =  512, n_seqs =  1, n_outputs =  512
+graph_reserve: reserving a graph for ubatch with n_tokens =    1, n_seqs =  1, n_outputs =    1
+graph_reserve: reserving a graph for ubatch with n_tokens =  512, n_seqs =  1, n_outputs =  512
+sched_reserve:        CPU compute buffer size =   265.50 MiB
+sched_reserve: graph nodes  = 1057
+sched_reserve: graph splits = 1
+sched_reserve: reserve took 3.56 ms, sched copies = 1

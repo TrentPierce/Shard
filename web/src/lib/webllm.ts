@@ -48,6 +48,12 @@ export type DraftGenerationOptions = {
 // Small model suitable for draft generation (Llama-3.2-1B-Instruct is ideal)
 const DRAFT_MODEL = "Llama-3.2-1B-Instruct-q4f32_1-MLC"
 
+// Nano model for mobile devices (highly quantized for 4GB RAM limit)
+const NANO_MODEL = "Llama-3.2-1B-Instruct-q4f16_0-MLC"
+
+// Mobile device memory threshold (4GB in bytes)
+const MOBILE_MEMORY_THRESHOLD = 4 * 1024 * 1024 * 1024
+
 // Default generation options for speculative decoding drafts
 const DEFAULT_DRAFT_OPTIONS: DraftGenerationOptions = {
     maxTokens: 10,
@@ -59,6 +65,77 @@ const DEFAULT_DRAFT_OPTIONS: DraftGenerationOptions = {
 
 let engine: MLCEngine | null = null
 let isLoading = false
+let currentModel: string = DRAFT_MODEL
+
+// ─── Mobile Detection ─────────────────────────────────────────────────────────
+
+/**
+ * Detect if the current device is a mobile device.
+ * 
+ * Checks:
+ * 1. User agent for mobile patterns
+ * 2. Screen size (small screens typically indicate mobile)
+ * 3. Available device memory (if available via navigator.deviceMemory)
+ * 
+ * @returns True if the device appears to be mobile
+ */
+export function isMobileDevice(): boolean {
+    if (typeof navigator === "undefined") {
+        return false
+    }
+    
+    const ua = navigator.userAgent.toLowerCase()
+    
+    // Check user agent patterns
+    const mobilePatterns = [
+        /android/i,
+        /webos/i,
+        /iphone/i,
+        /ipad/i,
+        /ipod/i,
+        /blackberry/i,
+        /windows phone/i,
+        /mobile/i,
+    ]
+    
+    const isMobileUA = mobilePatterns.some(pattern => pattern.test(ua))
+    if (isMobileUA) {
+        return true
+    }
+    
+    // Check screen size (typical mobile cutoffs)
+    if (typeof screen !== "undefined") {
+        const maxScreenDim = Math.max(screen.width, screen.height)
+        if (maxScreenDim < 768) {
+            return true
+        }
+    }
+    
+    // Check device memory (if available)
+    // @ts-expect-error deviceMemory is not in standard types
+    const deviceMemory = navigator.deviceMemory
+    if (deviceMemory !== undefined && deviceMemory < 4) {
+        return true
+    }
+    
+    return false
+}
+
+/**
+ * Get the appropriate model for the current device.
+ * 
+ * Mobile devices use the highly quantized Nano model (q4f16_0)
+ * to fit within 4GB RAM constraints.
+ * 
+ * @returns The model ID to use for this device
+ */
+export function getModelForDevice(): string {
+    if (isMobileDevice()) {
+        console.log("[WebLLM] Mobile device detected, using Nano model:", NANO_MODEL)
+        return NANO_MODEL
+    }
+    return DRAFT_MODEL
+}
 
 // ─── Functions ──────────────────────────────────────────────────────────────
 
@@ -155,9 +232,13 @@ export async function initWebLLM(
     }
 
     try {
-        // Initialize MLCEngine with the small draft model
+        // Use device-appropriate model (Nano for mobile, standard for desktop)
+        const model = getModelForDevice()
+        currentModel = model
+        
+        // Initialize MLCEngine with the appropriate draft model
         engine = await CreateMLCEngine(
-            DRAFT_MODEL,
+            model,
             {
                 initProgressCallback: wrappedCallback,
                 logLevel: "INFO",
@@ -244,7 +325,7 @@ export function isWebLLMReady(): boolean {
  * Get the current model ID being used.
  */
 export function getCurrentModel(): string {
-    return DRAFT_MODEL
+    return currentModel
 }
 
 /**
@@ -270,8 +351,68 @@ export async function resetWebLLMChat(): Promise<void> {
 export async function isModelCached(modelId?: string): Promise<boolean> {
     try {
         const { hasModelInCache } = await import("@mlc-ai/web-llm")
-        return await hasModelInCache(modelId || DRAFT_MODEL)
+        return await hasModelInCache(modelId || getModelForDevice())
     } catch {
         return false
     }
+}
+
+// ─── Wake Lock API (Mobile Scout Mode) ───────────────────────────────────────
+
+let wakeLock: WakeLockSentinel | null = null
+
+/**
+ * Request a wake lock to keep the screen awake.
+ * 
+ * This is useful for mobile Scout mode when background processing
+ * is needed. Uses the Wake Lock API.
+ * 
+ * @returns True if wake lock was acquired
+ */
+export async function requestWakeLock(): Promise<boolean> {
+    if (typeof navigator === "undefined" || !("wakeLock" in navigator)) {
+        console.warn("[WebLLM] Wake Lock API not supported")
+        return false
+    }
+    
+    try {
+        wakeLock = await navigator.wakeLock.request("screen")
+        console.log("[WebLLM] Wake lock acquired for mobile Scout mode")
+        
+        // Handle release automatically when visibility changes
+        wakeLock.addEventListener("release", () => {
+            console.log("[WebLLM] Wake lock released")
+            wakeLock = null
+        })
+        
+        return true
+    } catch (error: any) {
+        console.error("[WebLLM] Failed to acquire wake lock:", error?.message ?? error)
+        return false
+    }
+}
+
+/**
+ * Release the wake lock if held.
+ * 
+ * Call this when Scout mode is disabled or when background
+ * processing is no longer needed.
+ */
+export async function releaseWakeLock(): Promise<void> {
+    if (wakeLock) {
+        try {
+            await wakeLock.release()
+            wakeLock = null
+            console.log("[WebLLM] Wake lock manually released")
+        } catch (error: any) {
+            console.error("[WebLLM] Failed to release wake lock:", error?.message ?? error)
+        }
+    }
+}
+
+/**
+ * Check if wake lock is currently held.
+ */
+export function isWakeLockActive(): boolean {
+    return wakeLock !== null
 }
