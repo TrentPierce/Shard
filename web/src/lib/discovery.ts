@@ -8,7 +8,7 @@
  * 4. IPFS content routing
  */
 
-interface OracleNode {
+export interface OracleNode {
   peer_id: string
   api_url: string
   latency_ms?: number
@@ -17,7 +17,7 @@ interface OracleNode {
 
 interface DiscoveryResponse {
   nodes: OracleNode[]
-  source: 'local' | 'community' | 'dns' | 'ipfs'
+  source: 'local' | 'community' | 'dns' | 'ipfs' | 'merged'
   last_updated: string
 }
 
@@ -45,7 +45,6 @@ export async function getLocalOracleNodes(): Promise<DiscoveryResponse> {
       nodes.push({
         peer_id: topology.oracle_peer_id,
         api_url: `http://${topology.public_api_addr}`,
-        source: 'local',
       })
     }
     
@@ -170,4 +169,30 @@ export function selectFastestOracle(nodes: OracleNode[]): OracleNode | null {
   nodesWithLatency.sort((a, b) => (a.latency_ms! - b.latency_ms!))
   
   return nodesWithLatency[0]
+}
+
+/**
+ * Get the best Oracle API URL for making requests.
+ * Falls back to configured API_BASE if no oracle nodes are available.
+ */
+export async function getBestOracleApiUrl(): Promise<string> {
+  // Import config here to avoid circular dependencies
+  const { apiUrl: configApiUrl } = await import("./config")
+  
+  try {
+    // Try to get oracle nodes from discovery
+    const discovery = await getAllOracleNodes()
+    
+    if (discovery.nodes.length > 0) {
+      const fastest = selectFastestOracle(discovery.nodes)
+      if (fastest && fastest.api_url) {
+        return fastest.api_url
+      }
+    }
+  } catch (error) {
+    console.warn("[Discovery] Failed to get oracle nodes, using config URL:", error)
+  }
+  
+  // Fallback to configured API URL
+  return configApiUrl("/v1")
 }

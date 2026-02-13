@@ -1,0 +1,384 @@
+name: Global Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag (e.g., v0.4.0)'
+        required: false
+        type: string
+
+env:
+  NODE_VERSION: '20'
+  PYTHON_VERSION: '3.11'
+  RUST_VERSION: 'stable'
+
+jobs:
+  # ============================================
+  # Build Windows Executable
+  # ============================================
+  build-windows:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+      
+      - name: Install Build Dependencies
+        run: |
+          pip install pyinstaller
+          pip install -r desktop/python/requirements.txt
+      
+      - name: Build Rust Daemon
+        working-directory: desktop/rust
+        run: |
+          cargo build --release --target x86_64-pc-windows-msvc
+      
+      - name: Build C++ Engine
+        working-directory: cpp/shard-bridge
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --config Release
+      
+      - name: Build Web UI
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+      
+      - name: Create Distribution
+        run: |
+          python scripts/build_release.py
+      
+      - name: Create Windows Installer (Inno Setup simulation)
+        run: |
+          $version = "${{ github.ref_name }}".TrimStart("v")
+          $exeName = "Shard_Setup_${version}_windows_x64.exe"
+          
+          # Create a simple installer script using PowerShell
+          $script = @"
+          `$ErrorActionPreference = 'Stop'
+          
+          # Create installer directory
+          `$installerDir = "dist\windows-installer"
+          if (!(Test-Path `$installerDir)) { New-Item -ItemType Directory -Path `$installerDir -Force }
+          
+          # Copy release files
+          `$releaseDir = "dist\ShardAI"
+          if (Test-Path `$releaseDir) {
+              Copy-Item -Path "`$releaseDir\*" -Destination `$installerDir -Recurse -Force
+          }
+          
+          # Create version file
+          "`$version" | Out-File -FilePath "`$installerDir\version.txt" -Encoding utf8
+          
+          # Create README
+          @'
+          # Shard Network Installer
+          
+          ## Installation
+          1. Extract this folder to your desired location
+          2. Run `ShardAI.exe` to start the Oracle
+          3. Open http://localhost:3000 in your browser
+          
+          ## First Run
+          - On first run, the model will be downloaded automatically
+          - Ensure you have at least 4GB free disk space
+          
+          ## Support
+          Visit https://github.com/TrentPierce/Shard for documentation
+          '@ | Out-File -FilePath "`$installerDir\README.md" -Encoding utf8
+          
+          # Create zip archive
+          Compress-Archive -Path "`$installerDir\*" -DestinationPath "`$exeName" -Force
+          
+          Write-Host "Created: `$exeName"
+          "@
+          
+          $script | Out-File -FilePath "create_installer.ps1" -Encoding utf8
+          powershell -ExecutionPolicy Bypass -File create_installer.ps1
+      
+      - name: Upload Windows Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: shard-windows
+          path: Shard_Setup_*.exe
+          retention-days: 30
+  
+  # ============================================
+  # Build Linux AppImage
+  # ============================================
+  build-linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+      
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake build-essential libssl-dev pkg-config
+      
+      - name: Install Python Dependencies
+        run: |
+          pip install pyinstaller
+          pip install -r desktop/python/requirements.txt
+      
+      - name: Build Rust Daemon
+        working-directory: desktop/rust
+        run: cargo build --release
+      
+      - name: Build C++ Engine
+        working-directory: cpp/shard-bridge
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --config Release
+      
+      - name: Build Web UI
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+      
+      - name: Create Distribution
+        run: python scripts/build_release.py
+      
+      - name: Create AppImage
+        run: |
+          version="${{ github.ref_name }}".TrimStart("v")
+          
+          # Create AppDir structure
+          mkdir -p AppDir/usr/bin AppDir/usr/lib AppDir/usr/share/applications
+          
+          # Copy release files
+          cp -r dist/ShardAI/* AppDir/usr/
+          
+          # Create AppRun script
+          cat > AppDir/AppRun << 'EOF'
+          #!/bin/bash
+          SELF=$(readlink -f "$0")
+          HERE=${SELF%/*}
+          export PATH="${HERE}/usr/bin:$PATH"
+          exec "${HERE}/usr/bin/ShardAI" "$@"
+          EOF
+          chmod +x AppDir/AppRun
+          
+          # Create desktop file
+          cat > AppDir/shard.desktop << 'EOF'
+          [Desktop Entry]
+          Name=Shard AI
+          Exec=ShardAI
+          Icon=shard
+          Type=Application
+          Categories=Network;AI;
+          EOF
+          
+          # Download and use appimagetool (if available)
+          if command -v appimagetool &> /dev/null; then
+              appimagetool AppDir "Shard_${version}_linux_x86_64.AppImage"
+          else
+              # Fallback: create tarball
+              tar -czvf "Shard_${version}_linux_x86_64.tar.gz" -C AppDir usr
+          fi
+      
+      - name: Upload Linux Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: shard-linux
+          path: |
+            Shard_*.AppImage
+            Shard_*.tar.gz
+          retention-days: 30
+  
+  # ============================================
+  # Build macOS DMG
+  # ============================================
+  build-macos:
+    runs-on: macos-latest
+    timeout-minutes: 45
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          targets: aarch64-apple-darwin
+      
+      - name: Install System Dependencies
+        run: |
+          brew install cmake pkg-config
+      
+      - name: Install Python Dependencies
+        run: |
+          pip install pyinstaller
+          pip install -r desktop/python/requirements.txt
+      
+      - name: Build Rust Daemon (Universal)
+        working-directory: desktop/rust
+        run: |
+          cargo build --release --target aarch64-apple-darwin
+          # Create universal binary
+          cargo build --release
+          lipo -create -output target/release/shard-daemon \
+            target/release/shard-daemon \
+            target/aarch64-apple-darwin/release/shard-daemon
+      
+      - name: Build C++ Engine
+        working-directory: cpp/shard-bridge
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+          cmake --build build --config Release
+      
+      - name: Build Web UI
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+      
+      - name: Create Distribution
+        run: python scripts/build_release.py
+      
+      - name: Create DMG
+        run: |
+          version="${{ github.ref_name }}".TrimStart("v")
+          
+          # Create DMG structure
+          mkdir -p "Shard-${version}.app/Contents/MacOS"
+          cp -r dist/ShardAI/* "Shard-${version}.app/Contents/MacOS/"
+          
+          # Create Info.plist
+          cat > "Shard-${version}.app/Contents/Info.plist" << 'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>CFBundleExecutable</key>
+              <string>ShardAI</string>
+              <key>CFBundleIdentifier</key>
+              <string>network.shard.ai</string>
+              <key>CFBundleName</key>
+              <string>Shard AI</string>
+              <key>CFBundleVersion</key>
+              <string>1</string>
+              <key>CFBundlePackageType</key>
+              <string>APPL</string>
+          </dict>
+          </plist>
+          EOF
+          
+          # Create DMG using hdiutil
+          hdiutil create -volname "Shard-${version}" \
+            -srcfolder "Shard-${version}.app" \
+            -ov -format UDZO \
+            "Shard_${version}_macos_universal.dmg"
+      
+      - name: Upload macOS Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: shard-macos
+          path: Shard_*.dmg
+          retention-days: 30
+  
+  # ============================================
+  # Create GitHub Release
+  # ============================================
+  release:
+    needs: [build-windows, build-linux, build-macos]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      
+      - name: Display structure
+        run: ls -R artifacts
+      
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          draft: false
+          prerelease: ${{ contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') }}
+          generate_release_notes: true
+          files: |
+            artifacts/shard-windows/*.exe
+            artifacts/shard-linux/*.AppImage
+            artifacts/shard-linux/*.tar.gz
+            artifacts/shard-macos/*.dmg
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  
+  # ============================================
+  # Release Verification
+  # ============================================
+  verify:
+    needs: [release]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    
+    steps:
+      - name: Verify Release Created
+        run: |
+          echo "Checking for release..."
+          
+          # Get release info
+          release=$(gh release view "${{ github.ref_name }}" --json name,url,assets 2>/dev/null)
+          
+          if [ -z "$release" ]; then
+            echo "Release not found!"
+            exit 1
+          fi
+          
+          echo "Release found:"
+          echo "$release" | jq '.'
+          
+          # Check assets count
+          asset_count=$(echo "$release" | jq '.assets | length')
+          echo "Assets count: $asset_count"
+          
+          if [ "$asset_count" -lt 1 ]; then
+            echo "No assets found in release!"
+            exit 1
+          fi
+          
+          echo "✅ Release verification passed!"
+
