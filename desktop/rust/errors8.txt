@@ -1,4 +1,0 @@
-    Checking shard-oracle-daemon v0.4.4 (D:\Dev\Projects\Shard\Shard\desktop\rust)
-src\main.rs:32:40: warning: unused import: `SwarmBuilder`
-warning: `shard-oracle-daemon` (bin "shard-daemon") generated 1 warning (run `cargo fix --bin "shard-daemon" -p shard-oracle-daemon` to apply 1 suggestion)
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 2.22s

@@ -1,3 +1,0 @@
-    Blocking waiting for file lock on build directory
-    Checking shard-oracle-daemon v0.4.4 (D:\Dev\Projects\Shard\Shard\desktop\rust)
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 18.44s
