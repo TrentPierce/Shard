@@ -66,28 +66,25 @@ jobs:
       
       - name: Create Windows Installer (Inno Setup simulation)
         run: |
+          $ErrorActionPreference = 'Stop'
+          
           $version = "${{ github.ref_name }}".TrimStart("v")
           $exeName = "Shard_Setup_${version}_windows_x64.exe"
           
-          # Create a simple installer script using PowerShell
-          $script = @"
-          `$ErrorActionPreference = 'Stop'
+          $baseDir = $PWD.Path.TrimEnd('\')
+          $installerDir = "$baseDir\dist\windows-installer"
+          if (!(Test-Path $installerDir)) { New-Item -ItemType Directory -Path $installerDir -Force }
           
-          # Create installer directory
-          `$installerDir = Join-Path `$PWD.Path "dist`\windows-installer"
-          if (!(Test-Path `$installerDir)) { New-Item -ItemType Directory -Path `$installerDir -Force }
-          
-          # Copy release files
-          `$releaseDir = Join-Path `$PWD.Path "dist`\ShardAI"
-          if (Test-Path `$releaseDir) {
-              Get-ChildItem -Path `$releaseDir -Recurse | Copy-Item -Destination `$installerDir -Recurse -Force
+          $releaseDir = "$baseDir\dist\ShardAI"
+          if (Test-Path $releaseDir) {
+              Copy-Item -Path "$releaseDir\*" -Destination $installerDir -Recurse -Force
           }
           
           # Create version file
-          "`$version" | Out-File -FilePath (Join-Path `$installerDir "version.txt") -Encoding utf8
+          $version | Out-File -FilePath "$installerDir\version.txt" -Encoding utf8
           
           # Create README
-          @'
+          @"
           # Shard Network Installer
           
           ## Installation
@@ -101,18 +98,12 @@ jobs:
           
           ## Support
           Visit https://github.com/TrentPierce/Shard for documentation
-          '@ | Out-File -FilePath (Join-Path `$installerDir "README.md") -Encoding utf8
+          "@ | Out-File -FilePath "$installerDir\README.md" -Encoding utf8
           
-          # Create zip archive using dotnet Compress-Archive
-          `$tempZip = Join-Path `$PWD.Path "`$exeName"
-          Add-Type -AssemblyName System.IO.Compression.FileSystem
-          `[System.IO.Compression.ZipFile]::CreateFromDirectory(`$installerDir, `$tempZip)
+          # Create zip archive
+          Compress-Archive -Path "$installerDir\*" -DestinationPath "$baseDir\$exeName" -Force
           
-          Write-Host "Created: `$exeName"
-          "@
-          
-          $script | Out-File -FilePath "create_installer.ps1" -Encoding utf8
-          powershell -ExecutionPolicy Bypass -File create_installer.ps1
+          Write-Host "Created: $exeName"
       
       - name: Upload Windows Artifact
         uses: actions/upload-artifact@v4
