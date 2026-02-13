@@ -24,7 +24,7 @@ Verified, production-ready organization:
 
 - **`desktop/`**: Core application logic.
   - **`rust/`**: High-performance P2P networking daemon (the "Sidecar").
-  - **`python/`**: AI Orchestration, API endpoints, and Logic (the "Oracle").
+  - **`python/`**: AI Orchestration, API endpoints, and Logic (the "Shard").
 - **`web/`**: Next.js user-facing web client and "Scout" node implementation.
 - **`cpp/`**: Native bindings for hardware-accelerated inference (e.g., BitNet).
 - **`docs/`**: Comprehensive documentation, architecture diagrams, and audit reports.
@@ -61,7 +61,7 @@ For a detailed technical analysis, see the [White Paper](docs/Shard-White-Paper-
 
 | Class | Name | Hardware | Role |
 |-------|------|----------|------|
-| **A** | **Oracle** | Desktop/Server (GPU) | Full model host, verifies draft tokens from Scouts. |
+| **A** | **Shard** | Desktop/Server (GPU) | Full model host, verifies draft tokens from Scouts. |
 | **B** | **Scout** | Browser (WebGPU) | Runs tiny draft model, submits speculative tokens. |
 | **C** | **Consumer** | Any Device | Pure consumer, queued behind contributors. |
 

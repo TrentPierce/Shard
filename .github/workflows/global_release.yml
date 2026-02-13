@@ -83,7 +83,7 @@ jobs:
           
           ## Installation
           1. Extract this folder to your desired location
-          2. Run `ShardAI.exe` to start the Oracle
+          2. Run `ShardAI.exe` to start the Shard
           3. Open http://localhost:3000 in your browser
           
           ## First Run

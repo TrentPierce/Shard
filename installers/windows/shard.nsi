@@ -1,4 +1,4 @@
-; Shard Oracle Daemon NSIS Installer Script
+; Shard Daemon NSIS Installer Script
 ; Builds Windows .exe installer with auto-update support
 
 !include "MUI2.nsh"
@@ -6,7 +6,7 @@
 !include "WinVer.nsh"
 
 ; General
-Name "Shard Oracle"
+Name "Shard"
 OutFile "shard-installer.exe"
 InstallDir "$PROGRAMFILES64\Shard"
 InstallDirRegKey HKLM "Software\Shard" "InstallDir"
@@ -36,7 +36,7 @@ RequestExecutionLevel admin
 !insertmacro MUI_LANGUAGE "English"
 
 ; Installer Sections
-Section "Shard Oracle" SecMain
+Section "Shard" SecMain
     SetOutPath "$INSTDIR"
     
     ; Copy main executable
@@ -50,18 +50,18 @@ Section "Shard Oracle" SecMain
     
     ; Create Start Menu shortcuts
     CreateDirectory "$SMPROGRAMS\Shard"
-    CreateShortcut "$SMPROGRAMS\Shard\Shard Oracle.lnk" "$INSTDIR\shard-daemon.exe" "--contribute" "$INSTDIR\shard-daemon.exe" 0
+    CreateShortcut "$SMPROGRAMS\Shard\Shard.lnk" "$INSTDIR\shard-daemon.exe" "--contribute" "$INSTDIR\shard-daemon.exe" 0
     CreateShortcut "$SMPROGRAMS\Shard\Uninstall.lnk" "$INSTDIR\Uninstall.exe"
     
     ; Create Desktop shortcut
-    CreateShortcut "$DESKTOP\Shard Oracle.lnk" "$INSTDIR\shard-daemon.exe" "--contribute" "$INSTDIR\shard-daemon.exe" 0
+    CreateShortcut "$DESKTOP\Shard.lnk" "$INSTDIR\shard-daemon.exe" "--contribute" "$INSTDIR\shard-daemon.exe" 0
     
     ; Write registry keys
     WriteRegStr HKLM "Software\Shard" "InstallDir" "$INSTDIR"
     WriteRegStr HKLM "Software\Shard" "Version" "${VERSION}"
     
     ; Write uninstall info
-    WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Shard" "DisplayName" "Shard Oracle"
+    WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Shard" "DisplayName" "Shard"
     WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Shard" "UninstallString" "$INSTDIR\Uninstall.exe"
     WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Shard" "InstallLocation" "$INSTDIR"
     WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Shard" "DisplayVersion" "${VERSION}"
@@ -92,7 +92,7 @@ Section "Uninstall"
     ; Remove shortcuts
     Delete "$SMPROGRAMS\Shard\*.lnk"
     RMDir "$SMPROGRAMS\Shard"
-    Delete "$DESKTOP\Shard Oracle.lnk"
+    Delete "$DESKTOP\Shard.lnk"
     
     ; Remove registry keys
     DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Shard"

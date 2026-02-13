@@ -2,7 +2,7 @@
  * Golden Ticket Verification System for Scout Nodes
  *
  * This module provides the scout-side functionality for detecting and
- * properly responding to Golden Tickets from Oracle nodes. Golden Tickets
+ * properly responding to Golden Tickets from Shard nodes. Golden Tickets
  * are pre-solved prompts used to verify scout honesty and prevent Sybil attacks.
  *
  * Key Responsibilities:
@@ -53,7 +53,7 @@ export type WorkResult = {
 /**
  * Known Golden Ticket prompt patterns.
  *
- * These patterns match the templates defined in the Oracle's golden_ticket.py.
+ * These patterns match the templates defined in the Shard's golden_ticket.py.
  * Scouts use these to detect when they're being tested and respond correctly.
  *
  * NOTE: This list must be kept in sync with GOLDEN_TICKET_TEMPLATES in
@@ -99,7 +99,7 @@ const GOLDEN_TICKET_PATTERNS: Array<{
  * Check if a prompt is a Golden Ticket.
  *
  * This function analyzes the prompt text to determine if it's a
- * pre-solved verification prompt from an Oracle node.
+ * pre-solved verification prompt from a Shard node.
  *
  * @param prompt - The prompt text to check
  * @returns GoldenTicketCheck with detection result and expected answer if found
@@ -204,7 +204,7 @@ export function generateHonestGoldenTicketResponse(
  * 2. If yes, generates an honest response
  * 3. If no, generates normal draft tokens using WebLLM
  *
- * @param work - The work request from the Oracle
+ * @param work - The work request from the Shard
  * @param scoutId - The ID of this scout
  * @returns WorkResult with the response
  */
@@ -272,10 +272,10 @@ export async function processWorkRequest(
 // ─── API Integration ─────────────────────────────────────────────────────────
 
 /**
- * Submit a work result to the Oracle API.
+ * Submit a work result to the Shard API.
  *
  * This function submits the draft response (whether from a Golden Ticket
- * or normal work) to the Oracle for verification.
+ * or normal work) to the Shard for verification.
  *
  * @param result - The work result to submit
  * @returns Success status and detail message
@@ -319,7 +319,7 @@ export async function submitWorkResult(
 }
 
 /**
- * Fetch work from the Oracle API.
+ * Fetch work from the Shard API.
  *
  * Polls for available work that the Scout can process.
  *

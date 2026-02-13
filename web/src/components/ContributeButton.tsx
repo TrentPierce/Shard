@@ -13,7 +13,7 @@ interface ContributeButtonProps {
   className?: string
 }
 
-type ContributionTier = "browser" | "light" | "full" | "oracle"
+type ContributionTier = "browser" | "light" | "full" | "shard"
 
 interface TierInfo {
   id: ContributionTier
@@ -41,14 +41,14 @@ const TIERS: TierInfo[] = [
   {
     id: "full",
     name: "Full Node",
-    description: "Run a full Oracle node with full model inference",
+    description: "Run a full Shard node with full model inference",
     requirements: "8GB+ VRAM, 16GB+ RAM",
     benefits: "Unlimited access, earn reputation"
   },
   {
-    id: "oracle",
-    name: "Oracle Server",
-    description: "Run a public Oracle node serving API requests",
+    id: "shard",
+    name: "Shard Server",
+    description: "Run a public Shard node serving API requests",
     requirements: "16GB+ VRAM, dedicated server or data center",
     benefits: "Earn priority tokens, network revenue share"
   }
@@ -68,7 +68,7 @@ export function ContributeButton({ className = "" }: ContributeButtonProps) {
         return `${baseUrl}/download/v0.4.0/shard-0.4.0-windows-x64.exe`
       case "full":
         return `${baseUrl}/download/v0.4.0/shard-0.4.0-windows-x64.exe`
-      case "oracle":
+      case "shard":
         return `${baseUrl}/download/v0.4.0/shard-0.4.0-linux-x86_64.AppImage`
       default:
         return baseUrl

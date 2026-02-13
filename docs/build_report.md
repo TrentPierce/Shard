@@ -19,7 +19,7 @@ This document records all changes made to prepare Shard for production release a
 
 Implemented a live force-directed graph visualization:
 - Real-time peer network visualization using HTML5 Canvas
-- Local Oracle node at center (green)
+- Local Shard node at center (green)
 - Connected Scout nodes (blue)
 - Force-directed physics simulation
 - TPS and latency stats overlay

@@ -9,7 +9,7 @@ The system is a decentralized, peer-to-peer (P2P) inference network that provide
 
 ## 2. Node Classes (The Agents)
 
-### Class A: "The Oracle" (Titan Node)
+### Class A: "The Shard" (Titan Node)
 * **Hardware:** Desktop PC / Server (NVIDIA GPU 8GB+ VRAM).
 * **Software:** Installed Native Client (.exe / Python).
 * **Role:** The "Target Model" host.
@@ -24,7 +24,7 @@ The system is a decentralized, peer-to-peer (P2P) inference network that provide
 * **Role:** The "Draft Model" host.
 * **Function:** * Runs a tiny, "distilled" model (e.g., Llama-3-1B-Int4) via WebGPU.
     * Performs **Speculative Decoding**: rapid-fires 5-10 token guesses.
-    * Sends guesses to an Oracle Node for validation.
+    * Sends guesses to a Shard Node for validation.
     * Usage contributes to "Free Tier" access.
 * **Stack:** `WebLLM`, `Apache TVM`, `js-libp2p`.
 
@@ -39,13 +39,13 @@ The system is a decentralized, peer-to-peer (P2P) inference network that provide
 ## 3. The "Hybrid Speculative" Workflow
 1.  **Prompt:** User sends prompt "Explain Quantum Physics."
 2.  **Scout Swarm:** 3 local browser peers (Scouts) generate the first 10 tokens using a tiny draft model.
-3.  **Consensus:** They send these draft tokens to 1 Oracle.
-4.  **Verification:** The Oracle runs the full model *once* in parallel to verify the draft tokens.
+3.  **Consensus:** They send these draft tokens to 1 Shard.
+4.  **Verification:** The Shard runs the full model *once* in parallel to verify the draft tokens.
     * *Match:* Tokens accepted. Output streamed to user.
-    * *Mismatch:* Oracle corrects the stream, slashes Scout reputation score.
+    * *Mismatch:* Shard corrects the stream, slashes Scout reputation score.
 5.  **Result:** User gets "Server-Grade" quality at "Edge" latency.
 
 ## 4. Incentive & Security Protocol
-* **Proof of Inference (PoI):** * Oracles occasionally inject "Golden Tickets" (pre-solved prompts) to test Scouts.
+* **Proof of Inference (PoI):** * Shards occasionally inject "Golden Tickets" (pre-solved prompts) to test Scouts.
     * Scouts failing Golden Tickets are banned (Sybil Attack Prevention).
-* **The "Double-Dip" Prevention:** * If a native `.exe` client is detected on localhost:8080, the Browser Client **MUST** disable WebGPU and route strictly to the local Oracle to prevent hardware crash.
+* **The "Double-Dip" Prevention:** * If a native `.exe` client is detected on localhost:8080, the Browser Client **MUST** disable WebGPU and route strictly to the local Shard to prevent hardware crash.

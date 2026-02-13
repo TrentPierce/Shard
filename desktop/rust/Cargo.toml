@@ -1,5 +1,5 @@
 [package]
-name = "shard-oracle-daemon"
+name = "shard-daemon"
 version = "0.4.4"
 edition = "2021"
 description = "P2P networking sidecar for the Shard distributed inference network"

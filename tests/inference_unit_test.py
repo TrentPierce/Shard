@@ -25,14 +25,14 @@ class FakeControlPlane:
 
 def test_cooperative_generate_emits_local_then_verified_remote_tokens() -> None:
     async def runner() -> list[str]:
-        local_tokens = iter(["hello", "from", "oracle", None])
+        local_tokens = iter(["hello", "from", "shard", None])
 
         async def local_model_generate(_generated: list[str], _prompt: str, _request_id: str):
             return next(local_tokens)
 
         async def verify_draft(_generated: list[str], draft: list[str]):
             if draft == ["scout-a", "scout-b"]:
-                return ["scout-a"], "oracle-c"
+                return ["scout-a"], "shard-c"
             return draft, None
 
         control = FakeControlPlane(results=[{"draft_tokens": ["scout-a", "scout-b"]}])
@@ -51,7 +51,7 @@ def test_cooperative_generate_emits_local_then_verified_remote_tokens() -> None:
         return emitted
 
     emitted = asyncio.run(runner())
-    assert emitted == ["hello", "scout-a", "oracle-c", "from", "oracle"]
+    assert emitted == ["hello", "scout-a", "shard-c", "from", "shard"]
 
 
 def test_cooperative_generate_stops_on_local_none() -> None:

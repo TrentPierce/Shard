@@ -22,7 +22,7 @@ def _load_client(monkeypatch, api_keys="", rate_limit="60", max_prompt="16000"):
     monkeypatch.delenv("BITNET_LIB", raising=False)
     monkeypatch.delenv("BITNET_MODEL", raising=False)
 
-    module = importlib.import_module("oracle_api")
+    module = importlib.import_module("shard_api")
     module = importlib.reload(module)
     return TestClient(module.app)
 

@@ -23,7 +23,7 @@ Wave 1 (Foundation) → Wave 2 (Core P2P) → Wave 3 (WebLLM) → Wave 4 (Securi
 ## Current State Assessment
 
 ### ✅ Already Implemented (70% complete)
-- Python Oracle API with FastAPI, OpenAI-compatible endpoints
+- Python Shard API with FastAPI, OpenAI-compatible endpoints
 - Rust P2P Daemon with libp2p, gossipsub, TCP/WebSocket transports
 - Inference module with cooperative generation loop
 - BitNet ctypes bridge for model loading
@@ -227,13 +227,13 @@ Wave 1 (Foundation) → Wave 2 (Core P2P) → Wave 3 (WebLLM) → Wave 4 (Securi
 - **Depends on:** Task 2.3 (for connection status)
 
 ### Task 2.5: Traffic Shaping & Priority System
-- **Files:** `desktop/python/oracle_api.py`, `desktop/rust/src/main.rs`
+- **Files:** `desktop/python/shard_api.py`, `desktop/rust/src/main.rs`
 - **Category:** `ultrabrain`
 - **Skills:** None
 - **Complexity:** Medium
 - **Description:**
   - Implement load-based queue management
-  - Create priority tiers (Oracle > Scout > Leech)
+  - Create priority tiers (Shard > Scout > Leech)
   - Add swarm load endpoint
   - Implement dynamic priority adjustment
 - **Deliverables:**
@@ -345,13 +345,13 @@ Wave 1 (Foundation) → Wave 2 (Core P2P) → Wave 3 (WebLLM) → Wave 4 (Securi
 - **Blocking:** Tasks 4.2, 4.3
 - **Depends on:** Task 3.2
 
-### Task 4.2: Golden Ticket Implementation (Oracle)
-- **Files:** `desktop/python/inference.py`, `desktop/python/oracle_api.py`
+### Task 4.2: Golden Ticket Implementation (Shard)
+- **Files:** `desktop/python/inference.py`, `desktop/python/shard_api.py`
 - **Category:** `ultrabrain`
 - **Skills:** None
 - **Complexity:** High
 - **Description:**
-  - Implement ticket generation in Oracle
+  - Implement ticket generation in Shard
   - Add ticket injection to cooperative_generate
   - Create ticket signature verification
   - Add ticket result validation
@@ -496,7 +496,7 @@ Wave 1 (Foundation) → Wave 2 (Core P2P) → Wave 3 (WebLLM) → Wave 4 (Securi
 - **Complexity:** High
 - **Description:**
   - Create end-to-end integration tests
-  - Test Oracle→Scout→Leech flow
+  - Test Shard→Scout→Leech flow
   - Add load testing scenarios
   - Implement chaos testing
 - **Deliverables:**
@@ -572,7 +572,7 @@ graph TD
     T33 --> T43[4.3 Scout Ticket Handler]
     
     %% Wave 4
-    T41 --> T42[4.2 Oracle Tickets]
+    T41 --> T42[4.2 Shard Tickets]
     T41 --> T43
     T42 --> T44[4.4 Reputation]
     T43 --> T44
@@ -598,7 +598,7 @@ graph TD
 | **Dev 1** | Rust/Core P2P | `ultrabrain` | 1.2, 2.2, 2.3, 4.4, 4.5 |
 | **Dev 2** | WebLLM/Browser | `deep`, `ultrabrain` | 1.1, 3.1, 3.2, 3.3, 4.3 |
 | **Dev 3** | Frontend/UI | `visual-engineering` | 2.4, 3.4, 5.2 |
-| **Dev 4** | Python/Oracle | `ultrabrain` | 4.1, 4.2, 4.6 |
+| **Dev 4** | Python/Shard | `ultrabrain` | 4.1, 4.2, 4.6 |
 | **Dev 5** | DevOps/Build | `unspecified-low` | 1.4, 1.6, 5.1, 5.4 |
 | **Dev 6** | Documentation/Tests | `writing`, `unspecified-high` | 1.3, 1.5, 5.3, 5.5 |
 
@@ -637,7 +637,7 @@ If you're working alone, follow this sequence:
 ## Success Criteria
 
 ### Minimum Viable Product (MVP)
-- [ ] Oracle node runs and accepts connections
+- [ ] Shard node runs and accepts connections
 - [ ] Scout mode generates draft tokens via WebLLM
 - [ ] Leech mode shows queue and receives responses
 - [ ] Basic P2P connectivity (WebSocket acceptable)
@@ -670,7 +670,7 @@ If you're working alone, follow this sequence:
 shard/
 ├── desktop/
 │   ├── python/
-│   │   ├── oracle_api.py
+│   │   ├── shard_api.py
 │   │   ├── inference.py
 │   │   ├── bitnet/
 │   │   │   ├── __init__.py
@@ -703,7 +703,7 @@ shard/
 │   │   └── swarm-worker.js           # COMPLETE
 │   └── package.json
 ├── tests/
-│   ├── oracle_api_security_test.py
+│   ├── shard_api_security_test.py
 │   ├── inference_unit_test.py
 │   ├── inference_benchmark.py
 │   ├── golden_ticket_test.py         # NEW
@@ -738,7 +738,7 @@ shard/
 
 | Component | Technology | Version |
 |-----------|-----------|---------|
-| Oracle API | Python + FastAPI | 3.11+ |
+| Shard API | Python + FastAPI | 3.11+ |
 | P2P Daemon | Rust + libp2p | 1.75+ |
 | Web Client | Next.js + React | 14.x |
 | WebLLM | @mlc-ai/web-llm | 0.2.78+ |
