@@ -11,8 +11,8 @@ interface PeerNode {
 }
 
 interface Link {
-  source: string
-  target: string
+  source: string | { id: string }
+  target: string | { id: string }
   strength: number
 }
 
