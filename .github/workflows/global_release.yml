@@ -22,7 +22,7 @@ jobs:
   # ============================================
   build-windows:
     runs-on: windows-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     
     steps:
       - name: Checkout code
@@ -74,17 +74,17 @@ jobs:
           `$ErrorActionPreference = 'Stop'
           
           # Create installer directory
-          `$installerDir = "dist\windows-installer"
+          `$installerDir = "dist`\windows-installer"
           if (!(Test-Path `$installerDir)) { New-Item -ItemType Directory -Path `$installerDir -Force }
           
           # Copy release files
-          `$releaseDir = "dist\ShardAI"
+          `$releaseDir = "dist`\ShardAI"
           if (Test-Path `$releaseDir) {
-              Copy-Item -Path "`$releaseDir\*" -Destination `$installerDir -Recurse -Force
+              Get-ChildItem -Path `$releaseDir -Recurse | Copy-Item -Destination `$installerDir -Recurse -Force
           }
           
           # Create version file
-          "`$version" | Out-File -FilePath "`$installerDir\version.txt" -Encoding utf8
+          "`$version" | Out-File -FilePath "`$installerDir`\version.txt" -Encoding utf8
           
           # Create README
           @'
@@ -101,10 +101,12 @@ jobs:
           
           ## Support
           Visit https://github.com/TrentPierce/Shard for documentation
-          '@ | Out-File -FilePath "`$installerDir\README.md" -Encoding utf8
+          '@ | Out-File -FilePath "`$installerDir`\README.md" -Encoding utf8
           
-          # Create zip archive
-          Compress-Archive -Path "`$installerDir\*" -DestinationPath "`$exeName" -Force
+          # Create zip archive using dotnet Compress-Archive
+          `$tempZip = [System.IO.Path]::Combine(`$PWD.Path, "`$exeName")
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          `[System.IO.Compression.ZipFile]::CreateFromDirectory(`$installerDir, `$tempZip)
           
           Write-Host "Created: `$exeName"
           "@
@@ -124,7 +126,7 @@ jobs:
   # ============================================
   build-linux:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     
     steps:
       - name: Checkout code
@@ -171,7 +173,7 @@ jobs:
       
       - name: Create AppImage
         run: |
-          version="${{ github.ref_name }}".TrimStart("v")
+          version="${GITHUB_REF#refs/tags/v}"
           
           # Create AppDir structure
           mkdir -p AppDir/usr/bin AppDir/usr/lib AppDir/usr/share/applications
@@ -221,7 +223,7 @@ jobs:
   # ============================================
   build-macos:
     runs-on: macos-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     
     steps:
       - name: Checkout code
@@ -236,7 +238,7 @@ jobs:
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ env.RUST_VERSION }}
-          targets: aarch64-apple-darwin
+          targets: x86_64-apple-darwin,aarch64-apple-darwin
       
       - name: Install System Dependencies
         run: |
@@ -250,9 +252,10 @@ jobs:
       - name: Build Rust Daemon (Universal)
         working-directory: desktop/rust
         run: |
+          # Build for both architectures explicitly
+          cargo build --release --target x86_64-apple-darwin
           cargo build --release --target aarch64-apple-darwin
           # Create universal binary
-          cargo build --release
           lipo -create -output target/release/shard-daemon \
             target/release/shard-daemon \
             target/aarch64-apple-darwin/release/shard-daemon
@@ -274,7 +277,7 @@ jobs:
       
       - name: Create DMG
         run: |
-          version="${{ github.ref_name }}".TrimStart("v")
+          version="${GITHUB_REF#refs/tags/v}"
           
           # Create DMG structure
           mkdir -p "Shard-${version}.app/Contents/MacOS"
