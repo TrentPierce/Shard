@@ -74,17 +74,17 @@ jobs:
           `$ErrorActionPreference = 'Stop'
           
           # Create installer directory
-          `$installerDir = "dist`\windows-installer"
+          `$installerDir = Join-Path `$PWD.Path "dist`\windows-installer"
           if (!(Test-Path `$installerDir)) { New-Item -ItemType Directory -Path `$installerDir -Force }
           
           # Copy release files
-          `$releaseDir = "dist`\ShardAI"
+          `$releaseDir = Join-Path `$PWD.Path "dist`\ShardAI"
           if (Test-Path `$releaseDir) {
               Get-ChildItem -Path `$releaseDir -Recurse | Copy-Item -Destination `$installerDir -Recurse -Force
           }
           
           # Create version file
-          "`$version" | Out-File -FilePath "`$installerDir`\version.txt" -Encoding utf8
+          "`$version" | Out-File -FilePath (Join-Path `$installerDir "version.txt") -Encoding utf8
           
           # Create README
           @'
@@ -101,10 +101,10 @@ jobs:
           
           ## Support
           Visit https://github.com/TrentPierce/Shard for documentation
-          '@ | Out-File -FilePath "`$installerDir`\README.md" -Encoding utf8
+          '@ | Out-File -FilePath (Join-Path `$installerDir "README.md") -Encoding utf8
           
           # Create zip archive using dotnet Compress-Archive
-          `$tempZip = [System.IO.Path]::Combine(`$PWD.Path, "`$exeName")
+          `$tempZip = Join-Path `$PWD.Path "`$exeName"
           Add-Type -AssemblyName System.IO.Compression.FileSystem
           `[System.IO.Compression.ZipFile]::CreateFromDirectory(`$installerDir, `$tempZip)
           
