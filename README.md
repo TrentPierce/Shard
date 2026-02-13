@@ -3,7 +3,7 @@
 > **Free, unlimited LLM access** powered by a decentralized P2P inference mesh.
 > Contribute compute, earn priority.
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![License: BSL 1.1](https://img.shields.io/badge/License-BSL_1.1-orange.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![Rust 1.75+](https://img.shields.io/badge/rust-1.75+-orange.svg)](https://www.rust-lang.org/)
 [![Node.js 18+](https://img.shields.io/badge/node-18+-green.svg)](https://nodejs.org/)
@@ -11,6 +11,10 @@
 [![CI](https://github.com/TrentPierce/Shard/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/TrentPierce/Shard/actions/workflows/ci.yml)
 
 ---
+
+## White Paper
+
+For a comprehensive technical analysis of Shard's architecture, including BitNet quantization, Hybrid Speculative Decoding, and P2P networking, see the [White Paper](docs/Shard-White-Paper-Feb-2026.pdf).
 
 ## Demo
 
