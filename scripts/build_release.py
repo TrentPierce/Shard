@@ -93,7 +93,14 @@ def freeze_python(daemon_bin: Path, engine_lib: Path) -> Path:
 
     cmd.append(str(api_entry))
     run(cmd)
-    return DIST / "ShardAI"
+    
+    # Copy installer script to distribution
+    frozen = DIST / "ShardAI"
+    installer_script = ROOT / "scripts" / "install.bat"
+    if installer_script.exists():
+        shutil.copy2(installer_script, frozen / "install.bat")
+    
+    return frozen
 
 
 def write_manifest(target: Path, daemon_bin: Path, engine_lib: Path) -> None:
