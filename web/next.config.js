@@ -1,7 +1,10 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  output: 'export',  // Static export for IPFS hosting
+  
+  // Note: output: 'export' removed for Vercel compatibility
+  // For static IPFS export, add 'output: export' back and use: npm run build && npm run export
+  // images: { unoptimized: true } is required when using output: 'export'
   
   // Security Headers
   async headers() {

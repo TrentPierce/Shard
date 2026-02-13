@@ -1,15 +1,20 @@
-import type { Metadata } from "next"
+import type { Metadata, Viewport } from "next"
 import "./globals.css"
 import ErrorBoundary from "@/components/ErrorBoundary"
 import { Providers } from "@/components/Providers"
+
+export const viewport: Viewport = {
+    width: "device-width",
+    initialScale: 1,
+    maximumScale: 5,
+    themeColor: "#06060e",
+}
 
 export const metadata: Metadata = {
     title: "Shard — Distributed Inference Network",
     description:
         "Free, unlimited LLM access powered by a decentralized P2P inference mesh. Contribute compute, earn priority.",
     manifest: "/manifest.json",
-    themeColor: "#06060e",
-    viewport: "width=device-width, initial-scale=1, maximum-scale=5",
     appleWebApp: {
         capable: true,
         statusBarStyle: "black-translucent",
