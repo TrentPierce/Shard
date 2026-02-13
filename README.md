@@ -8,6 +8,7 @@
 [![Rust 1.75+](https://img.shields.io/badge/rust-1.75+-orange.svg)](https://www.rust-lang.org/)
 [![Node.js 18+](https://img.shields.io/badge/node-18+-green.svg)](https://nodejs.org/)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](http://makeapullrequest.com)
+[![CI](https://github.com/TrentPierce/Shard/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/TrentPierce/Shard/actions/workflows/ci.yml)
 
 ---
 

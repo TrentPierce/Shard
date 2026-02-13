@@ -81,6 +81,8 @@ class BitNetRuntime:
         self._lib.shard_tokenize.restype = ctypes.c_int
         self._lib.shard_token_to_piece.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_int]
         self._lib.shard_token_to_piece.restype = ctypes.c_int
+        self._lib.shard_rollback.argtypes = [ctypes.c_void_p, ctypes.c_int]
+        self._lib.shard_rollback.restype = ctypes.c_int
 
     @staticmethod
     def token_id_for_text(text: str) -> int:
@@ -95,7 +97,13 @@ class BitNetRuntime:
             max_toks = len(text) * 4 + 16
             buf = (ctypes.c_int * max_toks)()
             n = self._lib.shard_tokenize(self._handle, text.encode("utf-8"), buf, max_toks)
-            return list(buf)[:n] if n > 0 else []
+            tokens = list(buf)[:n] if n > 0 else []
+            # shard_tokenize implicitly adds BOS (128000). We must strip it to avoid:
+            # 1. Double BOS at start of prompt (since we manually add <|begin_of_text|>)
+            # 2. BOS inserted before EVERY generated token in the eval loop
+            if tokens and tokens[0] == 128000:
+                tokens = tokens[1:]
+            return tokens
         
         # Legacy fallback
         ids: list[int] = []
@@ -116,7 +124,12 @@ class BitNetRuntime:
                 # Use ctypes.string_at to get exactly n bytes (safely handles null-termination)
                 raw = ctypes.string_at(buf, n)
                 # Decode with replacement for invalid sequences (preserves valid chars)
-                return raw.decode("utf-8", errors="replace")
+                dec = raw.decode("utf-8", errors="replace")
+                # Llama-3 BPE sometimes (though rarely) adds space at start of pieces
+                # But mostly it encodes spaces as separate tokens or as part of the word
+                # Let's trust the raw decode for now, but maybe strip if needed?
+                # Actually, for Llama 3, best to just return raw decode.
+                return dec
             return f"tok_{token_id}"
         return self._reverse_token_map.get(token_id, f"tok_{token_id}")
 

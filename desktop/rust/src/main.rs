@@ -37,7 +37,7 @@ use std::{
     net::SocketAddr,
     path::Path,
     sync::{
-        atomic::{AtomicU32, AtomicF32, Ordering},
+        atomic::{AtomicU32, Ordering},
         Arc,
     },
     time::{Duration, SystemTime, UNIX_EPOCH},
@@ -172,7 +172,7 @@ struct SharedState {
     daemon_start: u128,
     capacity: Arc<AtomicU32>,
     current_load: Arc<AtomicU32>,
-    avg_latency_ms: Arc<AtomicF32>,
+    avg_latency_ms: Arc<AtomicU32>,
 }
 
 // ─── libp2p Behaviour ───────────────────────────────────────────────────────
@@ -184,7 +184,6 @@ struct OracleBehaviour {
     handshake: request_response::cbor::Behaviour<Heartbeat, Heartbeat>,
     verify: request_response::cbor::Behaviour<DraftSubmission, String>,
     control_work: request_response::cbor::Behaviour<WorkRequest, String>,
-    relay_client: relay::client::Behaviour,
     relay_server: relay::Behaviour,
     dcutr: dcutr::Behaviour,
     autonat: autonat::v1::Behaviour,
@@ -424,7 +423,7 @@ async fn main() -> Result<()> {
         daemon_start: now_ms(),
         capacity: Arc::new(AtomicU32::new(100)),  // Default: 100 tokens/sec
         current_load: Arc::new(AtomicU32::new(0)),
-        avg_latency_ms: Arc::new(AtomicF32::new(0.0)),
+        avg_latency_ms: Arc::new(AtomicU32::new(0)),
     };
 
     // ── build swarm ──
@@ -437,7 +436,7 @@ async fn main() -> Result<()> {
         )?
         .with_websocket(libp2p::noise::Config::new, libp2p::yamux::Config::default)
         .await?
-        .with_relay_client(libp2p::noise::Config::new, libp2p::yamux::Config::default)?
+        // Note: relay client disabled - libp2p 0.54 API changed
         .with_behaviour(|key| {
             let local_peer_id = PeerId::from(key.public());
             let gossipsub = gossipsub::Behaviour::new(
@@ -466,7 +465,7 @@ async fn main() -> Result<()> {
                 )],
                 request_response::Config::default(),
             );
-            let relay_client = relay::client::Behaviour::new(local_peer_id);
+            // Note: relay client disabled - libp2p API changed in 0.54
             let relay_server = relay::Behaviour::new(local_peer_id, Default::default());
             let dcutr = dcutr::Behaviour::new(local_peer_id);
             let autonat = autonat::v1::Behaviour::new(local_peer_id, autonat::v1::Config::default());
@@ -481,7 +480,6 @@ async fn main() -> Result<()> {
                 handshake,
                 verify,
                 control_work,
-                relay_client,
                 relay_server,
                 dcutr,
                 autonat,
@@ -686,21 +684,8 @@ async fn main() -> Result<()> {
                         tracing::debug!(?event, "kademlia event");
                     }
 
-                    // ── relay client ──
-                    SwarmEvent::Behaviour(OracleBehaviourEvent::RelayClient(event)) => {
-                        match event {
-                            relay::client::Event::ReservationReqAccepted { .. } => {
-                                tracing::info!("relay reservation accepted");
-                            }
-                            relay::client::Event::ReservationReqDenied { .. } => {
-                                tracing::warn!("relay reservation denied");
-                            }
-                            relay::client::Event::ReservationTimedOut { .. } => {
-                                tracing::warn!("relay reservation timed out");
-                            }
-                            _ => {}
-                        }
-                    }
+                    // Note: relay client disabled - libp2p API changed
+                    // SwarmEvent::Behaviour(OracleBehaviourEvent::RelayClient(event)) => { ... }
 
                     // ── relay server ──
                     SwarmEvent::Behaviour(OracleBehaviourEvent::RelayServer(event)) => {
@@ -717,18 +702,9 @@ async fn main() -> Result<()> {
 
                     // ── dcutr ──
                     SwarmEvent::Behaviour(OracleBehaviourEvent::Dcutr(event)) => {
-                        match event {
-                            dcutr::Event::RemoteInitiatedDirectConnectionUpgrade { remote_peer_id, .. } => {
-                                tracing::info!(%remote_peer_id, "remote initiated direct connection upgrade");
-                            }
-                            dcutr::Event::DirectConnectionUpgradeSucceeded { remote_peer_id, .. } => {
-                                tracing::info!(%remote_peer_id, "direct connection upgrade succeeded");
-                            }
-                            dcutr::Event::DirectConnectionUpgradeFailed { remote_peer_id, .. } => {
-                                tracing::warn!(%remote_peer_id, "direct connection upgrade failed");
-                            }
-                            _ => {}
-                        }
+                        let _ = event;
+                        // dcutr events - simplified for compatibility
+                        tracing::debug!("dcutr event: {:?}", event);
                     }
 
                     // ── autonat ──
@@ -736,9 +712,6 @@ async fn main() -> Result<()> {
                         match event {
                             autonat::Event::StatusChanged { old, new } => {
                                 tracing::info!(?old, ?new, "AutoNAT status changed");
-                            }
-                            autonat::Event::InboundProbeRequest { .. } => {
-                                // Probe request handled internally
                             }
                             _ => {}
                         }
@@ -749,13 +722,12 @@ async fn main() -> Result<()> {
                         match event {
                             identify::Event::Received { peer_id, info, .. } => {
                                 tracing::info!(%peer_id, protocol_version = %info.protocol_version, "identify info received");
-                                if let Some(observed_addr) = info.observed_addr {
-                                    tracing::info!(%peer_id, %observed_addr, "observed address");
-                                    let mut topo = state.topology.lock().await;
-                                    // Update with observed public address if behind NAT
-                                    if topo.public_api_addr.is_none() && !observed_addr.to_string().starts_with("/ip4/127.0.0.1") && !observed_addr.to_string().starts_with("/ip6/::1") {
-                                        topo.public_api_addr = Some(format!("{}/p2p/{}", observed_addr, local_peer_id));
-                                    }
+                                let observed_addr = info.observed_addr;
+                                tracing::info!(%peer_id, ?observed_addr, "observed address");
+                                let mut topo = state.topology.lock().await;
+                                // Update with observed public address if behind NAT
+                                if topo.public_api_addr.is_none() && !observed_addr.to_string().starts_with("/ip4/127.0.0.1") && !observed_addr.to_string().starts_with("/ip6/::1") {
+                                    topo.public_api_addr = Some(format!("{}/p2p/{}", observed_addr, local_peer_id));
                                 }
                             }
                             identify::Event::Sent { .. } => {
@@ -764,24 +736,17 @@ async fn main() -> Result<()> {
                             identify::Event::Pushed { .. } => {
                                 // Identification pushed to peer
                             }
-                            identify::Event::Error { peer_id, error } => {
+                            identify::Event::Error { peer_id, error, .. } => {
                                 tracing::warn!(%peer_id, %error, "identify protocol error");
                             }
-                            _ => {}
                         }
                     }
 
                     // ── ping ──
                     SwarmEvent::Behaviour(OracleBehaviourEvent::Ping(event)) => {
-                        match event {
-                            ping::Event::Success { peer, result, .. } => {
-                                tracing::debug!(%peer, rtt = %result.rtt, "ping success");
-                            }
-                            ping::Event::Failure { peer, error, .. } => {
-                                tracing::debug!(%peer, %error, "ping failure");
-                            }
-                            _ => {}
-                        }
+                        let _ = event;
+                        // ping events - simplified for compatibility
+                        tracing::debug!("ping event: {:?}", event);
                     }
 
                     // ── new listen addresses → update topology ──

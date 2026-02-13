@@ -27,7 +27,7 @@ def test_cooperative_generate_emits_local_then_verified_remote_tokens() -> None:
     async def runner() -> list[str]:
         local_tokens = iter(["hello", "from", "oracle", None])
 
-        async def local_model_generate(_generated: list[str], _prompt: str):
+        async def local_model_generate(_generated: list[str], _prompt: str, _request_id: str):
             return next(local_tokens)
 
         async def verify_draft(_generated: list[str], draft: list[str]):
@@ -56,7 +56,7 @@ def test_cooperative_generate_emits_local_then_verified_remote_tokens() -> None:
 
 def test_cooperative_generate_stops_on_local_none() -> None:
     async def runner() -> list[str]:
-        async def local_model_generate(_generated: list[str], _prompt: str):
+        async def local_model_generate(_generated: list[str], _prompt: str, _request_id: str):
             return None
 
         async def verify_draft(_generated: list[str], draft: list[str]):
