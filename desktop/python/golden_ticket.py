@@ -45,6 +45,7 @@ import logging
 import os
 import re
 import secrets
+import sqlite3
 import threading
 import time
 from dataclasses import dataclass, field
@@ -60,9 +61,203 @@ DEFAULT_REPUTATION_THRESHOLD = 0.7  # 70% accuracy required
 DEFAULT_MIN_ATTEMPTS_BEFORE_BAN = 3  # Minimum golden tickets before ban decision
 DEFAULT_BAN_DURATION_HOURS = 24  # Ban duration in hours
 
-# File paths for persistence
+# File paths for persistence (JSON fallback)
 BANNED_LIST_PATH = Path(os.getenv("SHARD_BANNED_LIST_PATH", "./data/banned_scouts.json"))
 REPUTATION_DB_PATH = Path(os.getenv("SHARD_REPUTATION_DB_PATH", "./data/scout_reputation.json"))
+
+# SQLite database path (preferred for production)
+SQLITE_DB_PATH = Path(os.getenv("SHARD_SQLITE_DB_PATH", "./data/shard_reputation.db"))
+
+
+# ─── SQLite Reputation Ledger ───────────────────────────────────────────────────
+
+class SQLiteReputationLedger:
+    """SQLite-backed reputation ledger for production deployments.
+    
+    This provides:
+    - Persistent storage of scout reputations
+    - Atomic updates for concurrent access
+    - Better performance than JSON files for large datasets
+    
+    Schema:
+        scout_reputation:
+            - peer_id (TEXT PRIMARY KEY)
+            - golden_attempts (INTEGER)
+            - golden_correct (INTEGER)
+            - first_seen (REAL)
+            - last_seen (REAL)
+            
+        banned_scouts:
+            - peer_id (TEXT PRIMARY KEY)
+            - banned_at (REAL)
+            - ban_duration_hours (INTEGER)
+            - reason (TEXT)
+            - failed_attempts (INTEGER)
+    """
+    
+    def __init__(self, db_path: Path | None = None) -> None:
+        self._db_path = db_path or SQLITE_DB_PATH
+        self._conn: sqlite3.Connection | None = None
+        self._lock = threading.RLock()
+        
+    def _ensure_connection(self) -> sqlite3.Connection:
+        """Ensure database connection is established."""
+        if self._conn is None:
+            self._db_path.parent.mkdir(parents=True, exist_ok=True)
+            self._conn = sqlite3.connect(str(self._db_path), check_same_thread=False)
+            self._conn.row_factory = sqlite3.Row
+            self._init_schema()
+        return self._conn
+    
+    def _init_schema(self) -> None:
+        """Initialize database schema."""
+        conn = self._conn
+        if conn is None:
+            return
+            
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS scout_reputation (
+                peer_id TEXT PRIMARY KEY,
+                golden_attempts INTEGER DEFAULT 0,
+                golden_correct INTEGER DEFAULT 0,
+                first_seen REAL NOT NULL,
+                last_seen REAL NOT NULL
+            )
+        """)
+        
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS banned_scouts (
+                peer_id TEXT PRIMARY KEY,
+                banned_at REAL NOT NULL,
+                ban_duration_hours INTEGER NOT NULL,
+                reason TEXT,
+                failed_attempts INTEGER DEFAULT 0
+            )
+        """)
+        
+        conn.commit()
+    
+    def get_reputation(self, peer_id: str) -> ScoutReputation | None:
+        """Get reputation for a scout peer."""
+        with self._lock:
+            conn = self._ensure_connection()
+            row = conn.execute(
+                "SELECT * FROM scout_reputation WHERE peer_id = ?",
+                (peer_id,)
+            ).fetchone()
+            
+            if row is None:
+                return None
+                
+            return ScoutReputation(
+                peer_id=row["peer_id"],
+                golden_attempts=row["golden_attempts"],
+                golden_correct=row["golden_correct"],
+                first_seen=row["first_seen"],
+                last_seen=row["last_seen"],
+            )
+    
+    def save_reputation(self, rep: ScoutReputation) -> None:
+        """Save or update reputation for a scout."""
+        with self._lock:
+            conn = self._ensure_connection()
+            conn.execute("""
+                INSERT OR REPLACE INTO scout_reputation 
+                (peer_id, golden_attempts, golden_correct, first_seen, last_seen)
+                VALUES (?, ?, ?, ?, ?)
+            """, (
+                rep.peer_id,
+                rep.golden_attempts,
+                rep.golden_correct,
+                rep.first_seen,
+                rep.last_seen,
+            ))
+            conn.commit()
+    
+    def is_banned(self, peer_id: str) -> bool:
+        """Check if a scout is currently banned."""
+        with self._lock:
+            conn = self._ensure_connection()
+            row = conn.execute(
+                "SELECT banned_at, ban_duration_hours FROM banned_scouts WHERE peer_id = ?",
+                (peer_id,)
+            ).fetchone()
+            
+            if row is None:
+                return False
+                
+            # Check if ban has expired
+            elapsed_hours = (time.time() - row["banned_at"]) / 3600
+            return elapsed_hours < row["ban_duration_hours"]
+    
+    def ban_scout(self, ban: BanEntry) -> None:
+        """Ban a scout."""
+        with self._lock:
+            conn = self._ensure_connection()
+            conn.execute("""
+                INSERT OR REPLACE INTO banned_scouts
+                (peer_id, banned_at, ban_duration_hours, reason, failed_attempts)
+                VALUES (?, ?, ?, ?, ?)
+            """, (
+                ban.peer_id,
+                ban.banned_at,
+                ban.ban_duration_hours,
+                ban.reason,
+                ban.failed_attempts,
+            ))
+            conn.commit()
+    
+    def unban_scout(self, peer_id: str) -> bool:
+        """Unban a scout. Returns True if scout was unbanned."""
+        with self._lock:
+            conn = self._ensure_connection()
+            cursor = conn.execute(
+                "DELETE FROM banned_scouts WHERE peer_id = ?",
+                (peer_id,)
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+    
+    def get_all_reputations(self) -> dict[str, ScoutReputation]:
+        """Get all scout reputations."""
+        with self._lock:
+            conn = self._ensure_connection()
+            rows = conn.execute("SELECT * FROM scout_reputation").fetchall()
+            return {
+                row["peer_id"]: ScoutReputation(
+                    peer_id=row["peer_id"],
+                    golden_attempts=row["golden_attempts"],
+                    golden_correct=row["golden_correct"],
+                    first_seen=row["first_seen"],
+                    last_seen=row["last_seen"],
+                )
+                for row in rows
+            }
+    
+    def get_all_banned(self) -> dict[str, BanEntry]:
+        """Get all active bans."""
+        with self._lock:
+            conn = self._ensure_connection()
+            rows = conn.execute("SELECT * FROM banned_scouts").fetchall()
+            result = {}
+            for row in rows:
+                ban = BanEntry(
+                    peer_id=row["peer_id"],
+                    banned_at=row["banned_at"],
+                    ban_duration_hours=row["ban_duration_hours"],
+                    reason=row["reason"],
+                    failed_attempts=row["failed_attempts"],
+                )
+                if ban.is_active:
+                    result[row["peer_id"]] = ban
+            return result
+    
+    def close(self) -> None:
+        """Close database connection."""
+        with self._lock:
+            if self._conn:
+                self._conn.close()
+                self._conn = None
 
 # ─── Golden Ticket Templates ──────────────────────────────────────────────────
 
