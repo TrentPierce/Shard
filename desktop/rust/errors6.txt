@@ -1,6 +1,0 @@
-    Checking shard-oracle-daemon v0.4.4 (D:\Dev\Projects\Shard\Shard\desktop\rust)
-src\main.rs:32:40: warning: unused import: `SwarmBuilder`
-src\main.rs:434:61: error[E0599]: no method named `clone` found for struct `libp2p::libp2p_dns::Transport<T, R>` in the current scope: method not found in `Transport<Transport<Tcp>, Resolver<GenericConnector<...>>>`
-src\main.rs:461:10: error[E0277]: `?` couldn't convert the error: `str: StdError` is not satisfied: the trait `StdError` is not implemented for `str`
-warning: `shard-oracle-daemon` (bin "shard-daemon") generated 1 warning
-error: could not compile `shard-oracle-daemon` (bin "shard-daemon") due to 2 previous errors; 1 warning emitted
