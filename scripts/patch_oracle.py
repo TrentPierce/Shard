@@ -1,7 +1,7 @@
 
 import os
 
-path = 'desktop/python/oracle_api.py'
+path = 'desktop/python/shard_api.py'
 with open(path, 'r', encoding='utf-8') as f:
     content = f.read()
 
@@ -49,6 +49,6 @@ if start != -1 and end != -1:
     new_content = content[:start] + new_code + content[end:]
     with open(path, 'w', encoding='utf-8') as f:
         f.write(new_content)
-    print("Successfully patched oracle_api.py")
+    print("Successfully patched shard_api.py")
 else:
     print(f"Failed to find boundaries: start={start}, end={end}")

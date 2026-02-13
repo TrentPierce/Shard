@@ -1,4 +1,4 @@
-"""OpenAI-compatible local Oracle API with SSE streaming.
+"""OpenAI-compatible local Shard API with SSE streaming.
 
 Service roles:
 - Driver API in Python (OpenAI-compatible, with streaming)
@@ -35,7 +35,7 @@ from golden_ticket import (
     reset_scout_reputation,
 )
 
-LOGGER = logging.getLogger("shard.oracle_api")
+LOGGER = logging.getLogger("shard.shard_api")
 
 # Try to load BitNet runtime, but allow running without it
 # Note: BITNET is checked at runtime in endpoints, not at import time
@@ -110,16 +110,16 @@ tags_metadata = [
 ]
 
 app = FastAPI(
-    title="Shard Oracle API",
+    title="Shard API",
     version="0.4.4",
     description=r"""
     OpenAI-compatible API for the Shard distributed inference network.
 
     ## Overview
 
-    The Shard Oracle API provides server-grade LLM inference through a hybrid
+    The Shard API provides server-grade LLM inference through a hybrid
     P2P network. It combines:
-    - **Oracle nodes** with full models that verify draft tokens
+    - **Shard nodes** with full models that verify draft tokens
     - **Scout nodes** with draft models that generate token predictions
     - **Distributed inference** for free, unlimited access
 
@@ -130,7 +130,7 @@ app = FastAPI(
          ↓
     Scout Nodes (WebLLM) → Draft Token Generation
          ↓
-    Oracle Nodes (BitNet) → Draft Verification
+    Shard Nodes (BitNet) → Draft Verification
          ↓
     Final Response
     ```
@@ -139,7 +139,7 @@ app = FastAPI(
 
     ### Inference
     - **Chat Completions**: OpenAI-compatible streaming and non-streaming chat
-    - **Distributed Generation**: Hybrid Oracle+Scout inference for quality
+    - **Distributed Generation**: Hybrid Shard+Scout inference for quality
     - **Golden Ticket Security**: Sybil attack prevention through verification
 
     ### Network
@@ -148,7 +148,7 @@ app = FastAPI(
     - **Kademlia DHT**: Peer discovery and routing
 
     ### Quality
-    - **Verify, Don't Trust**: All Scout drafts verified by Oracles
+    - **Verify, Don't Trust**: All Scout drafts verified by Shards
     - **Heavier is Truth**: GPU nodes always override browser drafts
     - **Reputation System**: Scout accuracy tracked and scored
 
@@ -163,7 +163,7 @@ app = FastAPI(
 
     ## Node Modes
 
-    - **Oracle**: Full model host that verifies draft tokens (desktop GPU recommended)
+    - **Shard**: Full model host that verifies draft tokens (desktop GPU recommended)
     - **Scout**: Browser node that generates draft tokens (WebGPU recommended)
     - **Leech**: Consumer-only node (lowest priority, queued behind contributors)
 
@@ -427,13 +427,13 @@ class ChatRequest(BaseModel):
     Request for chat completion generation.
 
     This follows the OpenAI-compatible chat completion API specification.
-    Uses distributed inference via Scout nodes and local Oracle verification.
+    Uses distributed inference via Scout nodes and local Shard verification.
     """
     model: str = Field(
         default="shard-hybrid",
         description=(
             "Model identifier to use. Currently supports: "
-            "shard-hybrid (hybrid Oracle+Scout inference)"
+            "shard-hybrid (hybrid Shard+Scout inference)"
         ),
         examples=["shard-hybrid", "gpt-4", "claude-3"],
     )
@@ -624,7 +624,7 @@ async def health() -> dict[str, Any]:
     summary="Get network topology",
     description=(
         "Retrieves the network topology for browser Scout auto-discovery. "
-        "Scouts use this endpoint to find Oracle nodes to connect to."
+        "Scouts use this endpoint to find Shard nodes to connect to."
     ),
 )
 async def system_topology() -> dict[str, Any]:
@@ -639,8 +639,8 @@ async def system_topology() -> dict[str, Any]:
     return {
         "status": "degraded",
         "source": "fallback",
-        "oracle_webrtc_multiaddr": None,
-        "oracle_ws_multiaddr": None,
+        "shard_webrtc_multiaddr": None,
+        "shard_ws_multiaddr": None,
         "detail": "Rust sidecar not reachable",
     }
 
@@ -671,7 +671,7 @@ async def system_peers() -> dict[str, Any]:
     summary="Create chat completion",
     description=(
         "Creates a model response for the given chat conversation. "
-        "Uses distributed inference with Scout nodes and Oracle verification. "
+        "Uses distributed inference with Scout nodes and Shard verification. "
         "Supports both streaming and non-streaming modes."
     ),
     responses={

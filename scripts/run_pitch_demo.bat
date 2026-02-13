@@ -57,7 +57,7 @@ if not exist "%EXE_PATH%" (
     if defined DEBUG_MODE (
         python desktop\python\run.py
     ) else (
-        start "Shard Oracle" python desktop\python\run.py
+        start "Shard" python desktop\python\run.py
     )
 ) else (
     echo [INFO] Found executable: %EXE_PATH%
@@ -69,7 +69,7 @@ if not exist "%EXE_PATH%" (
     if defined DEBUG_MODE (
         "%EXE_PATH%"
     ) else (
-        start "Shard Oracle - Pitch Mode" "%EXE_PATH%"
+        start "Shard - Pitch Mode" "%EXE_PATH%"
     )
 )
 

@@ -11,7 +11,7 @@
 
 ## Model Runtime
 
-- **Oracle (Desktop):** `bitnet.cpp` with in-process Python `ctypes` bridge.
+- **Shard (Desktop):** `bitnet.cpp` with in-process Python `ctypes` bridge.
 - **Scout (Browser):** `@mlc-ai/web-llm` for draft tokens.
 
 ## Control Plane

@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react"
 import type { NodeMode } from "@/app/page"
 import type { Topology } from "@/lib/swarm"
-import { heartbeatOracle } from "@/lib/swarm"
+import { heartbeatShard } from "@/lib/swarm"
 import type { ModelProgress } from "@/lib/webllm"
 import { apiUrl } from "@/lib/config"
 
@@ -52,14 +52,14 @@ export default function NetworkStatus({
 
     const doPing = async () => {
         const addr =
-            topology?.oracle_ws_multiaddr ?? topology?.oracle_webrtc_multiaddr
+            topology?.shard_ws_multiaddr ?? topology?.shard_webrtc_multiaddr
         if (!addr) {
-            setHeartbeat("no oracle address")
+            setHeartbeat("no shard address")
             return
         }
         setPinging(true)
         setHeartbeat("dialing…")
-        const result = await heartbeatOracle(addr)
+        const result = await heartbeatShard(addr)
         if (result.ok) {
             setHeartbeat(`PONG rtt=${result.rttMs?.toFixed(1)}ms`)
         } else {
@@ -91,8 +91,8 @@ export default function NetworkStatus({
                 <div className="stat-row">
                     <span className="stat-label" id="node-mode-label">Node Mode</span>
                     <span className="stat-value" aria-labelledby="node-mode-label">
-                        {mode === "local-oracle"
-                            ? "Oracle"
+                        {mode === "local-shard"
+                            ? "Shard"
                             : mode === "scout"
                                 ? "Scout"
                                 : mode === "scout-initializing"
@@ -182,11 +182,11 @@ export default function NetworkStatus({
                     <span className="stat-label">Peer ID</span>
                     <span
                         className="stat-value"
-                        title={topology?.oracle_peer_id ?? ""}
+                        title={topology?.shard_peer_id ?? ""}
                         style={{ fontSize: "10px", maxWidth: "140px", overflow: "hidden", textOverflow: "ellipsis" }}
                     >
-                        {topology?.oracle_peer_id
-                            ? topology.oracle_peer_id.slice(0, 16) + "…"
+                        {topology?.shard_peer_id
+                            ? topology.shard_peer_id.slice(0, 16) + "…"
                             : "—"}
                     </span>
                 </div>
@@ -196,7 +196,7 @@ export default function NetworkStatus({
                         className="stat-value"
                         style={{ fontSize: "9px", maxWidth: "140px", overflow: "hidden", textOverflow: "ellipsis" }}
                     >
-                        {topology?.oracle_ws_multiaddr ? "✓ available" : "—"}
+                        {topology?.shard_ws_multiaddr ? "✓ available" : "—"}
                     </span>
                 </div>
                 <div className="stat-row">
@@ -205,7 +205,7 @@ export default function NetworkStatus({
                         className="stat-value"
                         style={{ fontSize: "9px", maxWidth: "140px", overflow: "hidden", textOverflow: "ellipsis" }}
                     >
-                        {topology?.oracle_webrtc_multiaddr ? "✓ available" : "—"}
+                        {topology?.shard_webrtc_multiaddr ? "✓ available" : "—"}
                     </span>
                 </div>
             </div>
