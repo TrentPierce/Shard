@@ -12,6 +12,7 @@ Usage:
 """
 
 from __future__ import annotations
+import atexit
 
 import argparse
 import logging
@@ -70,6 +71,28 @@ def main() -> None:
         level=getattr(logging, args.log_level.upper(), logging.INFO),
         format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
     )
+
+    if getattr(sys, "frozen", False):
+        import subprocess
+        base_dir = os.path.dirname(sys.executable)
+        daemon_name = "shard-daemon.exe" if os.name == "nt" else "shard-daemon"
+        daemon_path = os.path.join(base_dir, "_internal", "bin", daemon_name)
+        if os.path.exists(daemon_path):
+            print(f"Starting bundled sidecar: {daemon_path}")
+            try:
+                daemon_proc = subprocess.Popen([daemon_path])
+                def cleanup_daemon():
+                    print("Stopping sidecar...")
+                    daemon_proc.terminate()
+                    try:
+                        daemon_proc.wait(timeout=2)
+                    except subprocess.TimeoutExpired:
+                        daemon_proc.kill()
+                atexit.register(cleanup_daemon)
+            except Exception as e:
+                print(f"ERROR: Failed to start sidecar: {e}", file=sys.stderr)
+        else:
+            print(f"WARNING: Bundled sidecar not found at {daemon_path}", file=sys.stderr)
 
     uvicorn.run(
         "oracle_api:app",

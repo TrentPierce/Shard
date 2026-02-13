@@ -3,7 +3,9 @@ const nextConfig = {
   reactStrictMode: true,
   
   // Note: output: 'export' removed for Vercel compatibility
-  // For static IPFS export, add 'output: export' back and use: npm run build && npm run export
+  // Output as static files for desktop bundling
+  output: 'export',
+  images: { unoptimized: true },
   // images: { unoptimized: true } is required when using output: 'export'
   
   // Security Headers

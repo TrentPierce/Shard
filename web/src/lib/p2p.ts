@@ -13,6 +13,7 @@
 
 import { createLibp2p } from 'libp2p';
 import { webSockets } from '@libp2p/websockets';
+import { webRTC } from '@libp2p/webrtc';
 import { noise } from '@chainsafe/libp2p-noise';
 import { yamux } from '@chainsafe/libp2p-yamux';
 import { mplex } from '@libp2p/mplex';
@@ -93,15 +94,24 @@ export async function initP2P(config: P2PConfig = {}): Promise<string> {
 
   try {
     // Configure bootstrap peers
-    const bootstrapPeers = config.bootstrapPeers || ['ws://127.0.0.1:4101'];
-    const reconnectInterval = config.reconnectInterval || 5000;
+    // Configure bootstrap peers - connect to same host if served via network
+    let defaultPeer = 'ws://127.0.0.1:4101';
+    if (typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+      const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+      // Attempt to connect to the P2P port on the same host
+      defaultPeer = `${protocol}://${window.location.hostname}:4101`;
+    }
+    const bootstrapPeers = config.bootstrapPeers || [defaultPeer];
 
     console.log('[p2p] Initializing with bootstrap peers:', bootstrapPeers);
 
     // Create libp2p node
     p2pNode = await createLibp2p({
       // Transports
-      transports: [webSockets()],
+      transports: [
+        webSockets(),
+        webRTC(),
+      ],
 
       // Connection encryption
       connectionEncryption: [noise()],
