@@ -1,14 +1,14 @@
 /**
- * Oracle Node Discovery Client
+ * Shard Node Discovery Client
  * 
- * Fetches available Oracle nodes from multiple sources:
+ * Fetches available Shard nodes from multiple sources:
  * 1. Local Rust daemon (/v1/system/topology)
  * 2. Community list (GitHub Pages JSON)
  * 3. DNS TXT records (shard.network)
  * 4. IPFS content routing
  */
 
-export interface OracleNode {
+export interface ShardNode {
   peer_id: string
   api_url: string
   latency_ms?: number
@@ -16,15 +16,15 @@ export interface OracleNode {
 }
 
 interface DiscoveryResponse {
-  nodes: OracleNode[]
+  nodes: ShardNode[]
   source: 'local' | 'community' | 'dns' | 'ipfs' | 'merged'
   last_updated: string
 }
 
 /**
- * Get Oracle nodes from local daemon
+ * Get Shard nodes from local daemon
  */
-export async function getLocalOracleNodes(): Promise<DiscoveryResponse> {
+export async function getLocalShardNodes(): Promise<DiscoveryResponse> {
   try {
     const response = await fetch('/v1/system/topology')
     if (!response.ok) throw new Error('Local topology fetch failed')
@@ -40,10 +40,10 @@ export async function getLocalOracleNodes(): Promise<DiscoveryResponse> {
     }
     
     // Return local node if it's serving as public API
-    const nodes: OracleNode[] = []
+    const nodes: ShardNode[] = []
     if (topology.public_api && topology.public_api_addr) {
       nodes.push({
-        peer_id: topology.oracle_peer_id,
+        peer_id: topology.shard_peer_id,
         api_url: `http://${topology.public_api_addr}`,
       })
     }
@@ -64,9 +64,9 @@ export async function getLocalOracleNodes(): Promise<DiscoveryResponse> {
 }
 
 /**
- * Get Oracle nodes from community GitHub list
+ * Get Shard nodes from community GitHub list
  */
-export async function getCommunityOracleNodes(): Promise<DiscoveryResponse> {
+export async function getCommunityShardNodes(): Promise<DiscoveryResponse> {
   try {
     const response = await fetch('https://raw.githubusercontent.com/ShardNetwork/nodes/main.json', {
       cache: 'reload',
@@ -77,7 +77,7 @@ export async function getCommunityOracleNodes(): Promise<DiscoveryResponse> {
     const nodes = await response.json()
     
     return {
-      nodes: nodes.oracle_nodes || [],
+      nodes: nodes.shard_nodes || [],
       source: 'community',
       last_updated: nodes.last_updated || new Date().toISOString(),
     }
@@ -92,9 +92,9 @@ export async function getCommunityOracleNodes(): Promise<DiscoveryResponse> {
 }
 
 /**
- * Get Oracle nodes from IPFS (via DNSLink or gateway)
+ * Get Shard nodes from IPFS (via DNSLink or gateway)
  */
-export async function getIPFSOracleNodes(): Promise<DiscoveryResponse> {
+export async function getIPFSShardNodes(): Promise<DiscoveryResponse> {
   try {
     // Try IPFS gateway first
     const response = await fetch('https://shard.network/api/nodes.json', {
@@ -106,7 +106,7 @@ export async function getIPFSOracleNodes(): Promise<DiscoveryResponse> {
     const data = await response.json()
     
     return {
-      nodes: data.oracle_nodes || [],
+      nodes: data.shard_nodes || [],
       source: 'ipfs',
       last_updated: data.last_updated || new Date().toISOString(),
     }
@@ -121,17 +121,17 @@ export async function getIPFSOracleNodes(): Promise<DiscoveryResponse> {
 }
 
 /**
- * Get all Oracle nodes from all sources (merged)
+ * Get all Shard nodes from all sources (merged)
  */
-export async function getAllOracleNodes(): Promise<DiscoveryResponse> {
+export async function getAllShardNodes(): Promise<DiscoveryResponse> {
   const [local, community, ipfs] = await Promise.all([
-    getLocalOracleNodes(),
-    getCommunityOracleNodes(),
-    getIPFSOracleNodes(),
+    getLocalShardNodes(),
+    getCommunityShardNodes(),
+    getIPFSShardNodes(),
   ])
   
   // Merge all nodes, deduplicate by peer_id
-  const allNodes = new Map<string, OracleNode>()
+  const allNodes = new Map<string, ShardNode>()
   
   for (const response of [local, community, ipfs]) {
     for (const node of response.nodes) {
@@ -152,9 +152,9 @@ export async function getAllOracleNodes(): Promise<DiscoveryResponse> {
 }
 
 /**
- * Select fastest Oracle node based on latency
+ * Select fastest Shard node based on latency
  */
-export function selectFastestOracle(nodes: OracleNode[]): OracleNode | null {
+export function selectFastestShard(nodes: ShardNode[]): ShardNode | null {
   if (nodes.length === 0) return null
   
   // Filter nodes with known latency
@@ -172,25 +172,25 @@ export function selectFastestOracle(nodes: OracleNode[]): OracleNode | null {
 }
 
 /**
- * Get the best Oracle API URL for making requests.
- * Falls back to configured API_BASE if no oracle nodes are available.
+ * Get the best Shard API URL for making requests.
+ * Falls back to configured API_BASE if no shard nodes are available.
  */
-export async function getBestOracleApiUrl(): Promise<string> {
+export async function getBestShardApiUrl(): Promise<string> {
   // Import config here to avoid circular dependencies
   const { apiUrl: configApiUrl } = await import("./config")
   
   try {
-    // Try to get oracle nodes from discovery
-    const discovery = await getAllOracleNodes()
+    // Try to get shard nodes from discovery
+    const discovery = await getAllShardNodes()
     
     if (discovery.nodes.length > 0) {
-      const fastest = selectFastestOracle(discovery.nodes)
+      const fastest = selectFastestShard(discovery.nodes)
       if (fastest && fastest.api_url) {
         return fastest.api_url
       }
     }
   } catch (error) {
-    console.warn("[Discovery] Failed to get oracle nodes, using config URL:", error)
+    console.warn("[Discovery] Failed to get shard nodes, using config URL:", error)
   }
   
   // Fallback to configured API URL

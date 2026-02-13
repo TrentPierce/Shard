@@ -23,7 +23,7 @@ jobs:
       - name: Unit + failure tests
         run: |
           cd ../..
-          python -m pytest -q tests/inference_unit_test.py tests/control_plane_failure_test.py tests/bitnet_runtime_integration_test.py tests/oracle_api_security_test.py
+          python -m pytest -q tests/inference_unit_test.py tests/control_plane_failure_test.py tests/bitnet_runtime_integration_test.py tests/shard_api_security_test.py
 
   web-lockfile:
     runs-on: ubuntu-latest

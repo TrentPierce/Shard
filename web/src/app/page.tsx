@@ -8,7 +8,7 @@ import NetworkStatus from "@/components/NetworkStatus"
 import NetworkVisualizer from "@/components/NetworkVisualizer"
 import {
     fetchTopology,
-    probeLocalOracle,
+    probeLocalShard,
     startScoutWorker,
     type Topology,
 } from "@/lib/swarm"
@@ -20,7 +20,7 @@ import {
 
 export type NodeMode =
     | "loading"
-    | "local-oracle"
+    | "local-shard"
     | "scout-initializing"
     | "scout"
     | "leech"
@@ -45,14 +45,14 @@ export default function HomePage() {
 
     useEffect(() => {
         const boot = async () => {
-            // 1. Check for local Oracle exe
-            const probe = await probeLocalOracle()
+            // 1. Check for local Shard exe
+            const probe = await probeLocalShard()
             if (probe.available) {
-                setMode("local-oracle")
+                setMode("local-shard")
                 return
             }
 
-            // If no local oracle was found, initialize WebLLM for Scout mode
+            // If no local shard was found, initialize WebLLM for Scout mode
             if (!probe.available) {
                 setMode("scout-initializing")
 
@@ -144,8 +144,8 @@ export default function HomePage() {
                 </div>
             )}
             
-            {/* Network Visualizer - shown in pitch mode or when in local-oracle mode */}
-            {(pitchMode || mode === "local-oracle") && (
+            {/* Network Visualizer - shown in pitch mode or when in local-shard mode */}
+            {(pitchMode || mode === "local-shard") && (
                 <div
                     style={{
                         padding: "16px",

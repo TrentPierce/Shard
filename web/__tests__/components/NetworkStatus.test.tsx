@@ -37,19 +37,19 @@ describe("NetworkStatus", () => {
     })
   })
 
-  describe("Rendering in Oracle mode", () => {
-    it("displays oracle status", () => {
-      render(<NetworkStatus {...defaultProps} mode="local-oracle" />)
-      expect(screen.getByText(/Local Oracle/i)).toBeInTheDocument()
+  describe("Rendering in Shard mode", () => {
+    it("displays shard status", () => {
+      render(<NetworkStatus {...defaultProps} mode="local-shard" />)
+      expect(screen.getByText(/Local Shard/i)).toBeInTheDocument()
     })
 
     it("displays peer count when connected", () => {
       const propsWithTopology = {
         ...defaultProps,
-        mode: "local-oracle",
+        mode: "local-shard",
         topology: {
           status: "ok",
-          oracle_peer_id: "test-peer-id",
+          shard_peer_id: "test-peer-id",
           listen_addrs: ["/ip4/127.0.0.1/tcp/4001/ws"],
         },
       }

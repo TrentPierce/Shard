@@ -10,7 +10,7 @@ interface HeaderProps {
 
 const modeLabels: Record<NodeMode, string> = {
     loading: "Bootstrapping",
-    "local-oracle": "Oracle",
+    "local-shard": "Shard",
     "scout-initializing": "Scout (Loading)",
     scout: "Scout",
     leech: "Consumer",
@@ -18,7 +18,7 @@ const modeLabels: Record<NodeMode, string> = {
 
 const modeDescriptions: Record<NodeMode, string> = {
     loading: "Connecting to network…",
-    "local-oracle": "Full model loaded — verifying drafts",
+    "local-shard": "Full model loaded — verifying drafts",
     "scout-initializing": "Loading WebLLM model…",
     scout: "Contributing compute via WebGPU",
     leech: "Consuming inference — upgrade to Scout for priority",
@@ -40,7 +40,7 @@ export default function Header({ mode, rustStatus }: HeaderProps) {
 
             <div style={{ display: "flex", alignItems: "center", gap: "16px" }} role="status" aria-live="polite">
                 <div
-                    className={`header__mode header__mode--${mode === "local-oracle" ? "oracle" : mode}`}
+                    className={`header__mode header__mode--${mode === "local-shard" ? "shard" : mode}`}
                     title={modeDescriptions[mode]}
                     role="status"
                 >

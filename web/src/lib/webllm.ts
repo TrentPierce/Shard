@@ -264,7 +264,7 @@ export async function initWebLLM(
  *
  * This function takes a prompt context and generates a short sequence of
  * draft tokens using the small WebLLM model. These tokens are sent to an
- * Oracle node for verification as part of the hybrid speculative decoding
+ * Shard node for verification as part of the hybrid speculative decoding
  * workflow.
  *
  * @param prompt - The prompt context to generate from
@@ -298,9 +298,9 @@ export async function generateDraftTokens(
         const text = response.choices[0]?.message?.content || ""
 
         // Get the generated text - token extraction happens at the API layer
-        // We return the text which will be tokenized by the Oracle
+        // We return the text which will be tokenized by the Shard
         return {
-            tokens: [], // Token IDs are handled by the Oracle
+            tokens: [], // Token IDs are handled by the Shard
             text,
             success: true,
         }

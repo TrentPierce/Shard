@@ -92,7 +92,7 @@ def freeze_python(daemon_bin: Path, engine_lib: Path, web_out: Path) -> Path:
         str(one_dir),
         "--specpath",
         str(BUILD),
-        "--hidden-import", "oracle_api",
+        "--hidden-import", "shard_api",
         "--hidden-import", "inference",
         "--hidden-import", "bitnet",
         "--hidden-import", "bitnet.ctypes_bridge",

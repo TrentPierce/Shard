@@ -1,6 +1,6 @@
 # Authentication
 
-This guide covers API key authentication, rate limiting, quotas, and security best practices for the Shard Oracle API.
+This guide covers API key authentication, rate limiting, quotas, and security best practices for the Shard API.
 
 ## Table of Contents
 
@@ -20,24 +20,24 @@ This guide covers API key authentication, rate limiting, quotas, and security be
 
 ### What is an API Key?
 
-An API key is a unique identifier used to authenticate requests to the Oracle API. It is required for all authenticated endpoints except `/health`.
+An API key is a unique identifier used to authenticate requests to the Shard API. It is required for all authenticated endpoints except `/health`.
 
 ### Key Format
 
 Shard API keys follow this format:
 
 ```
-sk-oracle-<random-32-char-string>
+sk-shard-<random-32-char-string>
 ```
 
 **Example**:
 ```
-sk-oracle-abc123def456ghi789jkl012mno345pqr678stu901vwx234yz
+sk-shard-abc123def456ghi789jkl012mno345pqr678stu901vwx234yz
 ```
 
 ### Key Length
 
-- **Format**: `sk-oracle-` prefix + 32 alphanumeric characters
+- **Format**: `sk-shard-` prefix + 32 alphanumeric characters
 - **Total length**: 41 characters
 - **Storage**: 64 characters if including the prefix
 
@@ -47,7 +47,7 @@ sk-oracle-abc123def456ghi789jkl012mno345pqr678stu901vwx234yz
 
 ### Method 1: From Environment Variable
 
-The API key is set in the `SHARD_API_KEY` environment variable when the Oracle starts.
+The API key is set in the `SHARD_API_KEY` environment variable when the Shard starts.
 
 ```bash
 # Check environment variable
@@ -71,34 +71,34 @@ curl http://localhost:8000/system/status \
 ```json
 {
   "status": "operational",
-  "api_key": "sk-oracle-abc123def456ghi789jkl012mno345pqr678stu901vwx234yz",
-  "node_mode": "oracle",
+  "api_key": "sk-shard-abc123def456ghi789jkl012mno345pqr678stu901vwx234yz",
+  "node_mode": "shard",
   ...
 }
 ```
 
 ### Method 3: From Startup Logs
 
-The API key is logged to the console when the Oracle starts:
+The API key is logged to the console when the Shard starts:
 
 ```bash
 # Look for this line in the startup logs
-[INFO] Oracle API key: sk-oracle-abc123def456ghi789jkl012mno345pqr678stu901vwx234yz
+[INFO] Shard API key: sk-shard-abc123def456ghi789jkl012mno345pqr678stu901vwx234yz
 ```
 
 ### Method 4: Environment Variable Config
 
-If you're deploying your own Oracle, set the API key in the environment:
+If you're deploying your own Shard, set the API key in the environment:
 
 ```bash
 # Linux/Mac
-export SHARD_API_KEY="sk-oracle-abc123def456ghi789jkl012mno345pqr678stu901vwx234yz"
+export SHARD_API_KEY="sk-shard-abc123def456ghi789jkl012mno345pqr678stu901vwx234yz"
 
 # Windows
-set SHARD_API_KEY=sk-oracle-abc123def456ghi789jkl012mno345pqr678stu901vwx234yz
+set SHARD_API_KEY=sk-shard-abc123def456ghi789jkl012mno345pqr678stu901vwx234yz
 
 # Docker
-docker run -e SHARD_API_KEY="sk-oracle-abc123def456ghi789jkl012mno345pqr678stu901vwx234yz" shard-oracle
+docker run -e SHARD_API_KEY="sk-shard-abc123def456ghi789jkl012mno345pqr678stu901vwx234yz" shard
 ```
 
 ### Method 5: Configuration File
@@ -107,7 +107,7 @@ In `config.yaml`:
 
 ```yaml
 api:
-  key: "sk-oracle-abc123def456ghi789jkl012mno345pqr678stu901vwx234yz"
+  key: "sk-shard-abc123def456ghi789jkl012mno345pqr678stu901vwx234yz"
 ```
 
 ---
@@ -118,7 +118,7 @@ api:
 
 ```bash
 curl http://localhost:8000/chat/completions \
-  -H "Authorization: Bearer sk-oracle-abc123def456ghi789jkl012mno345pqr678stu901vwx234yz" \
+  -H "Authorization: Bearer sk-shard-abc123def456ghi789jkl012mno345pqr678stu901vwx234yz" \
   -H "Content-Type: application/json" \
   -d '{
     "model": "llama-3-70b-bitnet",
@@ -134,7 +134,7 @@ import requests
 response = requests.post(
     "http://localhost:8000/chat/completions",
     headers={
-        "Authorization": "Bearer sk-oracle-abc123def456ghi789jkl012mno345pqr678stu901vwx234yz",
+        "Authorization": "Bearer sk-shard-abc123def456ghi789jkl012mno345pqr678stu901vwx234yz",
         "Content-Type": "application/json"
     },
     json={
@@ -152,7 +152,7 @@ print(response.json())
 const response = await fetch("http://localhost:8000/chat/completions", {
   method: "POST",
   headers: {
-    "Authorization": "Bearer sk-oracle-abc123def456ghi789jkl012mno345pqr678stu901vwx234yz",
+    "Authorization": "Bearer sk-shard-abc123def456ghi789jkl012mno345pqr678stu901vwx234yz",
     "Content-Type": "application/json"
   },
   body: JSON.stringify({
@@ -172,7 +172,7 @@ For security, you can store your API key in a file and read it programmatically:
 **API Key File** (`.shard_api_key`):
 
 ```
-sk-oracle-abc123def456ghi789jkl012mno345pqr678stu901vwx234yz
+sk-shard-abc123def456ghi789jkl012mno345pqr678stu901vwx234yz
 ```
 
 **Python Example**:
@@ -390,12 +390,12 @@ Rotate your API key in the following situations:
 
 #### Step 1: Generate a New API Key
 
-The Oracle generates a new API key on startup. To rotate programmatically:
+The Shard generates a new API key on startup. To rotate programmatically:
 
 ```bash
-# Restart the Oracle to generate a new API key
-pkill shard-oracle
-./start-oracle.sh  # Or your startup command
+# Restart the Shard to generate a new API key
+pkill shard
+./start-shard.sh  # Or your startup command
 ```
 
 #### Step 2: Update Your Applications
@@ -404,15 +404,15 @@ Update all applications using the old API key to use the new one:
 
 ```python
 # Old API key
-OLD_KEY = "sk-oracle-old-abc123..."
+OLD_KEY = "sk-shard-old-abc123..."
 
 # New API key
-NEW_KEY = "sk-oracle-new-def456..."
+NEW_KEY = "sk-shard-new-def456..."
 ```
 
 #### Step 3: Invalidate Old Key
 
-The old API key remains valid until you restart the Oracle. After restart, the old key no longer works.
+The old API key remains valid until you restart the Shard. After restart, the old key no longer works.
 
 **Note**: There's no explicit "delete" or "revoke" operation for API keys. Rotation is achieved by generating a new key.
 
@@ -420,7 +420,7 @@ The old API key remains valid until you restart the Oracle. After restart, the o
 
 ```bash
 curl http://localhost:8000/system/status \
-  -H "Authorization: Bearer sk-oracle-new-def456..."
+  -H "Authorization: Bearer sk-shard-new-def456..."
 ```
 
 ---
@@ -436,13 +436,13 @@ git commit -m "Add API key"  # BAD!
 echo $SHARD_API_KEY >> .gitignore  # Incomplete
 
 # Share in chat/messaging
-"Here's my API key: sk-oracle-..."  # BAD!
+"Here's my API key: sk-shard-..."  # BAD!
 ```
 
 **✅ DO**:
 ```bash
 # Add to .env file
-echo "SHARD_API_KEY=sk-oracle-..." >> .env
+echo "SHARD_API_KEY=sk-shard-..." >> .env
 
 # Add to .gitignore
 echo ".env" >> .gitignore
@@ -541,7 +541,7 @@ In production, always use HTTPS:
 http://localhost:8000/chat/completions
 
 # Correct (production)
-https://oracle.shard.network/chat/completions
+https://shard.shard.network/chat/completions
 ```
 
 ### 7. Key Expiry (Coming Soon)
@@ -572,12 +572,12 @@ Future versions will support API key expiry. Set expiration dates to automatical
 ```bash
 # Check you're including the Bearer prefix
 curl http://localhost:8000/chat/completions \
-  -H "Authorization: Bearer sk-oracle-abc123..."  # ✅ Correct
-  # -H "Authorization: sk-oracle-abc123..."  # ❌ Missing "Bearer"
+  -H "Authorization: Bearer sk-shard-abc123..."  # ✅ Correct
+  # -H "Authorization: sk-shard-abc123..."  # ❌ Missing "Bearer"
 
 # Verify API key is correct
 curl http://localhost:8000/system/status \
-  -H "Authorization: Bearer sk-oracle-abc123..."
+  -H "Authorization: Bearer sk-shard-abc123..."
 ```
 
 ---
@@ -649,7 +649,7 @@ while True:
 {
   "error": {
     "code": "invalid_api_key",
-    "message": "API key must start with 'sk-oracle-'"
+    "message": "API key must start with 'sk-shard-'"
   }
 }
 ```
@@ -659,8 +659,8 @@ while True:
 **Solution**:
 
 ```bash
-# Correct format: sk-oracle-<32-char-random-string>
-sk-oracle-abc123def456ghi789jkl012mno345pqr678stu901vwx234yz
+# Correct format: sk-shard-<32-char-random-string>
+sk-shard-abc123def456ghi789jkl012mno345pqr678stu901vwx234yz
 
 # ✅ Correct format
 # ❌ Incorrect (missing prefix)
@@ -689,9 +689,9 @@ curl http://localhost:8000/system/status \
 # Option 3: Check startup logs
 tail -f logs/shard.log | grep "API key"
 
-# Option 4: Generate new key by restarting Oracle
-pkill shard-oracle
-./start-oracle.sh
+# Option 4: Generate new key by restarting Shard
+pkill shard
+./start-shard.sh
 ```
 
 ---
@@ -730,14 +730,14 @@ result = rate_limited_call(
 **macOS/Linux**:
 ```bash
 # Add to ~/.bashrc or ~/.zshrc
-export SHARD_API_KEY="sk-oracle-..."
+export SHARD_API_KEY="sk-shard-..."
 source ~/.bashrc
 ```
 
 **Windows**:
 ```powershell
 # Add to PowerShell profile
-[System.Environment]::SetEnvironmentVariable("SHARD_API_KEY", "sk-oracle-...", "User")
+[System.Environment]::SetEnvironmentVariable("SHARD_API_KEY", "sk-shard-...", "User")
 
 # Reload PowerShell
 ```
@@ -746,29 +746,29 @@ source ~/.bashrc
 
 ```dockerfile
 # Dockerfile
-FROM shard-oracle:latest
-ENV SHARD_API_KEY="sk-oracle-abc123..."
+FROM shard:latest
+ENV SHARD_API_KEY="sk-shard-abc123..."
 ```
 
 ```bash
 # Docker Compose
 services:
-  oracle:
-    image: shard-oracle:latest
+  shard:
+    image: shard:latest
     environment:
-      - SHARD_API_KEY=sk-oracle-abc123...
+      - SHARD_API_KEY=sk-shard-abc123...
 ```
 
 ### Ansible
 
 ```yaml
 # playbook.yml
-- name: Deploy Shard Oracle
+- name: Deploy Shard
   hosts: servers
   tasks:
     - name: Set API key environment variable
       ansible.builtin.set_fact:
-        shard_api_key: "sk-oracle-abc123..."
+        shard_api_key: "sk-shard-abc123..."
 ```
 
 ---

@@ -1,6 +1,6 @@
 # Error Codes
 
-This guide covers all HTTP status codes, error codes, and error types returned by the Shard Oracle API.
+This guide covers all HTTP status codes, error codes, and error types returned by the Shard API.
 
 ## Table of Contents
 
@@ -35,7 +35,7 @@ All error responses follow a consistent format:
 | Field | Description | Example |
 |-------|-------------|---------|
 | `code` | Machine-readable error code | `invalid_api_key` |
-| `message` | Human-readable error description | "API key must start with 'sk-oracle-'" |
+| `message` | Human-readable error description | "API key must start with 'sk-shard-'" |
 | `details` | Additional error details (optional) | `{"value": "abc123"}` |
 | `request_id` | Unique request ID for tracking | `req-abc123def456` |
 
@@ -47,7 +47,7 @@ All error responses follow a consistent format:
 {
   "error": {
     "code": "invalid_api_key",
-    "message": "API key must start with 'sk-oracle-'",
+    "message": "API key must start with 'sk-shard-'",
     "request_id": "req-abc123"
   }
 }
@@ -209,7 +209,7 @@ All error responses follow a consistent format:
 {
   "error": {
     "code": "invalid_api_key",
-    "message": "API key must start with 'sk-oracle-'",
+    "message": "API key must start with 'sk-shard-'",
     "request_id": "req-pqr678"
   }
 }
@@ -506,7 +506,7 @@ All error responses follow a consistent format:
 - Cluster overloaded
 - Maintenance mode active
 - Scout network unavailable
-- Oracle daemon down
+- Shard daemon down
 
 **Examples**:
 
@@ -744,7 +744,7 @@ callShardAPI(
 
 **Solution**:
 - Verify you're including the `Authorization: Bearer <key>` header
-- Check your API key format: `sk-oracle-<32-char-string>`
+- Check your API key format: `sk-shard-<32-char-string>`
 - Generate a new key if needed
 
 ---

@@ -1,4 +1,4 @@
-//! Shard Oracle Daemon — P2P networking sidecar for the Shard inference network.
+//! Shard Daemon — P2P networking sidecar for the Shard inference network.
 //!
 //! Provides:
 //! - libp2p swarm with TCP, WebSocket transports (WebRTC-direct on Linux/Mac)
@@ -48,7 +48,7 @@ use tower_http::cors::{Any, CorsLayer};
 // ─── CLI ────────────────────────────────────────────────────────────────────
 
 #[derive(Parser, Debug, Clone)]
-#[command(name = "shard-daemon", version, about = "Shard Oracle P2P Daemon")]
+#[command(name = "shard-daemon", version, about = "Shard P2P Daemon")]
 struct Cli {
     /// Port for the embedded HTTP control-plane API
     #[arg(long, default_value = "9091")]
@@ -90,7 +90,7 @@ struct Cli {
     #[arg(long, default_value = "false")]
     relay_server: bool,
 
-    /// Contribute compute to the network (run as Oracle node)
+    /// Contribute compute to the network (run as Shard node)
     #[arg(long, default_value = "true")]
     contribute: bool,
 
@@ -178,7 +178,7 @@ struct SharedState {
 // ─── libp2p Behaviour ───────────────────────────────────────────────────────
 
 #[derive(NetworkBehaviour)]
-struct OracleBehaviour {
+struct ShardBehaviour {
     gossipsub: gossipsub::Behaviour,
     kad: KadBehaviour<MemoryStore>,
     handshake: request_response::cbor::Behaviour<Heartbeat, Heartbeat>,
@@ -302,9 +302,9 @@ async fn topology_handler(AxumState(state): AxumState<SharedState>) -> Json<serd
     Json(serde_json::json!({
         "status": "ok",
         "source": "rust-sidecar",
-        "oracle_peer_id": topo.local_peer_id,
-        "oracle_webrtc_multiaddr": topo.webrtc_addr,
-        "oracle_ws_multiaddr": topo.ws_addr,
+        "shard_peer_id": topo.local_peer_id,
+        "shard_webrtc_multiaddr": topo.webrtc_addr,
+        "shard_ws_multiaddr": topo.ws_addr,
         "listen_addrs": topo.listen_addrs,
         "known_peer_count": known.len(),
         "public_api": topo.is_public,
@@ -466,7 +466,7 @@ async fn main() -> Result<()> {
         );
         let verify = request_response::cbor::Behaviour::new(
             [(
-                StreamProtocol::new("/shard/oracle/verify/1.0.0"),
+                StreamProtocol::new("/shard/shard/verify/1.0.0"),
                 ProtocolSupport::Full,
             )],
             request_response::Config::default(),
@@ -486,7 +486,7 @@ async fn main() -> Result<()> {
             id_keys.public(),
         ));
         let ping = ping::Behaviour::new(ping::Config::new());
-        OracleBehaviour {
+        ShardBehaviour {
             gossipsub,
             kad,
             handshake,
@@ -544,7 +544,7 @@ async fn main() -> Result<()> {
     println!();
     println!("  ╔══════════════════════════════════════════════╗");
     println!(
-        "  ║       Shard Oracle Daemon  v{}           ║",
+        "  ║       Shard Daemon  v{}           ║",
         env!("CARGO_PKG_VERSION")
     );
     println!("  ╠══════════════════════════════════════════════╣");
@@ -628,7 +628,7 @@ async fn main() -> Result<()> {
             event = swarm.select_next_some() => {
                 match event {
                     // ── gossipsub ──
-                    SwarmEvent::Behaviour(OracleBehaviourEvent::Gossipsub(gossipsub::Event::Message { message, .. })) => {
+                    SwarmEvent::Behaviour(ShardBehaviourEvent::Gossipsub(gossipsub::Event::Message { message, .. })) => {
                         if message.topic == result_topic.hash() {
                             if let Ok(result) = serde_json::from_slice::<WorkResponse>(&message.data) {
                                 tracing::info!(
@@ -645,7 +645,7 @@ async fn main() -> Result<()> {
                     }
 
                     // ── request/response: work forwarding ──
-                    SwarmEvent::Behaviour(OracleBehaviourEvent::ControlWork(
+                    SwarmEvent::Behaviour(ShardBehaviourEvent::ControlWork(
                         request_response::Event::Message { message, .. },
                     )) => {
                         if let request_response::Message::Request { request, channel, .. } = message {
@@ -661,7 +661,7 @@ async fn main() -> Result<()> {
                     }
 
                     // ── handshake (PING/PONG) ──
-                    SwarmEvent::Behaviour(OracleBehaviourEvent::Handshake(
+                    SwarmEvent::Behaviour(ShardBehaviourEvent::Handshake(
                         request_response::Event::Message { peer, message, .. },
                     )) => {
                         match message {
@@ -694,20 +694,20 @@ async fn main() -> Result<()> {
                     }
 
                     // ── verify protocol ──
-                    SwarmEvent::Behaviour(OracleBehaviourEvent::Verify(event)) => {
+                    SwarmEvent::Behaviour(ShardBehaviourEvent::Verify(event)) => {
                         tracing::debug!(?event, "verify protocol event");
                     }
 
                     // ── kademlia ──
-                    SwarmEvent::Behaviour(OracleBehaviourEvent::Kad(event)) => {
+                    SwarmEvent::Behaviour(ShardBehaviourEvent::Kad(event)) => {
                         tracing::debug!(?event, "kademlia event");
                     }
 
                     // Note: relay client disabled - libp2p API changed
-                    // SwarmEvent::Behaviour(OracleBehaviourEvent::RelayClient(event)) => { ... }
+                    // SwarmEvent::Behaviour(ShardBehaviourEvent::RelayClient(event)) => { ... }
 
                     // ── relay server ──
-                    SwarmEvent::Behaviour(OracleBehaviourEvent::RelayServer(event)) => {
+                    SwarmEvent::Behaviour(ShardBehaviourEvent::RelayServer(event)) => {
                         match event {
                             relay::Event::ReservationReqAccepted { src_peer_id, .. } => {
                                 tracing::info!(%src_peer_id, "relay server: reservation accepted");
@@ -720,14 +720,14 @@ async fn main() -> Result<()> {
                     }
 
                     // ── dcutr ──
-                    SwarmEvent::Behaviour(OracleBehaviourEvent::Dcutr(event)) => {
+                    SwarmEvent::Behaviour(ShardBehaviourEvent::Dcutr(event)) => {
                         let _ = event;
                         // dcutr events - simplified for compatibility
                         tracing::debug!("dcutr event: {:?}", event);
                     }
 
                     // ── autonat ──
-                    SwarmEvent::Behaviour(OracleBehaviourEvent::Autonat(event)) => {
+                    SwarmEvent::Behaviour(ShardBehaviourEvent::Autonat(event)) => {
                         match event {
                             autonat::Event::StatusChanged { old, new } => {
                                 tracing::info!(?old, ?new, "AutoNAT status changed");
@@ -737,7 +737,7 @@ async fn main() -> Result<()> {
                     }
 
                     // ── identify ──
-                    SwarmEvent::Behaviour(OracleBehaviourEvent::Identify(event)) => {
+                    SwarmEvent::Behaviour(ShardBehaviourEvent::Identify(event)) => {
                         match event {
                             identify::Event::Received { peer_id, info, .. } => {
                                 tracing::info!(%peer_id, protocol_version = %info.protocol_version, "identify info received");
@@ -762,7 +762,7 @@ async fn main() -> Result<()> {
                     }
 
                     // ── ping ──
-                    SwarmEvent::Behaviour(OracleBehaviourEvent::Ping(event)) => {
+                    SwarmEvent::Behaviour(ShardBehaviourEvent::Ping(event)) => {
                         let _ = event;
                         // ping events - simplified for compatibility
                         tracing::debug!("ping event: {:?}", event);
@@ -785,9 +785,9 @@ async fn main() -> Result<()> {
                         }
 
                         let topo_json = serde_json::json!({
-                            "oracle_peer_id": topo.local_peer_id,
-                            "oracle_webrtc_multiaddr": topo.webrtc_addr,
-                            "oracle_ws_multiaddr": topo.ws_addr,
+                            "shard_peer_id": topo.local_peer_id,
+                            "shard_webrtc_multiaddr": topo.webrtc_addr,
+                            "shard_ws_multiaddr": topo.ws_addr,
                             "listen_addrs": topo.listen_addrs,
                             "public_api": topo.is_public,
                             "public_api_addr": topo.public_api_addr,

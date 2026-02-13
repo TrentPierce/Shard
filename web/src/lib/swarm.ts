@@ -1,9 +1,9 @@
 /**
  * Shard Swarm Utilities
  *
- * - Local Oracle detection (double-dip prevention)
+ * - Local Shard detection (double-dip prevention)
  * - Topology fetch from Python API
- * - Oracle heartbeat over local Driver API
+ * - Shard heartbeat over local Driver API
  * - P2P networking via js-libp2p (browser Scout nodes)
  */
 
@@ -28,7 +28,7 @@ export {
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
-export type LocalOracleProbe = {
+export type LocalShardProbe = {
     available: boolean
     endpoint: string
 }
@@ -36,9 +36,9 @@ export type LocalOracleProbe = {
 export type Topology = {
     status: string
     source?: string
-    oracle_peer_id?: string
-    oracle_webrtc_multiaddr?: string | null
-    oracle_ws_multiaddr?: string | null
+    shard_peer_id?: string
+    shard_webrtc_multiaddr?: string | null
+    shard_ws_multiaddr?: string | null
     listen_addrs?: string[]
 }
 
@@ -69,18 +69,18 @@ export type ScoutSubmissionResult = {
 // ─── Functions ──────────────────────────────────────────────────────────────
 
 /**
- * Probe localhost for a running native Oracle exe.
+ * Probe localhost for a running native Shard exe.
  * If detected, the browser MUST disable WebGPU and route to the local
- * Oracle (double-dip prevention per the agents.md spec).
+ * Shard (double-dip prevention per the agents.md spec).
  * 
  * Detection criteria:
  * 1. Health endpoint responds with "ok"
  * 2. Latency is < 2ms (indicates same machine)
  * 
  * If both conditions are met, WebGPU must be disabled to prevent
- * GPU OOM crashes from Scout and Oracle fighting for VRAM.
+ * GPU OOM crashes from Scout and Shard fighting for VRAM.
  */
-export async function probeLocalOracle(): Promise<LocalOracleProbe> {
+export async function probeLocalShard(): Promise<LocalShardProbe> {
     const endpoint = apiUrl("/health")
     const LATENCY_THRESHOLD_MS = 2  // Same-machine detection threshold
     
@@ -98,7 +98,7 @@ export async function probeLocalOracle(): Promise<LocalOracleProbe> {
         // Must disable WebGPU to prevent VRAM conflicts
         if (isHealthy && rttMs < LATENCY_THRESHOLD_MS) {
             console.log(
-                `[Double-Dip Guard] Local Oracle detected at ${endpoint} ` +
+                `[Double-Dip Guard] Local Shard detected at ${endpoint} ` +
                 `(RTT: ${rttMs.toFixed(2)}ms < ${LATENCY_THRESHOLD_MS}ms threshold). ` +
                 `Disabling WebGPU to prevent VRAM conflicts.`
             )
@@ -119,10 +119,10 @@ export async function probeLocalOracle(): Promise<LocalOracleProbe> {
 export async function fetchTopology(): Promise<Topology> {
     try {
         const res = await fetch(apiUrl("/v1/system/topology"))
-        if (!res.ok) return { status: "degraded", oracle_webrtc_multiaddr: null }
+        if (!res.ok) return { status: "degraded", shard_webrtc_multiaddr: null }
         return (await res.json()) as Topology
     } catch {
-        return { status: "degraded", oracle_webrtc_multiaddr: null }
+        return { status: "degraded", shard_webrtc_multiaddr: null }
     }
 }
 
@@ -133,8 +133,8 @@ export async function fetchTopology(): Promise<Topology> {
  * libp2p's browser+native stacks, so this lightweight heartbeat keeps the
  * web runner verifiable without requiring restricted packages.
  */
-export async function heartbeatOracle(
-    oracleAddr: string
+export async function heartbeatShard(
+    shardAddr: string
 ): Promise<HandshakeResult> {
     try {
         const started = performance.now()
@@ -144,7 +144,7 @@ export async function heartbeatOracle(
         if (!res.ok) {
             return {
                 ok: false,
-                detail: `health check failed (${res.status}) for ${oracleAddr}`,
+                detail: `health check failed (${res.status}) for ${shardAddr}`,
                 rttMs,
             }
         }
@@ -153,14 +153,14 @@ export async function heartbeatOracle(
         if (payload?.status === "ok") {
             return {
                 ok: true,
-                detail: `PONG via ${oracleAddr}`,
+                detail: `PONG via ${shardAddr}`,
                 rttMs,
             }
         }
 
         return {
             ok: false,
-            detail: `unexpected response for ${oracleAddr}`,
+            detail: `unexpected response for ${shardAddr}`,
             rttMs,
         }
     } catch (err: any) {
@@ -172,8 +172,8 @@ export async function heartbeatOracle(
  * Register the service worker for background coordination.
  */
 export async function initSwarmWorker(
-    knownOracleAddr: string | null,
-    hasLocalOracle = false,
+    knownShardAddr: string | null,
+    hasLocalShard = false,
     topology: Topology | null = null
 ): Promise<ServiceWorkerRegistration | null> {
     if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) {
@@ -207,8 +207,8 @@ export async function initSwarmWorker(
 
     registration.active?.postMessage({
         type: "INIT_SCOUT",
-        knownOracleAddr,
-        hasLocalOracle,
+        knownShardAddr,
+        hasLocalShard,
         bootstrapAddrs,
     })
 
@@ -219,7 +219,7 @@ export async function initSwarmWorker(
  * Handle incoming work request from the swarm.
  *
  * This function generates draft tokens using WebLLM and submits the results
- * back to the API for verification by an Oracle node.
+ * back to the API for verification by a Shard node.
  *
  * @param work - The work request containing the prompt
  * @returns Promise containing the result of the submission

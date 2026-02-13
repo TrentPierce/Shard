@@ -32,10 +32,10 @@ The Golden Ticket system provides cryptoeconomic Sybil attack prevention by rand
 
 ### Flow
 
-1. Oracle randomly decides to inject Golden Ticket (5% by default)
+1. Shard randomly decides to inject Golden Ticket (5% by default)
 2. Work request includes pre-solved prompt with known answer
 3. Scout responds with draft tokens
-4. Oracle verifies response:
+4. Shard verifies response:
    - Correct: Scout reputation improves
    - Incorrect: Scout reputation degrades
 5. If accuracy < 70% after 3+ attempts, Scout is banned
@@ -46,30 +46,30 @@ The Golden Ticket system provides cryptoeconomic Sybil attack prevention by rand
 
 ### Overview
 
-Prevents GPU OOM crashes by ensuring Scout and Oracle don't compete for VRAM on the same machine.
+Prevents GPU OOM crashes by ensuring Scout and Shard don't compete for VRAM on the same machine.
 
 ### Implementation
 
-**Location**: `web/src/lib/swarm.ts` (probeLocalOracle)
+**Location**: `web/src/lib/swarm.ts` (probeLocalShard)
 
 **Detection Logic**:
 1. Browser probes `localhost:8000/health`
 2. Measures round-trip latency
 3. If RTT < 2ms → same machine detected
-4. Browser disables WebGPU and routes to local Oracle
+4. Browser disables WebGPU and routes to local Shard
 
 ### Code
 
 ```typescript
 const LATENCY_THRESHOLD_MS = 2  // Same-machine threshold
 
-async function probeLocalOracle(): Promise<LocalOracleProbe> {
+async function probeLocalShard(): Promise<LocalShardProbe> {
     const startTime = performance.now()
     const res = await fetch("/health")
     const rttMs = performance.now() - startTime
     
     if (rttMs < LATENCY_THRESHOLD_MS) {
-        // Disable WebGPU - route to Oracle
+        // Disable WebGPU - route to Shard
         return { available: true, endpoint }
     }
 }

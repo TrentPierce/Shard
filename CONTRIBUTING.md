@@ -167,9 +167,9 @@ git push origin feature/your-feature-name
 Shard/
 ├── desktop/
 │   ├── control_plane/         # Protocol definitions (protobuf)
-│   ├── python/                # Oracle API (FastAPI)
+│   ├── python/                # Shard API (FastAPI)
 │   │   ├── run.py            # Entry point
-│   │   ├── oracle_api.py     # API endpoints
+│   │   ├── shard_api.py     # API endpoints
 │   │   ├── inference.py      # Cooperative generation
 │   │   └── bitnet/           # BitNet runtime bridge
 │   └── rust/                 # P2P networking daemon
@@ -193,7 +193,7 @@ Shard/
 
 | Component | Language | Purpose |
 |-----------|----------|---------|
-| **Python Oracle API** | Python | OpenAI-compatible API, inference orchestration |
+| **Python Shard API** | Python | OpenAI-compatible API, inference orchestration |
 | **Rust Daemon** | Rust | P2P networking (libp2p), peer discovery |
 | **Web Client** | TypeScript/React | Browser UI, WebLLM integration |
 | **BitNet Bridge** | Python | Local model verification bridge |
@@ -513,7 +513,7 @@ npm run test:e2e
 ```
 tests/
 ├── unit/
-│   ├── test_oracle_api.py
+│   ├── test_shard_api.py
 │   └── test_inference.py
 ├── integration/
 │   └── test_p2p_network.py
@@ -551,7 +551,7 @@ We follow a simplified [Conventional Commits](https://www.conventionalcommits.or
 ### Examples
 
 ```
-feat(oracle): add support for streaming responses
+feat(shard): add support for streaming responses
 
 Implements SSE streaming for the chat completions endpoint
 to reduce latency and improve user experience.
