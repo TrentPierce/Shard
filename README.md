@@ -1,7 +1,13 @@
-# Shard: Hybrid Distributed Inference Network
+<p align="center">
+  <img src="assets/logo.png" width="400" alt="Shard Logo">
+</p>
 
-> **Free, unlimited LLM access** powered by a decentralized P2P inference mesh.
-> Contribute compute, earn priority.
+<h1 align="center">Shard: Hybrid Distributed Inference Network</h1>
+
+<p align="center">
+  <strong>Free, unlimited LLM access powered by a decentralized P2P inference mesh.</strong><br>
+  <em>Contribute compute, earn priority.</em>
+</p>
 
 [![License: BSL 1.1](https://img.shields.io/badge/License-BSL_1.1-orange.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
