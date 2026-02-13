@@ -26,6 +26,7 @@ htmlcov/
 
 # ─── Rust ───
 desktop/rust/target/
+desktop/rust/vendor/
 **/*.rs.bk
 
 # ─── Node.js / Next.js ───
@@ -55,6 +56,13 @@ dist/
 !dist/README.md
 /tmp/shard-*.json
 /tmp/shard-control.sock
+shard_context_clean.txt
+shard_context_clean_no_json.txt
+shard_whitepaper_context.txt
+test_output.txt
+*.lib
+*.pdb
+dist_README.txt
 
 # ─── Model Files ───
 *.gguf
