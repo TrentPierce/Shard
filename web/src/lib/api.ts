@@ -1,16 +1,16 @@
 /**
- * Shard Oracle API Client
+ * Shard API Client
  *
- * Handles communication with the Python Oracle API (port 8000).
+ * Handles communication with the Python Shard API (port 8000).
  * Supports both streaming (SSE) and non-streaming chat completions.
  */
 
 import { apiUrl } from "./config"
 import {
-  getAllOracleNodes,
-  selectFastestOracle,
-  getBestOracleApiUrl,
-  type OracleNode
+  getAllShardNodes,
+  selectFastestShard,
+  getBestShardApiUrl,
+  type ShardNode
 } from "./discovery"
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -43,7 +43,7 @@ export async function sendMessage(
     onToken: (token: string) => void,
     onDone: () => void
 ): Promise<void> {
-    const apiEndpoint = await getBestOracleApiUrl()
+    const apiEndpoint = await getBestShardApiUrl()
     const body: ChatCompletionRequest = {
         model: "shard-hybrid",
         messages: history.map((m) => ({ role: m.role, content: m.content })),
@@ -136,7 +136,7 @@ export async function sendMessageSync(
 // ─── Health ─────────────────────────────────────────────────────────────────
 
 /**
- * Check the health of the Oracle API.
+ * Check the health of the Shard API.
  */
 export async function checkHealth(): Promise<{
     ok: boolean

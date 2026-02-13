@@ -23,13 +23,13 @@ The Shard network uses a distributed peer-to-peer architecture built on libp2p f
 
 | Node Type | Name | Hardware | Role |
 |-----------|------|----------|------|
-| **A** | **Oracle** | Desktop/Server with GPU | Full model host, verifies draft tokens |
+| **A** | **Shard** | Desktop/Server with GPU | Full model host, verifies draft tokens |
 | **B** | **Scout** | Browser (WebGPU) | Runs tiny draft model, submits token guesses |
 | **C** | **Leech** | Any | Pure consumer, queued behind contributors |
 
 ### Key Principles
 
-1. **Verify, Don't Trust**: All Scout drafts are verified by Oracles using the full model
+1. **Verify, Don't Trust**: All Scout drafts are verified by Shards using the full model
 2. **Heavier is Truth**: GPU nodes always override browser drafts in case of discrepancies
 3. **Distributed Inference**: Work is distributed across the network for scalability
 4. **Golden Ticket Security**: Automated verification to prevent Sybil attacks
@@ -51,8 +51,8 @@ libp2p uses path-based protocol identifiers with version numbers for compatibili
 | Protocol | Description | Usage |
 |----------|-------------|-------|
 | `/shard/1.0.0/handshake` | Initial peer connection | All new connections |
-| `/shard/1.0.0/verify` | Draft verification | Oracle-only |
-| `/shard/1.0.0/metrics` | Health checks | Both Oracles & Scouts |
+| `/shard/1.0.0/verify` | Draft verification | Shard-only |
+| `/shard/1.0.0/metrics` | Health checks | Both Shards & Scouts |
 | `/shard/1.0.0/protocol-list` | Protocol discovery | All nodes |
 | `/multistream/1.0.0` | Protocol negotiation | Connection setup |
 
@@ -174,7 +174,7 @@ message HandshakeMessage {
   // Protocol version we support
   string protocol_version = 1;
   
-  // Node type (Oracle/Scout/Leech)
+  // Node type (Shard/Scout/Leech)
   NodeType node_type = 2;
   
   // Capabilities (list of supported protocol IDs)
@@ -221,17 +221,17 @@ Uses Noise Protocol Framework with IK pattern for key exchange:
 
 ### Overview
 
-Work distribution coordinates tasks between Oracles and Scouts using gossipsub pub/sub protocol.
+Work distribution coordinates tasks between Shards and Scouts using gossipsub pub/sub protocol.
 
 ### Publisher-Subscriber Model
 
-Oracles **publish** work requests to the `shard-work` topic. Scouts **subscribe** to receive and process work.
+Shards **publish** work requests to the `shard-work` topic. Scouts **subscribe** to receive and process work.
 
 ### Work Assignment Lifecycle
 
 ```
 ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐
-│  Oracle  │    │ Control  │    │  Scout   │    │   Oracle  │
+│  Shard  │    │ Control  │    │  Scout   │    │   Shard  │
 │          │    │  Plane   │    │          │    │  (Verifier)│
 └────┬─────┘    └────┬─────┘    └────┬─────┘    └─────┬─────┘
      │                │                │                │
@@ -280,7 +280,7 @@ message WorkResult {
   bytes work_cid = 1;             // Matching work assignment CID
   bytes result_cid = 2;            // Content-addressed result
   repeated uint32 token_ids = 3;     // Generated token sequence
-  bool verified = 4;                 // Oracle verification status
+  bool verified = 4;                 // Shard verification status
   bytes proof = 5;                   // Proof of inference (signature)
   int32 inference_time_ms = 6;      // Time to generate (milliseconds)
   float confidence_score = 7;       // Scout confidence (0-1)
@@ -289,7 +289,7 @@ message WorkResult {
 
 ### Priority-Based Routing
 
-Oracles can set priorities (1-10, where 1 is highest):
+Shards can set priorities (1-10, where 1 is highest):
 
 | Priority | Use Case | Expected Latency |
 |----------|----------|-----------------|
@@ -319,7 +319,7 @@ message GossipWorkMessage {
 
 **Publishing Rules**:
 - Must use gossipsub's Gossipsub feature set for flood-sub
-- Messages must be signed by the publisher (Oracle)
+- Messages must be signed by the publisher (Shard)
 - Use quality-of-service (QoS) for important work
 - Set appropriate heartbeat interval (default: 3 seconds)
 
@@ -327,21 +327,21 @@ message GossipWorkMessage {
 
 **Purpose**: Distribution of verified inference results
 
-**Direction**: Published by Oracles → Subscribed by Leech nodes (read-only)
+**Direction**: Published by Shards → Subscribed by Leech nodes (read-only)
 
 **Message Schema**:
 ```protobuf
 message ResultBroadcast {
   bytes work_cid = 1;
   WorkResult result = 2;
-  bytes verification_signature = 3;  // Oracle's signature
+  bytes verification_signature = 3;  // Shard's signature
   int32 confidence_score = 4;
-  int32 proof_strength = 5;          // Oracle confidence (0-1)
+  int32 proof_strength = 5;          // Shard confidence (0-1)
 }
 ```
 
 **Publishing Rules**:
-- Only Oracles can publish to this topic (security requirement)
+- Only Shards can publish to this topic (security requirement)
 - Results must include proof of inference (cryptographic signature)
 - Use high QoS (priority 10) for critical results
 - Set expiration (TTL) to prevent message replay
@@ -424,7 +424,7 @@ let ws = WsConfig::new(...)
 - SRTP for data channels
 
 **Use Case**:
-- Browser Scouts connecting to Oracles
+- Browser Scouts connecting to Shards
 - Direct browser-to-browser connections
 - Zero-latency connections when firewalls allow
 
@@ -436,7 +436,7 @@ let webrtc = WebRTCConfig::new(...)
 
 ### Transport Recommendations
 
-**For Oracles (desktop)**:
+**For Shards (desktop)**:
 - **Primary**: TCP with mTLS
 - **Secondary**: WebSocket for enterprise networks
 - **Optional**: WebRTC for mobile remote access
@@ -496,8 +496,8 @@ let routing_table = KademliaRoutingTable::new(store, network_key)?;
 ### Bootstrap Mechanisms
 
 **Initial Discovery**:
-1. Scout requests topology from Oracle
-2. Oracle returns list of available peers
+1. Scout requests topology from Shard
+2. Shard returns list of available peers
 3. Scout connects to bootstrap peers
 4. Scout announces itself via gossipsub
 
@@ -553,13 +553,13 @@ message ErrorDetail {
 - All gossipsub messages MUST be signed
 
 **Authentication**:
-- Oracles verify scout signatures on work results
-- Scout signatures verify oracle identity
+- Shards verify scout signatures on work results
+- Scout signatures verify shard identity
 - Mutual authentication (both sides verify each other)
 
 **Rate Limiting**:
 - Scout endpoints: 120 requests/min per IP
-- Oracle endpoints: 60 requests/min per peer ID
+- Shard endpoints: 60 requests/min per peer ID
 - Gossipsub: Message rate limiting (1000 msgs/sec)
 
 **DoS Prevention**:
@@ -596,9 +596,9 @@ message ErrorDetail {
 
 ### Complete Work Flow Example
 
-**Scenario**: Oracle broadcasts a work assignment to Scouts
+**Scenario**: Shard broadcasts a work assignment to Scouts
 
-**Step 1: Oracle broadcasts work**
+**Step 1: Shard broadcasts work**
 ```protobuf
 // Control plane publishes to shard-work topic
 message GossipWorkMessage {
@@ -629,14 +629,14 @@ message WorkResult {
 }
 ```
 
-**Step 3: Oracle verifies and publishes result**
+**Step 3: Shard verifies and publishes result**
 ```protobuf
-// Oracle verifies tokens against full model
+// Shard verifies tokens against full model
 // If correct, publishes to shard-work-result topic
 message ResultBroadcast {
   work_cid: "cid-abc-123"
   result: WorkResult { ... }
-  verification_signature: "<oracle-signature>"
+  verification_signature: "<shard-signature>"
   confidence_score: 1.0
   proof_strength: 0.99
 }
@@ -645,7 +645,7 @@ message ResultBroadcast {
 **Step 4: Leech nodes consume results**
 - Leech nodes subscribe to `shard-work-result` topic
 - Consume verified results for inference
-- No verification required (pre-verified by Oracles)
+- No verification required (pre-verified by Shards)
 
 ### Golden Ticket Verification Example
 
@@ -669,7 +669,7 @@ message WorkResponse {
 }
 ```
 
-**Oracle Verification**:
+**Shard Verification**:
 - Compares draft tokens against expected tokens
 - Verifies correctness
 - If correct: Accepts result, reputation +1

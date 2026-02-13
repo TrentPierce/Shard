@@ -1,5 +1,5 @@
 class Shard < Formula
-  desc "Shard Oracle - P2P distributed inference daemon"
+  desc "Shard - P2P distributed inference daemon"
   homepage "https://shard.network"
   url "https://github.com/TrentPierce/Shard/releases/download/v0.4.0/shard-0.4.0-linux-x86_64.tar.gz"
   sha256 "REPLACE_WITH_ACTUAL_SHA256"

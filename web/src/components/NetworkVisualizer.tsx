@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation"
 interface PeerNode {
   id: string
   name: string
-  type: "oracle" | "scout" | "local"
+  type: "shard" | "scout" | "local"
   status: "connected" | "disconnected" | "joining"
 }
 
@@ -33,7 +33,7 @@ export default function NetworkVisualizer({ pitchMode = false, onToast }: Networ
   const [dimensions, setDimensions] = useState({ width: 400, height: 300 })
   const [graphData, setGraphData] = useState<GraphData>({
     nodes: [
-      { id: "local", name: "Local Oracle", type: "local", status: "connected" }
+      { id: "local", name: "Local Shard", type: "local", status: "connected" }
     ],
     links: []
   })
@@ -106,7 +106,7 @@ export default function NetworkVisualizer({ pitchMode = false, onToast }: Networ
             
             return {
               nodes: [
-                { id: "local", name: "Local Oracle", type: "local", status: "connected" },
+                { id: "local", name: "Local Shard", type: "local", status: "connected" },
                 ...prev.nodes.filter((n: PeerNode) => n.id !== "local"),
                 ...newNodes
               ],

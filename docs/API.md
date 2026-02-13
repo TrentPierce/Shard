@@ -2,7 +2,7 @@
 
 Version: 0.4.0
 
-This document provides comprehensive documentation for the Shard Oracle API, which follows the OpenAI API specification for compatibility with existing clients.
+This document provides comprehensive documentation for the Shard API, which follows the OpenAI API specification for compatibility with existing clients.
 
 ---
 
@@ -24,10 +24,10 @@ This document provides comprehensive documentation for the Shard Oracle API, whi
 
 ## Overview
 
-The Shard Oracle API provides an OpenAI-compatible interface for interacting with the distributed inference network. The API supports:
+The Shard API provides an OpenAI-compatible interface for interacting with the distributed inference network. The API supports:
 
 - Chat completions with streaming
-- Hybrid inference (Oracle verification + Scout generation)
+- Hybrid inference (Shard verification + Scout generation)
 - Network topology discovery
 - System health monitoring
 
@@ -326,9 +326,9 @@ Retrieve network topology information for browser auto-discovery.
 {
   "status": "ok",
   "source": "rust-sidecar",
-  "oracle_peer_id": "QmXw...",
-  "oracle_webrtc_multiaddr": "/ip4/192.168.1.10/udp/9090/webrtc-direct/p2p/QmXw...",
-  "oracle_ws_multiaddr": "/ip4/192.168.1.10/tcp/4101/ws/p2p/QmXw...",
+  "shard_peer_id": "QmXw...",
+  "shard_webrtc_multiaddr": "/ip4/192.168.1.10/udp/9090/webrtc-direct/p2p/QmXw...",
+  "shard_ws_multiaddr": "/ip4/192.168.1.10/tcp/4101/ws/p2p/QmXw...",
   "listen_addrs": [
     "/ip4/192.168.1.10/tcp/4001",
     "/ip4/192.168.1.10/tcp/4101/ws"
@@ -343,9 +343,9 @@ Retrieve network topology information for browser auto-discovery.
 |-------|------|-------------|
 | `status` | string | `ok` or `degraded` |
 | `source` | string | Data source (`rust-sidecar` or `fallback`) |
-| `oracle_peer_id` | string | libp2p peer ID of the Oracle |
-| `oracle_webrtc_multiaddr` | string | WebRTC multiaddr (Linux/Mac only) |
-| `oracle_ws_multiaddr` | string | WebSocket multiaddr |
+| `shard_peer_id` | string | libp2p peer ID of the Shard |
+| `shard_webrtc_multiaddr` | string | WebRTC multiaddr (Linux/Mac only) |
+| `shard_ws_multiaddr` | string | WebSocket multiaddr |
 | `listen_addrs` | array | All listening addresses |
 | `known_peer_count` | number | Number of known peers |
 

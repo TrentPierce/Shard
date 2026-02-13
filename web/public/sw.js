@@ -63,7 +63,7 @@ self.addEventListener('fetch', (event) => {
     return
   }
   
-  // Skip API requests when online (they'll go directly to Oracle)
+  // Skip API requests when online (they'll go directly to Shard)
   if (request.url.includes('/v1/') || request.url.includes('/api/')) {
     event.respondWith(fetch(request))
     return
@@ -84,19 +84,19 @@ self.addEventListener('fetch', (event) => {
   )
 })
 
-// Handle background sync of Oracle node list
+// Handle background sync of Shard node list
 self.addEventListener('message', (event) => {
   if (event.data && event.data.type === 'SYNC_ORACLE_NODES') {
-    console.log('[SW] Syncing Oracle nodes list')
+    console.log('[SW] Syncing Shard nodes list')
     
     // Fetch latest node list from configured bootstrap endpoints
-    syncOracleNodes().catch((error) => {
-      console.error('[SW] Failed to sync Oracle nodes:', error)
+    syncShardNodes().catch((error) => {
+      console.error('[SW] Failed to sync Shard nodes:', error)
     })
   }
 })
 
-async function syncOracleNodes() {
+async function syncShardNodes() {
   try {
     // Try multiple endpoints in order of preference
     const endpoints = [
@@ -112,7 +112,7 @@ async function syncOracleNodes() {
         if (response.ok) {
           const nodes = await response.json()
           const cache = await caches.open('shard-nodes-cache')
-          await cache.put('oracle-nodes', new Response(JSON.stringify(nodes), {
+          await cache.put('shard-nodes', new Response(JSON.stringify(nodes), {
             headers: { 'Content-Type': 'application/json' }
           }))
           return
@@ -122,7 +122,7 @@ async function syncOracleNodes() {
       }
     }
   } catch (error) {
-    console.error('[SW] Error syncing Oracle nodes:', error)
+    console.error('[SW] Error syncing Shard nodes:', error)
   }
 }
 

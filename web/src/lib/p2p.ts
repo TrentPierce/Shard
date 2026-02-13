@@ -8,7 +8,7 @@
  * - WebSocket transport for browser compatibility
  * - Gossipsub pub/sub for work distribution
  * - Automatic reconnection to bootstrap peers
- * - Double-dip prevention (local Oracle detection)
+ * - Double-dip prevention (local Shard detection)
  */
 
 import { createLibp2p } from 'libp2p';

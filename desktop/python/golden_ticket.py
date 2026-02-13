@@ -1,7 +1,7 @@
 """Golden Ticket Security System for Sybil Attack Prevention
 
 The Golden Ticket system provides cryptographic verification of Scout nodes
-to prevent Sybil attacks in the Shard P2P network. Oracles inject pre-solved
+to prevent Sybil attacks in the Shard P2P network. Shards inject pre-solved
 prompts at random intervals (configurable, default 5%) to verify that Scouts
 are honestly performing inference work.
 
@@ -19,13 +19,13 @@ Usage:
         get_scout_reputation,
     )
     
-    # Generate a golden ticket (Oracle side)
+    # Generate a golden ticket (Shard side)
     gt = generator.maybe_inject_golden_ticket(normal_prompt)
     if gt["is_golden_ticket"]:
         # Store expected answer for later verification
         store_expected_answer(gt["request_id"], gt["expected_answer"])
     
-    # Verify a response (Oracle side)
+    # Verify a response (Shard side)
     is_valid = verify_golden_ticket(
         request_id=work_id,
         scout_response=scout_text,

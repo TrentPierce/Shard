@@ -212,7 +212,7 @@ body {
   text-transform: uppercase;
 }
 
-.header__mode--oracle {
+.header__mode--shard {
   background: rgba(0, 212, 255, 0.12);
   color: var(--accent-cyan);
   border: 1px solid rgba(0, 212, 255, 0.2);

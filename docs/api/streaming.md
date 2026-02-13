@@ -1,6 +1,6 @@
 # Streaming
 
-The Shard Oracle API supports **Server-Sent Events (SSE)** streaming for real-time chat completion responses. This allows you to receive tokens as they are generated, reducing latency and improving user experience.
+The Shard API supports **Server-Sent Events (SSE)** streaming for real-time chat completion responses. This allows you to receive tokens as they are generated, reducing latency and improving user experience.
 
 ## Table of Contents
 
@@ -68,7 +68,7 @@ curl http://localhost:8000/chat/completions \
 
 ### Server-Sent Events (SSE) Protocol
 
-The Shard Oracle API uses SSE, which is a standard HTTP protocol for server-to-client streaming.
+The Shard API uses SSE, which is a standard HTTP protocol for server-to-client streaming.
 
 **SSE Format**:
 
@@ -372,7 +372,7 @@ import requests
 import json
 
 def stream_chat_completion(api_url, api_key, messages):
-    """Stream chat completion from the Shard Oracle API"""
+    """Stream chat completion from the Shard API"""
 
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -425,7 +425,7 @@ def stream_chat_completion(api_url, api_key, messages):
 
 # Usage
 api_url = "http://localhost:8000/chat/completions"
-api_key = "sk-oracle-abc123def456ghi789jkl012mno345pqr678stu901vwx234yz"
+api_key = "sk-shard-abc123def456ghi789jkl012mno345pqr678stu901vwx234yz"
 
 messages = [
     {"role": "system", "content": "You are a helpful assistant."},
@@ -444,7 +444,7 @@ print(f"\n\nFull response: {response}")
 from openai import OpenAI
 
 client = OpenAI(
-    api_key="sk-oracle-abc123def456ghi789jkl012mno345pqr678stu901vwx234yz",
+    api_key="sk-shard-abc123def456ghi789jkl012mno345pqr678stu901vwx234yz",
     base_url="http://localhost:8000"
 )
 
@@ -532,7 +532,7 @@ async function streamChatCompletion(apiUrl, apiKey, messages) {
 
 // Usage
 const apiUrl = 'http://localhost:8000/chat/completions';
-const apiKey = 'sk-oracle-abc123def456ghi789jkl012mno345pqr678stu901vwx234yz';
+const apiKey = 'sk-shard-abc123def456ghi789jkl012mno345pqr678stu901vwx234yz';
 
 const messages = [
   { role: 'system', content: 'You are a helpful assistant.' },
@@ -552,7 +552,7 @@ streamChatCompletion(apiUrl, apiKey, messages)
 import OpenAI from 'openai';
 
 const client = new OpenAI({
-  apiKey: 'sk-oracle-abc123def456ghi789jkl012mno345pqr678stu901vwx234yz',
+  apiKey: 'sk-shard-abc123def456ghi789jkl012mno345pqr678stu901vwx234yz',
   baseURL: 'http://localhost:8000'
 });
 
@@ -666,7 +666,7 @@ messages = [
 
 response = stream_with_error_handling(
     "http://localhost:8000/chat/completions",
-    "sk-oracle-abc123def456ghi789jkl012mno345pqr678stu901vwx234yz",
+    "sk-shard-abc123def456ghi789jkl012mno345pqr678stu901vwx234yz",
     messages
 )
 ```

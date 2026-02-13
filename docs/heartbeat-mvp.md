@@ -3,7 +3,7 @@
 ## Goal
 
 Prove browser-to-desktop bridge with:
-1. Auto-discovery of local Oracle WebRTC multiaddr.
+1. Auto-discovery of local Shard WebRTC multiaddr.
 2. PING/PONG heartbeat over `/shard/1.0.0/handshake`.
 
 ## Auto-Discovery Flow
@@ -15,7 +15,7 @@ Prove browser-to-desktop bridge with:
 ## Heartbeat Test
 
 - Open web app.
-- Verify Known Oracle Multiaddr is populated from topology endpoint.
+- Verify Known Shard Multiaddr is populated from topology endpoint.
 - Click **Send PING**.
 - Expect `PONG rtt=...ms` in browser and latency log in Rust daemon.
 

@@ -29,7 +29,7 @@ cp README.md "${STAGING}/usr/share/doc/shard/"
 # Create systemd service
 cat > "${STAGING}/etc/shard/shard.service" <<EOF
 [Unit]
-Description=Shard Oracle Daemon
+Description=Shard Daemon
 After=network-online.target
 Wants=network-online.target
 
@@ -61,11 +61,11 @@ cat > "${STAGING}/etc/init.d/shard" <<EOF
 # Required-Stop:     $network $remote_fs $syslog
 # Default-Start:     2 3 4 5
 # Default-Stop:      0 1 6
-# Short-Description: Shard Oracle Daemon
+# Short-Description: Shard Daemon
 ### END INIT INFO
 
 NAME=shard-daemon
-DESC="Shard Oracle Daemon"
+DESC="Shard Daemon"
 DAEMON=${INSTALL_DIR}/\$NAME
 PIDFILE=/var/run/shard.pid
 

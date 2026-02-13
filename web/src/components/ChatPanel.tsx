@@ -84,7 +84,7 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
                         ...last,
                         content:
                             "⚠ Connection error: " +
-                            (err?.message ?? "Could not reach the Oracle API. Is the Python server running on :8000?"),
+                            (err?.message ?? "Could not reach the Shard API. Is the Python server running on :8000?"),
                     }
                 }
                 return updated
@@ -111,7 +111,7 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
                         <div className="chat__empty-hint">
                             Ask anything. Your prompt will be processed through the
                             decentralized inference mesh — Scout peers generate draft tokens,
-                            Oracles verify them.
+                            Shards verify them.
                         </div>
                     </div>
                 ) : (

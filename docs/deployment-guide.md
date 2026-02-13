@@ -1,6 +1,6 @@
 # Deployment Guide
 
-This guide covers deploying Shard Oracle nodes in various environments, from local development to production cloud deployments.
+This guide covers deploying Shard nodes in various environments, from local development to production cloud deployments.
 
 ---
 
@@ -255,7 +255,7 @@ Create `/etc/systemd/system/shard-daemon.service`:
 
 ```ini
 [Unit]
-Description=Shard Oracle P2P Daemon
+Description=Shard P2P Daemon
 After=network.target
 
 [Service]
@@ -291,7 +291,7 @@ Create `/etc/systemd/system/shard-api.service`:
 
 ```ini
 [Unit]
-Description=Shard Oracle API
+Description=Shard API
 Requires=shard-daemon.service
 After=shard-daemon.service
 
@@ -366,7 +366,7 @@ docker build -t shard:0.4.0 .
 
 ```bash
 docker run --rm \
-  --name shard-oracle \
+  --name shard \
   -p 8000:8000 \
   -p 9091:9091 \
   -p 4001:4001 \
@@ -538,7 +538,7 @@ aws autoscaling create-auto-scaling-group \
 1. **Create Compute Engine Instance:**
 
 ```bash
-gcloud compute instances create shard-oracle \
+gcloud compute instances create shard \
   --zone=us-central1-a \
   --machine-type=n1-standard-4 \
   --image-family=ubuntu-2204-lts \
@@ -565,7 +565,7 @@ gcloud compute firewall-rules create shard-p2p \
 3. **SSH and Deploy:**
 
 ```bash
-gcloud compute ssh shard-oracle --zone=us-central1-a
+gcloud compute ssh shard --zone=us-central1-a
 # Follow Linux deployment steps
 ```
 
@@ -578,7 +578,7 @@ Build and deploy to Cloud Run:
 gcloud builds submit --tag gcr.io/your-project/shard:latest
 
 # Deploy
-gcloud run deploy shard-oracle \
+gcloud run deploy shard \
   --image gcr.io/your-project/shard:latest \
   --platform managed \
   --region us-central1 \
@@ -598,7 +598,7 @@ gcloud run deploy shard-oracle \
 ```bash
 az vm create \
   --resource-group shard-rg \
-  --name shard-oracle \
+  --name shard \
   --image Ubuntu2204 \
   --size Standard_NC4as_T4_v3 \
   --admin-username azureuser \
@@ -611,7 +611,7 @@ az vm create \
 ```bash
 az network nsg rule create \
   --resource-group shard-rg \
-  --nsg-name shard-oracleNSG \
+  --nsg-name shardNSG \
   --name AllowAPI \
   --access Allow \
   --protocol Tcp \
@@ -628,7 +628,7 @@ az network nsg rule create \
 3. **SSH and Deploy:**
 
 ```bash
-ssh azureuser@shard-oracle.eastus.cloudapp.azure.com
+ssh azureuser@shard.eastus.cloudapp.azure.com
 # Follow Linux deployment steps
 ```
 
@@ -641,7 +641,7 @@ az group create --name shard-rg --location eastus
 # Create container instance
 az container create \
   --resource-group shard-rg \
-  --name shard-oracle \
+  --name shard \
   --image shard:latest \
   --cpu 4 \
   --memory 8 \
@@ -710,10 +710,10 @@ sudo journalctl -u shard-api --boot
 
 ```bash
 # View logs
-docker logs shard-oracle -f
+docker logs shard -f
 
 # View last 100 lines
-docker logs shard-oracle --tail 100
+docker logs shard --tail 100
 ```
 
 ---

@@ -30,7 +30,7 @@ let libp2pModules = null;
 
 let heartbeatTimer = null;
 let doubleDipLocked = false;
-let knownOracle = null;
+let knownShard = null;
 let scoutReady = false;
 let p2pNode = null;
 let workTopic = null;
@@ -56,13 +56,13 @@ async function broadcast(msg) {
 
 // ─── Scout Runtime ──────────────────────────────────────────────────────────
 
-async function initScoutRuntime(oracleAddr, hasLocalOracle) {
-  doubleDipLocked = Boolean(hasLocalOracle);
-  knownOracle = oracleAddr;
+async function initScoutRuntime(shardAddr, hasLocalShard) {
+  doubleDipLocked = Boolean(hasLocalShard);
+  knownShard = shardAddr;
   scoutReady = !doubleDipLocked;
 
   console.log("[swarm-worker] scout runtime initialized", {
-    knownOracle,
+    knownShard,
     doubleDipLocked,
     scoutReady,
   });
@@ -75,7 +75,7 @@ async function initScoutRuntime(oracleAddr, hasLocalOracle) {
       ts: Date.now(),
       scoutReady,
       doubleDipLocked,
-      knownOracle,
+      knownShard,
     });
   }, 15000);
 
@@ -248,7 +248,7 @@ async function onInferenceResult(result) {
     }
   }
 
-  // Fallback: Forward to the Oracle API HTTP endpoint
+  // Fallback: Forward to the Shard API HTTP endpoint
   try {
     const response = await fetch(`${CONTROL_PLANE_URL}/broadcast-work`, {
       method: "POST",
@@ -278,10 +278,10 @@ self.addEventListener("message", (event) => {
 
   switch (type) {
     case "INIT_SCOUT":
-      initScoutRuntime(event.data.knownOracleAddr, event.data.hasLocalOracle);
+      initScoutRuntime(event.data.knownShardAddr, event.data.hasLocalShard);
       // Initialize P2P if bootstrap addresses provided
-      if (event.data.bootstrapAddrs || event.data.knownOracleAddr) {
-        const addrs = event.data.bootstrapAddrs || [event.data.knownOracleAddr];
+      if (event.data.bootstrapAddrs || event.data.knownShardAddr) {
+        const addrs = event.data.bootstrapAddrs || [event.data.knownShardAddr];
         initP2P(addrs);
       }
       break;

@@ -3371,7 +3371,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "shard-oracle-daemon"
+name = "shard-daemon"
 version = "0.4.4"
 dependencies = [
  "anyhow",

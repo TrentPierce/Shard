@@ -39,7 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Handshake Protocol**: PING/PONG verification for peer health
 - **Request/Response Protocol**: Work request forwarding and draft verification
 - **Rust Daemon Control Plane**: HTTP API on port 9091 for daemon management
-- **Python Oracle API**: FastAPI-based driver API on port 8000
+- **Python Shard API**: FastAPI-based driver API on port 8000
 - **BitNet Bridge**: In-process ctypes bridge for local model verification
 - **API Authentication**: Optional API key authentication via `SHARD_API_KEYS`
 - **Rate Limiting**: Per-client rate limiting via `SHARD_RATE_LIMIT_PER_MINUTE`
@@ -57,7 +57,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - **API Structure**: Restructured API.md with comprehensive architecture documentation
-- **Node Classification**: Improved node class documentation (Oracle, Scout, Leech)
+- **Node Classification**: Improved node class documentation (Shard, Scout, Leech)
 
 ### Fixed
 - **Connection Handling**: Fixed connection timeout handling and reconnection logic
@@ -109,7 +109,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **BitNet Runtime**: ctypes bridge for local model verification
-- **Cooperative Generation**: Hybrid Oracle+Scout inference loop
+- **Cooperative Generation**: Hybrid Shard+Scout inference loop
 - **Basic Authentication**: API key authentication framework
 
 ### Changed

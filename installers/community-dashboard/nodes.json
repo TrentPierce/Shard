@@ -1,9 +1,9 @@
 {
   "version": "0.4.0",
   "last_updated": "2026-02-12T00:00:00Z",
-  "description": "Community-maintained list of public Shard Oracle nodes",
+  "description": "Community-maintained list of public Shard nodes",
   "submit_node": "https://github.com/TrentPierce/Shard/issues/new?template=node-submission.md",
-  "oracle_nodes": [
+  "shard_nodes": [
     {
       "peer_id": "12D3KooW...",
       "api_url": "https://your-node.example.com:8000",
@@ -23,7 +23,7 @@
     }
   ],
   "stats": {
-    "total_oracle_nodes": 0,
+    "total_shard_nodes": 0,
     "total_relay_servers": 0,
     "avg_uptime_percent": 0
   }
