@@ -19,6 +19,7 @@ Pitch Mode (Demo Mode):
 from __future__ import annotations
 
 import logging
+import asyncio
 import os
 import time
 from collections import deque
@@ -202,6 +203,7 @@ async def cooperative_generate(
     control_plane: RustControlPlaneClient,
     max_tokens: int = 256,
     telemetry_hook: Callable[[dict[str, float | int]], Awaitable[None] | None] | None = None,
+    scout_event_hook: Callable[[dict[str, object]], Awaitable[None] | None] | None = None,
     kv_checkpoint_manager: KvCheckpointManager | None = None,
 ) -> AsyncIterator[str]:
     """Hybrid speculative loop with Golden Ticket security.
@@ -225,6 +227,8 @@ async def cooperative_generate(
     # Keep a tiny moving average of local token generation time so we can
     # compare what speculative remote drafts cost versus equivalent local work.
     local_token_cost_ms: deque[float] = deque(maxlen=64)
+    remote_timeout_s = max(0.01, float(os.getenv("SHARD_SCOUT_RESULT_TIMEOUT_S", "0.15")))
+    remote_disabled = False
 
     while tokens_emitted < max_tokens:
         local_start = time.perf_counter()
@@ -260,8 +264,22 @@ async def cooperative_generate(
             await control_plane.broadcast_work(request_id, context, min_tokens=5)
             last_broadcast = now
 
+        if remote_disabled:
+            continue
+
         remote_eval_start = time.perf_counter()
-        result = await control_plane.try_pop_result()
+        try:
+            result = await asyncio.wait_for(control_plane.try_pop_result(), timeout=remote_timeout_s)
+        except asyncio.TimeoutError:
+            # Scout disconnected or partitioned; disable speculation for this request
+            # and immediately continue in local auto-regressive mode.
+            LOGGER.warning(
+                "Scout draft timeout exceeded (%.2fs); switching request %s to local-only fallback",
+                remote_timeout_s,
+                request_id,
+            )
+            remote_disabled = True
+            continue
         
         # Pitch Mode: Handle peer failure immediately (0ms delay)
         if not result and PITCH_MODE:
@@ -323,6 +341,19 @@ async def cooperative_generate(
 
         accepted, correction = await verify_draft(generated, draft_tokens)
         remote_eval_ms = (time.perf_counter() - remote_eval_start) * 1000.0
+
+        if scout_event_hook is not None and scout_id:
+            accepted_full = len(accepted) == len(draft_tokens)
+            event_payload: dict[str, object] = {
+                "scout_id": scout_id,
+                "accepted": accepted_full,
+                "accepted_tokens": len(accepted),
+                "draft_tokens": len(draft_tokens),
+                "reason": None if accepted_full else "draft mismatch",
+            }
+            maybe_evt = scout_event_hook(event_payload)
+            if hasattr(maybe_evt, "__await__"):
+                await maybe_evt
 
         if telemetry_hook is not None and draft_tokens:
             n_tokens = len(draft_tokens)

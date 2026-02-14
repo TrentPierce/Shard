@@ -163,6 +163,40 @@ def test_cooperative_generate_uses_kv_checkpoint_manager_on_remote_gap() -> None
     assert runtime.snapshots_imported >= 1
 
 
+def test_cooperative_generate_falls_back_after_scout_timeout() -> None:
+    class SlowControlPlane(FakeControlPlane):
+        async def try_pop_result(self):
+            await asyncio.sleep(0.2)
+            return None
+
+    async def runner() -> list[str]:
+        local_tokens = iter(["tok1", "tok2", "tok3", None])
+
+        async def local_model_generate(_generated: list[str], _prompt: str, _request_id: str):
+            return next(local_tokens)
+
+        async def verify_draft(_generated: list[str], draft: list[str]):
+            return draft, None
+
+        os.environ["SHARD_SCOUT_RESULT_TIMEOUT_S"] = "0.01"
+        control = SlowControlPlane()
+        emitted: list[str] = []
+        async for tok in cooperative_generate(
+            prompt="test",
+            local_model_generate=local_model_generate,
+            verify_draft=verify_draft,
+            control_plane=control,  # type: ignore[arg-type]
+            max_tokens=3,
+        ):
+            emitted.append(tok)
+        return emitted
+
+    import os
+
+    emitted = asyncio.run(runner())
+    assert emitted == ["tok1", "tok2", "tok3"]
+
+
 def test_bitnet_runtime_import_kv_snapshot_rejects_invalid_header() -> None:
     runtime = BitNetRuntime.__new__(BitNetRuntime)
     runtime._abi = "shard"

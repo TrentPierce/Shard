@@ -1,0 +1,17 @@
+# syntax=docker/dockerfile:1.7
+FROM nvidia/cuda:12.4.1-devel-ubuntu22.04 AS builder
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential cmake ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+WORKDIR /build
+COPY cpp/shard-bridge ./cpp/shard-bridge
+COPY cpp/llama.cpp ./cpp/llama.cpp
+RUN cmake -S cpp/shard-bridge -B cpp/shard-bridge/build -DCMAKE_BUILD_TYPE=Release && \
+    cmake --build cpp/shard-bridge/build --config Release
+
+FROM nvidia/cuda:12.4.1-runtime-ubuntu22.04
+RUN apt-get update && apt-get install -y --no-install-recommends python3 && rm -rf /var/lib/apt/lists/*
+WORKDIR /opt/shard/inference
+COPY --from=builder /build/cpp/shard-bridge/build /opt/shard/lib
+EXPOSE 7000
+CMD ["python3", "-m", "http.server", "7000"]

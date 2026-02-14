@@ -726,6 +726,32 @@ async def _verify_draft(generated: list[str], draft: list[str]) -> tuple[list[st
         return [], None
 
 
+async def _handle_scout_verification_event(event: dict[str, object]) -> None:
+    """Forward verification outcome to Rust daemon reputation tracker."""
+    scout_id = event.get("scout_id")
+    if not isinstance(scout_id, str) or not scout_id:
+        return
+
+    accepted = bool(event.get("accepted", False))
+    accepted_tokens = int(event.get("accepted_tokens", 0) or 0)
+    draft_tokens = int(event.get("draft_tokens", 0) or 0)
+    probability_bound = 1.0
+
+    if accepted and draft_tokens > 0 and accepted_tokens == draft_tokens:
+        probability_bound = max(USEFUL_COMPUTE_FAILURE_THRESHOLD * 0.1, 1.0e-16)
+    elif draft_tokens > 0:
+        mismatch_ratio = 1.0 - (accepted_tokens / max(1, draft_tokens))
+        probability_bound = max(USEFUL_COMPUTE_FAILURE_THRESHOLD * (1.0 + mismatch_ratio), 1.0e-6)
+
+    reason = event.get("reason")
+    await _notify_rust_penalty(
+        scout_id=scout_id,
+        accepted=accepted,
+        probability_bound=probability_bound,
+        reason=reason if isinstance(reason, str) else None,
+    )
+
+
 # ─── Endpoints ───────────────────────────────────────────────────────────────
 
 
@@ -922,6 +948,7 @@ async def chat_completions(
             control_plane=control,
             max_tokens=payload.max_tokens,
             telemetry_hook=LATENCY_PROFILE.record_sample,
+            scout_event_hook=_handle_scout_verification_event,
         ):
             tokens.append(tok)
     except Exception as exc:
@@ -986,6 +1013,7 @@ async def _stream_generate(
             control_plane=control,
             max_tokens=max_tokens,
             telemetry_hook=LATENCY_PROFILE.record_sample,
+            scout_event_hook=_handle_scout_verification_event,
         ):
             chunk = {
                 "id": completion_id,
