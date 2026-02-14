@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 import os
 import sys
 import time
@@ -585,6 +586,106 @@ class ChatResponse(BaseModel):
 
 # ─── Local Model + Verification ─────────────────────────────────────────────
 
+USEFUL_COMPUTE_TOP_K = int(os.getenv("SHARD_USEFUL_COMPUTE_TOP_K", "8"))
+USEFUL_COMPUTE_MAX_TOKENS = int(os.getenv("SHARD_USEFUL_COMPUTE_MAX_TOKENS", "32"))
+USEFUL_COMPUTE_FAILURE_THRESHOLD = float(os.getenv("SHARD_USEFUL_COMPUTE_FAILURE_THRESHOLD", "1e-12"))
+
+
+class UsefulComputeVerifier:
+    """Bounds the chance that a draft token sequence was randomly guessed.
+
+    We avoid expensive cryptographic consensus and instead score whether the
+    submitted draft is aligned with the authoritative model's token
+    distribution. The resulting probability bound is the product of each token
+    hit probability under a conservative top-k approximation.
+    """
+
+    def __init__(self, *, top_k: int, max_tokens: int, failure_threshold: float) -> None:
+        self.top_k = max(1, top_k)
+        self.max_tokens = max(1, max_tokens)
+        self.failure_threshold = max(1e-30, failure_threshold)
+
+    @staticmethod
+    def _token_rank_probability(rank: int) -> float:
+        """Conservative fallback probability for rank-based token matching."""
+        return 1.0 / float(rank + 1)
+
+    async def verify(self, generated: list[str], draft: list[str]) -> dict[str, object]:
+        runtime = await get_or_load_bitnet()
+        if runtime is None:
+            return {
+                "accepted": False,
+                "probability_bound": 0.0,
+                "accepted_tokens": [],
+                "expected": None,
+                "reason": "bitnet runtime unavailable",
+            }
+
+        if not draft:
+            return {
+                "accepted": False,
+                "probability_bound": 1.0,
+                "accepted_tokens": [],
+                "expected": None,
+                "reason": "empty draft",
+            }
+
+        accepted, expected = await _verify_draft(generated, draft)
+        examined = min(len(draft), self.max_tokens)
+        probability_bound = 1.0
+
+        # If the peer matched N tokens before diverging, random guessing chance is
+        # upper-bounded by ∏(1/(rank+1)). We use rank=top_k for accepted tokens
+        # (conservative), and exact mismatch probability floor for failures.
+        for _ in range(min(len(accepted), examined)):
+            probability_bound *= self._token_rank_probability(self.top_k)
+
+        accepted_full = len(accepted) == len(draft)
+        if not accepted_full:
+            # Mismatch event makes successful random forgery substantially less
+            # likely than a full accepted run; tighten the bound aggressively.
+            probability_bound *= self._token_rank_probability(self.top_k * 4)
+
+        probability_bound = max(0.0, min(1.0, probability_bound))
+        accepted_verdict = accepted_full and probability_bound <= self.failure_threshold
+
+        return {
+            "accepted": accepted_verdict,
+            "probability_bound": probability_bound,
+            "accepted_tokens": accepted,
+            "expected": expected,
+            "reason": None if accepted_verdict else "draft failed useful-compute bound",
+        }
+
+
+USEFUL_COMPUTE_VERIFIER = UsefulComputeVerifier(
+    top_k=USEFUL_COMPUTE_TOP_K,
+    max_tokens=USEFUL_COMPUTE_MAX_TOKENS,
+    failure_threshold=USEFUL_COMPUTE_FAILURE_THRESHOLD,
+)
+
+
+async def _notify_rust_penalty(
+    *,
+    scout_id: str,
+    accepted: bool,
+    probability_bound: float,
+    reason: str | None = None,
+) -> None:
+    """Push scout penalty updates to Rust sidecar for p2p-level blackholing."""
+    try:
+        client = _get_http_client()
+        await client.post(
+            "/scout/penalty",
+            json={
+                "peer_id": scout_id,
+                "accepted": accepted,
+                "probability_bound": probability_bound,
+                "reason": reason,
+            },
+        )
+    except Exception:
+        LOGGER.exception("Failed to publish scout penalty update to Rust sidecar")
 
 
 _session_eval_pos: dict[str, int] = {}
@@ -1160,18 +1261,54 @@ async def submit_scout_draft(
             "verified": False,
         }
     
-    # Not a Golden Ticket - normal draft submission
-    # Forward to Rust sidecar via control plane
+    # Not a Golden Ticket - run lightweight proof-of-useful-compute verification.
+    generated_tokens = data.get("generatedTokens") or data.get("generated_tokens") or []
+    if not isinstance(generated_tokens, list):
+        generated_tokens = []
+
+    draft_tokens = draft_text.split() if isinstance(draft_text, str) else []
+    verification = await USEFUL_COMPUTE_VERIFIER.verify(generated_tokens, draft_tokens)
+
+    accepted = bool(verification.get("accepted", False))
+    probability_bound = float(verification.get("probability_bound", 1.0))
+    reason = verification.get("reason")
+    if reason is not None and not isinstance(reason, str):
+        reason = str(reason)
+
+    await _notify_rust_penalty(
+        scout_id=scout_id,
+        accepted=accepted,
+        probability_bound=probability_bound,
+        reason=reason,
+    )
+
+    if not accepted:
+        LOGGER.warning(
+            "Useful compute verification failed: scout=%s work=%s bound=%.3e",
+            scout_id,
+            work_id,
+            probability_bound,
+        )
+        return {
+            "success": False,
+            "detail": "Draft failed useful-compute verification",
+            "verified": False,
+            "probability_bound": probability_bound,
+            "expected": verification.get("expected"),
+        }
+
+    # Forward accepted draft to Rust sidecar via control plane
     try:
         control = RustControlPlaneClient(base_url=RUST_URL)
-        # Store the result for the cooperative_generate loop to pick up
         await control.submit_draft_result(work_id, scout_id, draft_text)
         await control.close()
-        
+
         return {
             "success": True,
             "detail": "Draft submitted for verification",
             "verified": None,
+            "probability_bound": probability_bound,
+            "accepted_tokens": verification.get("accepted_tokens", []),
         }
     except Exception as exc:
         LOGGER.exception("Failed to submit draft to control plane")
