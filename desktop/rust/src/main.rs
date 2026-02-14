@@ -59,6 +59,10 @@ struct Cli {
     #[arg(long, default_value = "9090")]
     webrtc_port: u16,
 
+    /// UDP port for QUIC/WebTransport-ready transport
+    #[arg(long, default_value = "9092")]
+    quic_port: u16,
+
     /// Bootstrap peer multiaddr (can be repeated)
     #[arg(long)]
     bootstrap: Vec<String>,
@@ -143,6 +147,7 @@ struct TopologyState {
     local_peer_id: String,
     listen_addrs: Vec<String>,
     webrtc_addr: Option<String>,
+    quic_addr: Option<String>,
     ws_addr: Option<String>,
     public_api_addr: Option<String>,
     is_public: bool,
@@ -194,81 +199,117 @@ struct ScoutPenaltyStatus {
     failures: u32,
     accepted: u32,
     blackholed: bool,
+    success_rate: f32,
+    last_reason: Option<String>,
+}
+
+#[derive(Debug, Default)]
+struct ScoutReputationEntry {
+    recent: VecDeque<bool>,
+    failure_count: u32,
+    accepted_count: u32,
+    banned_until_ms: Option<u128>,
     last_reason: Option<String>,
 }
 
 #[derive(Debug, Default)]
 struct ScoutPenaltyBook {
-    scores: HashMap<String, i32>,
-    failure_counts: HashMap<String, u32>,
-    accepted_counts: HashMap<String, u32>,
-    blackholed: HashSet<String>,
-    last_reason: HashMap<String, String>,
+    entries: HashMap<String, ScoutReputationEntry>,
 }
 
 impl ScoutPenaltyBook {
-    const FAILURE_PENALTY: i32 = 25;
-    const SOFT_FAIL_PENALTY: i32 = 10;
-    const ACCEPT_REWARD: i32 = 6;
-    const BLACKHOLE_THRESHOLD: i32 = 100;
+    const WINDOW_SIZE: usize = 10;
+    const MIN_SAMPLES_FOR_BAN: usize = 5;
+    const SUCCESS_RATE_THRESHOLD: f32 = 0.55;
+    const BAN_COOLDOWN_MS: u128 = 60_000;
+
+    fn success_rate(entry: &ScoutReputationEntry) -> f32 {
+        if entry.recent.is_empty() {
+            return 1.0;
+        }
+        let success = entry.recent.iter().filter(|ok| **ok).count() as f32;
+        success / (entry.recent.len() as f32)
+    }
 
     fn apply_update(&mut self, update: ScoutPenaltyUpdate) -> ScoutPenaltyStatus {
-        let score = self.scores.entry(update.peer_id.clone()).or_insert(0);
+        let now = now_ms();
+        let entry = self.entries.entry(update.peer_id.clone()).or_default();
+
+        if entry.recent.len() >= Self::WINDOW_SIZE {
+            entry.recent.pop_front();
+        }
+        entry.recent.push_back(update.accepted);
 
         if update.accepted {
-            *score = score.saturating_sub(Self::ACCEPT_REWARD);
-            *self
-                .accepted_counts
-                .entry(update.peer_id.clone())
-                .or_insert(0) += 1;
+            entry.accepted_count = entry.accepted_count.saturating_add(1);
         } else {
-            let penalty = if update.probability_bound <= 1.0e-9 {
-                Self::FAILURE_PENALTY
-            } else {
-                Self::SOFT_FAIL_PENALTY
-            };
-            *score = score.saturating_add(penalty);
-            *self
-                .failure_counts
-                .entry(update.peer_id.clone())
-                .or_insert(0) += 1;
+            entry.failure_count = entry.failure_count.saturating_add(1);
             if let Some(reason) = update.reason.as_ref() {
-                self.last_reason
-                    .insert(update.peer_id.clone(), reason.clone());
+                entry.last_reason = Some(reason.clone());
             }
         }
 
-        if *score >= Self::BLACKHOLE_THRESHOLD {
-            self.blackholed.insert(update.peer_id.clone());
+        let success_rate = Self::success_rate(entry);
+        if entry.recent.len() >= Self::MIN_SAMPLES_FOR_BAN
+            && success_rate < Self::SUCCESS_RATE_THRESHOLD
+        {
+            entry.banned_until_ms = Some(now + Self::BAN_COOLDOWN_MS);
+        }
+
+        let blackholed = entry
+            .banned_until_ms
+            .map(|until| until > now)
+            .unwrap_or(false);
+
+        if !blackholed {
+            entry.banned_until_ms = None;
         }
 
         ScoutPenaltyStatus {
             peer_id: update.peer_id.clone(),
-            score: *score,
-            failures: *self.failure_counts.get(&update.peer_id).unwrap_or(&0),
-            accepted: *self.accepted_counts.get(&update.peer_id).unwrap_or(&0),
-            blackholed: self.blackholed.contains(&update.peer_id),
-            last_reason: self.last_reason.get(&update.peer_id).cloned(),
+            score: (success_rate * 100.0).round() as i32,
+            failures: entry.failure_count,
+            accepted: entry.accepted_count,
+            blackholed,
+            success_rate,
+            last_reason: entry.last_reason.clone(),
         }
     }
 
-    fn is_blackholed(&self, peer_id: &str) -> bool {
-        self.blackholed.contains(peer_id)
+    fn is_blackholed(&mut self, peer_id: &str) -> bool {
+        let now = now_ms();
+        if let Some(entry) = self.entries.get_mut(peer_id) {
+            if let Some(until) = entry.banned_until_ms {
+                if until > now {
+                    return true;
+                }
+                entry.banned_until_ms = None;
+            }
+        }
+        false
     }
 
     fn all_statuses(&self) -> Vec<ScoutPenaltyStatus> {
-        self.scores
+        self.entries
             .iter()
-            .map(|(peer_id, score)| ScoutPenaltyStatus {
+            .map(|(peer_id, entry)| ScoutPenaltyStatus {
                 peer_id: peer_id.clone(),
-                score: *score,
-                failures: *self.failure_counts.get(peer_id).unwrap_or(&0),
-                accepted: *self.accepted_counts.get(peer_id).unwrap_or(&0),
-                blackholed: self.blackholed.contains(peer_id),
-                last_reason: self.last_reason.get(peer_id).cloned(),
+                score: (Self::success_rate(entry) * 100.0).round() as i32,
+                failures: entry.failure_count,
+                accepted: entry.accepted_count,
+                blackholed: entry
+                    .banned_until_ms
+                    .map(|until| until > now_ms())
+                    .unwrap_or(false),
+                success_rate: Self::success_rate(entry),
+                last_reason: entry.last_reason.clone(),
             })
             .collect()
     }
+}
+
+fn should_reject_peer_connection(penalties: &mut ScoutPenaltyBook, peer_id: &str) -> bool {
+    penalties.is_blackholed(peer_id)
 }
 
 #[derive(Debug, Serialize)]
@@ -484,6 +525,7 @@ async fn topology_handler(AxumState(state): AxumState<SharedState>) -> Json<serd
         "source": "rust-sidecar",
         "shard_peer_id": topo.local_peer_id,
         "shard_webrtc_multiaddr": topo.webrtc_addr,
+        "shard_quic_multiaddr": topo.quic_addr,
         "shard_ws_multiaddr": topo.ws_addr,
         "listen_addrs": topo.listen_addrs,
         "known_peer_count": known.len(),
@@ -624,6 +666,7 @@ async fn main() -> Result<()> {
             local_peer_id: local_peer_id.to_string(),
             listen_addrs: Vec::new(),
             webrtc_addr: None,
+            quic_addr: None,
             ws_addr: None,
             public_api_addr: cli.public_host.clone(),
             is_public: cli.public_api,
@@ -664,14 +707,21 @@ async fn main() -> Result<()> {
 
     let webrtc_cert = libp2p_webrtc::tokio::Certificate::generate(&mut rand::thread_rng())?;
     let webrtc = libp2p_webrtc::tokio::Transport::new(id_keys.clone(), webrtc_cert);
+    let quic = libp2p::quic::tokio::Transport::new(libp2p::quic::Config::new(&id_keys));
 
     use libp2p::Transport;
     let transport = authenticated_transport
         .or_transport(webrtc)
+        .or_transport(quic)
         .map(|either, _| match either {
-            libp2p::futures::future::Either::Left((peer_id, muxer)) => {
-                (peer_id, libp2p::core::muxing::StreamMuxerBox::new(muxer))
-            }
+            libp2p::futures::future::Either::Left(left) => match left {
+                libp2p::futures::future::Either::Left((peer_id, muxer)) => {
+                    (peer_id, libp2p::core::muxing::StreamMuxerBox::new(muxer))
+                }
+                libp2p::futures::future::Either::Right((peer_id, muxer)) => {
+                    (peer_id, libp2p::core::muxing::StreamMuxerBox::new(muxer))
+                }
+            },
             libp2p::futures::future::Either::Right((peer_id, muxer)) => {
                 (peer_id, libp2p::core::muxing::StreamMuxerBox::new(muxer))
             }
@@ -752,6 +802,8 @@ async fn main() -> Result<()> {
     let webrtc_addr: Multiaddr =
         format!("/ip4/0.0.0.0/udp/{}/webrtc-direct", cli.webrtc_port).parse()?;
     swarm.listen_on(webrtc_addr)?;
+    let quic_addr: Multiaddr = format!("/ip4/0.0.0.0/udp/{}/quic-v1", cli.quic_port).parse()?;
+    swarm.listen_on(quic_addr)?;
 
     // ── bootstrap peers ──
     for addr_str in &bootstrap_addrs {
@@ -824,6 +876,10 @@ async fn main() -> Result<()> {
         cli.webrtc_port
     );
     println!(
+        "  ║  QUIC         : /ip4/0.0.0.0/udp/{}/quic-v1 ║",
+        cli.quic_port
+    );
+    println!(
         "  ║  Contribute   : {}                              ║",
         if cli.contribute {
             "enabled"
@@ -882,7 +938,7 @@ async fn main() -> Result<()> {
                         if message.topic == result_topic.hash() {
                             if let Ok(result) = serde_json::from_slice::<WorkResponse>(&message.data) {
                                 let peer_is_blackholed = {
-                                    let penalties = state.scout_penalties.lock().await;
+                                    let mut penalties = state.scout_penalties.lock().await;
                                     penalties.is_blackholed(&result.peer_id)
                                 };
                                 if peer_is_blackholed {
@@ -1050,10 +1106,14 @@ async fn main() -> Result<()> {
                         if addr_str.contains("/webrtc-direct/") {
                             topo.webrtc_addr = Some(format!("{}/p2p/{}", addr_str, local_peer_id));
                         }
+                        if addr_str.contains("/quic-v1") {
+                            topo.quic_addr = Some(format!("{}/p2p/{}", addr_str, local_peer_id));
+                        }
 
                         let topo_json = serde_json::json!({
                             "shard_peer_id": topo.local_peer_id,
                             "shard_webrtc_multiaddr": topo.webrtc_addr,
+                            "shard_quic_multiaddr": topo.quic_addr,
                             "shard_ws_multiaddr": topo.ws_addr,
                             "listen_addrs": topo.listen_addrs,
                             "public_api": topo.is_public,
@@ -1069,6 +1129,16 @@ async fn main() -> Result<()> {
 
                     // ── peer connections ──
                     SwarmEvent::ConnectionEstablished { peer_id, endpoint, .. } => {
+                        let should_reject = {
+                            let mut penalties = state.scout_penalties.lock().await;
+                            penalties.is_blackholed(&peer_id.to_string())
+                        };
+                        if should_reject {
+                            tracing::warn!(%peer_id, "rejecting blackholed peer at transport layer");
+                            let _ = swarm.disconnect_peer_id(peer_id);
+                            continue;
+                        }
+
                         tracing::info!(%peer_id, ?endpoint, "peer connected");
                         let remote_addr = endpoint.get_remote_address().to_string();
 
@@ -1119,8 +1189,8 @@ async fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        unique_addrs, validate_work_request, LatencyHistogram, ScoutPenaltyBook,
-        ScoutPenaltyUpdate, WorkRequest,
+        should_reject_peer_connection, unique_addrs, validate_work_request, LatencyHistogram,
+        ScoutPenaltyBook, ScoutPenaltyUpdate, WorkRequest,
     };
 
     #[test]
@@ -1170,53 +1240,108 @@ mod tests {
         assert!(validate_work_request(&bad).is_err());
     }
     #[test]
-    fn penalty_book_blackholes_repeat_offender() {
+    fn test_malicious_scout_blacklist_trigger() {
         let mut penalties = ScoutPenaltyBook::default();
-        let peer_id = "12D3KooWBadActor".to_string();
+        let peer_id = "PeerID_C".to_string();
 
         let mut status = penalties.apply_update(ScoutPenaltyUpdate {
             peer_id: peer_id.clone(),
-            accepted: false,
-            probability_bound: 1.0e-12,
-            reason: Some("probability bound below threshold".to_string()),
+            accepted: true,
+            probability_bound: 1.0e-16,
+            reason: None,
         });
         assert!(!status.blackholed);
 
-        for _ in 0..8 {
+        for _ in 0..5 {
             status = penalties.apply_update(ScoutPenaltyUpdate {
                 peer_id: peer_id.clone(),
                 accepted: false,
                 probability_bound: 1.0e-12,
-                reason: None,
+                reason: Some("poisoned draft".to_string()),
             });
         }
 
-        assert!(status.score >= 100);
+        assert!(status.score < 55);
         assert!(status.blackholed);
         assert!(penalties.is_blackholed(&peer_id));
     }
 
     #[test]
-    fn penalty_book_rewards_accepted_contributions() {
+    fn test_honest_scout_baseline_reputation() {
         let mut penalties = ScoutPenaltyBook::default();
-        let peer_id = "12D3KooWHonest".to_string();
-
-        penalties.apply_update(ScoutPenaltyUpdate {
+        let peer_id = "PeerID_A".to_string();
+        let mut status = penalties.apply_update(ScoutPenaltyUpdate {
             peer_id: peer_id.clone(),
-            accepted: false,
-            probability_bound: 1.0e-3,
-            reason: Some("weak mismatch".to_string()),
-        });
-        let status = penalties.apply_update(ScoutPenaltyUpdate {
-            peer_id,
             accepted: true,
-            probability_bound: 0.0,
+            probability_bound: 1.0e-16,
             reason: None,
         });
 
-        assert_eq!(status.failures, 1);
-        assert_eq!(status.accepted, 1);
-        assert!(status.score < ScoutPenaltyBook::BLACKHOLE_THRESHOLD);
+        for _ in 0..9 {
+            status = penalties.apply_update(ScoutPenaltyUpdate {
+                peer_id: peer_id.clone(),
+                accepted: true,
+                probability_bound: 1.0e-16,
+                reason: None,
+            });
+        }
+
+        assert_eq!(status.accepted, 10);
+        assert_eq!(status.failures, 0);
+        assert_eq!(status.score, 100);
         assert!(!status.blackholed);
+    }
+
+    #[test]
+    fn test_degraded_scout_scoring_without_immediate_ban() {
+        let mut penalties = ScoutPenaltyBook::default();
+        let peer_id = "PeerID_B".to_string();
+
+        let mut status = penalties.apply_update(ScoutPenaltyUpdate {
+            peer_id: peer_id.clone(),
+            accepted: true,
+            probability_bound: 1.0e-16,
+            reason: None,
+        });
+
+        // Mixed quality scout; keep recent sliding success ratio above ban threshold.
+        for accepted in [true, false, true, false, true, true, false, true, false] {
+            status = penalties.apply_update(ScoutPenaltyUpdate {
+                peer_id: peer_id.clone(),
+                accepted,
+                probability_bound: if accepted { 1.0e-16 } else { 1.0e-6 },
+                reason: if accepted {
+                    None
+                } else {
+                    Some("invalid draft".to_string())
+                },
+            });
+        }
+
+        assert!(status.score >= 55);
+        assert!(!status.blackholed);
+    }
+
+    #[test]
+    fn test_blacklist_enforcement_rejects_connection() {
+        let mut penalties = ScoutPenaltyBook::default();
+        let peer_id = "PeerID_C".to_string();
+
+        penalties.apply_update(ScoutPenaltyUpdate {
+            peer_id: peer_id.clone(),
+            accepted: true,
+            probability_bound: 1.0e-16,
+            reason: None,
+        });
+        for _ in 0..5 {
+            penalties.apply_update(ScoutPenaltyUpdate {
+                peer_id: peer_id.clone(),
+                accepted: false,
+                probability_bound: 1.0e-12,
+                reason: Some("poisoned".to_string()),
+            });
+        }
+
+        assert!(should_reject_peer_connection(&mut penalties, &peer_id));
     }
 }

@@ -1,0 +1,57 @@
+services:
+  shard-daemon:
+    build:
+      context: .
+      dockerfile: Dockerfile.daemon
+    container_name: shard-daemon
+    command: ["shard-daemon", "--control-port", "9091", "--tcp-port", "4001", "--webrtc-port", "9090", "--quic-port", "9092"]
+    ports:
+      - "9091:9091"
+      - "4001:4001"
+      - "4101:4101"
+      - "9090:9090/udp"
+      - "9092:9092/udp"
+    networks:
+      - shard-net
+    restart: unless-stopped
+
+  shard-inference:
+    build:
+      context: .
+      dockerfile: Dockerfile.inference
+    container_name: shard-inference
+    environment:
+      NVIDIA_VISIBLE_DEVICES: ${NVIDIA_VISIBLE_DEVICES:-all}
+      NVIDIA_DRIVER_CAPABILITIES: ${NVIDIA_DRIVER_CAPABILITIES:-compute,utility}
+    gpus: all
+    expose:
+      - "7000"
+    networks:
+      - shard-net
+    restart: unless-stopped
+
+  shard-api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: shard-api
+    depends_on:
+      - shard-daemon
+      - shard-inference
+    environment:
+      SHARD_RUST_URL: http://shard-daemon:9091
+      SHARD_INFERENCE_URL: http://shard-inference:7000
+      SHARD_LOG_LEVEL: ${SHARD_LOG_LEVEL:-INFO}
+      BITNET_LIB: ${BITNET_LIB:-}
+      BITNET_MODEL: ${BITNET_MODEL:-}
+    command: ["python", "run.py", "--host", "0.0.0.0", "--port", "8000", "--rust-url", "http://shard-daemon:9091"]
+    working_dir: /app/desktop/python
+    ports:
+      - "8000:8000"
+    networks:
+      - shard-net
+    restart: unless-stopped
+
+networks:
+  shard-net:
+    driver: bridge
