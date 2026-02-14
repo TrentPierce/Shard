@@ -19,7 +19,7 @@ hex = "0.4"
 libp2p = { version = "0.56.0", features = [
     "tokio", "kad", "gossipsub", "request-response",
     "noise", "yamux", "tcp", "websocket", "dns", "macros", "cbor",
-    "relay", "dcutr", "autonat", "identify", "ping", "mdns",
+    "relay", "dcutr", "autonat", "identify", "ping", "mdns", "quic",
 ] }
 libp2p-webrtc = { version = "0.9.0-alpha.1", features = ["tokio"] }
 rand = "0.8"

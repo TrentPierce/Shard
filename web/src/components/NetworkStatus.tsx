@@ -208,6 +208,15 @@ export default function NetworkStatus({
                         {topology?.shard_webrtc_multiaddr ? "✓ available" : "—"}
                     </span>
                 </div>
+                <div className="stat-row">
+                    <span className="stat-label">QUIC Addr</span>
+                    <span
+                        className="stat-value"
+                        style={{ fontSize: "9px", maxWidth: "140px", overflow: "hidden", textOverflow: "ellipsis" }}
+                    >
+                        {topology?.shard_quic_multiaddr ? "✓ available" : "—"}
+                    </span>
+                </div>
             </div>
 
             {/* ── Peers ── */}
