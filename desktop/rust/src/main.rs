@@ -18,15 +18,12 @@ use axum::{
 };
 use clap::Parser;
 use libp2p::{
-    autonat,
-    dcutr,
+    autonat, dcutr,
     futures::StreamExt,
     gossipsub::{self, IdentTopic, MessageAuthenticity},
-    identify,
-    identity,
+    identify, identity,
     kad::{store::MemoryStore, Behaviour as KadBehaviour},
-    ping,
-    relay,
+    ping, relay,
     request_response::{self, OutboundRequestId, ProtocolSupport},
     swarm::{NetworkBehaviour, SwarmEvent},
     Multiaddr, PeerId, StreamProtocol,
@@ -151,9 +148,9 @@ struct TopologyState {
     is_public: bool,
     relay_server_enabled: bool,
     contribute_enabled: bool,
-    capacity: u32,        // tokens per second
-    load: u32,            // current active requests
-    latency_ms: f32,      // average response latency in ms
+    capacity: u32,   // tokens per second
+    load: u32,       // current active requests
+    latency_ms: f32, // average response latency in ms
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -178,6 +175,100 @@ struct SharedState {
     current_load: Arc<AtomicU32>,
     avg_latency_ms: Arc<AtomicU32>,
     gossipsub_latency_hist: Arc<LatencyHistogram>,
+    scout_penalties: Arc<Mutex<ScoutPenaltyBook>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ScoutPenaltyUpdate {
+    peer_id: String,
+    accepted: bool,
+    probability_bound: f64,
+    #[serde(default)]
+    reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ScoutPenaltyStatus {
+    peer_id: String,
+    score: i32,
+    failures: u32,
+    accepted: u32,
+    blackholed: bool,
+    last_reason: Option<String>,
+}
+
+#[derive(Debug, Default)]
+struct ScoutPenaltyBook {
+    scores: HashMap<String, i32>,
+    failure_counts: HashMap<String, u32>,
+    accepted_counts: HashMap<String, u32>,
+    blackholed: HashSet<String>,
+    last_reason: HashMap<String, String>,
+}
+
+impl ScoutPenaltyBook {
+    const FAILURE_PENALTY: i32 = 25;
+    const SOFT_FAIL_PENALTY: i32 = 10;
+    const ACCEPT_REWARD: i32 = 6;
+    const BLACKHOLE_THRESHOLD: i32 = 100;
+
+    fn apply_update(&mut self, update: ScoutPenaltyUpdate) -> ScoutPenaltyStatus {
+        let score = self.scores.entry(update.peer_id.clone()).or_insert(0);
+
+        if update.accepted {
+            *score = score.saturating_sub(Self::ACCEPT_REWARD);
+            *self
+                .accepted_counts
+                .entry(update.peer_id.clone())
+                .or_insert(0) += 1;
+        } else {
+            let penalty = if update.probability_bound <= 1.0e-9 {
+                Self::FAILURE_PENALTY
+            } else {
+                Self::SOFT_FAIL_PENALTY
+            };
+            *score = score.saturating_add(penalty);
+            *self
+                .failure_counts
+                .entry(update.peer_id.clone())
+                .or_insert(0) += 1;
+            if let Some(reason) = update.reason.as_ref() {
+                self.last_reason
+                    .insert(update.peer_id.clone(), reason.clone());
+            }
+        }
+
+        if *score >= Self::BLACKHOLE_THRESHOLD {
+            self.blackholed.insert(update.peer_id.clone());
+        }
+
+        ScoutPenaltyStatus {
+            peer_id: update.peer_id.clone(),
+            score: *score,
+            failures: *self.failure_counts.get(&update.peer_id).unwrap_or(&0),
+            accepted: *self.accepted_counts.get(&update.peer_id).unwrap_or(&0),
+            blackholed: self.blackholed.contains(&update.peer_id),
+            last_reason: self.last_reason.get(&update.peer_id).cloned(),
+        }
+    }
+
+    fn is_blackholed(&self, peer_id: &str) -> bool {
+        self.blackholed.contains(peer_id)
+    }
+
+    fn all_statuses(&self) -> Vec<ScoutPenaltyStatus> {
+        self.scores
+            .iter()
+            .map(|(peer_id, score)| ScoutPenaltyStatus {
+                peer_id: peer_id.clone(),
+                score: *score,
+                failures: *self.failure_counts.get(peer_id).unwrap_or(&0),
+                accepted: *self.accepted_counts.get(peer_id).unwrap_or(&0),
+                blackholed: self.blackholed.contains(peer_id),
+                last_reason: self.last_reason.get(peer_id).cloned(),
+            })
+            .collect()
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -199,9 +290,7 @@ struct LatencyHistogram {
 impl LatencyHistogram {
     fn new() -> Self {
         Self {
-            bucket_bounds_ms: [
-                5, 10, 25, 50, 100, 150, 200, 300, 500, 1000, 2000, 5000,
-            ],
+            bucket_bounds_ms: [5, 10, 25, 50, 100, 150, 200, 300, 500, 1000, 2000, 5000],
             bucket_counts: std::array::from_fn(|_| AtomicU64::new(0)),
         }
     }
@@ -451,6 +540,25 @@ async fn latency_profile_handler(
     }))
 }
 
+async fn scout_penalty_update_handler(
+    AxumState(state): AxumState<SharedState>,
+    Json(update): Json<ScoutPenaltyUpdate>,
+) -> Json<serde_json::Value> {
+    let mut penalties = state.scout_penalties.lock().await;
+    let status = penalties.apply_update(update);
+    Json(serde_json::json!({"ok": true, "status": status}))
+}
+
+async fn scout_penalty_status_handler(
+    AxumState(state): AxumState<SharedState>,
+) -> Json<serde_json::Value> {
+    let penalties = state.scout_penalties.lock().await;
+    Json(serde_json::json!({
+        "ok": true,
+        "peers": penalties.all_statuses(),
+    }))
+}
+
 fn create_router(state: SharedState) -> Router {
     let cors = CorsLayer::new()
         .allow_origin(Any)
@@ -463,6 +571,8 @@ fn create_router(state: SharedState) -> Router {
         .route("/peers", get(peers_handler))
         .route("/broadcast-work", post(broadcast_work_handler))
         .route("/pop-result", get(pop_result_handler))
+        .route("/scout/penalty", post(scout_penalty_update_handler))
+        .route("/scout/penalty", get(scout_penalty_status_handler))
         .route("/metrics/latency-profile", get(latency_profile_handler))
         .layer(cors)
         .with_state(state)
@@ -519,7 +629,7 @@ async fn main() -> Result<()> {
             is_public: cli.public_api,
             relay_server_enabled: cli.relay_server,
             contribute_enabled: cli.contribute,
-            capacity: 100,  // Default: 100 tokens/sec
+            capacity: 100, // Default: 100 tokens/sec
             load: 0,
             latency_ms: 0.0,
         })),
@@ -528,33 +638,43 @@ async fn main() -> Result<()> {
         results: Arc::new(Mutex::new(VecDeque::new())),
         work_tx,
         daemon_start: now_ms(),
-        capacity: Arc::new(AtomicU32::new(100)),  // Default: 100 tokens/sec
+        capacity: Arc::new(AtomicU32::new(100)), // Default: 100 tokens/sec
         current_load: Arc::new(AtomicU32::new(0)),
         avg_latency_ms: Arc::new(AtomicU32::new(0)),
         gossipsub_latency_hist: Arc::new(LatencyHistogram::new()),
+        scout_penalties: Arc::new(Mutex::new(ScoutPenaltyBook::default())),
     };
 
     // ── build swarm ──
     // ── build transport ──
     let tcp_config = libp2p::tcp::Config::default().nodelay(true);
-    let dns_tcp = libp2p::dns::tokio::Transport::system(libp2p::tcp::tokio::Transport::new(tcp_config.clone()))?;
-    let ws_dns_tcp = libp2p::websocket::Config::new(libp2p::dns::tokio::Transport::system(libp2p::tcp::tokio::Transport::new(tcp_config))?);
-    
+    let dns_tcp = libp2p::dns::tokio::Transport::system(libp2p::tcp::tokio::Transport::new(
+        tcp_config.clone(),
+    ))?;
+    let ws_dns_tcp = libp2p::websocket::Config::new(libp2p::dns::tokio::Transport::system(
+        libp2p::tcp::tokio::Transport::new(tcp_config),
+    )?);
+
     let tcp_ws = libp2p::core::transport::OrTransport::new(dns_tcp, ws_dns_tcp);
-    
+
     let authenticated_transport = tcp_ws
         .upgrade(libp2p::core::upgrade::Version::V1)
         .authenticate(libp2p::noise::Config::new(&id_keys).expect("Noise config failed"))
         .multiplex(libp2p::yamux::Config::default());
-        
+
     let webrtc_cert = libp2p_webrtc::tokio::Certificate::generate(&mut rand::thread_rng())?;
     let webrtc = libp2p_webrtc::tokio::Transport::new(id_keys.clone(), webrtc_cert);
-    
+
     use libp2p::Transport;
-    let transport = authenticated_transport.or_transport(webrtc)
+    let transport = authenticated_transport
+        .or_transport(webrtc)
         .map(|either, _| match either {
-            libp2p::futures::future::Either::Left((peer_id, muxer)) => (peer_id, libp2p::core::muxing::StreamMuxerBox::new(muxer)),
-            libp2p::futures::future::Either::Right((peer_id, muxer)) => (peer_id, libp2p::core::muxing::StreamMuxerBox::new(muxer)),
+            libp2p::futures::future::Either::Left((peer_id, muxer)) => {
+                (peer_id, libp2p::core::muxing::StreamMuxerBox::new(muxer))
+            }
+            libp2p::futures::future::Either::Right((peer_id, muxer)) => {
+                (peer_id, libp2p::core::muxing::StreamMuxerBox::new(muxer))
+            }
         })
         .boxed();
 
@@ -563,7 +683,8 @@ async fn main() -> Result<()> {
         let gossipsub = gossipsub::Behaviour::new(
             MessageAuthenticity::Signed(id_keys.clone()),
             gossipsub::Config::default(),
-        ).map_err(|e| anyhow::anyhow!(e.to_string()))?;
+        )
+        .map_err(|e| anyhow::anyhow!(e.to_string()))?;
         let kad = KadBehaviour::new(local_peer_id, MemoryStore::new(local_peer_id));
         let handshake = request_response::cbor::Behaviour::new(
             [(
@@ -607,8 +728,13 @@ async fn main() -> Result<()> {
             ping,
         }
     };
-    
-    let mut swarm = libp2p::Swarm::new(transport, behaviour, local_peer_id, libp2p::swarm::Config::with_tokio_executor());
+
+    let mut swarm = libp2p::Swarm::new(
+        transport,
+        behaviour,
+        local_peer_id,
+        libp2p::swarm::Config::with_tokio_executor(),
+    );
 
     // ── gossipsub topics ──
     let work_topic = IdentTopic::new("shard-work");
@@ -623,7 +749,8 @@ async fn main() -> Result<()> {
     let ws_addr: Multiaddr = format!("/ip4/0.0.0.0/tcp/{}/ws", cli.tcp_port + 100).parse()?;
     swarm.listen_on(tcp_addr)?;
     swarm.listen_on(ws_addr)?;
-    let webrtc_addr: Multiaddr = format!("/ip4/0.0.0.0/udp/{}/webrtc-direct", cli.webrtc_port).parse()?;
+    let webrtc_addr: Multiaddr =
+        format!("/ip4/0.0.0.0/udp/{}/webrtc-direct", cli.webrtc_port).parse()?;
     swarm.listen_on(webrtc_addr)?;
 
     // ── bootstrap peers ──
@@ -674,7 +801,11 @@ async fn main() -> Result<()> {
     );
     println!(
         "  ║  Public API   : {}                              ║",
-        if cli.public_api { "enabled" } else { "disabled" }
+        if cli.public_api {
+            "enabled"
+        } else {
+            "disabled"
+        }
     );
     println!(
         "  ║  Public Host  : {}                       ║",
@@ -682,7 +813,11 @@ async fn main() -> Result<()> {
     );
     println!(
         "  ║  Relay Server : {}                              ║",
-        if cli.relay_server { "enabled" } else { "disabled" }
+        if cli.relay_server {
+            "enabled"
+        } else {
+            "disabled"
+        }
     );
     println!(
         "  ║  WebRTC       : /ip4/0.0.0.0/udp/{}/p2p-webrtc-direct ║",
@@ -690,7 +825,11 @@ async fn main() -> Result<()> {
     );
     println!(
         "  ║  Contribute   : {}                              ║",
-        if cli.contribute { "enabled" } else { "disabled" }
+        if cli.contribute {
+            "enabled"
+        } else {
+            "disabled"
+        }
     );
     println!("  ╚══════════════════════════════════════════════╝");
     println!();
@@ -742,6 +881,15 @@ async fn main() -> Result<()> {
                     SwarmEvent::Behaviour(ShardBehaviourEvent::Gossipsub(gossipsub::Event::Message { message, .. })) => {
                         if message.topic == result_topic.hash() {
                             if let Ok(result) = serde_json::from_slice::<WorkResponse>(&message.data) {
+                                let peer_is_blackholed = {
+                                    let penalties = state.scout_penalties.lock().await;
+                                    penalties.is_blackholed(&result.peer_id)
+                                };
+                                if peer_is_blackholed {
+                                    tracing::warn!(peer = %result.peer_id, "dropping WorkResponse from blackholed scout peer");
+                                    continue;
+                                }
+
                                 tracing::info!(
                                     request_id = %result.request_id,
                                     peer = %result.peer_id,
@@ -970,7 +1118,10 @@ async fn main() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{LatencyHistogram, WorkRequest, unique_addrs, validate_work_request};
+    use super::{
+        unique_addrs, validate_work_request, LatencyHistogram, ScoutPenaltyBook,
+        ScoutPenaltyUpdate, WorkRequest,
+    };
 
     #[test]
     fn unique_addrs_removes_duplicates() {
@@ -1017,5 +1168,55 @@ mod tests {
             created_at_ms: None,
         };
         assert!(validate_work_request(&bad).is_err());
+    }
+    #[test]
+    fn penalty_book_blackholes_repeat_offender() {
+        let mut penalties = ScoutPenaltyBook::default();
+        let peer_id = "12D3KooWBadActor".to_string();
+
+        let mut status = penalties.apply_update(ScoutPenaltyUpdate {
+            peer_id: peer_id.clone(),
+            accepted: false,
+            probability_bound: 1.0e-12,
+            reason: Some("probability bound below threshold".to_string()),
+        });
+        assert!(!status.blackholed);
+
+        for _ in 0..8 {
+            status = penalties.apply_update(ScoutPenaltyUpdate {
+                peer_id: peer_id.clone(),
+                accepted: false,
+                probability_bound: 1.0e-12,
+                reason: None,
+            });
+        }
+
+        assert!(status.score >= 100);
+        assert!(status.blackholed);
+        assert!(penalties.is_blackholed(&peer_id));
+    }
+
+    #[test]
+    fn penalty_book_rewards_accepted_contributions() {
+        let mut penalties = ScoutPenaltyBook::default();
+        let peer_id = "12D3KooWHonest".to_string();
+
+        penalties.apply_update(ScoutPenaltyUpdate {
+            peer_id: peer_id.clone(),
+            accepted: false,
+            probability_bound: 1.0e-3,
+            reason: Some("weak mismatch".to_string()),
+        });
+        let status = penalties.apply_update(ScoutPenaltyUpdate {
+            peer_id,
+            accepted: true,
+            probability_bound: 0.0,
+            reason: None,
+        });
+
+        assert_eq!(status.failures, 1);
+        assert_eq!(status.accepted, 1);
+        assert!(status.score < ScoutPenaltyBook::BLACKHOLE_THRESHOLD);
+        assert!(!status.blackholed);
     }
 }
