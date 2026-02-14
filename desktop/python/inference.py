@@ -23,7 +23,8 @@ import os
 import time
 from collections import deque
 from collections.abc import AsyncIterator
-from typing import Any, Awaitable, Callable
+from dataclasses import dataclass
+from typing import Any, Awaitable, Callable, Protocol
 
 try:
     import httpx  # type: ignore
@@ -48,6 +49,74 @@ LOGGER = logging.getLogger("shard.inference")
 
 # Pitch Mode configuration
 PITCH_MODE = os.getenv("SHARD_PITCH_MODE", "0") == "1"
+
+
+class KvCheckpointRuntime(Protocol):
+    """Interface used by the generation loop for snapshot handoff.
+
+    Implemented by desktop/python/bitnet/ctypes_bridge.BitNetRuntime.
+    """
+
+    def export_kv_snapshot(self) -> bytes: ...
+
+    def import_kv_snapshot(self, snapshot: bytes | bytearray | memoryview) -> None: ...
+
+
+@dataclass
+class KvCheckpointState:
+    """In-memory bounded checkpoint used for local fallback/handoff.
+
+    - payload: serialized runtime state (KV cache + decoding metadata)
+    - token_count: generated token count at capture time
+    - generated_tail: short textual suffix to quickly rebuild prompt context
+    """
+
+    payload: bytes
+    token_count: int
+    generated_tail: tuple[str, ...]
+
+
+class KvCheckpointManager:
+    """Captures periodic KV snapshots and restores the latest safe snapshot.
+
+    Checkpoint cadence is token-based instead of time-based so this logic remains
+    deterministic under event-loop jitter.
+    """
+
+    def __init__(
+        self,
+        *,
+        runtime: KvCheckpointRuntime,
+        every_n_tokens: int = 8,
+        max_generated_tail: int = 256,
+    ) -> None:
+        self._runtime = runtime
+        self._every_n_tokens = max(1, every_n_tokens)
+        self._max_generated_tail = max(16, max_generated_tail)
+        self._latest: KvCheckpointState | None = None
+
+    @property
+    def latest(self) -> KvCheckpointState | None:
+        return self._latest
+
+    def maybe_checkpoint(self, generated: list[str], emitted_tokens: int) -> KvCheckpointState | None:
+        """Capture a new checkpoint when token cadence is reached."""
+        if emitted_tokens <= 0 or (emitted_tokens % self._every_n_tokens) != 0:
+            return self._latest
+        payload = self._runtime.export_kv_snapshot()
+        self._latest = KvCheckpointState(
+            payload=payload,
+            token_count=emitted_tokens,
+            generated_tail=tuple(generated[-self._max_generated_tail :]),
+        )
+        return self._latest
+
+    def restore_latest(self) -> KvCheckpointState | None:
+        """Restore the most recent checkpoint into the runtime."""
+        if self._latest is None:
+            return None
+        self._runtime.import_kv_snapshot(self._latest.payload)
+        return self._latest
 
 
 class RustControlPlaneClient:
@@ -133,6 +202,7 @@ async def cooperative_generate(
     control_plane: RustControlPlaneClient,
     max_tokens: int = 256,
     telemetry_hook: Callable[[dict[str, float | int]], Awaitable[None] | None] | None = None,
+    kv_checkpoint_manager: KvCheckpointManager | None = None,
 ) -> AsyncIterator[str]:
     """Hybrid speculative loop with Golden Ticket security.
 
@@ -166,6 +236,12 @@ async def cooperative_generate(
         local_token_cost_ms.append(local_elapsed_ms)
         yield local_token
         tokens_emitted += 1
+
+        if kv_checkpoint_manager is not None:
+            try:
+                kv_checkpoint_manager.maybe_checkpoint(generated, tokens_emitted)
+            except Exception as exc:
+                LOGGER.warning("KV checkpoint capture skipped: %s", exc)
 
         now = time.perf_counter()
         if (now - last_broadcast) >= 0.05:
@@ -203,6 +279,14 @@ async def cooperative_generate(
             continue
 
         if not result:
+            # Remote speculation currently unavailable. If we have an already captured
+            # checkpoint, ensure runtime state is coherent and continue local AR decode.
+            if kv_checkpoint_manager is not None and kv_checkpoint_manager.latest is not None:
+                try:
+                    kv_checkpoint_manager.restore_latest()
+                    generated = list(kv_checkpoint_manager.latest.generated_tail)
+                except Exception as exc:
+                    LOGGER.warning("KV checkpoint restore skipped: %s", exc)
             continue
 
         # Extract scout ID and check if banned
