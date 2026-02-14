@@ -15,6 +15,7 @@ import os
 import sys
 import time
 import uuid
+from collections import deque
 from collections.abc import AsyncIterator
 from typing import Annotated, Any, Literal
 
@@ -302,6 +303,50 @@ class RateLimiter:
 
 RATE_LIMITER = RateLimiter(RATE_LIMIT_PER_MINUTE)
 SCOUT_RATE_LIMITER = RateLimiter(int(os.getenv("SHARD_SCOUT_RATE_LIMIT_PER_MINUTE", "120")))
+
+
+class LatencyProfileStore:
+    """In-memory, low-overhead latency samples for local-vs-network comparisons."""
+
+    def __init__(self) -> None:
+        self._samples: deque[dict[str, float | int]] = deque(maxlen=1024)
+        self._lock = asyncio.Lock()
+
+    async def record_sample(self, sample: dict[str, float | int]) -> None:
+        async with self._lock:
+            self._samples.append(sample)
+
+    async def summarize(self, p50_ms: float, p90_ms: float, p99_ms: float) -> dict[str, dict[str, float | int]]:
+        async with self._lock:
+            samples = list(self._samples)
+
+        buckets: dict[str, list[dict[str, float | int]]] = {"p50": [], "p90": [], "p99": []}
+        for sample in samples:
+            net_ms = float(sample.get("network_rtt_plus_verify_ms", 0.0))
+            if net_ms <= p50_ms:
+                buckets["p50"].append(sample)
+            elif net_ms <= p90_ms:
+                buckets["p90"].append(sample)
+            else:
+                buckets["p99"].append(sample)
+
+        def _avg(rows: list[dict[str, float | int]], key: str) -> float:
+            if not rows:
+                return 0.0
+            return sum(float(r.get(key, 0.0)) for r in rows) / len(rows)
+
+        out: dict[str, dict[str, float | int]] = {}
+        for bucket_name, rows in buckets.items():
+            out[bucket_name] = {
+                "samples": len(rows),
+                "avg_tokens": _avg(rows, "tokens"),
+                "avg_local_generate_ms": _avg(rows, "local_generate_ms"),
+                "avg_network_rtt_plus_verify_ms": _avg(rows, "network_rtt_plus_verify_ms"),
+            }
+        return out
+
+
+LATENCY_PROFILE = LatencyProfileStore()
 
 
 def _get_http_client() -> httpx.AsyncClient:
@@ -775,6 +820,7 @@ async def chat_completions(
             verify_draft=_verify_draft,
             control_plane=control,
             max_tokens=payload.max_tokens,
+            telemetry_hook=LATENCY_PROFILE.record_sample,
         ):
             tokens.append(tok)
     except Exception as exc:
@@ -838,6 +884,7 @@ async def _stream_generate(
             verify_draft=_verify_draft,
             control_plane=control,
             max_tokens=max_tokens,
+            telemetry_hook=LATENCY_PROFILE.record_sample,
         ):
             chunk = {
                 "id": completion_id,
@@ -872,6 +919,39 @@ async def _stream_generate(
     }
     yield f"data: {json.dumps(final)}\n\n"
     yield "data: [DONE]\n\n"
+
+
+@app.get(
+    "/v1/metrics/latency_profile",
+    tags=["system"],
+    summary="Latency profile for local vs P2P speculative path",
+    description=(
+        "Compares local generation time for N tokens against network RTT + verification "
+        "for scout drafts, grouped by current P2P latency percentiles."
+    ),
+)
+async def latency_profile() -> dict[str, Any]:
+    client = _get_http_client()
+    p2p = {"p50": 0.0, "p90": 0.0, "p99": 0.0, "samples": 0}
+    try:
+        resp = await client.get("/metrics/latency-profile")
+        if resp.status_code == 200:
+            payload = resp.json().get("gossipsub_propagation_ms", {})
+            p2p = {
+                "p50": float(payload.get("p50", 0.0)),
+                "p90": float(payload.get("p90", 0.0)),
+                "p99": float(payload.get("p99", 0.0)),
+                "samples": int(payload.get("samples", 0)),
+            }
+    except httpx.HTTPError as exc:
+        LOGGER.warning("Rust latency profile fetch failed: %s", exc)
+
+    summary = await LATENCY_PROFILE.summarize(p2p["p50"], p2p["p90"], p2p["p99"])
+    return {
+        "status": "ok",
+        "p2p_latency_ms": p2p,
+        "local_vs_network": summary,
+    }
 
 
 @app.get(

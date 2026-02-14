@@ -95,3 +95,13 @@ def test_metrics_endpoint(monkeypatch) -> None:
     metrics = client.get("/metrics")
     assert metrics.status_code == 200
     assert "shard_chat_requests_total" in metrics.text
+
+
+def test_latency_profile_endpoint(monkeypatch) -> None:
+    client = _load_client(monkeypatch)
+
+    resp = client.get("/v1/metrics/latency_profile")
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert "p2p_latency_ms" in payload
+    assert "local_vs_network" in payload
