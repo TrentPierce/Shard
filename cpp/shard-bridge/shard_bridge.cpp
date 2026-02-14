@@ -2,7 +2,9 @@
 #include "llama.h"
 
 #include <algorithm>
+#include <cstdint>
 #include <cstring>
+#include <limits>
 #include <string>
 #include <vector>
 #include <iostream>
@@ -13,6 +15,20 @@ struct ShardEngineState {
     int32_t n_ctx = 4096;
     int32_t n_past = 0;
 };
+
+namespace {
+
+constexpr uint32_t kShardSnapshotMagic = 0x50414E53; // "SNAP" little-endian
+constexpr uint32_t kShardSnapshotVersion = 1;
+
+struct ShardSnapshotHeader {
+    uint32_t magic;
+    uint32_t version;
+    uint32_t n_past;
+    uint32_t payload_size;
+};
+
+} // namespace
 
 extern "C" {
 
@@ -138,6 +154,101 @@ SHARD_API int shard_token_to_piece(void* handle, int token_id, char* out_buffer,
 SHARD_API int shard_get_vram_usage(void* handle) {
     if (handle == nullptr) return -1;
     // placeholder: llama.cpp doesn't expose a simple "current vram used" easily without more plumbing
+    return 0;
+}
+
+SHARD_API int shard_kv_snapshot_size(void* handle) {
+    if (handle == nullptr) {
+        return -1;
+    }
+
+    auto* state = static_cast<ShardEngineState*>(handle);
+    const size_t payload_size = llama_state_get_size(state->ctx);
+    const size_t total_size = sizeof(ShardSnapshotHeader) + payload_size;
+    if (total_size > static_cast<size_t>(std::numeric_limits<int>::max())) {
+        return -2;
+    }
+    return static_cast<int>(total_size);
+}
+
+SHARD_API int shard_kv_snapshot_export(
+    void* handle,
+    unsigned char* out_buffer,
+    int out_buffer_size,
+    int max_snapshot_bytes
+) {
+    if (handle == nullptr || out_buffer == nullptr || out_buffer_size <= 0 || max_snapshot_bytes <= 0) {
+        return -1;
+    }
+
+    auto* state = static_cast<ShardEngineState*>(handle);
+    const size_t payload_size = llama_state_get_size(state->ctx);
+    const size_t total_size = sizeof(ShardSnapshotHeader) + payload_size;
+
+    if (total_size > static_cast<size_t>(max_snapshot_bytes)) {
+        return -2;
+    }
+    if (total_size > static_cast<size_t>(out_buffer_size)) {
+        return -3;
+    }
+
+    ShardSnapshotHeader header {
+        kShardSnapshotMagic,
+        kShardSnapshotVersion,
+        static_cast<uint32_t>(state->n_past),
+        static_cast<uint32_t>(payload_size),
+    };
+    std::memcpy(out_buffer, &header, sizeof(header));
+
+    const size_t written = llama_state_get_data(
+        state->ctx,
+        out_buffer + sizeof(header),
+        payload_size
+    );
+    if (written != payload_size) {
+        return -4;
+    }
+
+    return static_cast<int>(sizeof(header) + written);
+}
+
+SHARD_API int shard_kv_snapshot_import(
+    void* handle,
+    const unsigned char* snapshot_data,
+    int snapshot_size,
+    int max_snapshot_bytes
+) {
+    if (handle == nullptr || snapshot_data == nullptr || snapshot_size <= static_cast<int>(sizeof(ShardSnapshotHeader)) || max_snapshot_bytes <= 0) {
+        return -1;
+    }
+    if (snapshot_size > max_snapshot_bytes) {
+        return -2;
+    }
+
+    auto* state = static_cast<ShardEngineState*>(handle);
+
+    ShardSnapshotHeader header {};
+    std::memcpy(&header, snapshot_data, sizeof(header));
+    if (header.magic != kShardSnapshotMagic || header.version != kShardSnapshotVersion) {
+        return -3;
+    }
+
+    const size_t payload_size = static_cast<size_t>(header.payload_size);
+    const size_t expected_size = sizeof(ShardSnapshotHeader) + payload_size;
+    if (expected_size != static_cast<size_t>(snapshot_size)) {
+        return -4;
+    }
+
+    const size_t loaded = llama_state_set_data(
+        state->ctx,
+        snapshot_data + sizeof(ShardSnapshotHeader),
+        payload_size
+    );
+    if (loaded != payload_size) {
+        return -5;
+    }
+
+    state->n_past = static_cast<int32_t>(header.n_past);
     return 0;
 }
 
