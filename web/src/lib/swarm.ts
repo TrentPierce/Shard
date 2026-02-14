@@ -38,6 +38,7 @@ export type Topology = {
     source?: string
     shard_peer_id?: string
     shard_webrtc_multiaddr?: string | null
+    shard_quic_multiaddr?: string | null
     shard_ws_multiaddr?: string | null
     listen_addrs?: string[]
 }
@@ -119,10 +120,10 @@ export async function probeLocalShard(): Promise<LocalShardProbe> {
 export async function fetchTopology(): Promise<Topology> {
     try {
         const res = await fetch(apiUrl("/v1/system/topology"))
-        if (!res.ok) return { status: "degraded", shard_webrtc_multiaddr: null }
+        if (!res.ok) return { status: "degraded", shard_webrtc_multiaddr: null, shard_quic_multiaddr: null }
         return (await res.json()) as Topology
     } catch {
-        return { status: "degraded", shard_webrtc_multiaddr: null }
+        return { status: "degraded", shard_webrtc_multiaddr: null, shard_quic_multiaddr: null }
     }
 }
 
@@ -203,6 +204,23 @@ export async function initSwarmWorker(
                 return null
             })
             .filter((addr): addr is string => addr !== null)
+
+        // Prepare WebTransport endpoint hints from QUIC multiaddrs when supported.
+        const quicCandidates = topology.listen_addrs
+            .filter(addr => addr.includes('/quic-v1'))
+            .map(addr => {
+                const hostMatch = addr.match(/(?:ip4|dns4)\/([^/]+)/)
+                const portMatch = addr.match(/udp\/(\d+)/)
+                if (hostMatch && portMatch) {
+                    return `https://${hostMatch[1]}:${portMatch[1]}`
+                }
+                return null
+            })
+            .filter((addr): addr is string => addr !== null)
+
+        if (typeof window !== 'undefined' && 'WebTransport' in window && quicCandidates.length > 0) {
+            console.log('[swarm] WebTransport-capable browser detected; QUIC candidates:', quicCandidates)
+        }
     }
 
     registration.active?.postMessage({
