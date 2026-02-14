@@ -37,7 +37,7 @@ use std::{
     net::SocketAddr,
     path::Path,
     sync::{
-        atomic::{AtomicU32, Ordering},
+        atomic::{AtomicU32, AtomicU64, Ordering},
         Arc,
     },
     time::{Duration, SystemTime, UNIX_EPOCH},
@@ -120,6 +120,8 @@ pub struct WorkRequest {
     pub request_id: String,
     pub prompt_context: String,
     pub min_tokens: i32,
+    #[serde(default)]
+    pub created_at_ms: Option<u128>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -128,6 +130,8 @@ pub struct WorkResponse {
     pub peer_id: String,
     pub draft_tokens: Vec<String>,
     pub latency_ms: f32,
+    #[serde(default)]
+    pub created_at_ms: Option<u128>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -173,6 +177,93 @@ struct SharedState {
     capacity: Arc<AtomicU32>,
     current_load: Arc<AtomicU32>,
     avg_latency_ms: Arc<AtomicU32>,
+    gossipsub_latency_hist: Arc<LatencyHistogram>,
+}
+
+#[derive(Debug, Serialize)]
+struct LatencyPercentiles {
+    p50_ms: u64,
+    p90_ms: u64,
+    p99_ms: u64,
+    samples: u64,
+}
+
+#[derive(Debug)]
+struct LatencyHistogram {
+    /// Upper-bound bucket edges in milliseconds. Values above the last edge
+    /// are stored in an overflow bucket.
+    bucket_bounds_ms: [u64; 12],
+    bucket_counts: [AtomicU64; 13],
+}
+
+impl LatencyHistogram {
+    fn new() -> Self {
+        Self {
+            bucket_bounds_ms: [
+                5, 10, 25, 50, 100, 150, 200, 300, 500, 1000, 2000, 5000,
+            ],
+            bucket_counts: std::array::from_fn(|_| AtomicU64::new(0)),
+        }
+    }
+
+    fn observe(&self, latency_ms: u64) {
+        for (idx, bound) in self.bucket_bounds_ms.iter().enumerate() {
+            if latency_ms <= *bound {
+                self.bucket_counts[idx].fetch_add(1, Ordering::Relaxed);
+                return;
+            }
+        }
+        self.bucket_counts[self.bucket_counts.len() - 1].fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn percentiles(&self) -> LatencyPercentiles {
+        let counts: Vec<u64> = self
+            .bucket_counts
+            .iter()
+            .map(|v| v.load(Ordering::Relaxed))
+            .collect();
+        let total: u64 = counts.iter().sum();
+        if total == 0 {
+            return LatencyPercentiles {
+                p50_ms: 0,
+                p90_ms: 0,
+                p99_ms: 0,
+                samples: 0,
+            };
+        }
+
+        let p50_target = ((total as f64) * 0.50).ceil() as u64;
+        let p90_target = ((total as f64) * 0.90).ceil() as u64;
+        let p99_target = ((total as f64) * 0.99).ceil() as u64;
+
+        let mut running = 0u64;
+        let mut p50 = 0u64;
+        let mut p90 = 0u64;
+        let mut p99 = 0u64;
+
+        for (idx, count) in counts.iter().enumerate() {
+            running += *count;
+            let bucket_upper = self.bucket_bounds_ms.get(idx).copied().unwrap_or(10_000);
+
+            if p50 == 0 && running >= p50_target {
+                p50 = bucket_upper;
+            }
+            if p90 == 0 && running >= p90_target {
+                p90 = bucket_upper;
+            }
+            if p99 == 0 && running >= p99_target {
+                p99 = bucket_upper;
+                break;
+            }
+        }
+
+        LatencyPercentiles {
+            p50_ms: p50,
+            p90_ms: p90,
+            p99_ms: p99,
+            samples: total,
+        }
+    }
 }
 
 // ─── libp2p Behaviour ───────────────────────────────────────────────────────
@@ -345,6 +436,21 @@ async fn pop_result_handler(AxumState(state): AxumState<SharedState>) -> Json<se
     }
 }
 
+async fn latency_profile_handler(
+    AxumState(state): AxumState<SharedState>,
+) -> Json<serde_json::Value> {
+    let p = state.gossipsub_latency_hist.percentiles();
+    Json(serde_json::json!({
+        "source": "rust-sidecar",
+        "gossipsub_propagation_ms": {
+            "p50": p.p50_ms,
+            "p90": p.p90_ms,
+            "p99": p.p99_ms,
+            "samples": p.samples,
+        }
+    }))
+}
+
 fn create_router(state: SharedState) -> Router {
     let cors = CorsLayer::new()
         .allow_origin(Any)
@@ -357,6 +463,7 @@ fn create_router(state: SharedState) -> Router {
         .route("/peers", get(peers_handler))
         .route("/broadcast-work", post(broadcast_work_handler))
         .route("/pop-result", get(pop_result_handler))
+        .route("/metrics/latency-profile", get(latency_profile_handler))
         .layer(cors)
         .with_state(state)
 }
@@ -424,6 +531,7 @@ async fn main() -> Result<()> {
         capacity: Arc::new(AtomicU32::new(100)),  // Default: 100 tokens/sec
         current_load: Arc::new(AtomicU32::new(0)),
         avg_latency_ms: Arc::new(AtomicU32::new(0)),
+        gossipsub_latency_hist: Arc::new(LatencyHistogram::new()),
     };
 
     // ── build swarm ──
@@ -612,7 +720,10 @@ async fn main() -> Result<()> {
             }
 
             // ── inbound work from Python driver (HTTP → gossipsub) ──
-            Some(work_req) = work_rx.recv() => {
+            Some(mut work_req) = work_rx.recv() => {
+                if work_req.created_at_ms.is_none() {
+                    work_req.created_at_ms = Some(now_ms());
+                }
                 match serde_json::to_vec(&work_req) {
                     Ok(payload) => {
                         match swarm.behaviour_mut().gossipsub.publish(work_topic.clone(), payload) {
@@ -637,6 +748,14 @@ async fn main() -> Result<()> {
                                     tokens = result.draft_tokens.len(),
                                     "received WorkResponse via gossipsub"
                                 );
+
+                                // Propagation latency telemetry is intentionally lightweight:
+                                // one saturating subtraction + one atomic increment.
+                                if let Some(created_at_ms) = result.created_at_ms {
+                                    let propagation_ms = now_ms().saturating_sub(created_at_ms) as u64;
+                                    state.gossipsub_latency_hist.observe(propagation_ms);
+                                }
+
                                 let mut q = state.results.lock().await;
                                 q.push_back(result);
                                 while q.len() > 128 { q.pop_front(); }
@@ -851,7 +970,7 @@ async fn main() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{unique_addrs, validate_work_request, WorkRequest};
+    use super::{LatencyHistogram, WorkRequest, unique_addrs, validate_work_request};
 
     #[test]
     fn unique_addrs_removes_duplicates() {
@@ -865,11 +984,29 @@ mod tests {
     }
 
     #[test]
+    fn latency_histogram_reports_percentiles() {
+        let hist = LatencyHistogram::new();
+        for _ in 0..8 {
+            hist.observe(10);
+        }
+        for _ in 0..2 {
+            hist.observe(300);
+        }
+
+        let p = hist.percentiles();
+        assert_eq!(p.samples, 10);
+        assert!(p.p50_ms >= 10);
+        assert!(p.p90_ms >= 300);
+        assert!(p.p99_ms >= p.p90_ms);
+    }
+
+    #[test]
     fn work_request_validation_enforces_bounds() {
         let ok = WorkRequest {
             request_id: "abc".into(),
             prompt_context: "hello".into(),
             min_tokens: 4,
+            created_at_ms: None,
         };
         assert!(validate_work_request(&ok).is_ok());
 
@@ -877,6 +1014,7 @@ mod tests {
             request_id: "".into(),
             prompt_context: "hello".into(),
             min_tokens: 0,
+            created_at_ms: None,
         };
         assert!(validate_work_request(&bad).is_err());
     }

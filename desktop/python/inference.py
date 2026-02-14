@@ -21,6 +21,7 @@ from __future__ import annotations
 import logging
 import os
 import time
+from collections import deque
 from collections.abc import AsyncIterator
 from typing import Any, Awaitable, Callable
 
@@ -131,6 +132,7 @@ async def cooperative_generate(
     ],
     control_plane: RustControlPlaneClient,
     max_tokens: int = 256,
+    telemetry_hook: Callable[[dict[str, float | int]], Awaitable[None] | None] | None = None,
 ) -> AsyncIterator[str]:
     """Hybrid speculative loop with Golden Ticket security.
 
@@ -150,11 +152,18 @@ async def cooperative_generate(
     failed_peers: set[str] = set()
     last_reroute_log = 0.0
 
+    # Keep a tiny moving average of local token generation time so we can
+    # compare what speculative remote drafts cost versus equivalent local work.
+    local_token_cost_ms: deque[float] = deque(maxlen=64)
+
     while tokens_emitted < max_tokens:
+        local_start = time.perf_counter()
         local_token = await local_model_generate(generated, prompt, request_id)
+        local_elapsed_ms = (time.perf_counter() - local_start) * 1000.0
         if local_token is None:
             break
         generated.append(local_token)
+        local_token_cost_ms.append(local_elapsed_ms)
         yield local_token
         tokens_emitted += 1
 
@@ -175,6 +184,7 @@ async def cooperative_generate(
             await control_plane.broadcast_work(request_id, context, min_tokens=5)
             last_broadcast = now
 
+        remote_eval_start = time.perf_counter()
         result = await control_plane.try_pop_result()
         
         # Pitch Mode: Handle peer failure immediately (0ms delay)
@@ -228,6 +238,19 @@ async def cooperative_generate(
             continue
 
         accepted, correction = await verify_draft(generated, draft_tokens)
+        remote_eval_ms = (time.perf_counter() - remote_eval_start) * 1000.0
+
+        if telemetry_hook is not None and draft_tokens:
+            n_tokens = len(draft_tokens)
+            local_avg_ms = (sum(local_token_cost_ms) / len(local_token_cost_ms)) if local_token_cost_ms else 0.0
+            sample = {
+                "tokens": n_tokens,
+                "local_generate_ms": local_avg_ms * n_tokens,
+                "network_rtt_plus_verify_ms": remote_eval_ms,
+            }
+            maybe_awaitable = telemetry_hook(sample)
+            if hasattr(maybe_awaitable, "__await__"):
+                await maybe_awaitable
 
         for tok in accepted:
             if tokens_emitted >= max_tokens:
