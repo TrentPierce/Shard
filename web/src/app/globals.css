@@ -839,3 +839,234 @@ body {
   content: "🌞";
 }
 
+
+/* ═══ Network Telemetry Dashboard ═══ */
+.network-page {
+  min-height: 100vh;
+  padding: 32px;
+  color: #e6ebff;
+  background:
+    radial-gradient(circle at 15% 15%, rgba(0, 212, 255, 0.14), transparent 35%),
+    radial-gradient(circle at 85% 20%, rgba(139, 92, 246, 0.12), transparent 34%),
+    #05060f;
+  position: relative;
+  overflow-y: auto;
+}
+
+.network-page__noise {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.12;
+  background-image: radial-gradient(rgba(255, 255, 255, 0.45) 0.45px, transparent 0.45px);
+  background-size: 3px 3px;
+}
+
+.network-page__hero {
+  margin-bottom: 20px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 20px;
+  align-items: center;
+}
+
+.network-page__kicker {
+  width: 100%;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: #76d9ff;
+  font-size: 12px;
+  font-family: var(--font-mono);
+}
+
+.network-page h1 {
+  font-size: clamp(30px, 4vw, 48px);
+  letter-spacing: -0.03em;
+}
+
+.network-page__badge {
+  border: 1px solid rgba(0, 212, 255, 0.45);
+  color: #9cebff;
+  background: rgba(3, 30, 47, 0.8);
+  border-radius: 999px;
+  padding: 7px 14px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+}
+
+.network-grid {
+  display: grid;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.network-grid--stats {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.network-grid--main {
+  grid-template-columns: 2fr 1fr;
+}
+
+.network-card {
+  border: 1px solid rgba(89, 131, 255, 0.2);
+  background: linear-gradient(145deg, rgba(8, 16, 39, 0.95), rgba(4, 8, 22, 0.95));
+  border-radius: 16px;
+  padding: 18px;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.03), 0 24px 30px rgba(0, 0, 0, 0.22);
+}
+
+.network-card--cyan { border-color: rgba(0, 212, 255, 0.3); }
+.network-card--violet { border-color: rgba(139, 92, 246, 0.3); }
+.network-card--emerald { border-color: rgba(52, 211, 153, 0.3); }
+
+.network-card__label {
+  text-transform: uppercase;
+  letter-spacing: 0.11em;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: #93a0d4;
+  margin-bottom: 12px;
+}
+
+.network-card__value {
+  font-size: clamp(26px, 4vw, 40px);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+}
+
+.network-card__hint {
+  margin-top: 10px;
+  color: #8e9ac8;
+  font-size: 13px;
+}
+
+.network-card__header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.network-card__header h2 {
+  font-size: 17px;
+}
+
+.network-card__header span {
+  color: #90a8d8;
+  font-size: 12px;
+  font-family: var(--font-mono);
+}
+
+.node-mix {
+  display: grid;
+  place-items: center;
+  gap: 16px;
+  margin-top: 10px;
+}
+
+.node-mix__donut {
+  width: 180px;
+  height: 180px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  box-shadow: 0 0 35px rgba(0, 0, 0, 0.35);
+}
+
+.node-mix__center {
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  background: #050814;
+  border: 1px solid rgba(138, 164, 255, 0.2);
+  display: grid;
+  place-items: center;
+}
+
+.node-mix__center strong {
+  font-size: 34px;
+}
+
+.node-mix__center span {
+  color: #8f9cc9;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.node-mix__legend {
+  width: 100%;
+}
+
+.node-mix__legend p {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  color: #abb5dc;
+}
+
+.dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+}
+
+.dot--violet { background: #8b5cf6; }
+.dot--emerald { background: #34d399; }
+
+.leaderboard {
+  display: grid;
+  gap: 8px;
+}
+
+.leaderboard__row {
+  display: grid;
+  grid-template-columns: 50px 1fr auto;
+  gap: 12px;
+  align-items: center;
+  padding: 12px;
+  border: 1px solid rgba(102, 128, 209, 0.25);
+  border-radius: 12px;
+  background: rgba(6, 10, 26, 0.84);
+}
+
+.leaderboard__rank {
+  color: #7edfff;
+  font-family: var(--font-mono);
+}
+
+.leaderboard__identity,
+.leaderboard__metrics {
+  display: grid;
+}
+
+.leaderboard__identity small,
+.leaderboard__metrics small {
+  color: #8694c5;
+  font-size: 12px;
+}
+
+.leaderboard__metrics {
+  text-align: right;
+}
+
+@media (max-width: 900px) {
+  .network-page {
+    padding: 20px;
+  }
+
+  .network-grid--main {
+    grid-template-columns: 1fr;
+  }
+
+  .leaderboard__row {
+    grid-template-columns: 40px 1fr;
+  }
+
+  .leaderboard__metrics {
+    text-align: left;
+    grid-column: 2;
+  }
+}
