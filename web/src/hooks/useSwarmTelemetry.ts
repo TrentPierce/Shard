@@ -12,8 +12,30 @@ type IncomingTelemetryMessage = {
   global_tflops: number
 }
 
-const WS_URL = process.env.NEXT_PUBLIC_TELEMETRY_WS_URL ?? "ws://127.0.0.1:9093/telemetry/ws"
+const LOCAL_TELEMETRY_WS_URL = "ws://127.0.0.1:9093/telemetry/ws"
+const TELEMETRY_PATH = "/telemetry/ws"
+const INITIAL_RECONNECT_DELAY_MS = 1_500
+const MAX_RECONNECT_DELAY_MS = 30_000
+const MAX_EXP_BACKOFF_STEP = 6
 const MAX_HISTORY = 18
+
+function resolveTelemetryWsUrl() {
+  const configured = process.env.NEXT_PUBLIC_WS_URL?.trim()
+
+  if (!configured) {
+    return LOCAL_TELEMETRY_WS_URL
+  }
+
+  try {
+    const parsed = new URL(configured)
+    if (parsed.pathname === "/" || parsed.pathname === "") {
+      parsed.pathname = TELEMETRY_PATH
+    }
+    return parsed.toString()
+  } catch {
+    return configured
+  }
+}
 
 export function useSwarmTelemetry() {
   const [telemetry, setTelemetry] = useState<SwarmTelemetrySnapshot>(() => createInitialTelemetry())
@@ -37,7 +59,7 @@ export function useSwarmTelemetry() {
         return
       }
 
-      socket = new WebSocket(WS_URL)
+      socket = new WebSocket(resolveTelemetryWsUrl())
 
       socket.onopen = () => {
         reconnectAttempt.current = 0
@@ -72,7 +94,12 @@ export function useSwarmTelemetry() {
         }
 
         reconnectAttempt.current += 1
-        const backoffMs = Math.min(10_000, 1_000 * 2 ** Math.min(reconnectAttempt.current, 4))
+        const exponentialBackoff = Math.min(
+          MAX_RECONNECT_DELAY_MS,
+          INITIAL_RECONNECT_DELAY_MS * 2 ** Math.min(reconnectAttempt.current, MAX_EXP_BACKOFF_STEP),
+        )
+        const jitter = exponentialBackoff * (Math.random() * 0.3 - 0.15)
+        const backoffMs = Math.max(INITIAL_RECONNECT_DELAY_MS, Math.round(exponentialBackoff + jitter))
         reconnectTimer.current = window.setTimeout(connect, backoffMs)
       }
 
