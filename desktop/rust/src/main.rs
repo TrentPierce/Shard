@@ -701,7 +701,18 @@ fn create_router(state: SharedState) -> Router {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let cli = Cli::parse();
+    let mut cli = Cli::parse();
+
+    if let Ok(port_from_env) = std::env::var("PORT") {
+        match port_from_env.parse::<u16>() {
+            Ok(port) => {
+                cli.telemetry_ws_port = port;
+            }
+            Err(error) => {
+                eprintln!("Ignoring invalid PORT environment variable ({port_from_env}): {error}");
+            }
+        }
+    }
 
     tracing_subscriber::fmt()
         .with_env_filter(
