@@ -136,6 +136,76 @@ pub struct WorkResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TensorDataFormat {
+    Fp16,
+    Fp32,
+    Bf16,
+    Quantized,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TensorChunkRef {
+    pub chunk_index: u32,
+    pub total_chunks: u32,
+    pub byte_size: u64,
+    pub checksum_blake3: Option<String>,
+    pub data: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TensorBlobRef {
+    pub uri: String,
+    pub byte_size: u64,
+    pub checksum_blake3: Option<String>,
+    #[serde(default)]
+    pub expires_at_ms: Option<u128>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ForwardPassActivation {
+    pub request_id: String,
+    pub step_id: String,
+    pub source_peer_id: String,
+    pub target_peer_id: Option<String>,
+    pub tensor_name: String,
+    pub shape: Vec<usize>,
+    pub format: TensorDataFormat,
+    #[serde(default)]
+    pub chunk: Option<TensorChunkRef>,
+    #[serde(default)]
+    pub blob_ref: Option<TensorBlobRef>,
+    #[serde(default)]
+    pub created_at_ms: Option<u128>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BackwardPassGradient {
+    pub request_id: String,
+    pub step_id: String,
+    pub microbatch_id: String,
+    pub source_peer_id: String,
+    pub target_peer_id: Option<String>,
+    pub layer_path: String,
+    pub tensor_name: String,
+    pub shape: Vec<usize>,
+    pub format: TensorDataFormat,
+    #[serde(default)]
+    pub chunk: Option<TensorChunkRef>,
+    #[serde(default)]
+    pub blob_ref: Option<TensorBlobRef>,
+    #[serde(default)]
+    pub created_at_ms: Option<u128>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "packet_type", content = "payload", rename_all = "snake_case")]
+pub enum TrainingGossipPacket {
+    ForwardPass(ForwardPassActivation),
+    BackwardPass(BackwardPassGradient),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct PersistedPeers {
     peers: Vec<String>,
 }
@@ -181,6 +251,7 @@ struct SharedState {
     avg_latency_ms: Arc<AtomicU32>,
     gossipsub_latency_hist: Arc<LatencyHistogram>,
     scout_penalties: Arc<Mutex<ScoutPenaltyBook>>,
+    backward_passes: Arc<Mutex<VecDeque<BackwardPassGradient>>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -686,6 +757,7 @@ async fn main() -> Result<()> {
         avg_latency_ms: Arc::new(AtomicU32::new(0)),
         gossipsub_latency_hist: Arc::new(LatencyHistogram::new()),
         scout_penalties: Arc::new(Mutex::new(ScoutPenaltyBook::default())),
+        backward_passes: Arc::new(Mutex::new(VecDeque::new())),
     };
 
     // ── build swarm ──
@@ -789,9 +861,13 @@ async fn main() -> Result<()> {
     // ── gossipsub topics ──
     let work_topic = IdentTopic::new("shard-work");
     let result_topic = IdentTopic::new("shard-work-result");
+    let forward_topic = IdentTopic::new("shard-forward-pass");
+    let backward_topic = IdentTopic::new("shard-backward-pass");
     let auction_topic = IdentTopic::new("auction.prompt");
     swarm.behaviour_mut().gossipsub.subscribe(&work_topic)?;
     swarm.behaviour_mut().gossipsub.subscribe(&result_topic)?;
+    swarm.behaviour_mut().gossipsub.subscribe(&forward_topic)?;
+    swarm.behaviour_mut().gossipsub.subscribe(&backward_topic)?;
     swarm.behaviour_mut().gossipsub.subscribe(&auction_topic)?;
 
     // ── listen addresses ──
@@ -963,6 +1039,44 @@ async fn main() -> Result<()> {
                                 let mut q = state.results.lock().await;
                                 q.push_back(result);
                                 while q.len() > 128 { q.pop_front(); }
+                            }
+                        } else if message.topic == forward_topic.hash() || message.topic == backward_topic.hash() {
+                            match serde_json::from_slice::<TrainingGossipPacket>(&message.data) {
+                                Ok(TrainingGossipPacket::ForwardPass(packet)) => {
+                                    tracing::info!(
+                                        request_id = %packet.request_id,
+                                        step_id = %packet.step_id,
+                                        tensor = %packet.tensor_name,
+                                        source_peer = %packet.source_peer_id,
+                                        target_peer = ?packet.target_peer_id,
+                                        has_chunk = packet.chunk.is_some(),
+                                        has_blob_ref = packet.blob_ref.is_some(),
+                                        "received forward-pass activation packet"
+                                    );
+                                }
+                                Ok(TrainingGossipPacket::BackwardPass(packet)) => {
+                                    tracing::info!(
+                                        request_id = %packet.request_id,
+                                        step_id = %packet.step_id,
+                                        microbatch_id = %packet.microbatch_id,
+                                        layer = %packet.layer_path,
+                                        tensor = %packet.tensor_name,
+                                        source_peer = %packet.source_peer_id,
+                                        target_peer = ?packet.target_peer_id,
+                                        has_chunk = packet.chunk.is_some(),
+                                        has_blob_ref = packet.blob_ref.is_some(),
+                                        "received backward-pass gradient packet"
+                                    );
+
+                                    // Scaffold only: retain the latest gradient packets until
+                                    // training routing logic is implemented.
+                                    let mut gradients = state.backward_passes.lock().await;
+                                    gradients.push_back(packet);
+                                    while gradients.len() > 128 { gradients.pop_front(); }
+                                }
+                                Err(e) => {
+                                    tracing::warn!(%e, "invalid training gossip packet; ignoring");
+                                }
                             }
                         }
                     }
