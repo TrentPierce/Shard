@@ -1,35 +1,23 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useMemo } from "react"
 import TelemetryStatCard from "@/components/network/TelemetryStatCard"
 import TopContributorsTable from "@/components/network/TopContributorsTable"
 import SwarmThroughputCanvas from "@/components/network/SwarmThroughputCanvas"
-import {
-  createInitialTelemetry,
-  tickTelemetry,
-  type SwarmTelemetrySnapshot,
-} from "@/lib/mockSwarmTelemetry"
+import { useSwarmTelemetry } from "@/hooks/useSwarmTelemetry"
 
 const compactNumber = (value: number) =>
   new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 }).format(value)
 
 export default function NetworkTelemetryPage() {
-  const [telemetry, setTelemetry] = useState<SwarmTelemetrySnapshot>(() => createInitialTelemetry())
-
-  useEffect(() => {
-    const interval = window.setInterval(() => {
-      setTelemetry((current) => tickTelemetry(current))
-    }, 2200)
-
-    return () => window.clearInterval(interval)
-  }, [])
+  const { telemetry, statusLabel } = useSwarmTelemetry()
 
   const totalNodes = useMemo(
     () => telemetry.scoutCount + telemetry.shardCount,
     [telemetry.scoutCount, telemetry.shardCount],
   )
 
-  const scoutRatio = (telemetry.scoutCount / totalNodes) * 100
+  const scoutRatio = totalNodes > 0 ? (telemetry.scoutCount / totalNodes) * 100 : 0
 
   return (
     <main className="network-page">
@@ -37,7 +25,7 @@ export default function NetworkTelemetryPage() {
       <section className="network-page__hero">
         <p className="network-page__kicker">Shard Network Operations</p>
         <h1>Live Swarm Telemetry Dashboard</h1>
-        <span className="network-page__badge">MOCK STREAM / 2.2s REFRESH</span>
+        <span className="network-page__badge">{statusLabel}</span>
       </section>
 
       <section className="network-grid network-grid--stats">
