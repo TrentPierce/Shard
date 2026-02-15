@@ -42,6 +42,8 @@ use std::{
 use tokio::sync::{mpsc, Mutex};
 use tower_http::cors::{Any, CorsLayer};
 
+mod telemetry_ws;
+
 // ─── CLI ────────────────────────────────────────────────────────────────────
 
 #[derive(Parser, Debug, Clone)]
@@ -50,6 +52,10 @@ struct Cli {
     /// Port for the embedded HTTP control-plane API
     #[arg(long, default_value = "9091")]
     control_port: u16,
+
+    /// Port for read-only telemetry WebSocket stream
+    #[arg(long, default_value = "9093")]
+    telemetry_ws_port: u16,
 
     /// TCP transport listen port
     #[arg(long, default_value = "4001")]
@@ -889,6 +895,8 @@ async fn main() -> Result<()> {
         }
     }
 
+    telemetry_ws::spawn_telemetry_ws_server(state.clone(), cli.telemetry_ws_port);
+
     // ── spawn HTTP control-plane server ──
     let http_state = state.clone();
     let control_port = cli.control_port;
@@ -918,6 +926,10 @@ async fn main() -> Result<()> {
     println!(
         "  ║  Control API  : http://0.0.0.0:{}          ║",
         control_port
+    );
+    println!(
+        "  ║  Telemetry WS : ws://0.0.0.0:{}/telemetry/ws ║",
+        cli.telemetry_ws_port
     );
     println!(
         "  ║  TCP          : /ip4/0.0.0.0/tcp/{}        ║",
