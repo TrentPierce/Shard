@@ -84,7 +84,9 @@ Shard ships a drop-in style API so teams can move from local Hugging Face infere
 ### Install
 
 ```bash
-pip install shard-client
+# From the Shard source files you downloaded:
+cd python-sdk
+pip install .
 ```
 
 ### Replace Hugging Face `AutoModelForCausalLM` with `ShardDistributedModel`
