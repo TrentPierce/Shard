@@ -688,6 +688,18 @@ scrape_configs:
     scrape_interval: 15s
 ```
 
+Production-ready files are available in-repo:
+- `deploy/monitoring/prometheus/prometheus.yml`
+- `deploy/monitoring/grafana/provisioning/datasources/datasource.yml`
+- `deploy/monitoring/grafana/provisioning/dashboards/dashboards.yml`
+- `deploy/monitoring/grafana/dashboards/shard-operations.json`
+
+Run the full stack with monitoring enabled:
+
+```bash
+docker compose --profile monitoring up -d
+```
+
 ### Logging
 
 #### Systemd Journal
@@ -731,69 +743,18 @@ For production deployments with multiple instances:
 
 ### Health Check Script
 
-Create `health_check.sh`:
+Use the included script:
 
 ```bash
-#!/bin/bash
-
-# Check API health
-if curl -f http://localhost:8000/health > /dev/null 2>&1; then
-    echo "API: OK"
-else
-    echo "API: FAILED"
-    exit 1
-fi
-
-# Check Rust daemon
-if curl -f http://localhost:9091/health > /dev/null 2>&1; then
-    echo "Rust Daemon: OK"
-else
-    echo "Rust Daemon: FAILED"
-    exit 1
-fi
-
-# Check connected peers
-PEER_COUNT=$(curl -s http://localhost:9091/health | jq -r '.connected_peers')
-if [ "$PEER_COUNT" -gt 0 ]; then
-    echo "Peers: $PEER_COUNT connected"
-else
-    echo "Warning: No peers connected"
-fi
-
-echo "All health checks passed"
-exit 0
+bash scripts/health_check.sh
 ```
 
 ### Update Procedure
 
 ```bash
-# 1. Pull latest code
-git pull origin main
-
-# 2. Build new version
-cd desktop/rust
-cargo build --release
-
-# 3. Run health check on new binary
-./target/release/shard-daemon --help
-
-# 4. Stop old service
-sudo systemctl stop shard-daemon
-
-# 5. Backup old binary
-sudo cp target/release/shard-daemon target/release/shard-daemon.old
-
-# 6. Start new service
-sudo systemctl start shard-daemon
-
-# 7. Verify health
-./health_check.sh
-
-# 8. If healthy, restart API
-sudo systemctl restart shard-api
-
-# 9. Final verification
-./health_check.sh
+# Recreate one service and block until it reports healthy
+bash scripts/rolling_upgrade.sh shard-api
+bash scripts/health_check.sh
 ```
 
 ---

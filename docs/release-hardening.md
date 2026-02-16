@@ -67,3 +67,11 @@ The repository CI (`.github/workflows/ci.yml`) now enforces:
 1. Python unit/failure-path tests for cooperative inference behavior.
 2. Reproducible web installs via `npm ci`.
 3. Release-bundle contract checks (`tests/release_test.py`).
+
+## Operations Runbooks
+
+- Health verification: `scripts/health_check.sh`
+- Rolling service replacement: `scripts/rolling_upgrade.sh <service>`
+- Monitoring stack assets:
+  - `deploy/monitoring/prometheus/prometheus.yml`
+  - `deploy/monitoring/grafana/...`

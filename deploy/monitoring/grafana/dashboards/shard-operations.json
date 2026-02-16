@@ -1,0 +1,55 @@
+{
+  "annotations": {"list": []},
+  "editable": true,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "Chat Requests / min",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "targets": [{"expr": "increase(shard_chat_requests_total[1m])", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "reqpm"}, "overrides": []}
+    },
+    {
+      "type": "timeseries",
+      "title": "Inference Failures / min",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "targets": [{"expr": "increase(shard_chat_failures_total[1m])", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "reqpm"}, "overrides": []}
+    },
+    {
+      "type": "stat",
+      "title": "Auth Failures (5m)",
+      "gridPos": {"h": 8, "w": 8, "x": 0, "y": 8},
+      "targets": [{"expr": "increase(shard_auth_failures_total[5m])", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []}
+    },
+    {
+      "type": "stat",
+      "title": "Rate Limited (5m)",
+      "gridPos": {"h": 8, "w": 8, "x": 8, "y": 8},
+      "targets": [{"expr": "increase(shard_rate_limited_total[5m])", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []}
+    },
+    {
+      "type": "stat",
+      "title": "Golden Tickets Failed (1h)",
+      "gridPos": {"h": 8, "w": 8, "x": 16, "y": 8},
+      "targets": [{"expr": "increase(shard_golden_tickets_failed_total[1h])", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []}
+    }
+  ],
+  "refresh": "15s",
+  "schemaVersion": 39,
+  "style": "dark",
+  "tags": ["shard", "production"],
+  "templating": {"list": []},
+  "time": {"from": "now-15m", "to": "now"},
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Shard Operations",
+  "uid": "shard-ops",
+  "version": 1
+}
