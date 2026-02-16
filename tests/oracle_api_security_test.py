@@ -108,3 +108,54 @@ def test_latency_profile_endpoint(monkeypatch) -> None:
     payload = resp.json()
     assert "p2p_latency_ms" in payload
     assert "local_vs_network" in payload
+
+
+def test_scout_work_endpoint_returns_work_payload(monkeypatch) -> None:
+    client = _load_client(monkeypatch)
+    module = importlib.import_module("shard_api")
+
+    class _Resp:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {
+                "work": {
+                    "request_id": "req-1",
+                    "prompt_context": "hello from queue",
+                    "min_tokens": 2,
+                }
+            }
+
+    class _HttpClient:
+        async def get(self, _path: str):
+            return _Resp()
+
+    monkeypatch.setattr(module, "_get_http_client", lambda: _HttpClient())
+
+    resp = client.get("/v1/scout/work")
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["workId"] == "req-1"
+    assert payload["prompt"]
+
+
+def test_scout_work_endpoint_returns_204_when_empty(monkeypatch) -> None:
+    client = _load_client(monkeypatch)
+    module = importlib.import_module("shard_api")
+
+    class _Resp:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {"work": None}
+
+    class _HttpClient:
+        async def get(self, _path: str):
+            return _Resp()
+
+    monkeypatch.setattr(module, "_get_http_client", lambda: _HttpClient())
+
+    resp = client.get("/v1/scout/work")
+    assert resp.status_code == 204

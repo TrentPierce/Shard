@@ -11,16 +11,17 @@
 
 use anyhow::Result;
 use axum::{
-    extract::State as AxumState,
-    http::Method,
     extract::Query,
+    extract::{ws::{Message, WebSocket, WebSocketUpgrade}, State as AxumState},
+    http::{HeaderValue, Method},
+    response::IntoResponse,
     routing::{get, post},
     Json, Router,
 };
 use clap::Parser;
 use libp2p::{
     autonat, dcutr,
-    futures::StreamExt,
+    futures::{SinkExt, StreamExt},
     gossipsub::{self, IdentTopic, MessageAuthenticity},
     identify, identity,
     kad::{store::MemoryStore, Behaviour as KadBehaviour},
@@ -284,6 +285,14 @@ struct DraftResultSubmission {
 #[derive(Debug, Deserialize)]
 struct PopResultQuery {
     request_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct WsGenerateRequest {
+    request_id: Option<String>,
+    prompt: Option<String>,
+    prompt_context: Option<String>,
+    max_new_tokens: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -726,6 +735,109 @@ async fn submit_draft_handler(
     Json(serde_json::json!({ "ok": true, "detail": "draft queued" }))
 }
 
+async fn ws_generate_handler(
+    ws: WebSocketUpgrade,
+    AxumState(state): AxumState<SharedState>,
+) -> impl IntoResponse {
+    ws.on_upgrade(move |socket| ws_generate_stream(socket, state))
+}
+
+async fn ws_generate_stream(mut socket: WebSocket, state: SharedState) {
+    let first = socket.recv().await;
+    let Some(Ok(Message::Text(payload))) = first else {
+        return;
+    };
+
+    let parsed: WsGenerateRequest = match serde_json::from_str(&payload) {
+        Ok(req) => req,
+        Err(err) => {
+            let _ = socket
+                .send(Message::Text(
+                    serde_json::json!({"error": format!("invalid request: {err}")}).to_string(),
+                ))
+                .await;
+            return;
+        }
+    };
+
+    let request_id = parsed
+        .request_id
+        .filter(|id| !id.trim().is_empty())
+        .unwrap_or_else(|| format!("ws-{}", uuid::Uuid::new_v4()));
+    let prompt_context = parsed
+        .prompt
+        .or(parsed.prompt_context)
+        .filter(|p| !p.trim().is_empty())
+        .unwrap_or_default();
+    let max_new_tokens = parsed.max_new_tokens.unwrap_or(128).clamp(1, 2048);
+
+    let work = WorkRequest {
+        request_id: request_id.clone(),
+        prompt_context,
+        min_tokens: 1,
+        created_at_ms: Some(now_ms()),
+    };
+
+    if let Err(detail) = validate_work_request(&work) {
+        let _ = socket
+            .send(Message::Text(
+                serde_json::json!({"error": detail, "event": "done"}).to_string(),
+            ))
+            .await;
+        return;
+    }
+
+    {
+        let mut queue = state.scout_work.lock().await;
+        queue.push_back(work.clone());
+        while queue.len() > 1024 {
+            queue.pop_front();
+        }
+    }
+
+    if state.work_tx.send(work).await.is_err() {
+        let _ = socket
+            .send(Message::Text(
+                serde_json::json!({"error": "work queue unavailable", "event": "done"}).to_string(),
+            ))
+            .await;
+        return;
+    }
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    let mut emitted = 0u32;
+    while emitted < max_new_tokens && tokio::time::Instant::now() < deadline {
+        let maybe_result = {
+            let mut results = state.results.lock().await;
+            if let Some(idx) = results.iter().position(|r| r.request_id == request_id) {
+                results.remove(idx)
+            } else {
+                None
+            }
+        };
+
+        if let Some(result) = maybe_result {
+            for token in result.draft_tokens {
+                if emitted >= max_new_tokens {
+                    break;
+                }
+                let payload = serde_json::json!({ "token": token }).to_string();
+                if socket.send(Message::Text(payload)).await.is_err() {
+                    return;
+                }
+                emitted += 1;
+            }
+            continue;
+        }
+
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    let _ = socket
+        .send(Message::Text(serde_json::json!({"event": "done"}).to_string()))
+        .await;
+}
+
 async fn latency_profile_handler(
     AxumState(state): AxumState<SharedState>,
 ) -> Json<serde_json::Value> {
@@ -761,10 +873,25 @@ async fn scout_penalty_status_handler(
 }
 
 fn create_router(state: SharedState) -> Router {
-    let cors = CorsLayer::new()
-        .allow_origin(Any)
+    let mut cors = CorsLayer::new()
         .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
         .allow_headers(Any);
+
+    if let Ok(raw_origins) = std::env::var("SHARD_CORS_ORIGINS") {
+        let origins: Vec<HeaderValue> = raw_origins
+            .split(',')
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .filter_map(|value| HeaderValue::from_str(value).ok())
+            .collect();
+        if origins.is_empty() {
+            cors = cors.allow_origin(Any);
+        } else {
+            cors = cors.allow_origin(origins);
+        }
+    } else {
+        cors = cors.allow_origin(Any);
+    }
 
     Router::new()
         .route("/health", get(health_handler))
@@ -774,6 +901,7 @@ fn create_router(state: SharedState) -> Router {
         .route("/pop-result", get(pop_result_handler))
         .route("/pop-work", get(pop_work_handler))
         .route("/submit-draft", post(submit_draft_handler))
+        .route("/ws/generate", get(ws_generate_handler))
         .route("/scout/penalty", post(scout_penalty_update_handler))
         .route("/scout/penalty", get(scout_penalty_status_handler))
         .route("/metrics/latency-profile", get(latency_profile_handler))
