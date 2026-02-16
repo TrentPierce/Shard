@@ -39,9 +39,9 @@ jobs:
           mkdir -p release
           cd desktop/rust
           if [ "${{ matrix.os }}" = "windows-latest" ]; then
-            cp target/release/shard-daemon.exe ../release/
+            cp target/release/shard-daemon.exe ../../release/
           else
-            cp target/release/shard-daemon ../release/
+            cp target/release/shard-daemon ../../release/
           fi
 
       - name: Upload Release Asset
