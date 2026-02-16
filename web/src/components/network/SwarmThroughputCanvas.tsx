@@ -21,6 +21,16 @@ export default function SwarmThroughputCanvas({ samples }: SwarmThroughputCanvas
     context.clearRect(0, 0, width, height)
 
     const values = samples.map((sample) => sample.tflops)
+
+    if (values.length === 0) {
+      context.fillStyle = "rgba(8, 13, 32, 0.95)"
+      context.fillRect(0, 0, width, height)
+      context.font = "12px JetBrains Mono, monospace"
+      context.fillStyle = "rgba(179, 189, 227, 0.75)"
+      context.fillText("Waiting for telemetry samples…", 14, height / 2)
+      return
+    }
+
     const min = Math.min(...values) - 4
     const max = Math.max(...values) + 4
     const range = max - min || 1
