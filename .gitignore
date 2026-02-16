@@ -26,6 +26,7 @@ htmlcov/
 
 # ─── Rust ───
 desktop/rust/target/
+desktop/rust/target_*/
 desktop/rust/target_local*/
 desktop/rust/vendor/
 **/*.rs.bk

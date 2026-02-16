@@ -17,12 +17,7 @@ describe("NetworkStatus", () => {
   }
 
   beforeEach(() => {
-    global.fetch = jest.fn(async () =>
-      ({
-        ok: true,
-        json: async () => ({ peers: [] }),
-      }) as Response
-    )
+    global.fetch = jest.fn(() => new Promise(() => {}) as Promise<Response>)
   })
 
   describe("Rendering in Scout mode", () => {

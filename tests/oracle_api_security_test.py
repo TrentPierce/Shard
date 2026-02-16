@@ -12,9 +12,17 @@ TestClient = pytest.importorskip("fastapi.testclient").TestClient
 sys.path.append(str(Path(__file__).resolve().parents[1] / "desktop" / "python"))
 
 
-def _load_client(monkeypatch, api_keys="", rate_limit="60", max_prompt="16000", require_api_key: str | None = None):
+def _load_client(
+    monkeypatch,
+    api_keys="",
+    rate_limit="60",
+    max_prompt="16000",
+    require_api_key: str | None = None,
+    scout_rate_limit: str = "120",
+):
     monkeypatch.setenv("SHARD_API_KEYS", api_keys)
     monkeypatch.setenv("SHARD_RATE_LIMIT_PER_MINUTE", rate_limit)
+    monkeypatch.setenv("SHARD_SCOUT_RATE_LIMIT_PER_MINUTE", scout_rate_limit)
     monkeypatch.setenv("SHARD_MAX_PROMPT_CHARS", max_prompt)
     if require_api_key is None:
         require_api_key = "true" if api_keys else "false"
@@ -55,6 +63,9 @@ def test_chat_requires_api_key_when_configured(monkeypatch) -> None:
 
 def test_chat_rate_limit(monkeypatch) -> None:
     client = _load_client(monkeypatch, rate_limit="1")
+    module = importlib.import_module("shard_api")
+    fixed_time = module.time.time()
+    monkeypatch.setattr(module.time, "time", lambda: fixed_time)
 
     first = client.post("/v1/chat/completions", json=_payload())
     assert first.status_code == 200
@@ -97,6 +108,7 @@ def test_metrics_endpoint(monkeypatch) -> None:
 
     metrics = client.get("/metrics")
     assert metrics.status_code == 200
+    assert metrics.headers["content-type"].startswith("text/plain")
     assert "shard_chat_requests_total" in metrics.text
 
 
@@ -159,3 +171,37 @@ def test_scout_work_endpoint_returns_204_when_empty(monkeypatch) -> None:
 
     resp = client.get("/v1/scout/work")
     assert resp.status_code == 204
+
+
+def test_scout_work_rate_limit_sets_retry_after(monkeypatch) -> None:
+    client = _load_client(monkeypatch, scout_rate_limit="1")
+    module = importlib.import_module("shard_api")
+    fixed_time = module.time.time()
+    monkeypatch.setattr(module.time, "time", lambda: fixed_time)
+
+    class _Resp:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {
+                "work": {
+                    "request_id": "req-rl",
+                    "prompt_context": "limited",
+                    "min_tokens": 1,
+                }
+            }
+
+    class _HttpClient:
+        async def get(self, _path: str):
+            return _Resp()
+
+    monkeypatch.setattr(module, "_get_http_client", lambda: _HttpClient())
+
+    first = client.get("/v1/scout/work")
+    assert first.status_code == 200
+
+    second = client.get("/v1/scout/work")
+    assert second.status_code == 429
+    assert second.json()["detail"] == "Rate limit exceeded"
+    assert "Retry-After" in second.headers
