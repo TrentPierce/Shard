@@ -23,6 +23,7 @@ use libp2p::{
     gossipsub::{self, IdentTopic, MessageAuthenticity},
     identify, identity,
     kad::{store::MemoryStore, Behaviour as KadBehaviour},
+    mdns::Behaviour as MdnsBehaviour,
     ping, relay,
     request_response::{self, OutboundRequestId, ProtocolSupport},
     swarm::{NetworkBehaviour, SwarmEvent},
@@ -734,10 +735,18 @@ async fn main() -> Result<()> {
         Vec::new()
     };
     let persisted_bootstrap = load_persisted_peers(&known_peers_path).await;
+    
+    // Default bootstrap peers - public Shard nodes that are always online
+    // New nodes will automatically connect to the network via these
+    let default_bootstrap = vec![
+        // Add your EC2 or other known nodes here
+        // Format: "/ip4/<IP>/tcp/<PORT>/p2p/<PEER_ID>"
+    ];
+    
     let bootstrap_addrs = unique_addrs(
-        cli.bootstrap
-            .iter()
-            .cloned()
+        default_bootstrap
+            .into_iter()
+            .chain(cli.bootstrap.iter().cloned())
             .chain(file_bootstrap)
             .chain(persisted_bootstrap)
             .collect(),
