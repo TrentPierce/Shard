@@ -35,18 +35,16 @@ dev = [
     "black>=23.0",
     "ruff>=0.1.0",
 ]
+all = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.30.0",
+]
 
 [project.urls]
 Homepage = "https://github.com/ShardNetwork/Shard"
 Documentation = "https://docs.shard.network"
 Repository = "https://github.com/ShardNetwork/Shard"
 Issues = "https://github.com/ShardNetwork/Shard/issues"
-
-[project.optional-dependencies]
-all = [
-    "fastapi>=0.115.0",
-    "uvicorn[standard]>=0.30.0",
-]
 
 [tool.setuptools.packages.find]
 where = ["desktop/python"]
@@ -65,5 +63,5 @@ target-version = "py311"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-python_files = ["test_*.py"]
+python_files = ["test_*.py", "*_test.py"]
 asyncio_mode = "auto"

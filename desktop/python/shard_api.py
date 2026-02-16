@@ -228,9 +228,14 @@ app = FastAPI(
 # Public API configuration from environment
 PUBLIC_API = os.getenv("SHARD_PUBLIC_API", "false").lower() == "true"
 PUBLIC_HOST = os.getenv("SHARD_PUBLIC_HOST", "auto-detect")
-
-# CORS: allow any origin for decentralized access
-cors_origins = ["*"]
+cors_origins_env = os.getenv("SHARD_CORS_ORIGINS", "").strip()
+if cors_origins_env:
+    cors_origins = [origin.strip() for origin in cors_origins_env.split(",") if origin.strip()]
+else:
+    cors_origins = [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ]
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
@@ -259,6 +264,7 @@ _http_client: httpx.AsyncClient | None = None
 _bitnet_lock = asyncio.Lock()
 
 API_KEYS = {k.strip() for k in os.getenv("SHARD_API_KEYS", "").split(",") if k.strip()}
+REQUIRE_API_KEY = os.getenv("SHARD_REQUIRE_API_KEY", "true" if PUBLIC_API else "false").lower() == "true"
 RATE_LIMIT_PER_MINUTE = int(os.getenv("SHARD_RATE_LIMIT_PER_MINUTE", "60"))
 MAX_PROMPT_CHARS = int(os.getenv("SHARD_MAX_PROMPT_CHARS", "16000"))
 
@@ -408,8 +414,15 @@ async def require_api_key(
     x_api_key: Annotated[str | None, Header(alias="X-API-Key")] = None,
 ) -> str:
     """Optional-by-default API key auth. Enabled when SHARD_API_KEYS is set."""
-    if not API_KEYS:
+    if not REQUIRE_API_KEY:
         return "anonymous"
+
+    if not API_KEYS:
+        METRICS["auth_failures_total"] += 1
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="API key auth is required but SHARD_API_KEYS is not configured",
+        )
 
     bearer = None
     if authorization and authorization.lower().startswith("bearer "):
@@ -784,8 +797,8 @@ async def health() -> dict[str, Any]:
         "rust_sidecar": rust_status,
         "rust_url": RUST_URL,
         "bitnet_loaded": bitnet_loaded,
-        "bitnet_lib": os.getenv("BITNET_LIB", ""),
-        "bitnet_model": os.getenv("BITNET_MODEL", ""),
+        "bitnet_lib": os.getenv("BITNET_LIB", "") if os.getenv("SHARD_DEBUG_HEALTH", "false").lower() == "true" else "",
+        "bitnet_model": os.getenv("BITNET_MODEL", "") if os.getenv("SHARD_DEBUG_HEALTH", "false").lower() == "true" else "",
         "cors_origins": cors_origins,
     }
 
@@ -1375,9 +1388,50 @@ async def get_scout_work(
             headers={"Retry-After": str(remaining)},
         )
     
-    # This would typically come from the Rust sidecar work queue
-    # For now, return 204 No Content to indicate no work available
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+    client = _get_http_client()
+    try:
+        resp = await client.get("/pop-work")
+        if resp.status_code != 200:
+            LOGGER.warning("Rust pop-work failed: status=%s", resp.status_code)
+            return Response(status_code=status.HTTP_204_NO_CONTENT)
+        payload = resp.json()
+    except httpx.HTTPError as exc:
+        LOGGER.warning("Rust pop-work request failed: %s", exc)
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    work = payload.get("work") if isinstance(payload, dict) else None
+    if not isinstance(work, dict):
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    request_id = str(work.get("request_id") or "").strip()
+    prompt_context = str(work.get("prompt_context") or "").strip()
+    min_tokens = int(work.get("min_tokens") or 1)
+    if not request_id or not prompt_context:
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    # Opportunistically inject Golden Tickets into scout work.
+    maybe_gt = GT_GENERATOR.maybe_inject_golden_ticket(
+        normal_prompt=prompt_context,
+        request_id=request_id,
+    )
+    is_golden_ticket = bool(maybe_gt.get("is_golden_ticket"))
+    prompt = str(maybe_gt.get("prompt") or prompt_context)
+    if is_golden_ticket:
+        METRICS["golden_tickets_injected"] += 1
+
+    return Response(
+        content=json.dumps(
+            {
+                "workId": request_id,
+                "prompt": prompt,
+                "minTokens": min_tokens,
+                "isGoldenTicket": is_golden_ticket,
+                "timestamp": int(time.time() * 1000),
+            }
+        ),
+        media_type="application/json",
+        status_code=status.HTTP_200_OK,
+    )
 
 
 @app.get(

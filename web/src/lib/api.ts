@@ -23,6 +23,12 @@ export interface ChatCompletionRequest {
     stream?: boolean
 }
 
+const API_KEY = process.env.NEXT_PUBLIC_SHARD_API_KEY?.trim() || ""
+
+function authHeaders(): Record<string, string> {
+    return API_KEY ? { "Authorization": `Bearer ${API_KEY}` } : {}
+}
+
 // ─── Streaming Chat ─────────────────────────────────────────────────────────
 
 /**
@@ -50,7 +56,7 @@ export async function sendMessage(
         method: "POST",
         headers: { 
             "Content-Type": "application/json",
-            "Authorization": "Bearer test-key"
+            ...authHeaders(),
         },
         body: JSON.stringify(body),
     })
@@ -121,7 +127,7 @@ export async function sendMessageSync(
         method: "POST",
         headers: { 
             "Content-Type": "application/json",
-            "Authorization": "Bearer test-key"
+            ...authHeaders(),
         },
         body: JSON.stringify(body),
     })
