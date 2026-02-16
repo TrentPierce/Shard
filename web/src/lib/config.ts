@@ -8,7 +8,7 @@
 // ─── API Configuration ──────────────────────────────────────────────────────
 
 /**
- * Base URL for the Python Oracle API.
+ * Base URL for the Python Shard API.
  * Configurable via NEXT_PUBLIC_API_URL environment variable.
  * @default "http://127.0.0.1:8000"
  */
@@ -21,7 +21,7 @@ export const API_BASE = (typeof window !== 'undefined' && window.location.host)
 export const RUST_BASE = process.env.NEXT_PUBLIC_RUST_URL || "http://127.0.0.1:9091"
 
 /**
- * Get the API URL for the Python Oracle API.
+ * Get the API URL for the Python Shard API.
  * Returns full URL for API requests.
  */
 export function apiUrl(path: string = "/v1"): string {

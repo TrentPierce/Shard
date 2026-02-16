@@ -1,6 +1,6 @@
 # OpenAI API Compatibility
 
-The Shard Oracle API is designed to be **100% compatible** with the [OpenAI Chat Completions API](https://platform.openai.com/docs/api-reference/chat). This allows you to use existing OpenAI clients, libraries, and code with minimal modifications.
+The Shard API is designed to be **100% compatible** with the [OpenAI Chat Completions API](https://platform.openai.com/docs/api-reference/chat). This allows you to use existing OpenAI clients, libraries, and code with minimal modifications.
 
 ## Table of Contents
 
@@ -17,7 +17,7 @@ The Shard Oracle API is designed to be **100% compatible** with the [OpenAI Chat
 
 ## Overview
 
-The Shard Oracle API implements the following OpenAI-compatible endpoints:
+The Shard API implements the following OpenAI-compatible endpoints:
 
 | Endpoint | OpenAI Endpoint | Shard Endpoint | Notes |
 |----------|----------------|----------------|-------|
@@ -34,7 +34,7 @@ http://localhost:8000
 Or when running in Swarm mode:
 
 ```
-http://<oracle-ip>:8000
+http://<shard-ip>:8000
 ```
 
 ---
@@ -350,9 +350,9 @@ While the API is highly compatible, there are some differences:
 ### 1. API Key Authentication
 
 **OpenAI**: `Authorization: Bearer sk-...`
-**Shard**: `Authorization: Bearer sk-oracle-...`
+**Shard**: `Authorization: Bearer sk-shard-...`
 
-The API key format is different. Shard API keys start with `sk-oracle-`.
+The API key format is different. Shard API keys start with `sk-shard-`.
 
 ### 2. Model Names
 
@@ -399,7 +399,7 @@ These OpenAI features are not available in Shard:
 export OPENAI_KEY="sk-..."
 
 # Shard
-export SHARD_KEY="sk-oracle-abc123def456"
+export SHARD_KEY="sk-shard-abc123def456"
 ```
 
 ### Step 2: Update Model Name
@@ -431,7 +431,7 @@ client = OpenAI(api_key="sk-...", base_url="https://api.openai.com/v1")
 
 # Shard
 from openai import OpenAI
-client = OpenAI(api_key="sk-oracle-...", base_url="http://localhost:8000")
+client = OpenAI(api_key="sk-shard-...", base_url="http://localhost:8000")
 ```
 
 ### Step 4: Test Compatibility
@@ -441,7 +441,7 @@ from openai import OpenAI
 
 # Shard client
 client = OpenAI(
-    api_key="sk-oracle-abc123def456",
+    api_key="sk-shard-abc123def456",
     base_url="http://localhost:8000"
 )
 
@@ -470,7 +470,7 @@ from openai import OpenAI
 
 # Initialize with Shard base URL
 client = OpenAI(
-    api_key="sk-oracle-abc123def456",
+    api_key="sk-shard-abc123def456",
     base_url="http://localhost:8000"
 )
 
@@ -494,7 +494,7 @@ print(response.choices[0].message.content)
 import OpenAI from 'openai';
 
 const client = new OpenAI({
-  apiKey: 'sk-oracle-abc123def456',
+  apiKey: 'sk-shard-abc123def456',
   baseURL: 'http://localhost:8000'
 });
 
@@ -523,7 +523,7 @@ from langchain_openai import ChatOpenAI
 # Shard LangChain client
 llm = ChatOpenAI(
     model="llama-3-70b-bitnet",
-    openai_api_key="sk-oracle-abc123def456",
+    openai_api_key="sk-shard-abc123def456",
     openai_api_base="http://localhost:8000"
 )
 
@@ -538,7 +538,7 @@ from llama_index.llms.openai_like import OpenAILike
 
 llm = OpenAILike(
     model="llama-3-70b-bitnet",
-    api_key="sk-oracle-abc123def456",
+    api_key="sk-shard-abc123def456",
     api_base="http://localhost:8000",
     temperature=0.7
 )
@@ -557,7 +557,7 @@ print(response.text)
 from openai import OpenAI
 
 client = OpenAI(
-    api_key="sk-oracle-abc123def456",
+    api_key="sk-shard-abc123def456",
     base_url="http://localhost:8000"
 )
 

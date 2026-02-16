@@ -8,8 +8,15 @@ from __future__ import annotations
 
 import ctypes
 import hashlib
+import struct
 from dataclasses import dataclass
 from pathlib import Path
+
+
+SNAPSHOT_HEADER_FORMAT = "<IIII"
+SNAPSHOT_HEADER_SIZE = struct.calcsize(SNAPSHOT_HEADER_FORMAT)
+SNAPSHOT_MAGIC = 0x50414E53
+SNAPSHOT_VERSION = 1
 
 
 class BitNetHandle(ctypes.Structure):
@@ -23,6 +30,7 @@ class BitNetConfig:
     n_ctx: int = 4096
     n_threads: int = 8
     top_k: int = 32
+    max_kv_snapshot_bytes: int = 256 * 1024 * 1024
 
 
 class BitNetRuntime:
@@ -83,6 +91,12 @@ class BitNetRuntime:
         self._lib.shard_token_to_piece.restype = ctypes.c_int
         self._lib.shard_rollback.argtypes = [ctypes.c_void_p, ctypes.c_int]
         self._lib.shard_rollback.restype = ctypes.c_int
+        self._lib.shard_kv_snapshot_size.argtypes = [ctypes.c_void_p]
+        self._lib.shard_kv_snapshot_size.restype = ctypes.c_int
+        self._lib.shard_kv_snapshot_export.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_ubyte), ctypes.c_int, ctypes.c_int]
+        self._lib.shard_kv_snapshot_export.restype = ctypes.c_int
+        self._lib.shard_kv_snapshot_import.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_ubyte), ctypes.c_int, ctypes.c_int]
+        self._lib.shard_kv_snapshot_import.restype = ctypes.c_int
 
     @staticmethod
     def token_id_for_text(text: str) -> int:
@@ -199,6 +213,77 @@ class BitNetRuntime:
             return 0
         return self._lib.shard_rollback(self._handle, steps)
 
+    def export_kv_snapshot(self) -> bytes:
+        """Export a bounded binary snapshot that can restore decoding state.
+
+        The snapshot starts with a fixed little-endian header:
+        [magic, version, n_past, payload_size]
+        followed by llama.cpp state payload bytes.
+        """
+        if self._abi != "shard":
+            return b""
+
+        total_size = int(self._lib.shard_kv_snapshot_size(self._handle))
+        if total_size <= 0:
+            raise RuntimeError(f"shard_kv_snapshot_size failed with code {total_size}")
+        if total_size > self._cfg.max_kv_snapshot_bytes:
+            raise MemoryError(
+                f"KV snapshot size {total_size} exceeds cap {self._cfg.max_kv_snapshot_bytes}"
+            )
+
+        buf = (ctypes.c_ubyte * total_size)()
+        written = int(
+            self._lib.shard_kv_snapshot_export(
+                self._handle,
+                buf,
+                total_size,
+                self._cfg.max_kv_snapshot_bytes,
+            )
+        )
+        if written < 0:
+            raise RuntimeError(f"shard_kv_snapshot_export failed with code {written}")
+        snapshot = bytes(memoryview(buf)[:written])
+
+        if len(snapshot) < SNAPSHOT_HEADER_SIZE:
+            raise RuntimeError("KV snapshot shorter than header")
+        magic, version, _, payload_size = struct.unpack_from(SNAPSHOT_HEADER_FORMAT, snapshot, 0)
+        if magic != SNAPSHOT_MAGIC or version != SNAPSHOT_VERSION:
+            raise RuntimeError("KV snapshot header validation failed")
+        if SNAPSHOT_HEADER_SIZE + payload_size != len(snapshot):
+            raise RuntimeError("KV snapshot payload length mismatch")
+        return snapshot
+
+    def import_kv_snapshot(self, snapshot: bytes | bytearray | memoryview) -> None:
+        """Restore decoding state from a previously exported snapshot."""
+        if self._abi != "shard":
+            return
+
+        view = memoryview(snapshot)
+        if len(view) < SNAPSHOT_HEADER_SIZE:
+            raise ValueError("snapshot too small")
+        if len(view) > self._cfg.max_kv_snapshot_bytes:
+            raise MemoryError(
+                f"snapshot length {len(view)} exceeds cap {self._cfg.max_kv_snapshot_bytes}"
+            )
+
+        magic, version, _, payload_size = struct.unpack_from(SNAPSHOT_HEADER_FORMAT, view, 0)
+        if magic != SNAPSHOT_MAGIC or version != SNAPSHOT_VERSION:
+            raise ValueError("invalid snapshot header")
+        if SNAPSHOT_HEADER_SIZE + payload_size != len(view):
+            raise ValueError("invalid snapshot payload size")
+
+        buf = (ctypes.c_ubyte * len(view)).from_buffer_copy(view)
+        rc = int(
+            self._lib.shard_kv_snapshot_import(
+                self._handle,
+                buf,
+                len(view),
+                self._cfg.max_kv_snapshot_bytes,
+            )
+        )
+        if rc != 0:
+            raise RuntimeError(f"shard_kv_snapshot_import failed with code {rc}")
+
     def close(self) -> None:
         if not getattr(self, "_handle", None):
             return
@@ -210,5 +295,4 @@ class BitNetRuntime:
 
     def __del__(self) -> None:
         self.close()
-
 

@@ -1,6 +1,6 @@
 # REST API Reference
 
-This section provides comprehensive documentation for all REST API endpoints exposed by the Shard Oracle API.
+This section provides comprehensive documentation for all REST API endpoints exposed by the Shard API.
 
 ## Table of Contents
 
@@ -22,14 +22,14 @@ http://localhost:8000
 Or when running in Swarm mode:
 
 ```
-http://<oracle-ip>:8000
+http://<shard-ip>:8000
 ```
 
 ---
 
 ## Authentication
 
-The Oracle API uses API key authentication. Include your API key in the `Authorization` header:
+The Shard API uses API key authentication. Include your API key in the `Authorization` header:
 
 ```
 Authorization: Bearer <your-api-key>
@@ -37,9 +37,9 @@ Authorization: Bearer <your-api-key>
 
 ### Getting an API Key
 
-The API key is automatically generated when the Oracle starts. You can retrieve it from:
+The API key is automatically generated when the Shard starts. You can retrieve it from:
 
-1. **Environment Variable**: Check `SHARD_API_KEY` in the Oracle's environment
+1. **Environment Variable**: Check `SHARD_API_KEY` in the Shard's environment
 2. **System Status**: Use the `/system/status` endpoint
 3. **Startup Logs**: The API key is logged to `console.log`
 
@@ -85,7 +85,7 @@ X-RateLimit-Reset: 1697298600
 
 #### POST /chat/completions
 
-Generate a chat completion using the Oracle's 1.58-bit quantized model.
+Generate a chat completion using the Shard's 1.58-bit quantized model.
 
 **Tags**: `chat`
 
@@ -545,7 +545,7 @@ Retrieve logs from a specific scout.
     {
       "timestamp": "2024-10-15T14:30:00Z",
       "level": "INFO",
-      "message": "Connected to Oracle"
+      "message": "Connected to Shard"
     },
     {
       "timestamp": "2024-10-15T14:30:01Z",
@@ -587,11 +587,11 @@ Get comprehensive system status and health information.
 ```json
 {
   "status": "operational",
-  "api_key": "sk-oracle-abc123def456",
-  "node_mode": "oracle",
-  "node_type": "oracle_titan",
+  "api_key": "sk-shard-abc123def456",
+  "node_mode": "shard",
+  "node_type": "shard_titan",
   "cluster": {
-    "oracles": 1,
+    "shards": 1,
     "scouts": 3,
     "leeches": 10
   },
@@ -637,9 +637,9 @@ Get detailed cluster topology and load distribution.
   "mode": "swarm",
   "total_nodes": 14,
   "nodes": {
-    "oracles": [
+    "shards": [
       {
-        "id": "oracle-1",
+        "id": "shard-1",
         "ip": "192.168.1.1",
         "port": 8000,
         "status": "active",
@@ -689,7 +689,7 @@ curl http://localhost:8000/system/cluster \
 
 #### POST /system/restart
 
-Restart the cluster (Oracle daemon + scouts).
+Restart the cluster (Shard daemon + scouts).
 
 **Tags**: `system`
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Shard Oracle — unified entry point.
+"""Shard — unified entry point.
 
-Starts the FastAPI Oracle API server. The Rust sidecar (shard-daemon.exe)
+Starts the FastAPI Shard API server. The Rust sidecar (shard-daemon.exe)
 should be started separately or via a wrapper script.
 
 Usage:
@@ -21,7 +21,7 @@ import sys
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Shard Oracle API Server")
+    parser = argparse.ArgumentParser(description="Shard API Server")
     parser.add_argument("--host", default="0.0.0.0", help="Bind address (default: 0.0.0.0)")
     parser.add_argument("--port", type=int, default=8000, help="Bind port (default: 8000)")
     parser.add_argument(
@@ -41,7 +41,7 @@ def main() -> None:
     parser.add_argument("--https", action="store_true", help="Enable HTTPS with Let's Encrypt")
     args = parser.parse_args()
 
-    # Expose sidecar URL as env var so oracle_api can read it
+    # Expose sidecar URL as env var so shard_api can read it
     os.environ.setdefault("SHARD_RUST_URL", args.rust_url)
     # Pass public API flags to API
     if args.public_api:
@@ -58,7 +58,7 @@ def main() -> None:
         sys.exit(1)
     
     print(f"  ╔══════════════════════════════════════╗")
-    print(f"  ║       Shard Oracle API  v0.3.0           ║")
+    print(f"  ║       Shard API  v0.3.0           ║")
     print(f"  ╠══════════════════════════════════════╣")
     print(f"  ║  API        → http{'s' if args.https else ''}://{args.host}:{args.port}       ║")
     print(f"  ║  Public API  : {'enabled' if args.public_api else 'disabled'}          ║")
@@ -95,7 +95,7 @@ def main() -> None:
             print(f"WARNING: Bundled sidecar not found at {daemon_path}", file=sys.stderr)
 
     uvicorn.run(
-        "oracle_api:app",
+        "shard_api:app",
         host=args.host,
         port=args.port,
         reload=args.reload,

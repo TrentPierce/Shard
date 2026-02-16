@@ -1,5 +1,5 @@
 [package]
-name = "shard-oracle-daemon"
+name = "shard-daemon"
 version = "0.4.4"
 edition = "2021"
 description = "P2P networking sidecar for the Shard distributed inference network"
@@ -11,7 +11,7 @@ path = "src/main.rs"
 [dependencies]
 anyhow = "1"
 async-trait = "0.1"
-axum = { version = "0.7", features = ["json"] }
+axum = { version = "0.7", features = ["json", "ws"] }
 clap = { version = "4", features = ["derive"] }
 dirs = "5"
 futures = "0.3"
@@ -19,7 +19,7 @@ hex = "0.4"
 libp2p = { version = "0.56.0", features = [
     "tokio", "kad", "gossipsub", "request-response",
     "noise", "yamux", "tcp", "websocket", "dns", "macros", "cbor",
-    "relay", "dcutr", "autonat", "identify", "ping", "mdns",
+    "relay", "dcutr", "autonat", "identify", "ping", "mdns", "quic",
 ] }
 libp2p-webrtc = { version = "0.9.0-alpha.1", features = ["tokio"] }
 rand = "0.8"

@@ -2,7 +2,7 @@
 
 ## Topology Model
 
-- **Oracle nodes** run Rust daemon + Python API.
+- **Shard nodes** run Rust daemon + Python API.
 - **Scout nodes** provide draft tokens via gossipsub and req/resp protocols.
 - **Consumer clients** connect to Python API (OpenAI-compatible endpoint).
 
