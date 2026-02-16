@@ -144,7 +144,7 @@ The Shard API is fully compatible with OpenAI's chat completions API.
 
 | Model ID | Description | Implementation |
 |----------|-------------|----------------|
-| `shard-hybrid` | Hybrid inference (Oracle + Scout) | Default model |
+| `shard-hybrid` | Hybrid inference (Shard + Scout) | Default model |
 
 ### Python Client
 

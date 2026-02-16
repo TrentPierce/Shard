@@ -1,4 +1,4 @@
-# Shard Oracle Winget Package Manifest
+# Shard Winget Package Manifest
 # Submit to: https://github.com/microsoft/winget-pkgs
 
 Id: ShardNetwork.Shard
@@ -9,9 +9,9 @@ License: MIT
 LicenseUrl: https://github.com/TrentPierce/Shard/blob/main/LICENSE
 ShortDescription: Decentralized P2P inference network daemon
 Description: |
-  Shard Oracle is a P2P distributed inference daemon that enables free,
+  Shard is a P2P distributed inference daemon that enables free,
   unlimited LLM access through a hybrid speculative decoding mesh.
-  Run as an Oracle node to contribute compute and earn priority access.
+  Run as a Shard node to contribute compute and earn priority access.
 Homepage: https://shard.network
 Author: Shard Network
 Copyright: Copyright © 2024 Shard Network

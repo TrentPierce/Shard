@@ -9,7 +9,7 @@ This repository has a coherent architecture and good component boundaries (Pytho
 ## What Works Well
 
 1. **Clear high-level architecture and docs**
-   - The split between Oracle API (Python), control plane (Rust), and scout/client surface (web) is clearly documented and implemented.
+   - The split between Shard API (Python), control plane (Rust), and scout/client surface (web) is clearly documented and implemented.
 2. **Reasonable API surface**
    - Health, topology, peers, and OpenAI-style chat endpoints are present.
 3. **Release smoke tests exist**
@@ -18,7 +18,7 @@ This repository has a coherent architecture and good component boundaries (Pytho
 ## Blocking Issues
 
 1. **Inference path is still scaffolded**
-   - `desktop/python/oracle_api.py` still emits hardcoded scaffold tokens and a permissive verifier (`_stub_local_generate`, `_stub_verify`) rather than a real generation/verification flow.
+   - `desktop/python/shard_api.py` still emits hardcoded scaffold tokens and a permissive verifier (`_stub_local_generate`, `_stub_verify`) rather than a real generation/verification flow.
 2. **Frontend dependency reproducibility issue**
    - `npm ci` fails because `package.json` and `package-lock.json` are out of sync (`@types/react` mismatch).
 3. **Network/proxy fragility for setup**

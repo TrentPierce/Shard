@@ -7,7 +7,7 @@ set -e
 VERSION="0.4.0"
 APP_NAME="Shard"
 DMG_NAME="Shard-${VERSION}-macOS.dmg"
-VOLUME_NAME="Shard Oracle"
+VOLUME_NAME="Shard"
 SOURCE_DIR="target/release/shard-daemon"
 BUNDLE_ID="network.shard.daemon"
 
@@ -39,7 +39,7 @@ cat > "${CONTENTS_DIR}/Info.plist" <<EOF
     <key>CFBundleName</key>
     <string>${APP_NAME}</string>
     <key>CFBundleDisplayName</key>
-    <string>Shard Oracle</string>
+    <string>Shard</string>
     <key>CFBundleVersion</key>
     <string>${VERSION}</string>
     <key>CFBundleShortVersionString</key>

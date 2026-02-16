@@ -1,4 +1,4 @@
-"""OpenAI-compatible local Oracle API with SSE streaming.
+"""OpenAI-compatible local Shard API with SSE streaming.
 
 Service roles:
 - Driver API in Python (OpenAI-compatible, with streaming)
@@ -11,10 +11,12 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 import os
 import sys
 import time
 import uuid
+from collections import deque
 from collections.abc import AsyncIterator
 from typing import Annotated, Any, Literal
 
@@ -35,7 +37,7 @@ from golden_ticket import (
     reset_scout_reputation,
 )
 
-LOGGER = logging.getLogger("shard.oracle_api")
+LOGGER = logging.getLogger("shard.shard_api")
 
 # Try to load BitNet runtime, but allow running without it
 # Note: BITNET is checked at runtime in endpoints, not at import time
@@ -110,16 +112,16 @@ tags_metadata = [
 ]
 
 app = FastAPI(
-    title="Shard Oracle API",
+    title="Shard API",
     version="0.4.4",
     description=r"""
     OpenAI-compatible API for the Shard distributed inference network.
 
     ## Overview
 
-    The Shard Oracle API provides server-grade LLM inference through a hybrid
+    The Shard API provides server-grade LLM inference through a hybrid
     P2P network. It combines:
-    - **Oracle nodes** with full models that verify draft tokens
+    - **Shard nodes** with full models that verify draft tokens
     - **Scout nodes** with draft models that generate token predictions
     - **Distributed inference** for free, unlimited access
 
@@ -130,7 +132,7 @@ app = FastAPI(
          ↓
     Scout Nodes (WebLLM) → Draft Token Generation
          ↓
-    Oracle Nodes (BitNet) → Draft Verification
+    Shard Nodes (BitNet) → Draft Verification
          ↓
     Final Response
     ```
@@ -139,7 +141,7 @@ app = FastAPI(
 
     ### Inference
     - **Chat Completions**: OpenAI-compatible streaming and non-streaming chat
-    - **Distributed Generation**: Hybrid Oracle+Scout inference for quality
+    - **Distributed Generation**: Hybrid Shard+Scout inference for quality
     - **Golden Ticket Security**: Sybil attack prevention through verification
 
     ### Network
@@ -148,7 +150,7 @@ app = FastAPI(
     - **Kademlia DHT**: Peer discovery and routing
 
     ### Quality
-    - **Verify, Don't Trust**: All Scout drafts verified by Oracles
+    - **Verify, Don't Trust**: All Scout drafts verified by Shards
     - **Heavier is Truth**: GPU nodes always override browser drafts
     - **Reputation System**: Scout accuracy tracked and scored
 
@@ -163,7 +165,7 @@ app = FastAPI(
 
     ## Node Modes
 
-    - **Oracle**: Full model host that verifies draft tokens (desktop GPU recommended)
+    - **Shard**: Full model host that verifies draft tokens (desktop GPU recommended)
     - **Scout**: Browser node that generates draft tokens (WebGPU recommended)
     - **Leech**: Consumer-only node (lowest priority, queued behind contributors)
 
@@ -304,6 +306,50 @@ RATE_LIMITER = RateLimiter(RATE_LIMIT_PER_MINUTE)
 SCOUT_RATE_LIMITER = RateLimiter(int(os.getenv("SHARD_SCOUT_RATE_LIMIT_PER_MINUTE", "120")))
 
 
+class LatencyProfileStore:
+    """In-memory, low-overhead latency samples for local-vs-network comparisons."""
+
+    def __init__(self) -> None:
+        self._samples: deque[dict[str, float | int]] = deque(maxlen=1024)
+        self._lock = asyncio.Lock()
+
+    async def record_sample(self, sample: dict[str, float | int]) -> None:
+        async with self._lock:
+            self._samples.append(sample)
+
+    async def summarize(self, p50_ms: float, p90_ms: float, p99_ms: float) -> dict[str, dict[str, float | int]]:
+        async with self._lock:
+            samples = list(self._samples)
+
+        buckets: dict[str, list[dict[str, float | int]]] = {"p50": [], "p90": [], "p99": []}
+        for sample in samples:
+            net_ms = float(sample.get("network_rtt_plus_verify_ms", 0.0))
+            if net_ms <= p50_ms:
+                buckets["p50"].append(sample)
+            elif net_ms <= p90_ms:
+                buckets["p90"].append(sample)
+            else:
+                buckets["p99"].append(sample)
+
+        def _avg(rows: list[dict[str, float | int]], key: str) -> float:
+            if not rows:
+                return 0.0
+            return sum(float(r.get(key, 0.0)) for r in rows) / len(rows)
+
+        out: dict[str, dict[str, float | int]] = {}
+        for bucket_name, rows in buckets.items():
+            out[bucket_name] = {
+                "samples": len(rows),
+                "avg_tokens": _avg(rows, "tokens"),
+                "avg_local_generate_ms": _avg(rows, "local_generate_ms"),
+                "avg_network_rtt_plus_verify_ms": _avg(rows, "network_rtt_plus_verify_ms"),
+            }
+        return out
+
+
+LATENCY_PROFILE = LatencyProfileStore()
+
+
 def _get_http_client() -> httpx.AsyncClient:
     global _http_client
     if _http_client is None:
@@ -427,13 +473,13 @@ class ChatRequest(BaseModel):
     Request for chat completion generation.
 
     This follows the OpenAI-compatible chat completion API specification.
-    Uses distributed inference via Scout nodes and local Oracle verification.
+    Uses distributed inference via Scout nodes and local Shard verification.
     """
     model: str = Field(
         default="shard-hybrid",
         description=(
             "Model identifier to use. Currently supports: "
-            "shard-hybrid (hybrid Oracle+Scout inference)"
+            "shard-hybrid (hybrid Shard+Scout inference)"
         ),
         examples=["shard-hybrid", "gpt-4", "claude-3"],
     )
@@ -540,6 +586,106 @@ class ChatResponse(BaseModel):
 
 # ─── Local Model + Verification ─────────────────────────────────────────────
 
+USEFUL_COMPUTE_TOP_K = int(os.getenv("SHARD_USEFUL_COMPUTE_TOP_K", "8"))
+USEFUL_COMPUTE_MAX_TOKENS = int(os.getenv("SHARD_USEFUL_COMPUTE_MAX_TOKENS", "32"))
+USEFUL_COMPUTE_FAILURE_THRESHOLD = float(os.getenv("SHARD_USEFUL_COMPUTE_FAILURE_THRESHOLD", "1e-12"))
+
+
+class UsefulComputeVerifier:
+    """Bounds the chance that a draft token sequence was randomly guessed.
+
+    We avoid expensive cryptographic consensus and instead score whether the
+    submitted draft is aligned with the authoritative model's token
+    distribution. The resulting probability bound is the product of each token
+    hit probability under a conservative top-k approximation.
+    """
+
+    def __init__(self, *, top_k: int, max_tokens: int, failure_threshold: float) -> None:
+        self.top_k = max(1, top_k)
+        self.max_tokens = max(1, max_tokens)
+        self.failure_threshold = max(1e-30, failure_threshold)
+
+    @staticmethod
+    def _token_rank_probability(rank: int) -> float:
+        """Conservative fallback probability for rank-based token matching."""
+        return 1.0 / float(rank + 1)
+
+    async def verify(self, generated: list[str], draft: list[str]) -> dict[str, object]:
+        runtime = await get_or_load_bitnet()
+        if runtime is None:
+            return {
+                "accepted": False,
+                "probability_bound": 0.0,
+                "accepted_tokens": [],
+                "expected": None,
+                "reason": "bitnet runtime unavailable",
+            }
+
+        if not draft:
+            return {
+                "accepted": False,
+                "probability_bound": 1.0,
+                "accepted_tokens": [],
+                "expected": None,
+                "reason": "empty draft",
+            }
+
+        accepted, expected = await _verify_draft(generated, draft)
+        examined = min(len(draft), self.max_tokens)
+        probability_bound = 1.0
+
+        # If the peer matched N tokens before diverging, random guessing chance is
+        # upper-bounded by ∏(1/(rank+1)). We use rank=top_k for accepted tokens
+        # (conservative), and exact mismatch probability floor for failures.
+        for _ in range(min(len(accepted), examined)):
+            probability_bound *= self._token_rank_probability(self.top_k)
+
+        accepted_full = len(accepted) == len(draft)
+        if not accepted_full:
+            # Mismatch event makes successful random forgery substantially less
+            # likely than a full accepted run; tighten the bound aggressively.
+            probability_bound *= self._token_rank_probability(self.top_k * 4)
+
+        probability_bound = max(0.0, min(1.0, probability_bound))
+        accepted_verdict = accepted_full and probability_bound <= self.failure_threshold
+
+        return {
+            "accepted": accepted_verdict,
+            "probability_bound": probability_bound,
+            "accepted_tokens": accepted,
+            "expected": expected,
+            "reason": None if accepted_verdict else "draft failed useful-compute bound",
+        }
+
+
+USEFUL_COMPUTE_VERIFIER = UsefulComputeVerifier(
+    top_k=USEFUL_COMPUTE_TOP_K,
+    max_tokens=USEFUL_COMPUTE_MAX_TOKENS,
+    failure_threshold=USEFUL_COMPUTE_FAILURE_THRESHOLD,
+)
+
+
+async def _notify_rust_penalty(
+    *,
+    scout_id: str,
+    accepted: bool,
+    probability_bound: float,
+    reason: str | None = None,
+) -> None:
+    """Push scout penalty updates to Rust sidecar for p2p-level blackholing."""
+    try:
+        client = _get_http_client()
+        await client.post(
+            "/scout/penalty",
+            json={
+                "peer_id": scout_id,
+                "accepted": accepted,
+                "probability_bound": probability_bound,
+                "reason": reason,
+            },
+        )
+    except Exception:
+        LOGGER.exception("Failed to publish scout penalty update to Rust sidecar")
 
 
 _session_eval_pos: dict[str, int] = {}
@@ -578,6 +724,32 @@ async def _verify_draft(generated: list[str], draft: list[str]) -> tuple[list[st
     except Exception:
         LOGGER.exception("Draft verification failed")
         return [], None
+
+
+async def _handle_scout_verification_event(event: dict[str, object]) -> None:
+    """Forward verification outcome to Rust daemon reputation tracker."""
+    scout_id = event.get("scout_id")
+    if not isinstance(scout_id, str) or not scout_id:
+        return
+
+    accepted = bool(event.get("accepted", False))
+    accepted_tokens = int(event.get("accepted_tokens", 0) or 0)
+    draft_tokens = int(event.get("draft_tokens", 0) or 0)
+    probability_bound = 1.0
+
+    if accepted and draft_tokens > 0 and accepted_tokens == draft_tokens:
+        probability_bound = max(USEFUL_COMPUTE_FAILURE_THRESHOLD * 0.1, 1.0e-16)
+    elif draft_tokens > 0:
+        mismatch_ratio = 1.0 - (accepted_tokens / max(1, draft_tokens))
+        probability_bound = max(USEFUL_COMPUTE_FAILURE_THRESHOLD * (1.0 + mismatch_ratio), 1.0e-6)
+
+    reason = event.get("reason")
+    await _notify_rust_penalty(
+        scout_id=scout_id,
+        accepted=accepted,
+        probability_bound=probability_bound,
+        reason=reason if isinstance(reason, str) else None,
+    )
 
 
 # ─── Endpoints ───────────────────────────────────────────────────────────────
@@ -624,7 +796,7 @@ async def health() -> dict[str, Any]:
     summary="Get network topology",
     description=(
         "Retrieves the network topology for browser Scout auto-discovery. "
-        "Scouts use this endpoint to find Oracle nodes to connect to."
+        "Scouts use this endpoint to find Shard nodes to connect to."
     ),
 )
 async def system_topology() -> dict[str, Any]:
@@ -639,8 +811,8 @@ async def system_topology() -> dict[str, Any]:
     return {
         "status": "degraded",
         "source": "fallback",
-        "oracle_webrtc_multiaddr": None,
-        "oracle_ws_multiaddr": None,
+        "shard_webrtc_multiaddr": None,
+        "shard_ws_multiaddr": None,
         "detail": "Rust sidecar not reachable",
     }
 
@@ -671,7 +843,7 @@ async def system_peers() -> dict[str, Any]:
     summary="Create chat completion",
     description=(
         "Creates a model response for the given chat conversation. "
-        "Uses distributed inference with Scout nodes and Oracle verification. "
+        "Uses distributed inference with Scout nodes and Shard verification. "
         "Supports both streaming and non-streaming modes."
     ),
     responses={
@@ -775,6 +947,8 @@ async def chat_completions(
             verify_draft=_verify_draft,
             control_plane=control,
             max_tokens=payload.max_tokens,
+            telemetry_hook=LATENCY_PROFILE.record_sample,
+            scout_event_hook=_handle_scout_verification_event,
         ):
             tokens.append(tok)
     except Exception as exc:
@@ -838,6 +1012,8 @@ async def _stream_generate(
             verify_draft=_verify_draft,
             control_plane=control,
             max_tokens=max_tokens,
+            telemetry_hook=LATENCY_PROFILE.record_sample,
+            scout_event_hook=_handle_scout_verification_event,
         ):
             chunk = {
                 "id": completion_id,
@@ -872,6 +1048,39 @@ async def _stream_generate(
     }
     yield f"data: {json.dumps(final)}\n\n"
     yield "data: [DONE]\n\n"
+
+
+@app.get(
+    "/v1/metrics/latency_profile",
+    tags=["system"],
+    summary="Latency profile for local vs P2P speculative path",
+    description=(
+        "Compares local generation time for N tokens against network RTT + verification "
+        "for scout drafts, grouped by current P2P latency percentiles."
+    ),
+)
+async def latency_profile() -> dict[str, Any]:
+    client = _get_http_client()
+    p2p = {"p50": 0.0, "p90": 0.0, "p99": 0.0, "samples": 0}
+    try:
+        resp = await client.get("/metrics/latency-profile")
+        if resp.status_code == 200:
+            payload = resp.json().get("gossipsub_propagation_ms", {})
+            p2p = {
+                "p50": float(payload.get("p50", 0.0)),
+                "p90": float(payload.get("p90", 0.0)),
+                "p99": float(payload.get("p99", 0.0)),
+                "samples": int(payload.get("samples", 0)),
+            }
+    except httpx.HTTPError as exc:
+        LOGGER.warning("Rust latency profile fetch failed: %s", exc)
+
+    summary = await LATENCY_PROFILE.summarize(p2p["p50"], p2p["p90"], p2p["p99"])
+    return {
+        "status": "ok",
+        "p2p_latency_ms": p2p,
+        "local_vs_network": summary,
+    }
 
 
 @app.get(
@@ -1080,18 +1289,54 @@ async def submit_scout_draft(
             "verified": False,
         }
     
-    # Not a Golden Ticket - normal draft submission
-    # Forward to Rust sidecar via control plane
+    # Not a Golden Ticket - run lightweight proof-of-useful-compute verification.
+    generated_tokens = data.get("generatedTokens") or data.get("generated_tokens") or []
+    if not isinstance(generated_tokens, list):
+        generated_tokens = []
+
+    draft_tokens = draft_text.split() if isinstance(draft_text, str) else []
+    verification = await USEFUL_COMPUTE_VERIFIER.verify(generated_tokens, draft_tokens)
+
+    accepted = bool(verification.get("accepted", False))
+    probability_bound = float(verification.get("probability_bound", 1.0))
+    reason = verification.get("reason")
+    if reason is not None and not isinstance(reason, str):
+        reason = str(reason)
+
+    await _notify_rust_penalty(
+        scout_id=scout_id,
+        accepted=accepted,
+        probability_bound=probability_bound,
+        reason=reason,
+    )
+
+    if not accepted:
+        LOGGER.warning(
+            "Useful compute verification failed: scout=%s work=%s bound=%.3e",
+            scout_id,
+            work_id,
+            probability_bound,
+        )
+        return {
+            "success": False,
+            "detail": "Draft failed useful-compute verification",
+            "verified": False,
+            "probability_bound": probability_bound,
+            "expected": verification.get("expected"),
+        }
+
+    # Forward accepted draft to Rust sidecar via control plane
     try:
         control = RustControlPlaneClient(base_url=RUST_URL)
-        # Store the result for the cooperative_generate loop to pick up
         await control.submit_draft_result(work_id, scout_id, draft_text)
         await control.close()
-        
+
         return {
             "success": True,
             "detail": "Draft submitted for verification",
             "verified": None,
+            "probability_bound": probability_bound,
+            "accepted_tokens": verification.get("accepted_tokens", []),
         }
     except Exception as exc:
         LOGGER.exception("Failed to submit draft to control plane")
