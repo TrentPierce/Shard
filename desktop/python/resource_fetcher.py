@@ -43,9 +43,9 @@ FALLBACK_MODEL_URLS = [
     "https://huggingface.co/TheBloke/Llama-3.2-1B-Instruct-Q4_K_M-GGUF/resolve/main/llama-3.2-1b-instruct-q4_k_m.gguf",
 ]
 
-# Expected SHA256 checksums (to be updated with actual model checksums)
+# Expected SHA256 checksums. Leave empty until a verified checksum is published.
 MODEL_CHECKSUMS: dict[str, str] = {
-    "Llama-3.2-1B-Instruct-Q4_K_M.gguf": "e2c8e4e3f5a7c9d1b4f6e8a2c3d5e7f9a1b3c5d7e9f1a3b5c7d9e1f3a5b7c9d",  # Placeholder
+    "Llama-3.2-1B-Instruct-Q4_K_M.gguf": "",
 }
 
 
@@ -218,7 +218,7 @@ class ResourceFetcher:
             import urllib.request
             import urllib.error
         
-        self._models_dir.mkdir(parents=True, exist_ok=True)
+        self.models_dir.mkdir(parents=True, exist_ok=True)
         
         # Get file size
         try:

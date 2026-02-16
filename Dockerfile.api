@@ -7,4 +7,5 @@ COPY desktop/python/requirements.txt ./desktop/python/requirements.txt
 RUN pip install --no-cache-dir -r desktop/python/requirements.txt
 COPY desktop/python ./desktop/python
 EXPOSE 8000
+WORKDIR /app/desktop/python
 CMD ["python", "run.py", "--host", "0.0.0.0", "--port", "8000"]

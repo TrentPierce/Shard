@@ -12,10 +12,13 @@ TestClient = pytest.importorskip("fastapi.testclient").TestClient
 sys.path.append(str(Path(__file__).resolve().parents[1] / "desktop" / "python"))
 
 
-def _load_client(monkeypatch, api_keys="", rate_limit="60", max_prompt="16000"):
+def _load_client(monkeypatch, api_keys="", rate_limit="60", max_prompt="16000", require_api_key: str | None = None):
     monkeypatch.setenv("SHARD_API_KEYS", api_keys)
     monkeypatch.setenv("SHARD_RATE_LIMIT_PER_MINUTE", rate_limit)
     monkeypatch.setenv("SHARD_MAX_PROMPT_CHARS", max_prompt)
+    if require_api_key is None:
+        require_api_key = "true" if api_keys else "false"
+    monkeypatch.setenv("SHARD_REQUIRE_API_KEY", require_api_key)
     # Enable testing mode - uses mock BitNet for tests
     monkeypatch.setenv("SHARD_TESTING", "1")
     # Clear BITNET env vars to trigger mock mode

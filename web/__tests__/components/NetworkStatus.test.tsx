@@ -3,6 +3,10 @@ import { render, screen } from "@testing-library/react"
 import "@testing-library/jest-dom"
 import NetworkStatus from "@/components/NetworkStatus"
 
+jest.mock("@/lib/swarm", () => ({
+  heartbeatShard: jest.fn(async () => ({ ok: true, detail: "ok", rttMs: 1 })),
+}))
+
 describe("NetworkStatus", () => {
   const defaultProps = {
     mode: "scout" as const,
@@ -12,35 +16,45 @@ describe("NetworkStatus", () => {
     webLLMError: null,
   }
 
+  beforeEach(() => {
+    global.fetch = jest.fn(async () =>
+      ({
+        ok: true,
+        json: async () => ({ peers: [] }),
+      }) as Response
+    )
+  })
+
   describe("Rendering in Scout mode", () => {
     it("displays scout status", () => {
       render(<NetworkStatus {...defaultProps} />)
-      expect(screen.getByText(/Scout Node/i)).toBeInTheDocument()
+      expect(screen.getByText(/Scout Mode Active/i)).toBeInTheDocument()
     })
 
     it("displays WebGPU support status", () => {
       render(<NetworkStatus {...defaultProps} />)
-      expect(screen.getByText(/WebGPU.*Supported/i)).toBeInTheDocument()
+      expect(screen.getByText(/WebLLM/i)).toBeInTheDocument()
     })
   })
 
   describe("Rendering in Leech mode", () => {
     it("displays leech status with queue warning", () => {
       render(<NetworkStatus {...defaultProps} mode="leech" />)
-      expect(screen.getByText(/Consumer Node/i)).toBeInTheDocument()
-      expect(screen.getByText(/Low Priority/i)).toBeInTheDocument()
+      expect(screen.getByText(/Leech Mode Active/i)).toBeInTheDocument()
+      expect(screen.getByText(/^Low$/i)).toBeInTheDocument()
     })
 
     it("displays upgrade prompt", () => {
       render(<NetworkStatus {...defaultProps} mode="leech" />)
-      expect(screen.getByText(/Enable Scout Mode/i)).toBeInTheDocument()
+      expect(screen.getByRole("button", { name: /enable scout mode/i })).toBeInTheDocument()
     })
   })
 
   describe("Rendering in Shard mode", () => {
     it("displays shard status", () => {
       render(<NetworkStatus {...defaultProps} mode="local-shard" />)
-      expect(screen.getByText(/Local Shard/i)).toBeInTheDocument()
+      expect(screen.getByText(/Daemon Status/i)).toBeInTheDocument()
+      expect(screen.getByText(/Shard/i)).toBeInTheDocument()
     })
 
     it("displays peer count when connected", () => {
@@ -51,10 +65,12 @@ describe("NetworkStatus", () => {
           status: "ok",
           shard_peer_id: "test-peer-id",
           listen_addrs: ["/ip4/127.0.0.1/tcp/4001/ws"],
+          shard_ws_multiaddr: "/ip4/127.0.0.1/tcp/4101/ws/p2p/test-peer-id",
         },
       }
       render(<NetworkStatus {...propsWithTopology} />)
-      expect(screen.getByText(/Connected/i)).toBeInTheDocument()
+      expect(screen.getByText(/WS Addr/i)).toBeInTheDocument()
+      expect(screen.getByText(/✓ available/i)).toBeInTheDocument()
     })
   })
 
@@ -63,10 +79,9 @@ describe("NetworkStatus", () => {
       const propsWithProgress = {
         ...defaultProps,
         webLLMProgress: {
-          progress: 50,
-          loaded: 100,
-          total: 200,
+          progress: 0.5,
           text: "Loading model...",
+          timeElapsed: 5000,
         },
       }
       render(<NetworkStatus {...propsWithProgress} />)

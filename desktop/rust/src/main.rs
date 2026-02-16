@@ -13,6 +13,7 @@ use anyhow::Result;
 use axum::{
     extract::State as AxumState,
     http::Method,
+    extract::Query,
     routing::{get, post},
     Json, Router,
 };
@@ -251,6 +252,7 @@ struct SharedState {
     peers: Arc<Mutex<HashMap<String, PeerInfo>>>,
     known_peers: Arc<Mutex<Vec<String>>>,
     results: Arc<Mutex<VecDeque<WorkResponse>>>,
+    scout_work: Arc<Mutex<VecDeque<WorkRequest>>>,
     work_tx: mpsc::Sender<WorkRequest>,
     daemon_start: u128,
     capacity: Arc<AtomicU32>,
@@ -268,6 +270,20 @@ struct ScoutPenaltyUpdate {
     probability_bound: f64,
     #[serde(default)]
     reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct DraftResultSubmission {
+    work_id: String,
+    scout_id: String,
+    draft_text: String,
+    #[serde(default)]
+    timestamp: Option<f64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PopResultQuery {
+    request_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -631,18 +647,83 @@ async fn broadcast_work_handler(
         return Json(serde_json::json!({ "ok": false, "detail": detail }));
     }
 
+    {
+        let mut queue = state.scout_work.lock().await;
+        queue.push_back(req.clone());
+        while queue.len() > 1024 {
+            queue.pop_front();
+        }
+    }
+
     match state.work_tx.send(req).await {
         Ok(_) => Json(serde_json::json!({ "ok": true, "detail": "queued for gossipsub publish" })),
         Err(e) => Json(serde_json::json!({ "ok": false, "detail": format!("channel error: {e}") })),
     }
 }
 
-async fn pop_result_handler(AxumState(state): AxumState<SharedState>) -> Json<serde_json::Value> {
+async fn pop_result_handler(
+    AxumState(state): AxumState<SharedState>,
+    Query(query): Query<PopResultQuery>,
+) -> Json<serde_json::Value> {
     let mut results = state.results.lock().await;
+    if let Some(request_id) = query.request_id {
+        if let Some(idx) = results.iter().position(|r| r.request_id == request_id) {
+            if let Some(result) = results.remove(idx) {
+                return Json(serde_json::json!({ "result": result }));
+            }
+        }
+        return Json(serde_json::json!({ "result": null }));
+    }
+
     match results.pop_front() {
-        Some(r) => Json(serde_json::json!({ "result": r })),
+        Some(result) => Json(serde_json::json!({ "result": result })),
         None => Json(serde_json::json!({ "result": null })),
     }
+}
+
+async fn pop_work_handler(AxumState(state): AxumState<SharedState>) -> Json<serde_json::Value> {
+    let mut queue = state.scout_work.lock().await;
+    match queue.pop_front() {
+        Some(work) => Json(serde_json::json!({ "work": work })),
+        None => Json(serde_json::json!({ "work": null })),
+    }
+}
+
+async fn submit_draft_handler(
+    AxumState(state): AxumState<SharedState>,
+    Json(submission): Json<DraftResultSubmission>,
+) -> Json<serde_json::Value> {
+    if submission.work_id.trim().is_empty() || submission.scout_id.trim().is_empty() {
+        return Json(serde_json::json!({
+            "ok": false,
+            "detail": "work_id and scout_id are required",
+        }));
+    }
+
+    let created_at_ms = submission
+        .timestamp
+        .map(|ts| (ts * 1000.0).max(0.0) as u128)
+        .unwrap_or_else(now_ms);
+
+    let response = WorkResponse {
+        request_id: submission.work_id,
+        peer_id: submission.scout_id,
+        draft_tokens: submission
+            .draft_text
+            .split_whitespace()
+            .map(ToOwned::to_owned)
+            .collect(),
+        latency_ms: 0.0,
+        created_at_ms: Some(created_at_ms),
+    };
+
+    let mut results = state.results.lock().await;
+    results.push_back(response);
+    while results.len() > 2048 {
+        results.pop_front();
+    }
+
+    Json(serde_json::json!({ "ok": true, "detail": "draft queued" }))
 }
 
 async fn latency_profile_handler(
@@ -691,6 +772,8 @@ fn create_router(state: SharedState) -> Router {
         .route("/peers", get(peers_handler))
         .route("/broadcast-work", post(broadcast_work_handler))
         .route("/pop-result", get(pop_result_handler))
+        .route("/pop-work", get(pop_work_handler))
+        .route("/submit-draft", post(submit_draft_handler))
         .route("/scout/penalty", post(scout_penalty_update_handler))
         .route("/scout/penalty", get(scout_penalty_status_handler))
         .route("/metrics/latency-profile", get(latency_profile_handler))
@@ -776,6 +859,7 @@ async fn main() -> Result<()> {
         peers: Arc::new(Mutex::new(HashMap::new())),
         known_peers: Arc::new(Mutex::new(bootstrap_addrs.clone())),
         results: Arc::new(Mutex::new(VecDeque::new())),
+        scout_work: Arc::new(Mutex::new(VecDeque::new())),
         work_tx,
         daemon_start: now_ms(),
         capacity: Arc::new(AtomicU32::new(100)), // Default: 100 tokens/sec

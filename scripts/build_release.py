@@ -52,8 +52,8 @@ def build_cpp() -> Path:
 
 def build_web() -> Path:
     web_dir = ROOT / "web"
-    print("+ npm install (web)")
-    subprocess.run(["npm", "install"], cwd=str(web_dir), shell=True, check=True)
+    print("+ npm ci (web)")
+    subprocess.run(["npm", "ci"], cwd=str(web_dir), shell=True, check=True)
     print("+ npm run build (web)")
     subprocess.run(["npm", "run", "build"], cwd=str(web_dir), shell=True, check=True)
     out_dir = web_dir / "out"
@@ -143,7 +143,6 @@ def main() -> None:
     BUILD.mkdir(parents=True, exist_ok=True)
     DIST.mkdir(parents=True, exist_ok=True)
 
-    daemon_bin = build_rust()
     daemon_bin = build_rust()
     engine_lib = build_cpp()
     web_out = build_web()
