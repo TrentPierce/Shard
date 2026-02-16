@@ -12,9 +12,11 @@
  * Configurable via NEXT_PUBLIC_API_URL environment variable.
  * @default "http://127.0.0.1:8000"
  */
-export const API_BASE = (typeof window !== 'undefined' && window.location.host)
-  ? `${window.location.protocol}//${window.location.host}`
-  : (process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000")
+export const API_BASE = process.env.NEXT_PUBLIC_API_URL 
+  ? process.env.NEXT_PUBLIC_API_URL
+  : (typeof window !== 'undefined' && window.location.host)
+    ? `http://${window.location.hostname}:8000`
+    : "http://127.0.0.1:8000"
 
 // Rust URL is usually internal (Python -> Rust), but if accessed from browser, use relative + port logic if needed
 // For now, keep as-is or make relative if we proxy

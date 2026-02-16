@@ -53,7 +53,10 @@ export async function sendMessage(
 
     const res = await fetch(`${apiEndpoint}/v1/chat/completions`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+            "Content-Type": "application/json",
+            "Authorization": "Bearer test-key"
+        },
         body: JSON.stringify(body),
     })
 
@@ -121,7 +124,10 @@ export async function sendMessageSync(
 
     const res = await fetch(apiUrl("/v1/chat/completions"), {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+            "Content-Type": "application/json",
+            "Authorization": "Bearer test-key"
+        },
         body: JSON.stringify(body),
     })
 
