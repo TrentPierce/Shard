@@ -6,12 +6,6 @@
  */
 
 import { apiUrl } from "./config"
-import {
-  getAllShardNodes,
-  selectFastestShard,
-  getBestShardApiUrl,
-  type ShardNode
-} from "./discovery"
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -43,7 +37,8 @@ export async function sendMessage(
     onToken: (token: string) => void,
     onDone: () => void
 ): Promise<void> {
-    const apiEndpoint = await getBestShardApiUrl()
+    // Use direct API URL instead of discovery for reliability
+    const apiEndpoint = apiUrl("")
     const body: ChatCompletionRequest = {
         model: "shard-hybrid",
         messages: history.map((m) => ({ role: m.role, content: m.content })),
