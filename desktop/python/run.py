@@ -58,7 +58,7 @@ def main() -> None:
         sys.exit(1)
     
     print(f"  ╔══════════════════════════════════════╗")
-    print(f"  ║       Shard API  v0.3.0           ║")
+    print(f"  ║       Shard API  v0.4.4           ║")
     print(f"  ╠══════════════════════════════════════╣")
     print(f"  ║  API        → http{'s' if args.https else ''}://{args.host}:{args.port}       ║")
     print(f"  ║  Public API  : {'enabled' if args.public_api else 'disabled'}          ║")
