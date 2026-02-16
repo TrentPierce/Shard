@@ -21,11 +21,10 @@ use axum::{
 use clap::Parser;
 use libp2p::{
     autonat, dcutr,
-    futures::{SinkExt, StreamExt},
+    futures::StreamExt,
     gossipsub::{self, IdentTopic, MessageAuthenticity},
     identify, identity,
     kad::{store::MemoryStore, Behaviour as KadBehaviour},
-    mdns::Behaviour as MdnsBehaviour,
     ping, relay,
     request_response::{self, OutboundRequestId, ProtocolSupport},
     swarm::{NetworkBehaviour, SwarmEvent},
