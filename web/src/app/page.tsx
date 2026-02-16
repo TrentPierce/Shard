@@ -9,7 +9,10 @@ import NetworkVisualizer from "@/components/NetworkVisualizer"
 import {
     fetchTopology,
     probeLocalShard,
-    startScoutWorker,
+    initP2P,
+    subscribeToWork,
+    subscribeToResults,
+    publishResult,
     type Topology,
 } from "@/lib/swarm"
 import {
@@ -77,15 +80,25 @@ export default function HomePage() {
                     setWebLLMError(null)
                     setMode("scout")
 
-                    // Start the Scout worker loop
-                    startScoutWorker(
-                        (work) => {
-                            console.log("Received work:", work.workId)
-                        },
-                        (result) => {
-                            console.log("Work result:", result)
-                        }
-                    )
+                    // Initialize P2P connection to the network
+                    try {
+                        const peerId = await initP2P({
+                            emitSelf: false,
+                        })
+                        console.log('[p2p] Connected as scout, peerId:', peerId)
+
+                        // Subscribe to work topics
+                        subscribeToWork((work) => {
+                            console.log("Received work:", work.request_id)
+                        })
+                        subscribeToResults((result) => {
+                            console.log("Work result:", result.request_id)
+                            // Publish result back to network
+                            publishResult(result)
+                        })
+                    } catch (p2pError) {
+                        console.error('[p2p] Failed to initialize P2P:', p2pError)
+                    }
                 } catch (error: any) {
                     console.error("Failed to initialize WebLLM:", error)
                     setWebLLMError(error?.message ?? "Failed to initialize Scout mode")
