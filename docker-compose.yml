@@ -11,6 +11,12 @@ services:
       - "4101:4101"
       - "9090:9090/udp"
       - "9092:9092/udp"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9091/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
     networks:
       - shard-net
     restart: unless-stopped
@@ -26,6 +32,12 @@ services:
     gpus: all
     expose:
       - "7000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:7000/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 25s
     networks:
       - shard-net
     restart: unless-stopped
@@ -36,22 +48,80 @@ services:
       dockerfile: Dockerfile.api
     container_name: shard-api
     depends_on:
-      - shard-daemon
-      - shard-inference
+      shard-daemon:
+        condition: service_healthy
+      shard-inference:
+        condition: service_healthy
     environment:
       SHARD_RUST_URL: http://shard-daemon:9091
       SHARD_INFERENCE_URL: http://shard-inference:7000
       SHARD_LOG_LEVEL: ${SHARD_LOG_LEVEL:-INFO}
       BITNET_LIB: ${BITNET_LIB:-}
       BITNET_MODEL: ${BITNET_MODEL:-}
+      SHARD_API_KEYS: ${SHARD_API_KEYS:-}
+      SHARD_REQUIRE_API_KEY: ${SHARD_REQUIRE_API_KEY:-false}
+      SHARD_RATE_LIMIT_PER_MINUTE: ${SHARD_RATE_LIMIT_PER_MINUTE:-120}
+      SHARD_SCOUT_RATE_LIMIT_PER_MINUTE: ${SHARD_SCOUT_RATE_LIMIT_PER_MINUTE:-180}
+      SHARD_CORS_ORIGINS: ${SHARD_CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
     command: ["python", "run.py", "--host", "0.0.0.0", "--port", "8000", "--rust-url", "http://shard-daemon:9091"]
     working_dir: /app/desktop/python
     ports:
       - "8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
     networks:
       - shard-net
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    container_name: shard-prometheus
+    profiles: ["monitoring"]
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=15d"
+    volumes:
+      - ./deploy/monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "9095:9090"
+    networks:
+      - shard-net
+    depends_on:
+      shard-api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.3.1
+    container_name: shard-grafana
+    profiles: ["monitoring"]
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./deploy/monitoring/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./deploy/monitoring/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./deploy/monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "3001:3000"
+    networks:
+      - shard-net
+    depends_on:
+      - prometheus
     restart: unless-stopped
 
 networks:
   shard-net:
     driver: bridge
+
+volumes:
+  prometheus-data:
+  grafana-data:

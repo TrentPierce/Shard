@@ -160,6 +160,28 @@ Open: `http://localhost:3000`
 
 ---
 
+## Production Compose
+
+Use the checked-in runtime defaults from `.env.example`:
+
+```bash
+cp .env.example .env
+docker compose up -d
+```
+
+Enable observability stack (Prometheus + Grafana):
+
+```bash
+docker compose --profile monitoring up -d
+```
+
+Useful endpoints:
+- API: `http://localhost:8000/health`
+- Prometheus: `http://localhost:9095`
+- Grafana: `http://localhost:3001`
+
+---
+
 ## Project Structure
 
 - `web/` — Next.js app and browser Scout node
