@@ -108,7 +108,9 @@ SHARD_API int shard_rollback(void* handle, int steps) {
     state->n_past = std::max(0, state->n_past - steps);
     
     // Clear KV cache for those positions
-    llama_memory_seq_rm(llama_get_memory(state->ctx), 0, state->n_past, -1);
+    // Using seq_id=-1 acts as wildcard to clear across all sequences
+    // p1=-1 means "to end of sequence"
+    llama_memory_seq_rm(llama_get_memory(state->ctx), -1, state->n_past, -1);
     
     return 0;
 }
