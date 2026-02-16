@@ -291,8 +291,9 @@ class RateLimiter:
         self._buckets: dict[str, tuple[int, int]] = {}
         self._lock = asyncio.Lock()
 
-    async def check(self, key: str) -> tuple[bool, int]:
+    async def check(self, key: str) -> tuple[bool, int, int]:
         now_window = int(time.time() // 60)
+        reset_after_seconds = 60 - int(time.time() % 60)
         async with self._lock:
             count, window = self._buckets.get(key, (0, now_window))
             if window != now_window:
@@ -300,12 +301,12 @@ class RateLimiter:
                 window = now_window
 
             if count >= self.limit_per_minute:
-                return False, 0
+                return False, 0, reset_after_seconds
 
             count += 1
             self._buckets[key] = (count, window)
             remaining = self.limit_per_minute - count
-            return True, remaining
+            return True, remaining, reset_after_seconds
 
 
 RATE_LIMITER = RateLimiter(RATE_LIMIT_PER_MINUTE)
@@ -441,7 +442,7 @@ async def enforce_rate_limit(request: Request, principal: str) -> None:
     if identity == "anonymous":
         identity = request.client.host if request.client else "unknown"
 
-    allowed, remaining = await RATE_LIMITER.check(identity)
+    allowed, remaining, _reset_after = await RATE_LIMITER.check(identity)
     if not allowed:
         METRICS["rate_limited_total"] += 1
         raise HTTPException(
@@ -929,7 +930,7 @@ async def chat_completions(
 
     if len(user_text) > MAX_PROMPT_CHARS:
         raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
             detail=f"Prompt too large (>{MAX_PROMPT_CHARS} chars)",
         )
     completion_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
@@ -1105,7 +1106,7 @@ async def latency_profile() -> dict[str, Any]:
         "Format: `# HELP <metric_name> <help_text>` and `# TYPE <metric_name> <type>`"
     ),
 )
-async def metrics() -> str:
+async def metrics() -> PlainTextResponse:
     """Prometheus-style plaintext counters for lightweight monitoring."""
     lines = [
         "# HELP shard_chat_requests_total Total chat completion requests",
@@ -1133,7 +1134,7 @@ async def metrics() -> str:
         "# TYPE shard_scouts_banned_total counter",
         f"shard_scouts_banned_total {METRICS['scouts_banned']}",
     ]
-    return "\n".join(lines) + "\n"
+    return PlainTextResponse("\n".join(lines) + "\n")
 
 
 # ─── Golden Ticket & Reputation Endpoints ────────────────────────────────────
@@ -1240,13 +1241,13 @@ async def submit_scout_draft(
     Rate limited to prevent spam from malicious scouts.
     """
     client_ip = request.client.host if request.client else "unknown"
-    allowed, remaining = await SCOUT_RATE_LIMITER.check(client_ip)
+    allowed, _remaining, retry_after = await SCOUT_RATE_LIMITER.check(client_ip)
     if not allowed:
         METRICS["rate_limited_total"] += 1
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail=f"Rate limit exceeded. Try again in {remaining}s",
-            headers={"Retry-After": str(remaining)},
+            detail="Rate limit exceeded",
+            headers={"Retry-After": str(retry_after)},
         )
     
     try:
@@ -1379,13 +1380,13 @@ async def get_scout_work(
     Rate limited to prevent spam from malicious scouts.
     """
     client_ip = request.client.host if request.client else "unknown"
-    allowed, remaining = await SCOUT_RATE_LIMITER.check(client_ip)
+    allowed, _remaining, retry_after = await SCOUT_RATE_LIMITER.check(client_ip)
     if not allowed:
         METRICS["rate_limited_total"] += 1
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail=f"Rate limit exceeded. Try again in {remaining}s",
-            headers={"Retry-After": str(remaining)},
+            detail="Rate limit exceeded",
+            headers={"Retry-After": str(retry_after)},
         )
     
     client = _get_http_client()
