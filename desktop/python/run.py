@@ -95,7 +95,7 @@ def main() -> None:
             print(f"WARNING: Bundled sidecar not found at {daemon_path}", file=sys.stderr)
 
     uvicorn.run(
-        "oracle_api:app",
+        "shard_api:app",
         host=args.host,
         port=args.port,
         reload=args.reload,

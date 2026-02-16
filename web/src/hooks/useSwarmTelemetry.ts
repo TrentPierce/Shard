@@ -5,6 +5,7 @@ import {
   createInitialTelemetry,
   type SwarmTelemetrySnapshot,
 } from "@/lib/mockSwarmTelemetry"
+import { apiUrl } from "@/lib/config"
 
 type IncomingTelemetryMessage = {
   connected_peers: number
@@ -37,89 +38,81 @@ function resolveTelemetryWsUrl() {
   }
 }
 
+async function fetchTelemetryFromApi(): Promise<SwarmTelemetrySnapshot> {
+  try {
+    // Fetch health to get peer count
+    const healthRes = await fetch(apiUrl("/health"))
+    const health = await healthRes.json()
+    
+    // Fetch peers to count
+    const peersRes = await fetch(apiUrl("/v1/system/peers"))
+    const peers = await peersRes.json()
+    
+    const connectedPeers = peers?.peers?.length || 0
+    const globalTflops = health?.capacity ? (health.capacity * connectedPeers * 0.1) : 0
+    
+    return {
+      globalTflops: Math.round(globalTflops * 100) / 100,
+      scoutCount: connectedPeers, // Estimate all peers as scouts
+      shardCount: 1, // Local shard
+      throughputHistory: [],
+      contributors: []
+    }
+  } catch (e) {
+    console.error("Failed to fetch telemetry from API:", e)
+    return createInitialTelemetry()
+  }
+}
+
 export function useSwarmTelemetry() {
   const [telemetry, setTelemetry] = useState<SwarmTelemetrySnapshot>(() => createInitialTelemetry())
   const [isConnected, setIsConnected] = useState(false)
   const reconnectAttempt = useRef(0)
   const reconnectTimer = useRef<number | null>(null)
 
+  // Poll API for telemetry instead of WebSocket (more reliable for now)
   useEffect(() => {
-    let socket: WebSocket | null = null
     let isUnmounted = false
 
-    const clearTimer = () => {
-      if (reconnectTimer.current !== null) {
-        window.clearTimeout(reconnectTimer.current)
-        reconnectTimer.current = null
-      }
-    }
-
-    const connect = () => {
-      if (isUnmounted) {
-        return
-      }
-
-      socket = new WebSocket(resolveTelemetryWsUrl())
-
-      socket.onopen = () => {
-        reconnectAttempt.current = 0
-        setIsConnected(true)
-      }
-
-      socket.onmessage = (event) => {
-        try {
-          const parsed = JSON.parse(event.data) as IncomingTelemetryMessage
-          const now = new Date()
-          const sample = {
-            timestamp: now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-            tflops: Number(parsed.global_tflops.toFixed(2)),
-          }
-
-          setTelemetry((current) => ({
+    const pollTelemetry = async () => {
+      try {
+        const data = await fetchTelemetryFromApi()
+        if (!isUnmounted) {
+          setTelemetry(current => ({
             ...current,
-            globalTflops: sample.tflops,
-            scoutCount: parsed.active_scouts,
-            shardCount: Math.max(0, parsed.connected_peers - parsed.active_scouts),
-            throughputHistory: [...current.throughputHistory.slice(-(MAX_HISTORY - 1)), sample],
+            ...data,
+            // Keep existing throughput history and contributors if API returns empty
+            throughputHistory: data.throughputHistory.length > 0 
+              ? data.throughputHistory 
+              : current.throughputHistory,
+            contributors: data.contributors.length > 0 
+              ? data.contributors 
+              : current.contributors,
           }))
-        } catch {
-          // Ignore malformed telemetry packets.
+          setIsConnected(true)
         }
-      }
-
-      socket.onclose = () => {
-        setIsConnected(false)
-        if (isUnmounted) {
-          return
+      } catch (e) {
+        console.error("Telemetry poll failed:", e)
+        if (!isUnmounted) {
+          setIsConnected(false)
         }
-
-        reconnectAttempt.current += 1
-        const exponentialBackoff = Math.min(
-          MAX_RECONNECT_DELAY_MS,
-          INITIAL_RECONNECT_DELAY_MS * 2 ** Math.min(reconnectAttempt.current, MAX_EXP_BACKOFF_STEP),
-        )
-        const jitter = exponentialBackoff * (Math.random() * 0.3 - 0.15)
-        const backoffMs = Math.max(INITIAL_RECONNECT_DELAY_MS, Math.round(exponentialBackoff + jitter))
-        reconnectTimer.current = window.setTimeout(connect, backoffMs)
-      }
-
-      socket.onerror = () => {
-        socket?.close()
       }
     }
 
-    connect()
+    // Initial fetch
+    pollTelemetry()
+
+    // Poll every 5 seconds
+    const interval = setInterval(pollTelemetry, 5000)
 
     return () => {
       isUnmounted = true
-      setIsConnected(false)
-      clearTimer()
-      socket?.close()
+      clearInterval(interval)
     }
   }, [])
 
   const statusLabel = useMemo(
-    () => (isConnected ? "LIVE WS STREAM" : "RECONNECTING..."),
+    () => (isConnected ? "LIVE API POLL" : "CONNECTING..."),
     [isConnected],
   )
 
