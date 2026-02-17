@@ -331,7 +331,17 @@ async function submitDraftResult(result: WorkResult): Promise<ScoutSubmissionRes
  * For now, we use a random string.
  */
 function generateScoutId(): string {
-    return `scout_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+    if (typeof window === "undefined") {
+        return `scout_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`
+    }
+
+    const key = "shard-scout-id"
+    const existing = localStorage.getItem(key)
+    if (existing) return existing
+
+    const created = `scout_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`
+    localStorage.setItem(key, created)
+    return created
 }
 
 /**

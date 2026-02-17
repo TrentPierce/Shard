@@ -394,6 +394,9 @@ _SPECIAL_TEXT_TOKENS = {
     "<|end|>",
 }
 
+ACTIVE_SCOUTS: dict[str, float] = {}
+SCOUT_ACTIVE_TTL_SECONDS = int(os.getenv("SHARD_SCOUT_ACTIVE_TTL_SECONDS", "120"))
+
 
 def _is_special_text_token(token: str) -> bool:
     return token.strip() in _SPECIAL_TEXT_TOKENS
@@ -430,6 +433,21 @@ def _latest_user_message(messages: list["ChatMessage"]) -> str:
         if message.role == "user":
             return message.content.strip()
     return ""
+
+
+def _mark_active_scout(identity: str) -> None:
+    ident = identity.strip()
+    if not ident:
+        return
+    ACTIVE_SCOUTS[ident] = time.time()
+
+
+def _active_scout_count() -> int:
+    now = time.time()
+    expired = [key for key, ts in ACTIVE_SCOUTS.items() if now - ts > SCOUT_ACTIVE_TTL_SECONDS]
+    for key in expired:
+        ACTIVE_SCOUTS.pop(key, None)
+    return len(ACTIVE_SCOUTS)
 
 
 def _fallback_text_for_request(messages: list["ChatMessage"]) -> str | None:
@@ -959,6 +977,7 @@ async def health() -> dict[str, Any]:
         "rust_uptime_ms": rust_uptime_ms,
         "rust_version": rust_version,
         "connected_peers": connected_peers,
+        "active_scouts": _active_scout_count(),
         "last_incident": os.getenv("SHARD_LAST_INCIDENT", "none"),
         "bitnet_loaded": bitnet_loaded,
         "bitnet_lib": os.getenv("BITNET_LIB", "") if os.getenv("SHARD_DEBUG_HEALTH", "false").lower() == "true" else "",
@@ -1515,6 +1534,10 @@ async def submit_scout_draft(
     work_id = data.get("workId") or data.get("request_id")
     scout_id = data.get("scoutId") or data.get("scout_id")
     draft_text = data.get("draftText") or data.get("draft_text") or ""
+    if scout_id:
+        _mark_active_scout(str(scout_id))
+    else:
+        _mark_active_scout(f"ip:{client_ip}")
     
     if not work_id or not scout_id:
         raise HTTPException(
@@ -1634,6 +1657,7 @@ async def get_scout_work(
     Rate limited to prevent spam from malicious scouts.
     """
     client_ip = request.client.host if request.client else "unknown"
+    _mark_active_scout(f"ip:{client_ip}")
     allowed, _remaining, retry_after = await SCOUT_RATE_LIMITER.check(client_ip)
     if not allowed:
         METRICS["rate_limited_total"] += 1

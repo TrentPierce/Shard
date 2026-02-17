@@ -11,6 +11,7 @@ import {
     fetchTopology,
     probeLocalShard,
     initP2P,
+    startScoutWorker,
     subscribeToWork,
     subscribeToResults,
     publishResult,
@@ -39,6 +40,7 @@ export default function HomePage() {
     const [toastMessage, setToastMessage] = useState<string | null>(null)
     const [scoutRetryNonce, setScoutRetryNonce] = useState(0)
     const scoutBootedRef = useRef(false)
+    const stopScoutWorkerRef = useRef<(() => void) | null>(null)
 
     const getBootstrapPeersFromTopology = useCallback((topo: Topology | null): string[] => {
         if (!topo) return []
@@ -98,6 +100,10 @@ export default function HomePage() {
 
     useEffect(() => {
         const handleRetryScoutInit = () => {
+            if (stopScoutWorkerRef.current) {
+                stopScoutWorkerRef.current()
+                stopScoutWorkerRef.current = null
+            }
             scoutBootedRef.current = false
             setWebLLMError(null)
             setWebLLMProgress(null)
@@ -126,6 +132,10 @@ export default function HomePage() {
 
         const boot = async () => {
             scoutBootedRef.current = true
+            if (stopScoutWorkerRef.current) {
+                stopScoutWorkerRef.current()
+                stopScoutWorkerRef.current = null
+            }
             if (PREFER_LOCAL_SHARD) {
                 const probe = await probeLocalShard()
                 if (probe.available) {
@@ -154,6 +164,14 @@ export default function HomePage() {
                 setWebLLMError(null)
                 setMode("scout")
 
+                // Start Scout API worker loop so browser tabs actually contribute drafts.
+                try {
+                    const stopWorker = await startScoutWorker()
+                    stopScoutWorkerRef.current = stopWorker
+                } catch (workerError) {
+                    console.error("[scout] Failed to start worker loop:", workerError)
+                }
+
                 try {
                     const liveTopology = await fetchTopology()
                     const bootstrapPeers = getBootstrapPeersFromTopology(liveTopology)
@@ -172,10 +190,7 @@ export default function HomePage() {
                     })
                 } catch (p2pError) {
                     console.error('[p2p] Failed to initialize P2P:', p2pError)
-                    setWebLLMError(
-                        `Scout networking unavailable: ${p2pError instanceof Error ? p2pError.message : "unknown error"}`
-                    )
-                    setMode("leech")
+                    setWebLLMError(`Scout networking degraded: ${p2pError instanceof Error ? p2pError.message : "unknown error"}`)
                 }
             } catch (error: any) {
                 console.error("Failed to initialize WebLLM:", error)
@@ -186,6 +201,12 @@ export default function HomePage() {
         }
 
         boot()
+        return () => {
+            if (stopScoutWorkerRef.current) {
+                stopScoutWorkerRef.current()
+                stopScoutWorkerRef.current = null
+            }
+        }
     }, [showLanding, scoutRetryNonce])
 
     // Pitch Mode keyboard shortcut (Ctrl+Shift+P)
