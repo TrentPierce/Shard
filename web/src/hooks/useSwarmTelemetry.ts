@@ -55,20 +55,19 @@ async function fetchRealTelemetry(): Promise<SwarmTelemetrySnapshot> {
   const peerCountFromPeersEndpoint = Number(
     peersData?.peers?.length ?? peersData?.count ?? 0
   ) || 0
-  const activeScoutsFromHealth = Number(
-    health?.active_scouts ?? health?.connected_peers ?? 0
-  ) || 0
-  const connectedPeers = Math.max(peerCountFromPeersEndpoint, activeScoutsFromHealth)
+  const activeScoutsFromHealth = Number(health?.active_scouts ?? 0) || 0
+  const connectedPeers = peerCountFromPeersEndpoint
   const capacity = health?.capacity ?? topo?.capacity ?? 100
   const load = health?.load ?? topo?.load ?? 0
   const rustConnected = health?.rust_sidecar === "connected"
   const bitnetLoaded = health?.bitnet_loaded === true
 
-  // The EC2 Shard itself is always 1 active Shard node when healthy
-  const shardCount = (rustConnected || topo?.status === "ok") ? 1 : 0
+  // Count the main Shard plus connected daemon peers as Shard nodes.
+  const localShardOnline = rustConnected || topo?.status === "ok"
+  const shardCount = localShardOnline ? 1 + Math.max(0, connectedPeers) : Math.max(0, connectedPeers)
 
-  // Scout count comes from connected P2P peers
-  const scoutCount = Math.max(0, connectedPeers)
+  // Scout count comes from API-reported active browser/WebLLM workers.
+  const scoutCount = Math.max(0, activeScoutsFromHealth)
 
   // TFLOPs estimate: base capacity from the Shard + scout contributions
   // Even with 0 scouts, the Shard itself has compute capacity
@@ -90,12 +89,12 @@ async function fetchRealTelemetry(): Promise<SwarmTelemetrySnapshot> {
     })
   }
 
-  // Add connected peers as Scout contributors
+  // Add connected peers as Shard contributors
   if (peersData?.peers && Array.isArray(peersData.peers)) {
     for (const peer of peersData.peers) {
       contributors.push({
         id: (peer.peer_id || peer.id || "unknown").slice(0, 16),
-        role: "Scout",
+        role: "Shard",
         tokensProcessed: peer.tokens_processed ?? 0,
         efficiency: peer.verified ? 90 : 70,
       })
