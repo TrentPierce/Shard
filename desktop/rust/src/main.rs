@@ -955,8 +955,9 @@ async fn main() -> Result<()> {
     // Default bootstrap peers - public Shard nodes that are always online
     // New nodes will automatically connect to the network via these
     let default_bootstrap = vec![
-        // Add your EC2 or other known nodes here
-        // Format: "/ip4/<IP>/tcp/<PORT>/p2p/<PEER_ID>"
+        // Public bootstrap Shard (EC2)
+        "/ip4/54.224.107.75/tcp/4001/p2p/12D3KooWLm6braaLmNsY8X2fS8quKFmeoSxokkuRPmeh8vEt77tp".to_string(),
+        "/ip4/54.224.107.75/udp/9092/quic-v1/p2p/12D3KooWLm6braaLmNsY8X2fS8quKFmeoSxokkuRPmeh8vEt77tp".to_string(),
     ];
 
     let bootstrap_addrs = unique_addrs(

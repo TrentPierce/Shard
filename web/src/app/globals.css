@@ -124,7 +124,8 @@ body {
   background-image: var(--gradient-bg);
   color: var(--text-primary);
   min-height: 100vh;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 /* â”€â”€ Scrollbar â”€â”€ */
@@ -959,7 +960,7 @@ body {
 
 /* â•â•â• Network Telemetry Dashboard â•â•â• */
 .network-page {
-  min-height: 100vh;
+  height: 100vh;
   padding: 40px;
   color: #e5e7eb;
   background:
