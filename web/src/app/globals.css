@@ -1187,6 +1187,20 @@ body {
   max-width: 500px;
 }
 
+.landing__cta-group {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.landing__note {
+  margin-top: 18px;
+  font-size: 13px;
+  color: var(--text-muted);
+  max-width: 600px;
+}
+
 .landing__cta {
   display: inline-flex;
   align-items: center;
@@ -1297,8 +1311,19 @@ body {
 }
 
 .landing__step-icon {
-  font-size: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 90px;
+  height: 32px;
   margin-bottom: 16px;
+  border: 1px solid rgba(0, 212, 255, 0.25);
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  color: var(--accent-cyan);
+  background: rgba(0, 212, 255, 0.06);
 }
 
 .landing__step h3 {
@@ -1332,6 +1357,12 @@ body {
 .landing__cards {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 20px;
+}
+
+.landing__role-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
   gap: 20px;
 }
 

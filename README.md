@@ -83,6 +83,15 @@ flowchart LR
 
 ---
 
+## New To Shard?
+
+If you want a quick explanation of roles, contribution, and why distributed mode matters, start here:
+
+- [`docs/join-network.md`](docs/join-network.md)
+- [`docs/deployment-guide.md`](docs/deployment-guide.md)
+- [`/network` leaderboard page](https://shard-trents-projects-20e9a51a.vercel.app/network)
+
+---
 ## Quick Start
 
 ### Prerequisites
@@ -301,3 +310,4 @@ Converts to Apache 2.0 on February 13, 2036.
 <div align="center">
   <sub>Built with 🧊 by the <a href="https://github.com/TrentPierce/Shard">Shard</a> community</sub>
 </div>
+
