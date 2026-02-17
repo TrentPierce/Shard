@@ -112,6 +112,52 @@ def test_metrics_endpoint(monkeypatch) -> None:
     assert "shard_chat_requests_total" in metrics.text
 
 
+def test_non_streaming_completion_preserves_token_pieces(monkeypatch) -> None:
+    client = _load_client(monkeypatch)
+    module = importlib.import_module("shard_api")
+
+    async def _fake_generate(**_kwargs):
+        for tok in ["Hello", ",", " world", "!"]:
+            yield tok
+
+    monkeypatch.setattr(module, "cooperative_generate", _fake_generate)
+
+    resp = client.post("/v1/chat/completions", json=_payload(content="hey"))
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["choices"][0]["message"]["content"] == "Hello, world!"
+
+
+def test_streaming_completion_does_not_append_spaces(monkeypatch) -> None:
+    client = _load_client(monkeypatch)
+    module = importlib.import_module("shard_api")
+
+    class _DummyControlPlane:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def close(self):
+            return None
+
+    async def _fake_generate(**_kwargs):
+        for tok in ["Hello", ",", " world", "!"]:
+            yield tok
+
+    monkeypatch.setattr(module, "RustControlPlaneClient", _DummyControlPlane)
+    monkeypatch.setattr(module, "cooperative_generate", _fake_generate)
+
+    with client.stream(
+        "POST",
+        "/v1/chat/completions",
+        json={**_payload(content="hey"), "stream": True},
+    ) as resp:
+        body = "".join(chunk for chunk in resp.iter_text())
+
+    assert resp.status_code == 200
+    assert '"delta": {"content": "Hello "}' not in body
+    assert '"delta": {"content": "Hello"}' in body
+
+
 def test_latency_profile_endpoint(monkeypatch) -> None:
     client = _load_client(monkeypatch)
 
