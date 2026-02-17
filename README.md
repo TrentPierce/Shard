@@ -20,7 +20,7 @@
 
 The project is live with a public web app, public API, and TLS scout transport:
 
-- Web app (Vercel): `https://shard-981bwxsha-trents-projects-20e9a51a.vercel.app`
+- Web app (Vercel): `https://shard-trents-projects-20e9a51a.vercel.app`
 - API + topology (TLS): `https://54.224.107.75.nip.io`
 - Browser scout websocket transport (TLS): `wss://54.224.107.75.nip.io`
 - EC2 host: `54.224.107.75` (Ubuntu, systemd-managed daemon + API)
@@ -36,6 +36,49 @@ If you use the hosted web app against a protected API, set:
 
 - `NEXT_PUBLIC_SHARD_API_KEY=<public app key for this deployment>`
 - `NEXT_PUBLIC_API_URL=<api base url or /api via Vercel rewrite>`
+
+---
+
+## Join As A Shard Node
+
+You can join your own node to the live network with one command.
+
+Current bootstrap peer:
+
+```text
+/ip4/54.224.107.75/tcp/4001/p2p/12D3KooWPTDTQBH5JTCxhiaZuL9sr695UAEndMDRj9SJ9pi3agEq
+```
+
+Quick setup (Linux/Ubuntu):
+
+```bash
+git clone https://github.com/TrentPierce/Shard.git
+cd Shard/desktop/rust
+cargo build --release
+./target/release/shard-daemon \
+  --control-port 9091 \
+  --tcp-port 4001 \
+  --webrtc-port 9090 \
+  --quic-port 9092 \
+  --bootstrap /ip4/54.224.107.75/tcp/4001/p2p/12D3KooWPTDTQBH5JTCxhiaZuL9sr695UAEndMDRj9SJ9pi3agEq
+```
+
+If you also want to run API + inference on that machine:
+
+```bash
+cd ../../desktop/python
+pip install -r requirements.txt
+BITNET_LIB=/path/to/libshard_engine.so \
+BITNET_MODEL=/path/to/model.gguf \
+SHARD_TESTING=0 \
+SHARD_REQUIRE_API_KEY=true \
+SHARD_API_KEYS=<strong-key-list> \
+python run.py --rust-url http://127.0.0.1:9091
+```
+
+Note on public IP in docs:
+- For a temporary demo, exposing a public bootstrap IP is fine.
+- For long-term production, use a domain name and keep admin/control endpoints IP-restricted.
 
 ---
 
