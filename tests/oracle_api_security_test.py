@@ -158,6 +158,18 @@ def test_streaming_completion_does_not_append_spaces(monkeypatch) -> None:
     assert '"delta": {"content": "Hello"}' in body
 
 
+def test_prompt_format_auto_detects_tinyllama_chatml(monkeypatch) -> None:
+    monkeypatch.setenv("SHARD_PROMPT_FORMAT", "auto")
+    monkeypatch.setenv("BITNET_MODEL", "/home/ubuntu/models/tinyllama.Q2_K.gguf")
+    monkeypatch.setenv("SHARD_TESTING", "1")
+    module = importlib.import_module("shard_api")
+    module = importlib.reload(module)
+
+    assert module._resolved_prompt_format() == "chatml"
+    prompt = module._build_chat_prompt([module.Message(role="user", content="Hey")])
+    assert prompt == "<|user|>\nHey</s>\n<|assistant|>\n"
+
+
 def test_latency_profile_endpoint(monkeypatch) -> None:
     client = _load_client(monkeypatch)
 

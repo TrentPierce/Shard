@@ -33,7 +33,7 @@ cp .env.example .env
 | `SHARD_N_THREADS` | `4` | Number of CPU threads for inference |
 | `SHARD_CTX_SIZE` | `2048` | Context window size in tokens |
 | `SHARD_BATCH_SIZE` | `32` | Batch size for token generation |
-| `SHARD_PROMPT_FORMAT` | `auto` | Prompt format: `auto`, `llama3`, `plain` |
+| `SHARD_PROMPT_FORMAT` | `auto` | Prompt format: `auto`, `llama3`, `chatml`, `plain` |
 | `SHARD_MAX_TOKENS` | `512` | Maximum tokens per chat response |
 
 ### Security & Rate Limiting

@@ -234,12 +234,17 @@ curl http://localhost:8000/v1/chat/completions \
 
 For non-Llama-3 models (e.g., TinyLlama GGUF):
 ```bash
-SHARD_PROMPT_FORMAT=plain
+SHARD_PROMPT_FORMAT=chatml
 ```
 
 For Llama-3 chat models:
 ```bash
 SHARD_PROMPT_FORMAT=llama3  # or 'auto' with matching model names
+```
+
+Fallback for generic instruct models:
+```bash
+SHARD_PROMPT_FORMAT=plain
 ```
 
 ---
