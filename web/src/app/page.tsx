@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState, useCallback } from "react"
+import { useEffect, useState, useCallback, useRef } from "react"
 import { useQuery } from "@tanstack/react-query"
 import Header from "@/components/Header"
 import ChatPanel from "@/components/ChatPanel"
@@ -37,6 +37,8 @@ export default function HomePage() {
     const [webLLMError, setWebLLMError] = useState<string | null>(null)
     const [pitchMode, setPitchMode] = useState(false)
     const [toastMessage, setToastMessage] = useState<string | null>(null)
+    const [scoutRetryNonce, setScoutRetryNonce] = useState(0)
+    const scoutBootedRef = useRef(false)
 
     // Check if the user has already entered the app
     useEffect(() => {
@@ -53,6 +55,19 @@ export default function HomePage() {
         }
     }, [])
 
+    useEffect(() => {
+        const handleRetryScoutInit = () => {
+            scoutBootedRef.current = false
+            setWebLLMError(null)
+            setWebLLMProgress(null)
+            setScoutRetryNonce((prev) => prev + 1)
+        }
+        window.addEventListener("shard:retry-scout-init", handleRetryScoutInit)
+        return () => {
+            window.removeEventListener("shard:retry-scout-init", handleRetryScoutInit)
+        }
+    }, [])
+
     // React Query for topology polling
     const { data: topology } = useQuery({
         queryKey: ["topology"],
@@ -66,8 +81,10 @@ export default function HomePage() {
 
     useEffect(() => {
         if (showLanding) return // Don't boot until user enters app
+        if (scoutBootedRef.current) return
 
         const boot = async () => {
+            scoutBootedRef.current = true
             if (PREFER_LOCAL_SHARD) {
                 const probe = await probeLocalShard()
                 if (probe.available) {
@@ -116,11 +133,12 @@ export default function HomePage() {
                 console.error("Failed to initialize WebLLM:", error)
                 setWebLLMError(error?.message ?? "Failed to initialize Scout mode")
                 setMode("leech")
+                scoutBootedRef.current = false
             }
         }
 
         boot()
-    }, [showLanding])
+    }, [showLanding, scoutRetryNonce])
 
     // Pitch Mode keyboard shortcut (Ctrl+Shift+P)
     useEffect(() => {
