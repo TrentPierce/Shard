@@ -18,9 +18,7 @@ describe("ChatPanel", () => {
   it("renders the chat shell and input controls", () => {
     render(<ChatPanel mode="scout" />)
     expect(screen.getByRole("main", { name: /chat interface/i })).toBeInTheDocument()
-    expect(
-      screen.getByPlaceholderText(/send a message to the shard network/i),
-    ).toBeInTheDocument()
+    expect(screen.getByPlaceholderText(/ask a question/i)).toBeInTheDocument()
     expect(screen.getByRole("button", { name: /send message/i })).toBeInTheDocument()
   })
 

@@ -188,7 +188,7 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
                                     )}
                                 </div>
                                 <div className="message__meta">
-                                    {msg.role === "assistant" ? "shard-hybrid" : "you"} � {new Date(msg.timestamp).toLocaleTimeString()}
+                                    {msg.role === "assistant" ? "shard-hybrid" : "you"} | {new Date(msg.timestamp).toLocaleTimeString()}
                                 </div>
                             </div>
                         </div>
@@ -224,7 +224,7 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
                         <span aria-hidden="true">^</span>
                     </button>
                 </div>
-                <p className="chat__input-hint">Enter to send � Shift+Enter for newline</p>
+                <p className="chat__input-hint">Enter to send | Shift+Enter for newline</p>
             </div>
         </div>
     )

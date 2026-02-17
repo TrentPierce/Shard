@@ -413,6 +413,7 @@ impl ScoutPenaltyBook {
     }
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 fn should_reject_peer_connection(penalties: &mut ScoutPenaltyBook, peer_id: &str) -> bool {
     penalties.is_blackholed(peer_id)
 }
@@ -1331,18 +1332,28 @@ async fn main() -> Result<()> {
 
                     // ── request/response: work forwarding ──
                     SwarmEvent::Behaviour(ShardBehaviourEvent::ControlWork(
-                        request_response::Event::Message { message, .. },
+                        request_response::Event::Message {
+                            message:
+                                request_response::Message::Request {
+                                    request, channel, ..
+                                },
+                            ..
+                        },
                     )) => {
-                        if let request_response::Message::Request { request, channel, .. } = message {
-                            tracing::info!(id = %request.request_id, "work request via req/resp → publishing to gossipsub");
-                            if let Ok(payload) = serde_json::to_vec(&request) {
-                                let _ = swarm.behaviour_mut().gossipsub.publish(work_topic.clone(), payload);
-                            }
-                            let _ = swarm.behaviour_mut().control_work.send_response(
-                                channel,
-                                "published shard-work".to_string(),
-                            );
+                        tracing::info!(
+                            id = %request.request_id,
+                            "work request via req/resp -> publishing to gossipsub"
+                        );
+                        if let Ok(payload) = serde_json::to_vec(&request) {
+                            let _ = swarm
+                                .behaviour_mut()
+                                .gossipsub
+                                .publish(work_topic.clone(), payload);
                         }
+                        let _ = swarm.behaviour_mut().control_work.send_response(
+                            channel,
+                            "published shard-work".to_string(),
+                        );
                     }
 
                     // ── handshake (PING/PONG) ──
@@ -1412,13 +1423,10 @@ async fn main() -> Result<()> {
                     }
 
                     // ── autonat ──
-                    SwarmEvent::Behaviour(ShardBehaviourEvent::Autonat(event)) => {
-                        match event {
-                            autonat::Event::StatusChanged { old, new } => {
-                                tracing::info!(?old, ?new, "AutoNAT status changed");
-                            }
-                            _ => {}
-                        }
+                    SwarmEvent::Behaviour(ShardBehaviourEvent::Autonat(
+                        autonat::Event::StatusChanged { old, new },
+                    )) => {
+                        tracing::info!(?old, ?new, "AutoNAT status changed");
                     }
 
                     // ── identify ──
