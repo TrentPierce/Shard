@@ -12,19 +12,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Tag Organization**: Added endpoint tags (chat, scouts, system, admin) for better documentation organization in Swagger UI
 - **Response Examples**: Added comprehensive examples to all request/response schemas matching OpenAI API specification
 - **Error Documentation**: Enhanced error response documentation with detailed status codes and error types
+- **Developer Experience**: Added Makefile with `setup`, `dev`, `test`, `lint`, and `docker` targets
+- **Dev Container**: Added `.devcontainer/devcontainer.json` for GitHub Codespaces support
 
 ### Changed
+- **README**: Complete redesign with hero section, logo, badges, "Why Shard?" table, and structured quick-start guide
 - **API Documentation Enhancement**: Improved API.md with comprehensive OpenAI compatibility details, architecture diagrams, and deployment guidance
 - **Model Documentation**: Enhanced Pydantic models (Message, ChatRequest, Choice, ChatResponse) with detailed Field() descriptions and examples
 
 ### Fixed
+- **Repository Hygiene**: Removed tracked debug logs, binary files, and test artifacts from version control
 - **Documentation Clarity**: Fixed typos and improved clarity in API.md and README.md
-
-### Deprecated
-- None
-
-### Removed
-- None
 
 ---
 
@@ -56,6 +54,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Reputation System**: Scout accuracy tracking for trust management
 
 ### Changed
+- **Architecture**: Moved from monolithic to hybrid Python/Rust architecture
+- **Networking**: Replaced HTTP-based networking with libp2p P2P mesh
+- **Verification**: Improved verification logic with stricter prefix matching
 - **API Structure**: Restructured API.md with comprehensive architecture documentation
 - **Node Classification**: Improved node class documentation (Shard, Scout, Leech)
 
@@ -63,10 +64,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Connection Handling**: Fixed connection timeout handling and reconnection logic
 - **Rate Limiting**: Improved rate limiter precision and error reporting
 - **Metrics**: Enhanced Prometheus metrics with more granular counters
+- Connection timeout handling for peer bootstrap
+- Memory leak in draft token verification
+- Race condition in gossipsub subscription
+- CORS preflight handling
+- Rate limit header propagation
 
 ### Security
 - **Golden Tickets**: Implemented Golden Ticket mechanism for Sybil attack prevention
 - **Reputation System**: Added scout reputation tracking and banning mechanism
+- Added input validation for all endpoints
+- Implemented proper error handling and logging
+- Added API key authentication support
+- Rate limiting to prevent abuse
+- Prompt size limits (`SHARD_MAX_PROMPT_CHARS`)
+
+### Removed
+- Legacy HTTP-based work distribution
+- Direct file IPC (replaced with HTTP control plane)
+- Experimental REST API (replaced with OpenAI-compatible endpoint)
 
 ### Dependencies
 - **Python**: Added FastAPI (0.115.0+), Pydantic (2.9.0+), httpx (0.27.0+)
@@ -85,83 +101,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Deployment Guide**: Multi-component deployment instructions
 - **Troubleshooting**: Common issues and solutions guide
 
-[unreleased]: https://github.com/ShardNetwork/Shard/compare/v0.4.0...HEAD
-[0.4.0]: https://github.com/ShardNetwork/Shard/compare/v0.3.0...v0.4.0
-
----
-
-## [0.3.0] - 2024-11-15
-
-### Added
-- **Initial P2P Infrastructure**: libp2p-based networking layer with TCP/WebSocket transports
-- **Basic Control Plane**: HTTP API for task distribution (ports 4001, 4101)
-- **Initial Draft Model**: Basic Scout implementation with WebLLM integration
-- **Golden Ticket Framework**: Foundation for Sybil attack prevention
-
-### Changed
-- **Network Protocol**: Initial handshake and verification protocol design
-
-[0.3.0]: https://github.com/ShardNetwork/Shard/compare/v0.2.0...v0.3.0
-
----
-
-## [0.2.0] - 2024-10-01
-
-### Added
-- **BitNet Runtime**: ctypes bridge for local model verification
-- **Cooperative Generation**: Hybrid Shard+Scout inference loop
-- **Basic Authentication**: API key authentication framework
-
-### Changed
-- **API Design**: Initial FastAPI-based API structure
-- **Network Architecture**: Basic distributed architecture foundation
-
-[0.2.0]: https://github.com/ShardNetwork/Shard/compare/v0.1.0...v0.2.0
-
----
-
-## [0.1.0] - 2024-09-10
-
-### Added
-- **Project Initialization**: Repository setup, initial structure
-- **Core Protocols**: Basic project definitions and architecture
-
-[0.1.0]: https://github.com/ShardNetwork/Shard/compare/v0.0.1...v0.1.0
-
----
-
-## [0.0.1] - 2024-09-01
-
-### Added
-- **Initial Release**: Basic project foundation
-
-[0.0.1]: https://github.com/ShardNetwork/Shard/compare/HEAD...v0.0.1
-
-- **Comprehensive Documentation**: API docs, deployment guides, and architecture documentation
-
-### Changed
-- **Architecture**: Moved from monolithic to hybrid Python/Rust architecture
-- **Networking**: Replaced HTTP-based networking with libp2p P2P mesh
-- **Verification**: Improved verification logic with stricter prefix matching
-
-### Fixed
-- Connection timeout handling for peer bootstrap
-- Memory leak in draft token verification
-- Race condition in gossipsub subscription
-- CORS preflight handling
-- Rate limit header propagation
-
-### Removed
-- Legacy HTTP-based work distribution
-- Direct file IPC (replaced with HTTP control plane)
-- Experimental REST API (replaced with OpenAI-compatible endpoint)
-
-### Security
-- Added input validation for all endpoints
-- Implemented proper error handling and logging
-- Added API key authentication support
-- Rate limiting to prevent abuse
-- Prompt size limits (`SHARD_MAX_PROMPT_CHARS`)
+[unreleased]: https://github.com/TrentPierce/Shard/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/TrentPierce/Shard/compare/v0.3.0...v0.4.0
 
 ---
 
@@ -171,17 +112,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Initial proof-of-concept P2P architecture
 - Basic Python FastAPI endpoints
 - Simple file-based IPC between components
+- **Golden Ticket Framework**: Foundation for Sybil attack prevention
 
 ### Changed
 - Project structure reorganization
+- Initial handshake and verification protocol design
+
+[0.3.0]: https://github.com/TrentPierce/Shard/compare/v0.2.0...v0.3.0
 
 ---
 
 ## [0.2.0] - 2024-10-01
 
 ### Added
+- **BitNet Runtime**: ctypes bridge for local model verification
+- **Cooperative Generation**: Hybrid Shard+Scout inference loop
 - Basic Chat API implementation
 - Single-machine inference support
+- **Basic Authentication**: API key authentication framework
+
+### Changed
+- **API Design**: Initial FastAPI-based API structure
+
+[0.2.0]: https://github.com/TrentPierce/Shard/compare/v0.1.0...v0.2.0
 
 ---
 
@@ -191,6 +144,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Initial project scaffolding
 - Basic README documentation
 - Project structure setup
+
+[0.1.0]: https://github.com/TrentPierce/Shard/releases/tag/v0.1.0
 
 ---
 
@@ -202,11 +157,7 @@ Shard follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html):
 - **MINOR**: Backward-compatible new features (new endpoints, optional parameters)
 - **PATCH**: Backward-compatible bug fixes
 
-Pre-release versions use `-alpha`, `-beta`, or `-rc` suffixes.
-
 ### Release Cadence
-
-Releases are typically made on a monthly basis or when significant features are complete:
 
 - **Alpha**: Early development, may have breaking changes
 - **Beta**: Feature complete, minor breaking changes possible
@@ -219,25 +170,6 @@ Releases are typically made on a monthly basis or when significant features are 
 
 When contributing to Shard, please add entries to the "Unreleased" section following the format above.
 
-### Adding Changelog Entries
-
-```markdown
-### Added
-- Short description of new feature
-
-### Changed
-- Short description of change
-
-### Fixed
-- Short description of fix
-
-### Removed
-- Short description of removal
-
-### Security
-- Short description of security fix
-```
-
 ### Guidelines
 
 - Use one line per change
@@ -245,29 +177,12 @@ When contributing to Shard, please add entries to the "Unreleased" section follo
 - Use present tense ("Add" not "Added")
 - Link to relevant issues or pull requests when helpful
 - Include user-facing changes only
-- Separate sections with headers
-
-### Release Process
-
-Before releasing:
-
-1. Move all entries from "Unreleased" to new version section
-2. Update version number in all relevant files
-3. Add release date
-4. Review and edit entries for clarity
-5. Commit and tag the release:
-   ```bash
-   git tag -a v0.5.0 -m "Release v0.5.0"
-   git push origin v0.5.0
-   ```
-6. Create GitHub release with changelog excerpt
-7. Announce to community
 
 ---
 
 ## Links
 
-- [Releases](https://github.com/ShardNetwork/Shard/releases)
-- [Issues](https://github.com/ShardNetwork/Shard/issues)
-- [Pull Requests](https://github.com/ShardNetwork/Shard/pulls)
-- [Documentation](https://github.com/ShardNetwork/Shard/tree/main/docs)
+- [Releases](https://github.com/TrentPierce/Shard/releases)
+- [Issues](https://github.com/TrentPierce/Shard/issues)
+- [Pull Requests](https://github.com/TrentPierce/Shard/pulls)
+- [Documentation](https://github.com/TrentPierce/Shard/tree/main/docs)

@@ -41,10 +41,10 @@ all = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/ShardNetwork/Shard"
-Documentation = "https://docs.shard.network"
-Repository = "https://github.com/ShardNetwork/Shard"
-Issues = "https://github.com/ShardNetwork/Shard/issues"
+Homepage = "https://github.com/TrentPierce/Shard"
+Documentation = "https://github.com/TrentPierce/Shard/tree/main/docs"
+Repository = "https://github.com/TrentPierce/Shard"
+Issues = "https://github.com/TrentPierce/Shard/issues"
 
 [tool.setuptools.packages.find]
 where = ["desktop/python"]

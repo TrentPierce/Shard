@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://shard-trents-projects-20e9a51a.vercel.app/sitemap.xml

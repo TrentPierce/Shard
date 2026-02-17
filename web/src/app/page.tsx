@@ -6,6 +6,7 @@ import Header from "@/components/Header"
 import ChatPanel from "@/components/ChatPanel"
 import NetworkStatus from "@/components/NetworkStatus"
 import NetworkVisualizer from "@/components/NetworkVisualizer"
+import LandingPage from "@/components/LandingPage"
 import {
     fetchTopology,
     probeLocalShard,
@@ -30,17 +31,33 @@ export type NodeMode =
     | "leech"
 
 export default function HomePage() {
+    const [showLanding, setShowLanding] = useState(true)
     const [mode, setMode] = useState<NodeMode>("loading")
     const [webLLMProgress, setWebLLMProgress] = useState<ModelProgress | null>(null)
     const [webLLMError, setWebLLMError] = useState<string | null>(null)
     const [pitchMode, setPitchMode] = useState(false)
     const [toastMessage, setToastMessage] = useState<string | null>(null)
 
+    // Check if the user has already entered the app
+    useEffect(() => {
+        const entered = typeof window !== "undefined" && localStorage.getItem("shard-entered")
+        if (entered === "true") {
+            setShowLanding(false)
+        }
+    }, [])
+
+    const handleEnterApp = useCallback(() => {
+        setShowLanding(false)
+        if (typeof window !== "undefined") {
+            localStorage.setItem("shard-entered", "true")
+        }
+    }, [])
+
     // React Query for topology polling
     const { data: topology } = useQuery({
         queryKey: ["topology"],
         queryFn: fetchTopology,
-        refetchInterval: 10000, // Poll every 10 seconds
+        refetchInterval: 10000,
         staleTime: 5000,
     })
 
@@ -48,8 +65,9 @@ export default function HomePage() {
     const topologyData: Topology | null = topology ?? null
 
     useEffect(() => {
+        if (showLanding) return // Don't boot until user enters app
+
         const boot = async () => {
-            // Prefer Scout mode for browser visitors by default.
             if (PREFER_LOCAL_SHARD) {
                 const probe = await probeLocalShard()
                 if (probe.available) {
@@ -61,7 +79,6 @@ export default function HomePage() {
             setMode("scout-initializing")
 
             try {
-                // Check WebGPU support first
                 const gpuStatus = await checkWebGPUSupport()
                 if (!gpuStatus.supported) {
                     setWebLLMError(
@@ -71,30 +88,25 @@ export default function HomePage() {
                     return
                 }
 
-                // Initialize WebLLM with progress callback
                 await initWebLLM((progress) => {
                     setWebLLMProgress(progress)
                 })
 
-                // Clear progress and transition to scout mode
                 setWebLLMProgress(null)
                 setWebLLMError(null)
                 setMode("scout")
 
-                // Initialize P2P connection to the network
                 try {
                     const peerId = await initP2P({
                         emitSelf: false,
                     })
                     console.log('[p2p] Connected as scout, peerId:', peerId)
 
-                    // Subscribe to work topics
                     subscribeToWork((work) => {
                         console.log("Received work:", work.request_id)
                     })
                     subscribeToResults((result) => {
                         console.log("Work result:", result.request_id)
-                        // Publish result back to network
                         publishResult(result)
                     })
                 } catch (p2pError) {
@@ -108,7 +120,7 @@ export default function HomePage() {
         }
 
         boot()
-    }, [])
+    }, [showLanding])
 
     // Pitch Mode keyboard shortcut (Ctrl+Shift+P)
     useEffect(() => {
@@ -118,7 +130,7 @@ export default function HomePage() {
                 setPitchMode(prev => !prev)
             }
         }
-        
+
         window.addEventListener("keydown", handleKeyDown)
         return () => window.removeEventListener("keydown", handleKeyDown)
     }, [])
@@ -129,10 +141,15 @@ export default function HomePage() {
         setTimeout(() => setToastMessage(null), 4000)
     }, [])
 
+    // Show landing page for first-time visitors
+    if (showLanding) {
+        return <LandingPage onEnter={handleEnterApp} />
+    }
+
     return (
         <div className="app-shell">
             <Header mode={mode} rustStatus={rustStatus} />
-            
+
             {/* Toast Notification */}
             {toastMessage && (
                 <div
@@ -156,7 +173,7 @@ export default function HomePage() {
                     {toastMessage}
                 </div>
             )}
-            
+
             {/* Network Visualizer - shown in pitch mode or when in local-shard mode */}
             {(pitchMode || mode === "local-shard") && (
                 <div
@@ -165,13 +182,13 @@ export default function HomePage() {
                         borderBottom: "1px solid rgba(100, 200, 255, 0.1)"
                     }}
                 >
-                    <NetworkVisualizer 
-                        pitchMode={pitchMode} 
+                    <NetworkVisualizer
+                        pitchMode={pitchMode}
                         onToast={handleToast}
                     />
                 </div>
             )}
-            
+
             <NetworkStatus
                 mode={mode}
                 topology={topologyData}
