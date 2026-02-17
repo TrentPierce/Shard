@@ -23,11 +23,11 @@ export default function SwarmThroughputCanvas({ samples }: SwarmThroughputCanvas
     const values = samples.map((sample) => sample.tflops)
 
     if (values.length === 0) {
-      context.fillStyle = "rgba(8, 13, 32, 0.95)"
+      context.fillStyle = "rgba(17, 24, 39, 0.95)"
       context.fillRect(0, 0, width, height)
-      context.font = "12px JetBrains Mono, monospace"
-      context.fillStyle = "rgba(179, 189, 227, 0.75)"
-      context.fillText("Waiting for telemetry samples…", 14, height / 2)
+      context.font = "12px IBM Plex Mono, monospace"
+      context.fillStyle = "rgba(148, 163, 184, 0.82)"
+      context.fillText("Waiting for telemetry samples...", 14, height / 2)
       return
     }
 
@@ -35,10 +35,10 @@ export default function SwarmThroughputCanvas({ samples }: SwarmThroughputCanvas
     const max = Math.max(...values) + 4
     const range = max - min || 1
 
-    context.fillStyle = "rgba(8, 13, 32, 0.95)"
+    context.fillStyle = "rgba(17, 24, 39, 0.95)"
     context.fillRect(0, 0, width, height)
 
-    context.strokeStyle = "rgba(0, 212, 255, 0.15)"
+    context.strokeStyle = "rgba(148, 163, 184, 0.18)"
     context.lineWidth = 1
     for (let i = 1; i < 4; i += 1) {
       const y = (height / 4) * i
@@ -55,8 +55,8 @@ export default function SwarmThroughputCanvas({ samples }: SwarmThroughputCanvas
     })
 
     const gradient = context.createLinearGradient(0, 0, width, height)
-    gradient.addColorStop(0, "rgba(0, 212, 255, 0.95)")
-    gradient.addColorStop(1, "rgba(139, 92, 246, 0.95)")
+    gradient.addColorStop(0, "rgba(122, 162, 184, 0.95)")
+    gradient.addColorStop(1, "rgba(100, 116, 139, 0.95)")
 
     context.strokeStyle = gradient
     context.lineWidth = 2.2
@@ -71,8 +71,8 @@ export default function SwarmThroughputCanvas({ samples }: SwarmThroughputCanvas
     context.stroke()
 
     const areaGradient = context.createLinearGradient(0, 0, 0, height)
-    areaGradient.addColorStop(0, "rgba(0, 212, 255, 0.28)")
-    areaGradient.addColorStop(1, "rgba(0, 212, 255, 0)")
+    areaGradient.addColorStop(0, "rgba(122, 162, 184, 0.28)")
+    areaGradient.addColorStop(1, "rgba(122, 162, 184, 0)")
 
     context.fillStyle = areaGradient
     context.beginPath()
@@ -90,15 +90,16 @@ export default function SwarmThroughputCanvas({ samples }: SwarmThroughputCanvas
 
     const lastPoint = points[points.length - 1]
     context.beginPath()
-    context.fillStyle = "#00d4ff"
+    context.fillStyle = "#7aa2b8"
     context.arc(lastPoint.x, lastPoint.y, 4, 0, Math.PI * 2)
     context.fill()
 
-    context.font = "11px JetBrains Mono, monospace"
-    context.fillStyle = "rgba(179, 189, 227, 0.95)"
+    context.font = "11px IBM Plex Mono, monospace"
+    context.fillStyle = "rgba(148, 163, 184, 0.95)"
     context.fillText(`${samples[samples.length - 1]?.timestamp ?? ""} UTC`, 14, height - 12)
     context.fillText(`${max.toFixed(1)} TFLOPs peak`, width - 118, 14)
   }, [samples])
 
   return <canvas ref={canvasRef} width={780} height={250} style={{ width: "100%", height: "250px", borderRadius: "14px" }} />
 }
+
