@@ -1,0 +1,50 @@
+name: Bug Report
+description: Report a reproducible bug in Shard.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing a bug. Please provide enough detail for us to reproduce and fix it quickly.
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened?
+      description: Describe the bug and what you expected instead.
+      placeholder: "Observed behavior..."
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Include exact commands, URLs, and inputs.
+      placeholder: |
+        1. Start service with...
+        2. Open...
+        3. Send request...
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / screenshots
+      description: Paste relevant logs and screenshots.
+      render: shell
+  - type: input
+    id: os
+    attributes:
+      label: OS
+      placeholder: "Ubuntu 24.04, Windows 11, macOS 14..."
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: Rust / Python / Node / app version
+      placeholder: "Rust 1.88, Python 3.12, Node 20, Shard v0.4.4"
+    validations:
+      required: true
