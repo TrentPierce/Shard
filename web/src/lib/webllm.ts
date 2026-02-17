@@ -83,9 +83,9 @@ export function isMobileDevice(): boolean {
     if (typeof navigator === "undefined") {
         return false
     }
-    
+
     const ua = navigator.userAgent.toLowerCase()
-    
+
     // Check user agent patterns
     const mobilePatterns = [
         /android/i,
@@ -97,12 +97,12 @@ export function isMobileDevice(): boolean {
         /windows phone/i,
         /mobile/i,
     ]
-    
+
     const isMobileUA = mobilePatterns.some(pattern => pattern.test(ua))
     if (isMobileUA) {
         return true
     }
-    
+
     // Check screen size (typical mobile cutoffs)
     if (typeof screen !== "undefined") {
         const maxScreenDim = Math.max(screen.width, screen.height)
@@ -110,14 +110,14 @@ export function isMobileDevice(): boolean {
             return true
         }
     }
-    
+
     // Check device memory (if available)
     // @ts-expect-error deviceMemory is not in standard types
     const deviceMemory = navigator.deviceMemory
     if (deviceMemory !== undefined && deviceMemory < 4) {
         return true
     }
-    
+
     return false
 }
 
@@ -235,7 +235,7 @@ export async function initWebLLM(
         // Use device-appropriate model (Nano for mobile, standard for desktop)
         const model = getModelForDevice()
         currentModel = model
-        
+
         // Initialize MLCEngine with the appropriate draft model
         engine = await CreateMLCEngine(
             model,
@@ -288,14 +288,16 @@ export async function generateDraftTokens(
     const opts = { ...DEFAULT_DRAFT_OPTIONS, ...options }
 
     try {
-        const response = await engine.chat.completions.create({
-            messages: [{ role: "user", content: prompt }],
+        // Use completion API to treat prompt as raw context to continue (speculative decoding)
+        // This avoids applying chat templates to an already-formatted prompt prefix
+        const response = await engine.completions.create({
+            prompt: prompt,
             max_tokens: opts.maxTokens,
             temperature: opts.temperature,
             top_p: opts.topP,
         })
 
-        const text = response.choices[0]?.message?.content || ""
+        const text = response.choices[0]?.text || ""
 
         // Get the generated text - token extraction happens at the API layer
         // We return the text which will be tokenized by the Shard
@@ -374,17 +376,17 @@ export async function requestWakeLock(): Promise<boolean> {
         console.warn("[WebLLM] Wake Lock API not supported")
         return false
     }
-    
+
     try {
         wakeLock = await navigator.wakeLock.request("screen")
         console.log("[WebLLM] Wake lock acquired for mobile Scout mode")
-        
+
         // Handle release automatically when visibility changes
         wakeLock.addEventListener("release", () => {
             console.log("[WebLLM] Wake lock released")
             wakeLock = null
         })
-        
+
         return true
     } catch (error: any) {
         console.error("[WebLLM] Failed to acquire wake lock:", error?.message ?? error)
