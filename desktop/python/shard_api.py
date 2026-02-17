@@ -349,7 +349,7 @@ def _build_chat_prompt(messages: list["ChatMessage"]) -> str:
     if prompt_format == "chatml":
         prompt_parts = []
         for m in messages:
-            prompt_parts.append(f"<|{m.role}|>\n{m.content}</s>\n")
+            prompt_parts.append(f"<|{m.role}|>\n{m.content}\n")
         prompt_parts.append("<|assistant|>\n")
         return "".join(prompt_parts)
 
@@ -362,9 +362,27 @@ def _build_chat_prompt(messages: list["ChatMessage"]) -> str:
     return "\n".join(prompt_parts)
 
 
+_SPECIAL_TEXT_TOKENS = {
+    "<s>",
+    "</s>",
+    "<|eot_id|>",
+    "<|end_of_text|>",
+    "<|im_end|>",
+}
+
+
+def _is_special_text_token(token: str) -> bool:
+    return token.strip() in _SPECIAL_TEXT_TOKENS
+
+
 def _merge_text_tokens(tokens: list[str]) -> str:
     """Reconstruct output text from model token pieces without adding separators."""
-    return "".join(tokens)
+    merged: list[str] = []
+    for token in tokens:
+        if _is_special_text_token(token):
+            break
+        merged.append(token)
+    return "".join(merged).strip()
 
 
 class LatencyProfileStore:
@@ -1079,6 +1097,8 @@ async def _stream_generate(
             telemetry_hook=LATENCY_PROFILE.record_sample,
             scout_event_hook=_handle_scout_verification_event,
         ):
+            if _is_special_text_token(token):
+                break
             chunk = {
                 "id": completion_id,
                 "object": "chat.completion.chunk",
