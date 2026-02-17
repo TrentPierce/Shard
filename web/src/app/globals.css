@@ -430,6 +430,25 @@ body {
   max-width: 560px;
 }
 
+.chat__signal-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.chat__signal-chip {
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-family: var(--font-mono);
+  color: #cbd5e1;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  background: rgba(30, 41, 59, 0.34);
+  border-radius: 999px;
+  padding: 4px 8px;
+}
+
 .chat__status-group {
   display: flex;
   gap: 8px;
@@ -510,6 +529,31 @@ body {
   text-align: center;
   max-width: 320px;
   line-height: 1.6;
+}
+
+.chat__quick-prompts {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(520px, 100%);
+  margin-top: 6px;
+}
+
+.chat__quick-btn {
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  background: rgba(30, 41, 59, 0.36);
+  color: var(--text-primary);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  text-align: left;
+  padding: 9px 11px;
+  cursor: pointer;
+  transition: border-color var(--transition-fast), background var(--transition-fast);
+}
+
+.chat__quick-btn:hover {
+  border-color: rgba(122, 162, 184, 0.56);
+  background: rgba(30, 41, 59, 0.5);
 }
 
 /* â”€â”€ message bubbles â”€â”€ */

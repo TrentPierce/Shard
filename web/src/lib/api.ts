@@ -43,6 +43,7 @@ export async function sendMessage(
     onToken: (token: string) => void,
     onDone: () => void
 ): Promise<void> {
+    const startedAt = performance.now()
     // Use direct API URL instead of discovery for reliability
     const apiEndpoint = apiUrl("")
     const body: ChatCompletionRequest = {
@@ -89,6 +90,13 @@ export async function sendMessage(
 
             const data = trimmed.slice(6) // Remove "data: " prefix
             if (data === "[DONE]") {
+                if (typeof window !== "undefined") {
+                    window.dispatchEvent(
+                        new CustomEvent("shard:chat-success", {
+                            detail: { latencyMs: Math.round(performance.now() - startedAt) },
+                        })
+                    )
+                }
                 onDone()
                 return
             }
@@ -105,6 +113,13 @@ export async function sendMessage(
         }
     }
 
+    if (typeof window !== "undefined") {
+        window.dispatchEvent(
+            new CustomEvent("shard:chat-success", {
+                detail: { latencyMs: Math.round(performance.now() - startedAt) },
+            })
+        )
+    }
     onDone()
 }
 

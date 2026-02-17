@@ -93,15 +93,16 @@ export async function initP2P(config: P2PConfig = {}): Promise<string> {
   }
 
   try {
-    // Configure bootstrap peers
-    // Configure bootstrap peers - connect to same host if served via network
-    let defaultPeer = 'ws://127.0.0.1:4101';
-    if (typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
-      const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-      // Attempt to connect to the P2P port on the same host
-      defaultPeer = `${protocol}://${window.location.hostname}:4101`;
+    // Prefer explicit topology-derived bootstrap peers; fallback only for local dev.
+    const fallbackLocalPeer = '/ip4/127.0.0.1/tcp/4101/ws';
+    const requestedPeers =
+      config.bootstrapPeers && config.bootstrapPeers.length > 0
+        ? config.bootstrapPeers
+        : [fallbackLocalPeer];
+    const bootstrapPeers = sanitizeBootstrapPeers(requestedPeers);
+    if (bootstrapPeers.length === 0) {
+      throw new Error('No valid bootstrap peers available for this page security context');
     }
-    const bootstrapPeers = config.bootstrapPeers || [defaultPeer];
 
     console.log('[p2p] Initializing with bootstrap peers:', bootstrapPeers);
 
@@ -160,6 +161,16 @@ export async function initP2P(config: P2PConfig = {}): Promise<string> {
 
     isInitialized = true;
 
+    // Explicitly dial bootstraps once to accelerate first connection.
+    for (const addr of bootstrapPeers) {
+      try {
+        await p2pNode.dial(addr);
+        console.log('[p2p] Dialed bootstrap peer:', addr);
+      } catch (dialError) {
+        console.warn('[p2p] Bootstrap dial failed:', addr, dialError);
+      }
+    }
+
     console.log('[p2p] Initialized successfully');
     console.log('[p2p] Peer ID:', p2pNode.peerId.toString());
     console.log('[p2p] Multiaddrs:', p2pNode.getMultiaddrs().map(m => m.toString()));
@@ -176,6 +187,31 @@ export async function initP2P(config: P2PConfig = {}): Promise<string> {
     console.error('[p2p] Initialization failed:', error);
     throw new Error(`P2P initialization failed: ${error instanceof Error ? error.message : String(error)}`);
   }
+}
+
+function sanitizeBootstrapPeers(peers: string[]): string[] {
+  const isHttpsPage = typeof window !== 'undefined' && window.location.protocol === 'https:';
+  const unique = new Set<string>();
+
+  for (const raw of peers) {
+    const peer = String(raw || '').trim();
+    if (!peer) continue;
+
+    // On HTTPS pages, reject insecure websocket transports.
+    if (isHttpsPage) {
+      const insecureWs =
+        peer.startsWith('ws://') ||
+        peer.includes('/ws/') ||
+        peer.endsWith('/ws');
+      if (insecureWs && !peer.startsWith('wss://') && !peer.includes('/wss/')) {
+        continue;
+      }
+    }
+
+    unique.add(peer);
+  }
+
+  return Array.from(unique);
 }
 
 /**

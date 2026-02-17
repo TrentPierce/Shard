@@ -52,7 +52,13 @@ async function fetchRealTelemetry(): Promise<SwarmTelemetrySnapshot> {
     throw new Error("All API endpoints unreachable")
   }
 
-  const connectedPeers = peersData?.peers?.length ?? peersData?.count ?? 0
+  const connectedPeers =
+    Number(
+      peersData?.peers?.length ??
+      peersData?.count ??
+      health?.connected_peers ??
+      0
+    ) || 0
   const capacity = health?.capacity ?? topo?.capacity ?? 100
   const load = health?.load ?? topo?.load ?? 0
   const rustConnected = health?.rust_sidecar === "connected"
@@ -62,7 +68,7 @@ async function fetchRealTelemetry(): Promise<SwarmTelemetrySnapshot> {
   const shardCount = (rustConnected || topo?.status === "ok") ? 1 : 0
 
   // Scout count comes from connected P2P peers
-  const scoutCount = connectedPeers
+  const scoutCount = Math.max(0, connectedPeers)
 
   // TFLOPs estimate: base capacity from the Shard + scout contributions
   // Even with 0 scouts, the Shard itself has compute capacity

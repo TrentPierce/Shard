@@ -930,10 +930,20 @@ async def _handle_scout_verification_event(event: dict[str, object]) -> None:
 async def health() -> dict[str, Any]:
     client = _get_http_client()
     rust_status = "unreachable"
+    rust_uptime_ms = 0
+    rust_version = ""
+    connected_peers = 0
     try:
         r = await client.get("/health")
         if r.status_code == 200:
             rust_status = "connected"
+            try:
+                payload = r.json()
+                rust_uptime_ms = int(payload.get("uptime_ms") or 0)
+                rust_version = str(payload.get("version") or "")
+                connected_peers = int(payload.get("connected_peers") or 0)
+            except Exception:
+                pass
     except httpx.HTTPError as exc:
         LOGGER.warning("Rust sidecar health check failed: %s", exc)
 
@@ -946,6 +956,10 @@ async def health() -> dict[str, Any]:
         "accepting_swarm_jobs": STATE.is_idle,
         "rust_sidecar": rust_status,
         "rust_url": RUST_URL,
+        "rust_uptime_ms": rust_uptime_ms,
+        "rust_version": rust_version,
+        "connected_peers": connected_peers,
+        "last_incident": os.getenv("SHARD_LAST_INCIDENT", "none"),
         "bitnet_loaded": bitnet_loaded,
         "bitnet_lib": os.getenv("BITNET_LIB", "") if os.getenv("SHARD_DEBUG_HEALTH", "false").lower() == "true" else "",
         "bitnet_model": os.getenv("BITNET_MODEL", "") if os.getenv("SHARD_DEBUG_HEALTH", "false").lower() == "true" else "",
@@ -968,6 +982,7 @@ async def system_topology() -> dict[str, Any]:
         r = await client.get("/topology")
         if r.status_code == 200:
             data = r.json()
+            data = _normalize_public_topology_addrs(data)
             return {"status": "ok", "source": "rust-sidecar", **data}
     except httpx.HTTPError as exc:
         LOGGER.warning("Topology fetch failed: %s", exc)
@@ -978,6 +993,51 @@ async def system_topology() -> dict[str, Any]:
         "shard_ws_multiaddr": None,
         "detail": "Rust sidecar not reachable",
     }
+
+
+def _extract_public_host(value: str) -> str:
+    host = value.strip()
+    host = re.sub(r"^https?://", "", host)
+    host = host.split("/", 1)[0]
+    return host
+
+
+def _multiaddr_rewrite_host(addr: str, public_host: str) -> str:
+    # Replace /ip4/<host>/... or /dns4/<host>/... with /dns4/<public_host>/...
+    rewritten = re.sub(r"^/ip4/[^/]+/", f"/dns4/{public_host}/", addr)
+    rewritten = re.sub(r"^/dns4/[^/]+/", f"/dns4/{public_host}/", rewritten)
+    return rewritten
+
+
+def _normalize_public_topology_addrs(data: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(data, dict):
+        return data
+
+    if not data.get("public_api"):
+        return data
+
+    public_addr = str(data.get("public_api_addr") or "").strip()
+    if not public_addr:
+        return data
+
+    public_host = _extract_public_host(public_addr)
+    if not public_host:
+        return data
+
+    for key in ("shard_webrtc_multiaddr", "shard_quic_multiaddr", "shard_ws_multiaddr"):
+        val = data.get(key)
+        if isinstance(val, str) and val.strip():
+            data[key] = _multiaddr_rewrite_host(val, public_host)
+
+    listen_addrs = data.get("listen_addrs")
+    if isinstance(listen_addrs, list):
+        rewritten_addrs: list[str] = []
+        for entry in listen_addrs:
+            if isinstance(entry, str):
+                rewritten_addrs.append(_multiaddr_rewrite_host(entry, public_host))
+        data["listen_addrs"] = rewritten_addrs
+
+    return data
 
 
 @app.get(
