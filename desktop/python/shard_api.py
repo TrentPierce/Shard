@@ -277,6 +277,7 @@ API_KEYS = {k.strip() for k in os.getenv("SHARD_API_KEYS", "").split(",") if k.s
 REQUIRE_API_KEY = os.getenv("SHARD_REQUIRE_API_KEY", "true" if PUBLIC_API else "false").lower() == "true"
 RATE_LIMIT_PER_MINUTE = int(os.getenv("SHARD_RATE_LIMIT_PER_MINUTE", "60"))
 MAX_PROMPT_CHARS = int(os.getenv("SHARD_MAX_PROMPT_CHARS", "16000"))
+PROMPT_FORMAT = os.getenv("SHARD_PROMPT_FORMAT", "auto").strip().lower()
 
 METRICS: dict[str, int] = {
     "chat_requests_total": 0,
@@ -321,6 +322,33 @@ class RateLimiter:
 
 RATE_LIMITER = RateLimiter(RATE_LIMIT_PER_MINUTE)
 SCOUT_RATE_LIMITER = RateLimiter(int(os.getenv("SHARD_SCOUT_RATE_LIMIT_PER_MINUTE", "120")))
+
+
+def _resolved_prompt_format() -> Literal["llama3", "plain"]:
+    if PROMPT_FORMAT in {"llama3", "plain"}:
+        return PROMPT_FORMAT
+    model_hint = os.getenv("BITNET_MODEL", "").lower()
+    if "llama-3" in model_hint or "llama3" in model_hint:
+        return "llama3"
+    return "plain"
+
+
+def _build_chat_prompt(messages: list["ChatMessage"]) -> str:
+    prompt_format = _resolved_prompt_format()
+    if prompt_format == "llama3":
+        prompt_parts: list[str] = ["<|begin_of_text|>"]
+        for m in messages:
+            prompt_parts.append(f"<|start_header_id|>{m.role}<|end_header_id|>\n\n{m.content}<|eot_id|>")
+        prompt_parts.append("<|start_header_id|>assistant<|end_header_id|>\n\n")
+        return "".join(prompt_parts)
+
+    # Generic fallback prompt format for non-Llama-3 chat-tuned models.
+    prompt_parts = []
+    for m in messages:
+        role = m.role.capitalize()
+        prompt_parts.append(f"{role}: {m.content}")
+    prompt_parts.append("Assistant:")
+    return "\n".join(prompt_parts)
 
 
 class LatencyProfileStore:
@@ -932,11 +960,7 @@ async def chat_completions(
             ),
         )
 
-    prompt_parts: list[str] = ["<|begin_of_text|>"]
-    for m in payload.messages:
-        prompt_parts.append(f"<|start_header_id|>{m.role}<|end_header_id|>\n\n{m.content}<|eot_id|>")
-    prompt_parts.append("<|start_header_id|>assistant<|end_header_id|>\n\n")
-    user_text = "".join(prompt_parts)
+    user_text = _build_chat_prompt(payload.messages)
 
     if len(user_text) > MAX_PROMPT_CHARS:
         raise HTTPException(
