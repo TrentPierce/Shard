@@ -119,18 +119,24 @@ curl http://localhost:8000/v1/system/topology
 #### Windows (PowerShell)
 ```powershell
 & ".\shard-daemon-x86_64-pc-windows-msvc.exe"
+# Or use helper script from this repo:
+# installers\windows\start-shard.bat
 ```
 
 #### Linux
 ```bash
 chmod +x ./shard-daemon-x86_64-unknown-linux-gnu
 ./shard-daemon-x86_64-unknown-linux-gnu
+# Or use helper script from this repo:
+# installers/linux/start-shard.sh
 ```
 
 #### macOS (Apple Silicon)
 ```bash
 chmod +x ./shard-daemon-aarch64-apple-darwin
 ./shard-daemon-aarch64-apple-darwin
+# Or use helper script from this repo:
+# installers/macos/start-shard.sh
 ```
 
 Quick check (daemon local control API):
