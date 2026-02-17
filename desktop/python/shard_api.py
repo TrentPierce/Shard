@@ -325,14 +325,16 @@ RATE_LIMITER = RateLimiter(RATE_LIMIT_PER_MINUTE)
 SCOUT_RATE_LIMITER = RateLimiter(int(os.getenv("SHARD_SCOUT_RATE_LIMIT_PER_MINUTE", "120")))
 
 
-def _resolved_prompt_format() -> Literal["llama3", "plain"]:
-    if PROMPT_FORMAT in {"llama3", "plain"}:
+def _resolved_prompt_format() -> Literal["llama3", "chatml", "plain"]:
+    if PROMPT_FORMAT in {"llama3", "chatml", "plain"}:
         return PROMPT_FORMAT
     model_hint = os.getenv("BITNET_MODEL", "").lower()
     if "llama-3" in model_hint or "llama3" in model_hint:
         return "llama3"
     if re.search(r"llama[^0-9]*3", model_hint):
         return "llama3"
+    if "tinyllama" in model_hint or "chatml" in model_hint:
+        return "chatml"
     return "plain"
 
 
@@ -343,6 +345,12 @@ def _build_chat_prompt(messages: list["ChatMessage"]) -> str:
         for m in messages:
             prompt_parts.append(f"<|start_header_id|>{m.role}<|end_header_id|>\n\n{m.content}<|eot_id|>")
         prompt_parts.append("<|start_header_id|>assistant<|end_header_id|>\n\n")
+        return "".join(prompt_parts)
+    if prompt_format == "chatml":
+        prompt_parts = []
+        for m in messages:
+            prompt_parts.append(f"<|{m.role}|>\n{m.content}</s>\n")
+        prompt_parts.append("<|assistant|>\n")
         return "".join(prompt_parts)
 
     # Generic fallback prompt format for non-Llama-3 chat-tuned models.
