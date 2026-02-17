@@ -71,6 +71,7 @@ pip install -r requirements.txt
 BITNET_LIB=/path/to/libshard_engine.so \
 BITNET_MODEL=/path/to/model.gguf \
 SHARD_TESTING=0 \
+SHARD_PROMPT_FORMAT=plain \
 SHARD_REQUIRE_API_KEY=true \
 SHARD_API_KEYS=<strong-key-list> \
 python run.py --rust-url http://127.0.0.1:9091
@@ -220,6 +221,7 @@ cd desktop/python && pip install -r requirements.txt
 BITNET_LIB=/path/to/libshard_engine.so \
 BITNET_MODEL=/path/to/model.gguf \
 SHARD_TESTING=0 \
+SHARD_PROMPT_FORMAT=plain \
 python run.py
 
 # terminal 3
