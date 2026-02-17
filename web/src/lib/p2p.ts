@@ -13,7 +13,6 @@
 
 import { createLibp2p } from 'libp2p';
 import { webSockets } from '@libp2p/websockets';
-import { webRTC } from '@libp2p/webrtc';
 import { noise } from '@chainsafe/libp2p-noise';
 import { yamux } from '@chainsafe/libp2p-yamux';
 import { mplex } from '@libp2p/mplex';
@@ -101,10 +100,6 @@ export async function initP2P(config: P2PConfig = {}): Promise<string> {
         ? config.bootstrapPeers
         : [fallbackLocalPeer];
     const bootstrapPeers = sanitizeBootstrapPeers(requestedPeers);
-    if (bootstrapPeers.length === 0) {
-      throw new Error('No valid bootstrap peers available for this page security context');
-    }
-
     console.log('[p2p] Initializing with bootstrap peers:', bootstrapPeers);
 
     // Create libp2p node
@@ -112,7 +107,6 @@ export async function initP2P(config: P2PConfig = {}): Promise<string> {
       // Transports
       transports: [
         webSockets(),
-        webRTC(),
       ],
 
       // Connection encryption
@@ -125,11 +119,13 @@ export async function initP2P(config: P2PConfig = {}): Promise<string> {
       ],
 
       // Peer discovery
-      peerDiscovery: [
-        bootstrap({
-          list: bootstrapPeers,
-        }),
-      ],
+      peerDiscovery: bootstrapPeers.length > 0
+        ? [
+            bootstrap({
+              list: bootstrapPeers,
+            }),
+          ]
+        : [],
 
       // Services
       services: {
