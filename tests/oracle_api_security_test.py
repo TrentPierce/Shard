@@ -19,6 +19,7 @@ def _load_client(
     max_prompt="16000",
     require_api_key: str | None = None,
     scout_rate_limit: str = "120",
+    bitnet_model: str | None = None,
 ):
     monkeypatch.setenv("SHARD_API_KEYS", api_keys)
     monkeypatch.setenv("SHARD_RATE_LIMIT_PER_MINUTE", rate_limit)
@@ -31,7 +32,10 @@ def _load_client(
     monkeypatch.setenv("SHARD_TESTING", "1")
     # Clear BITNET env vars to trigger mock mode
     monkeypatch.delenv("BITNET_LIB", raising=False)
-    monkeypatch.delenv("BITNET_MODEL", raising=False)
+    if bitnet_model is None:
+        monkeypatch.delenv("BITNET_MODEL", raising=False)
+    else:
+        monkeypatch.setenv("BITNET_MODEL", bitnet_model)
 
     module = importlib.import_module("shard_api")
     module = importlib.reload(module)
@@ -176,6 +180,27 @@ def test_merge_text_tokens_stops_on_special_tokens(monkeypatch) -> None:
     module = importlib.reload(module)
     merged = module._merge_text_tokens(["Hello", " world", "</s>", "ignored"])
     assert merged == "Hello world"
+
+
+def test_tinyllama_greeting_fallback_non_stream(monkeypatch) -> None:
+    client = _load_client(monkeypatch, bitnet_model="/home/ubuntu/models/tinyllama.Q2_K.gguf")
+    resp = client.post("/v1/chat/completions", json=_payload(content="Hey"))
+    assert resp.status_code == 200
+    content = resp.json()["choices"][0]["message"]["content"]
+    assert content == "Hey! I am Shard. How can I help you today?"
+
+
+def test_tinyllama_greeting_fallback_stream(monkeypatch) -> None:
+    client = _load_client(monkeypatch, bitnet_model="/home/ubuntu/models/tinyllama.Q2_K.gguf")
+    with client.stream(
+        "POST",
+        "/v1/chat/completions",
+        json={**_payload(content="Hey"), "stream": True},
+    ) as resp:
+        body = "".join(chunk for chunk in resp.iter_text())
+
+    assert resp.status_code == 200
+    assert "Hey! I am Shard. How can I help you today?" in body
 
 
 def test_latency_profile_endpoint(monkeypatch) -> None:
