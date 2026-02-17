@@ -13,6 +13,7 @@ import json
 import logging
 import math
 import os
+import re
 import sys
 import time
 import uuid
@@ -330,6 +331,8 @@ def _resolved_prompt_format() -> Literal["llama3", "plain"]:
     model_hint = os.getenv("BITNET_MODEL", "").lower()
     if "llama-3" in model_hint or "llama3" in model_hint:
         return "llama3"
+    if re.search(r"llama[^0-9]*3", model_hint):
+        return "llama3"
     return "plain"
 
 
@@ -349,6 +352,11 @@ def _build_chat_prompt(messages: list["ChatMessage"]) -> str:
         prompt_parts.append(f"{role}: {m.content}")
     prompt_parts.append("Assistant:")
     return "\n".join(prompt_parts)
+
+
+def _merge_text_tokens(tokens: list[str]) -> str:
+    """Reconstruct output text from model token pieces without adding separators."""
+    return "".join(tokens)
 
 
 class LatencyProfileStore:
@@ -1009,7 +1017,7 @@ async def chat_completions(
     finally:
         await control.close()
 
-    content = " ".join(tokens)
+    content = _merge_text_tokens(tokens)
     return ChatResponse(
         id=completion_id,
         choices=[Choice(index=0, message={"role": "assistant", "content": content})],
@@ -1071,7 +1079,7 @@ async def _stream_generate(
                 "choices": [
                     {
                         "index": 0,
-                        "delta": {"content": token + " "},
+                        "delta": {"content": token},
                         "finish_reason": None,
                     }
                 ],
