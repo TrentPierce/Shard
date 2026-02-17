@@ -163,7 +163,7 @@ def test_streaming_completion_does_not_append_spaces(monkeypatch) -> None:
 
     assert resp.status_code == 200
     assert '"delta": {"content": "Hello "}' not in body
-    assert '"delta": {"content": "Hello"}' in body
+    assert '"delta": {"content": "Hello, world!"}' in body
 
 
 def test_prompt_format_auto_detects_tinyllama_chatml(monkeypatch) -> None:
@@ -252,6 +252,14 @@ def test_response_max_tokens_cap(monkeypatch) -> None:
     resp = client.post("/v1/chat/completions", json={**_payload(content="hey"), "max_tokens": 64})
     assert resp.status_code == 200
     assert seen["max_tokens"] == 5
+
+
+def test_condense_response_text(monkeypatch) -> None:
+    monkeypatch.setenv("SHARD_TESTING", "1")
+    module = importlib.import_module("shard_api")
+    module = importlib.reload(module)
+    text = "This is concise. This sentence should be removed. (extra notes)"
+    assert module._condense_response_text(text) == "This is concise."
 
 
 def test_latency_profile_endpoint(monkeypatch) -> None:
