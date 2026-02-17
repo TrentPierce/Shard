@@ -40,6 +40,47 @@ export default function HomePage() {
     const [scoutRetryNonce, setScoutRetryNonce] = useState(0)
     const scoutBootedRef = useRef(false)
 
+    const getBootstrapPeersFromTopology = useCallback((topo: Topology | null): string[] => {
+        if (!topo) return []
+
+        const candidates: string[] = []
+        const peerId = topo.shard_peer_id ?? ""
+        const addWithPeerId = (addr: string | null | undefined) => {
+            if (!addr) return
+            const trimmed = addr.trim()
+            if (!trimmed) return
+            if (trimmed.includes("/p2p/")) {
+                candidates.push(trimmed)
+                return
+            }
+            if (peerId) {
+                candidates.push(`${trimmed}/p2p/${peerId}`)
+            } else {
+                candidates.push(trimmed)
+            }
+        }
+
+        addWithPeerId(topo.shard_webrtc_multiaddr)
+        addWithPeerId(topo.shard_ws_multiaddr)
+        addWithPeerId(topo.shard_quic_multiaddr ?? null)
+        for (const listenAddr of topo.listen_addrs ?? []) {
+            addWithPeerId(listenAddr)
+        }
+
+        const isHttps = typeof window !== "undefined" && window.location.protocol === "https:"
+        const filtered = candidates.filter((addr) => {
+            if (!isHttps) return true
+            const insecureWs =
+                addr.startsWith("ws://") ||
+                addr.includes("/ws/") ||
+                addr.endsWith("/ws")
+            if (!insecureWs) return true
+            return addr.startsWith("wss://") || addr.includes("/wss/")
+        })
+
+        return Array.from(new Set(filtered))
+    }, [])
+
     // Check if the user has already entered the app
     useEffect(() => {
         const entered = typeof window !== "undefined" && localStorage.getItem("shard-entered")
@@ -114,8 +155,11 @@ export default function HomePage() {
                 setMode("scout")
 
                 try {
+                    const liveTopology = await fetchTopology()
+                    const bootstrapPeers = getBootstrapPeersFromTopology(liveTopology)
                     const peerId = await initP2P({
                         emitSelf: false,
+                        bootstrapPeers: bootstrapPeers.length > 0 ? bootstrapPeers : undefined,
                     })
                     console.log('[p2p] Connected as scout, peerId:', peerId)
 
@@ -128,6 +172,10 @@ export default function HomePage() {
                     })
                 } catch (p2pError) {
                     console.error('[p2p] Failed to initialize P2P:', p2pError)
+                    setWebLLMError(
+                        `Scout networking unavailable: ${p2pError instanceof Error ? p2pError.message : "unknown error"}`
+                    )
+                    setMode("leech")
                 }
             } catch (error: any) {
                 console.error("Failed to initialize WebLLM:", error)

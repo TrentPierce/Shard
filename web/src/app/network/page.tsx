@@ -5,12 +5,14 @@ import TelemetryStatCard from "@/components/network/TelemetryStatCard"
 import TopContributorsTable from "@/components/network/TopContributorsTable"
 import SwarmThroughputCanvas from "@/components/network/SwarmThroughputCanvas"
 import { useSwarmTelemetry } from "@/hooks/useSwarmTelemetry"
+import { useProductSignals } from "@/hooks/useProductSignals"
 
 const compactNumber = (value: number) =>
   new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 }).format(value)
 
 export default function NetworkTelemetryPage() {
   const { telemetry, statusLabel } = useSwarmTelemetry()
+  const { health, analytics, successRate } = useProductSignals()
 
   const totalNodes = useMemo(
     () => telemetry.scoutCount + telemetry.shardCount,
@@ -31,6 +33,15 @@ export default function NetworkTelemetryPage() {
         </p>
         <div className="network-page__hero-meta">
           <span className="network-page__badge">{statusLabel}</span>
+          <span className="network-page__badge">Model: shard-hybrid</span>
+          <span className="network-page__badge">Sessions: {analytics.sessions}</span>
+          <span className="network-page__badge">Success: {successRate}%</span>
+          <span className="network-page__badge">
+            Avg latency: {analytics.avgLatencyMs > 0 ? `${analytics.avgLatencyMs}ms` : "n/a"}
+          </span>
+          <span className="network-page__badge">
+            Last incident: {health.last_incident && health.last_incident !== "none" ? health.last_incident : "none"}
+          </span>
           <a className="network-page__link" href="https://github.com/TrentPierce/Shard/blob/main/docs/join-network.md" target="_blank" rel="noreferrer">
             How to contribute
           </a>

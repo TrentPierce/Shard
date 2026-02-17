@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react"
 import type { NodeMode } from "@/app/page"
 import { sendMessage, type ChatMessage } from "@/lib/api"
+import { useProductSignals } from "@/hooks/useProductSignals"
 
 interface ChatPanelProps {
     mode: NodeMode
@@ -14,6 +15,7 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
     const [streaming, setStreaming] = useState(false)
     const messagesEndRef = useRef<HTMLDivElement>(null)
     const textareaRef = useRef<HTMLTextAreaElement>(null)
+    const { health, analytics, successRate } = useProductSignals()
 
     const scrollToBottom = () => {
         messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
@@ -73,6 +75,9 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
                 },
             )
         } catch (err: any) {
+            if (typeof window !== "undefined") {
+                window.dispatchEvent(new Event("shard:chat-failure"))
+            }
             setMessages((prev) => {
                 const updated = [...prev]
                 const last = updated[updated.length - 1]
@@ -99,6 +104,22 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
 
     const ready = mode !== "loading"
     const assistantMessages = messages.filter((msg) => msg.role === "assistant").length
+    const modelLabel = "shard-hybrid"
+    const versionLabel = health.rust_version ? `daemon ${health.rust_version}` : "daemon unknown"
+    const uptimeLabel =
+        typeof health.rust_uptime_ms === "number" && health.rust_uptime_ms > 0
+            ? `${Math.floor(health.rust_uptime_ms / 3600000)}h uptime`
+            : "uptime unavailable"
+    const lastIncidentLabel =
+        health.last_incident && health.last_incident !== "none"
+            ? `incident: ${health.last_incident}`
+            : "incident-free"
+
+    const quickPrompts = [
+        "What can this network do right now?",
+        "Explain Scout vs Shard in 2 sentences.",
+        "Give me a quick health summary.",
+    ]
 
     return (
         <div className="chat" role="main" aria-label="Chat interface">
@@ -106,12 +127,20 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
                 <div>
                     <h2 className="chat__title">Conversation</h2>
                     <p className="chat__subtitle">OpenAI-compatible chat routed through Shard verification.</p>
+                    <div className="chat__signal-row">
+                        <span className="chat__signal-chip">Model: {modelLabel}</span>
+                        <span className="chat__signal-chip">{versionLabel}</span>
+                        <span className="chat__signal-chip">{uptimeLabel}</span>
+                        <span className="chat__signal-chip">{lastIncidentLabel}</span>
+                    </div>
                 </div>
                 <div className="chat__status-group">
                     <span className={`chat__status ${ready ? "chat__status--ok" : "chat__status--pending"}`}>
                         {ready ? "Network Ready" : "Connecting"}
                     </span>
                     <span className="chat__status chat__status--neutral">{assistantMessages} replies</span>
+                    <span className="chat__status chat__status--neutral">{analytics.sessions} sessions</span>
+                    <span className="chat__status chat__status--neutral">{successRate}% success</span>
                 </div>
             </div>
 
@@ -123,6 +152,18 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
                         <div className="chat__empty-hint">
                             Messages run through the verification pipeline. Scouts can draft tokens and
                             Shards validate final output.
+                        </div>
+                        <div className="chat__quick-prompts">
+                            {quickPrompts.map((prompt) => (
+                                <button
+                                    key={prompt}
+                                    type="button"
+                                    className="chat__quick-btn"
+                                    onClick={() => setInput(prompt)}
+                                >
+                                    {prompt}
+                                </button>
+                            ))}
                         </div>
                     </div>
                 ) : (
