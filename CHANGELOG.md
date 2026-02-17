@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.8] - 2026-02-17
+
+### Added
+- Cross-platform helper launchers for release binaries:
+  - `installers/windows/start-shard.bat`
+  - `installers/linux/start-shard.sh`
+  - `installers/macos/start-shard.sh`
+- Release packaging now includes launcher scripts alongside daemon binaries.
+
+### Changed
+- Release workflow publishes assets to the created release directly (no forced draft state).
+- Version synchronization across Rust daemon, Python SDK/API metadata, web client, and repository version file.
+- README quick-start now documents one-command launchers and release-binary onboarding flow.
+
+### Fixed
+- Reduced first-run friction for new shard contributors by shipping built-in defaults plus starter scripts.
+
 ### Added
 - **OpenAPI Documentation**: Enhanced FastAPI app with comprehensive OpenAPI 3.1 spec generation, detailed Field() documentation with examples, organized endpoint tags, and enhanced descriptions
 - **Tag Organization**: Added endpoint tags (chat, scouts, system, admin) for better documentation organization in Swagger UI
@@ -101,7 +118,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Deployment Guide**: Multi-component deployment instructions
 - **Troubleshooting**: Common issues and solutions guide
 
-[unreleased]: https://github.com/TrentPierce/Shard/compare/v0.4.0...HEAD
+[unreleased]: https://github.com/TrentPierce/Shard/compare/v0.4.8...HEAD
+[0.4.8]: https://github.com/TrentPierce/Shard/compare/v0.4.7...v0.4.8
 [0.4.0]: https://github.com/TrentPierce/Shard/compare/v0.3.0...v0.4.0
 
 ---

@@ -124,7 +124,7 @@ tags_metadata = [
 
 app = FastAPI(
     title="Shard API",
-    version="0.4.7",
+    version="0.4.8",
     description=r"""
     OpenAI-compatible API for the Shard distributed inference network.
 
@@ -1750,3 +1750,4 @@ if getattr(sys, "frozen", False):
         app.mount("/", StaticFiles(directory=static_dir, html=True), name="static")
     else:
         LOGGER.warning(f"Static web directory not found at {static_dir}")
+
