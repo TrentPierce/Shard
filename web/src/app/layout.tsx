@@ -54,6 +54,8 @@ export default function RootLayout({
 }: {
     children: React.ReactNode
 }) {
+    const enableServiceWorker = process.env.NEXT_PUBLIC_ENABLE_SW === "true"
+
     return (
         <html lang="en">
             <head>
@@ -72,18 +74,32 @@ export default function RootLayout({
                 <Providers>
                     <ErrorBoundary>{children}</ErrorBoundary>
                 </Providers>
-                {/* Service Worker Registration */}
-                <script
-                    dangerouslySetInnerHTML={{
-                        __html: `
-                            if ('serviceWorker' in navigator) {
-                                navigator.serviceWorker.register('/sw.js').catch((err) => {
-                                    console.error('[SW] Service Worker registration failed:', err);
-                                });
-                            }
-                        `
-                    }}
-                />
+                {enableServiceWorker && (
+                    <script
+                        dangerouslySetInnerHTML={{
+                            __html: `
+                                if ('serviceWorker' in navigator) {
+                                    navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' }).catch((err) => {
+                                        console.error('[SW] Service Worker registration failed:', err);
+                                    });
+                                }
+                            `
+                        }}
+                    />
+                )}
+                {!enableServiceWorker && (
+                    <script
+                        dangerouslySetInnerHTML={{
+                            __html: `
+                                if ('serviceWorker' in navigator) {
+                                    navigator.serviceWorker.getRegistrations().then((registrations) => {
+                                        registrations.forEach((registration) => registration.unregister());
+                                    }).catch(() => {});
+                                }
+                            `
+                        }}
+                    />
+                )}
             </body>
         </html>
     )

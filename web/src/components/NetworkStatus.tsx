@@ -287,7 +287,7 @@ export default function NetworkStatus({
                             width: "100%",
                         }}
                         onClick={() => {
-                            window.location.reload();
+                            window.dispatchEvent(new Event("shard:retry-scout-init"))
                         }}
                     >
                         Enable Scout Mode
