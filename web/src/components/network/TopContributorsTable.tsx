@@ -15,7 +15,7 @@ export default function TopContributorsTable({ contributors }: TopContributorsTa
     <div className="network-card">
       <div className="network-card__header">
         <h2>Top Contributors</h2>
-        <span>live tokens processed</span>
+        <span>live contribution ranking</span>
       </div>
       <div className="leaderboard">
         {contributors.map((contributor, index) => (
@@ -23,11 +23,11 @@ export default function TopContributorsTable({ contributors }: TopContributorsTa
             <span className="leaderboard__rank">#{index + 1}</span>
             <div className="leaderboard__identity">
               <strong>{contributor.id}</strong>
-              <small>{contributor.role}</small>
+              <small className={`leaderboard__role leaderboard__role--${contributor.role.toLowerCase()}`}>{contributor.role}</small>
             </div>
             <div className="leaderboard__metrics">
               <strong>{formatTokens(contributor.tokensProcessed)}</strong>
-              <small>{contributor.efficiency}% efficiency</small>
+              <small>{contributor.efficiency}% verification efficiency</small>
             </div>
           </div>
         ))}

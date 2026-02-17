@@ -23,7 +23,6 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
         scrollToBottom()
     }, [messages])
 
-    // Auto-resize textarea
     useEffect(() => {
         const el = textareaRef.current
         if (el) {
@@ -46,7 +45,6 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
         setInput("")
         setStreaming(true)
 
-        // Create placeholder assistant message
         const assistantMsg: ChatMessage = {
             role: "assistant",
             content: "",
@@ -58,7 +56,6 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
             await sendMessage(
                 [...messages, userMsg],
                 (token) => {
-                    // Update the last message (assistant) with streaming content
                     setMessages((prev) => {
                         const updated = [...prev]
                         const last = updated[updated.length - 1]
@@ -73,7 +70,7 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
                 },
                 () => {
                     setStreaming(false)
-                }
+                },
             )
         } catch (err: any) {
             setMessages((prev) => {
@@ -83,8 +80,8 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
                     updated[updated.length - 1] = {
                         ...last,
                         content:
-                            "⚠ Connection error: " +
-                            (err?.message ?? "Could not reach the Shard API. Is the Python server running on :8000?"),
+                            "Connection error: " +
+                            (err?.message ?? "Could not reach the Shard API at port 8000."),
                     }
                 }
                 return updated
@@ -100,18 +97,32 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
         }
     }
 
+    const ready = mode !== "loading"
+    const assistantMessages = messages.filter((msg) => msg.role === "assistant").length
+
     return (
         <div className="chat" role="main" aria-label="Chat interface">
-            {/* ── Messages ── */}
+            <div className="chat__header">
+                <div>
+                    <h2 className="chat__title">Conversation</h2>
+                    <p className="chat__subtitle">OpenAI-compatible chat routed through Shard verification.</p>
+                </div>
+                <div className="chat__status-group">
+                    <span className={`chat__status ${ready ? "chat__status--ok" : "chat__status--pending"}`}>
+                        {ready ? "Network Ready" : "Connecting"}
+                    </span>
+                    <span className="chat__status chat__status--neutral">{assistantMessages} replies</span>
+                </div>
+            </div>
+
             <div className="chat__messages" role="log" aria-live="polite" aria-atomic="false" aria-label="Chat messages">
                 {messages.length === 0 ? (
                     <div className="chat__empty animate-slide-up">
-                        <div className="chat__empty-icon">⬡</div>
-                        <div className="chat__empty-title">Welcome to Shard</div>
+                        <div className="chat__empty-icon">S</div>
+                        <div className="chat__empty-title">Start a request</div>
                         <div className="chat__empty-hint">
-                            Ask anything. Your prompt will be processed through the
-                            decentralized inference mesh — Scout peers generate draft tokens,
-                            Shards verify them.
+                            Messages run through the verification pipeline. Scouts can draft tokens and
+                            Shards validate final output.
                         </div>
                     </div>
                 ) : (
@@ -123,7 +134,7 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
                             aria-labelledby={`msg-sender-${i}`}
                         >
                             <div className="message__avatar" id={`msg-sender-${i}`} aria-hidden="true">
-                                {msg.role === "user" ? "U" : "S"}
+                                {msg.role === "user" ? "You" : "Shard"}
                             </div>
                             <div>
                                 <div className="message__bubble" role="alert" aria-live="off">
@@ -136,8 +147,7 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
                                     )}
                                 </div>
                                 <div className="message__meta">
-                                    {msg.role === "assistant" ? "shard-hybrid" : "you"} ·{" "}
-                                    {new Date(msg.timestamp).toLocaleTimeString()}
+                                    {msg.role === "assistant" ? "shard-hybrid" : "you"} � {new Date(msg.timestamp).toLocaleTimeString()}
                                 </div>
                             </div>
                         </div>
@@ -146,7 +156,6 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
                 <div ref={messagesEndRef} />
             </div>
 
-            {/* ── Input ── */}
             <div className="chat__input-area">
                 <div className="chat__input-wrapper">
                     <textarea
@@ -154,11 +163,7 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
                         className="chat__input"
                         id="chat-input"
                         name="chat-input"
-                        placeholder={
-                            mode === "loading"
-                                ? "Connecting to network…"
-                                : "Send a message to the Shard network…"
-                        }
+                        placeholder={mode === "loading" ? "Connecting to network..." : "Ask a question..."}
                         value={input}
                         onChange={(e) => setInput(e.target.value)}
                         onKeyDown={handleKeyDown}
@@ -175,9 +180,10 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
                         type="submit"
                         aria-label="Send message"
                     >
-                        <span aria-hidden="true">↑</span>
+                        <span aria-hidden="true">^</span>
                     </button>
                 </div>
+                <p className="chat__input-hint">Enter to send � Shift+Enter for newline</p>
             </div>
         </div>
     )
