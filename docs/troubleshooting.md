@@ -24,3 +24,23 @@
 ## Streaming fails mid-response
 - Check `/metrics` and app logs for `chat_failures_total` spikes.
 - Validate `BITNET_LIB` and `BITNET_MODEL` are present and readable.
+
+## `bitnet_loaded: false` on `/health`
+- Ensure `SHARD_TESTING=0` in runtime environment.
+- Ensure both `BITNET_LIB` and `BITNET_MODEL` are set and point to readable files.
+- Ensure `LD_LIBRARY_PATH` includes the directory containing `libllama.so`/`libggml*.so` when using `libshard_engine.so`.
+- Restart API service after env changes:
+  - `sudo systemctl restart shard-api.service`
+- Validate:
+  - `curl http://127.0.0.1:8000/health`
+
+## Browser app gets 401 in production
+- API key auth is enabled when `SHARD_REQUIRE_API_KEY=true`.
+- Add `NEXT_PUBLIC_SHARD_API_KEY` to Vercel environment variables.
+- If using Vercel rewrites, confirm `NEXT_PUBLIC_API_URL=/api`.
+
+## Browser scouts cannot connect over websocket
+- Use a TLS endpoint (`wss://...`) for browser-facing transport.
+- Confirm DNS resolves to the host and TLS cert is valid.
+- Verify reverse proxy forwards websocket upgrade headers.
+- Confirm daemon advertises a public DNS host (`--public-host`) instead of private IP only.

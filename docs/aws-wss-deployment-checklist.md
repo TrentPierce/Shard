@@ -1,6 +1,14 @@
 # AWS EC2 Production Checklist (Rust sidecar + `wss://`)
 
-Use this when deploying the Shard Rust `libp2p`/WebSocket sidecar behind Nginx TLS.
+Use this when deploying the Shard Rust `libp2p`/WebSocket sidecar behind TLS
+termination (Caddy or Nginx).
+
+Current known-good deployment shape:
+
+- `shard-daemon.service` on EC2
+- `shard-api.service` on EC2
+- `caddy.service` for TLS + reverse proxy
+- Public endpoint example: `wss://54.224.107.75.nip.io`
 
 ## 1) Build and copy the Rust binary
 
@@ -41,6 +49,11 @@ sudo systemctl status shard-daemon --no-pager
 - Frontend URL should use: `wss://swarm.example.com/telemetry/ws`
 - Rust daemon continues to listen internally on `0.0.0.0:<PORT>` (default `9093`) and Nginx terminates TLS.
 
+If you do not own a domain yet, use a DNS wildcard service as a temporary host:
+
+- `54.224.107.75.nip.io` for IP `54.224.107.75`
+- Then advertise `--public-host 54.224.107.75.nip.io`
+
 Quick check:
 
 ```bash
@@ -70,6 +83,7 @@ The bootstrap script enables:
 
 ```bash
 sudo journalctl -u shard-daemon -f
-sudo nginx -t
-sudo systemctl status nginx --no-pager
+sudo journalctl -u shard-api -f
+sudo systemctl status caddy --no-pager
+sudo journalctl -u caddy -f
 ```

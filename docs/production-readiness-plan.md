@@ -2,6 +2,21 @@
 
 This roadmap translates Shard's current prototype into a production-grade decentralized inference platform suitable for a high-scrutiny technical review.
 
+## Current Status Snapshot (February 17, 2026)
+
+Completed:
+- CI suite passing on `main`.
+- Public frontend deployed on Vercel.
+- EC2 daemon + API running under `systemd`.
+- TLS endpoint active for browser transport (`wss://`).
+- Production API security enabled (`SHARD_REQUIRE_API_KEY=true`, scoped CORS).
+
+Remaining high-priority items:
+- Maintain real-model inference health (`bitnet_loaded=true`) across deploys.
+- Add stronger websocket transport validation tests for browser scout joins.
+- Add secret rotation and formal runbooks for key management.
+- Move from temporary DNS host to owned production domain.
+
 ## Phase 1: Critical Path (Weeks 1-3)
 
 ### Week 1: Core Functionality Implementation
