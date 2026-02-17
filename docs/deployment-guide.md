@@ -46,6 +46,41 @@ SHARD_API_KEYS=prod-key SHARD_RATE_LIMIT_PER_MINUTE=120 python run.py --rust-url
 
 ---
 
+## Reference Public Deployment (Current)
+
+This repository is currently deployed with:
+
+- Vercel frontend: `https://shard-981bwxsha-trents-projects-20e9a51a.vercel.app`
+- EC2 API + websocket TLS endpoint: `https://54.224.107.75.nip.io`
+- Scout websocket transport: `wss://54.224.107.75.nip.io`
+
+EC2 services are managed by `systemd`:
+
+- `shard-daemon.service` (Rust P2P control plane + transports)
+- `shard-api.service` (FastAPI OpenAI-compatible API)
+- `caddy.service` (TLS termination + reverse proxy)
+
+Critical environment for production API:
+
+```bash
+SHARD_REQUIRE_API_KEY=true
+SHARD_API_KEYS=<strong-random-key-list>
+SHARD_CORS_ORIGINS=https://shard-981bwxsha-trents-projects-20e9a51a.vercel.app
+SHARD_TESTING=0
+BITNET_LIB=/home/ubuntu/Shard/cpp/shard-bridge/build/libshard_engine.so
+BITNET_MODEL=/home/ubuntu/models/<model>.gguf
+LD_LIBRARY_PATH=/home/ubuntu/Shard/cpp/shard-bridge/build/bin
+```
+
+For Vercel, set:
+
+```bash
+NEXT_PUBLIC_SHARD_API_KEY=<matching api key>
+NEXT_PUBLIC_API_URL=/api
+```
+
+---
+
 ## Platform-Specific Instructions
 
 ### Linux
@@ -768,6 +803,7 @@ Set these for production:
 ```bash
 # API Keys (comma-separated)
 export SHARD_API_KEYS="secure-key-1,secure-key-2"
+export SHARD_REQUIRE_API_KEY=true
 
 # Rate limiting
 export SHARD_RATE_LIMIT_PER_MINUTE=120
@@ -780,6 +816,9 @@ export SHARD_LOG_LEVEL=INFO
 
 # CORS origins (restrict to known domains)
 export SHARD_CORS_ORIGINS="https://yourdomain.com,https://app.yourdomain.com"
+
+# Disable mock mode
+export SHARD_TESTING=0
 ```
 
 ### Firewall Configuration

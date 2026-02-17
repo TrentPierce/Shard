@@ -16,6 +16,29 @@
 
 ---
 
+## Current Deployment Status (February 17, 2026)
+
+The project is live with a public web app, public API, and TLS scout transport:
+
+- Web app (Vercel): `https://shard-981bwxsha-trents-projects-20e9a51a.vercel.app`
+- API + topology (TLS): `https://54.224.107.75.nip.io`
+- Browser scout websocket transport (TLS): `wss://54.224.107.75.nip.io`
+- EC2 host: `54.224.107.75` (Ubuntu, systemd-managed daemon + API)
+
+Production security defaults in use:
+
+- `SHARD_REQUIRE_API_KEY=true`
+- `SHARD_API_KEYS=<one or more strong keys>`
+- `SHARD_CORS_ORIGINS=<exact frontend origin(s)>`
+- `SHARD_TESTING=0`
+
+If you use the hosted web app against a protected API, set:
+
+- `NEXT_PUBLIC_SHARD_API_KEY=<public app key for this deployment>`
+- `NEXT_PUBLIC_API_URL=<api base url or /api via Vercel rewrite>`
+
+---
+
 ## Why Shard, Why Now?
 
 Shard is the decentralized inference network for developers who are done waiting on rented GPU queues and fragile single-region deployments.
@@ -150,7 +173,11 @@ cargo build --release
 ./desktop/rust/target/release/shard-daemon
 
 # terminal 2
-cd desktop/python && pip install -r requirements.txt && python run.py
+cd desktop/python && pip install -r requirements.txt
+BITNET_LIB=/path/to/libshard_engine.so \
+BITNET_MODEL=/path/to/model.gguf \
+SHARD_TESTING=0 \
+python run.py
 
 # terminal 3
 cd web && npm install && npm run dev

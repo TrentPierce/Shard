@@ -68,14 +68,24 @@ if _use_mock:
 else:
     try:
         from bitnet.ctypes_bridge import BitNetConfig as _BitNetConfig, BitNetRuntime as _BitNetRuntime
+    except Exception as exc:
+        LOGGER.warning("Failed to import BitNet runtime bridge: %s", exc)
+    else:
         BitNetConfig = _BitNetConfig
         BitNetRuntime = _BitNetRuntime
-        try:
-            BITNET = _BitNetRuntime()
-        except Exception:
-            pass
-    except Exception:
-        pass
+
+        # Eager init when explicitly configured; keep lazy fallback for cold starts.
+        lib_path = os.getenv("BITNET_LIB", "").strip()
+        model_path = os.getenv("BITNET_MODEL", "").strip()
+        if lib_path and model_path:
+            try:
+                BITNET = _BitNetRuntime(
+                    _BitNetConfig(lib_path=lib_path, model_path=model_path),
+                )
+                LOGGER.info("Initialized BitNet runtime at startup")
+            except Exception:
+                LOGGER.exception("BitNet startup initialization failed; will retry lazily")
+                BITNET = None
 
 # ─── App & Config ────────────────────────────────────────────────────────────
 
