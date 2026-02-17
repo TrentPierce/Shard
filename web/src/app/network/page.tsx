@@ -1,4 +1,4 @@
-"use client"
+﻿"use client"
 
 import { useMemo } from "react"
 import TelemetryStatCard from "@/components/network/TelemetryStatCard"
@@ -76,7 +76,7 @@ export default function NetworkTelemetryPage() {
             <div
               className="node-mix__donut"
               style={{
-                background: `conic-gradient(#6f5ef9 0% ${scoutRatio.toFixed(2)}%, #1dbf89 ${scoutRatio.toFixed(2)}% 100%)`,
+                background: `conic-gradient(#64748b 0% ${scoutRatio.toFixed(2)}%, #22c55e ${scoutRatio.toFixed(2)}% 100%)`,
               }}
               aria-label="Donut chart showing scouts and shards"
             >
@@ -86,8 +86,8 @@ export default function NetworkTelemetryPage() {
               </div>
             </div>
             <div className="node-mix__legend">
-              <p><span className="dot dot--violet" />Scouts � {telemetry.scoutCount}</p>
-              <p><span className="dot dot--emerald" />Shards � {telemetry.shardCount}</p>
+              <p><span className="dot dot--violet" />Scouts - {telemetry.scoutCount}</p>
+              <p><span className="dot dot--emerald" />Shards - {telemetry.shardCount}</p>
             </div>
           </div>
         </div>
@@ -97,3 +97,4 @@ export default function NetworkTelemetryPage() {
     </main>
   )
 }
+
