@@ -11,7 +11,7 @@
 
   [![CI](https://github.com/TrentPierce/Shard/actions/workflows/ci.yml/badge.svg)](https://github.com/TrentPierce/Shard/actions/workflows/ci.yml)
   [![License: BUSL-1.1](https://img.shields.io/badge/license-BUSL--1.1-blue.svg)](LICENSE)
-  [![Version](https://img.shields.io/badge/version-0.4.4-00d4ff.svg)](#)
+  [![Version](https://img.shields.io/badge/version-0.4.5-00d4ff.svg)](#)
   [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
   [![GitHub Stars](https://img.shields.io/github/stars/TrentPierce/Shard?style=social)](https://github.com/TrentPierce/Shard)
 
@@ -93,6 +93,24 @@ If you want a quick explanation of roles, contribution, and why distributed mode
 
 ---
 ## Quick Start
+
+### Fastest Setup Paths
+
+#### Join as Scout (browser contributor)
+1. Open the deployed web app.
+2. Allow WebGPU when prompted.
+3. Keep the tab open; it contributes draft work automatically.
+
+#### Run as Shard (one-command local stack)
+```bash
+docker compose up --build shard-daemon shard-inference shard-api
+```
+
+Verify:
+```bash
+curl http://localhost:8000/health
+curl http://localhost:8000/v1/system/topology
+```
 
 ### Prerequisites
 
@@ -285,6 +303,16 @@ We welcome contributions! See [**CONTRIBUTING.md**](CONTRIBUTING.md) for:
 make setup    # Install all dependencies
 make dev      # Start all services
 make test     # Run all test suites
+```
+
+### Versioning
+
+Shard uses a single source of truth in the root `VERSION` file.
+
+```bash
+make version         # show current version
+make version-sync    # sync all package/app versions from VERSION
+make version-set V=0.4.6
 ```
 
 ---
