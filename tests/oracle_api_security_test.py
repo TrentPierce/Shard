@@ -20,11 +20,15 @@ def _load_client(
     require_api_key: str | None = None,
     scout_rate_limit: str = "120",
     bitnet_model: str | None = None,
+    concise_mode: str = "true",
+    response_max_tokens: str = "80",
 ):
     monkeypatch.setenv("SHARD_API_KEYS", api_keys)
     monkeypatch.setenv("SHARD_RATE_LIMIT_PER_MINUTE", rate_limit)
     monkeypatch.setenv("SHARD_SCOUT_RATE_LIMIT_PER_MINUTE", scout_rate_limit)
     monkeypatch.setenv("SHARD_MAX_PROMPT_CHARS", max_prompt)
+    monkeypatch.setenv("SHARD_CONCISE_MODE", concise_mode)
+    monkeypatch.setenv("SHARD_RESPONSE_MAX_TOKENS", response_max_tokens)
     if require_api_key is None:
         require_api_key = "true" if api_keys else "false"
     monkeypatch.setenv("SHARD_REQUIRE_API_KEY", require_api_key)
@@ -213,6 +217,41 @@ def test_prompt_format_auto_detects_phi(monkeypatch) -> None:
     assert module._resolved_prompt_format() == "phi"
     prompt = module._build_chat_prompt([module.Message(role="user", content="Hey")])
     assert prompt == "<|user|>\nHey<|end|>\n<|assistant|>\n"
+
+
+def test_concise_system_message_applied(monkeypatch) -> None:
+    monkeypatch.setenv("SHARD_CONCISE_MODE", "true")
+    monkeypatch.setenv("SHARD_TESTING", "1")
+    module = importlib.import_module("shard_api")
+    module = importlib.reload(module)
+    messages = [module.Message(role="user", content="Explain recursion.")]
+    out = module._apply_concise_system_message(messages)
+    assert out[0].role == "system"
+    assert "concise and direct" in out[0].content
+
+
+def test_response_max_tokens_cap(monkeypatch) -> None:
+    client = _load_client(monkeypatch, response_max_tokens="5")
+    module = importlib.import_module("shard_api")
+    seen: dict[str, int] = {}
+
+    class _DummyControlPlane:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def close(self):
+            return None
+
+    async def _fake_generate(**kwargs):
+        seen["max_tokens"] = int(kwargs["max_tokens"])
+        for tok in ["one", " two"]:
+            yield tok
+
+    monkeypatch.setattr(module, "RustControlPlaneClient", _DummyControlPlane)
+    monkeypatch.setattr(module, "cooperative_generate", _fake_generate)
+    resp = client.post("/v1/chat/completions", json={**_payload(content="hey"), "max_tokens": 64})
+    assert resp.status_code == 200
+    assert seen["max_tokens"] == 5
 
 
 def test_latency_profile_endpoint(monkeypatch) -> None:

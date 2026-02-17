@@ -279,6 +279,8 @@ REQUIRE_API_KEY = os.getenv("SHARD_REQUIRE_API_KEY", "true" if PUBLIC_API else "
 RATE_LIMIT_PER_MINUTE = int(os.getenv("SHARD_RATE_LIMIT_PER_MINUTE", "60"))
 MAX_PROMPT_CHARS = int(os.getenv("SHARD_MAX_PROMPT_CHARS", "16000"))
 PROMPT_FORMAT = os.getenv("SHARD_PROMPT_FORMAT", "auto").strip().lower()
+CONCISE_MODE = os.getenv("SHARD_CONCISE_MODE", "true").strip().lower() == "true"
+RESPONSE_MAX_TOKENS = int(os.getenv("SHARD_RESPONSE_MAX_TOKENS", "80"))
 
 METRICS: dict[str, int] = {
     "chat_requests_total": 0,
@@ -368,6 +370,19 @@ def _build_chat_prompt(messages: list["ChatMessage"]) -> str:
         prompt_parts.append(f"{role}: {m.content}")
     prompt_parts.append("Assistant:")
     return "\n".join(prompt_parts)
+
+
+def _apply_concise_system_message(messages: list["ChatMessage"]) -> list["ChatMessage"]:
+    if not CONCISE_MODE:
+        return messages
+    concise = Message(
+        role="system",
+        content=(
+            "You are concise and direct. Keep responses short and to the point. "
+            "Use at most three short sentences unless the user explicitly asks for detail."
+        ),
+    )
+    return [concise, *messages]
 
 
 _SPECIAL_TEXT_TOKENS = {
@@ -1040,7 +1055,8 @@ async def chat_completions(
             ),
         )
 
-    user_text = _build_chat_prompt(payload.messages)
+    messages = _apply_concise_system_message(payload.messages)
+    user_text = _build_chat_prompt(messages)
 
     if len(user_text) > MAX_PROMPT_CHARS:
         raise HTTPException(
@@ -1048,7 +1064,8 @@ async def chat_completions(
             detail=f"Prompt too large (>{MAX_PROMPT_CHARS} chars)",
         )
     completion_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
-    fallback_text = _fallback_text_for_request(payload.messages)
+    fallback_text = _fallback_text_for_request(messages)
+    effective_max_tokens = min(payload.max_tokens, max(1, RESPONSE_MAX_TOKENS))
 
     # ── streaming ──
     if payload.stream:
@@ -1063,7 +1080,7 @@ async def chat_completions(
                 },
             )
         return StreamingResponse(
-            _stream_generate(completion_id, user_text, payload.max_tokens),
+            _stream_generate(completion_id, user_text, effective_max_tokens),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",
@@ -1096,7 +1113,7 @@ async def chat_completions(
             local_model_generate=_local_generate,
             verify_draft=_verify_draft,
             control_plane=control,
-            max_tokens=payload.max_tokens,
+            max_tokens=effective_max_tokens,
             telemetry_hook=LATENCY_PROFILE.record_sample,
             scout_event_hook=_handle_scout_verification_event,
         ):
