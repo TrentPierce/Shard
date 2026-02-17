@@ -45,8 +45,13 @@ jobs:
           cd desktop/rust
           if [ "${{ matrix.os }}" = "windows-latest" ]; then
             cp target/release/shard-daemon.exe ../../release/shard-daemon-${{ matrix.target }}.exe
+            cp ../../installers/windows/start-shard.bat ../../release/start-shard-${{ matrix.target }}.bat
+          elif [ "${{ matrix.os }}" = "macos-latest" ]; then
+            cp target/release/shard-daemon ../../release/shard-daemon-${{ matrix.target }}
+            cp ../../installers/macos/start-shard.sh ../../release/start-shard-${{ matrix.target }}.sh
           else
             cp target/release/shard-daemon ../../release/shard-daemon-${{ matrix.target }}
+            cp ../../installers/linux/start-shard.sh ../../release/start-shard-${{ matrix.target }}.sh
           fi
 
       - name: Upload Release Asset
@@ -54,4 +59,3 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           files: release/*
-          draft: true

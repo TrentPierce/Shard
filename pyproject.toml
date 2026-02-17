@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "shard-sdk"
-version = "0.4.7"
+version = "0.4.8"
 description = "Shard Network - Hybrid Distributed Inference SDK"
 readme = "README.md"
 license = {text = "BUSL-1.1 OR Apache-2.0"}
@@ -65,3 +65,4 @@ target-version = "py311"
 testpaths = ["tests"]
 python_files = ["test_*.py", "*_test.py"]
 asyncio_mode = "auto"
+

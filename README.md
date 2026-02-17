@@ -11,7 +11,7 @@
 
   [![CI](https://github.com/TrentPierce/Shard/actions/workflows/ci.yml/badge.svg)](https://github.com/TrentPierce/Shard/actions/workflows/ci.yml)
   [![License: BUSL-1.1](https://img.shields.io/badge/license-BUSL--1.1-blue.svg)](LICENSE)
-  [![Version](https://img.shields.io/badge/version-0.4.7-00d4ff.svg)](#)
+  [![Version](https://img.shields.io/badge/version-0.4.8-00d4ff.svg)](#)
   [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
   [![GitHub Stars](https://img.shields.io/github/stars/TrentPierce/Shard?style=social)](https://github.com/TrentPierce/Shard)
 
@@ -112,9 +112,9 @@ curl http://localhost:8000/health
 curl http://localhost:8000/v1/system/topology
 ```
 
-### Run a Shard Node from Release Binary (v0.4.7+)
+### Run a Shard Node from Release Binary (v0.4.8+)
 
-`v0.4.7` binaries include built-in public bootstrap peers. In most cases, you only need to run the binary.
+`v0.4.8` binaries include built-in public bootstrap peers. In most cases, you only need to run the binary.
 
 #### Windows (PowerShell)
 ```powershell
@@ -380,4 +380,5 @@ Converts to Apache 2.0 on February 13, 2036.
 <div align="center">
   <sub>Built with 🧊 by the <a href="https://github.com/TrentPierce/Shard">Shard</a> community</sub>
 </div>
+
 
