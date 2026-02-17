@@ -26,9 +26,9 @@ type SwarmTelemetrySnapshot = {
 async function fetchRealTelemetry(): Promise<SwarmTelemetrySnapshot> {
   // Fetch all three endpoints in parallel for speed
   const [healthRes, peersRes, topoRes] = await Promise.allSettled([
-    fetch(apiUrl("/health")),
-    fetch(apiUrl("/v1/system/peers")),
-    fetch(apiUrl("/v1/system/topology")),
+    fetch(apiUrl("/health"), { cache: "no-store" }),
+    fetch(apiUrl("/v1/system/peers"), { cache: "no-store" }),
+    fetch(apiUrl("/v1/system/topology"), { cache: "no-store" }),
   ])
 
   // Parse each response, defaulting gracefully on failure
@@ -52,14 +52,13 @@ async function fetchRealTelemetry(): Promise<SwarmTelemetrySnapshot> {
     throw new Error("All API endpoints unreachable")
   }
 
-  const connectedPeers =
-    Number(
-      peersData?.peers?.length ??
-      peersData?.count ??
-      health?.active_scouts ??
-      health?.connected_peers ??
-      0
-    ) || 0
+  const peerCountFromPeersEndpoint = Number(
+    peersData?.peers?.length ?? peersData?.count ?? 0
+  ) || 0
+  const activeScoutsFromHealth = Number(
+    health?.active_scouts ?? health?.connected_peers ?? 0
+  ) || 0
+  const connectedPeers = Math.max(peerCountFromPeersEndpoint, activeScoutsFromHealth)
   const capacity = health?.capacity ?? topo?.capacity ?? 100
   const load = health?.load ?? topo?.load ?? 0
   const rustConnected = health?.rust_sidecar === "connected"
