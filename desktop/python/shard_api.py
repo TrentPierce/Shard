@@ -124,7 +124,7 @@ tags_metadata = [
 
 app = FastAPI(
     title="Shard API",
-    version="0.4.5",
+    version="0.4.7",
     description=r"""
     OpenAI-compatible API for the Shard distributed inference network.
 
