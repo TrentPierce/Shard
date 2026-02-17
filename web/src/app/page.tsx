@@ -190,7 +190,6 @@ export default function HomePage() {
                     })
                 } catch (p2pError) {
                     console.error('[p2p] Failed to initialize P2P:', p2pError)
-                    setWebLLMError(`Scout networking degraded: ${p2pError instanceof Error ? p2pError.message : "unknown error"}`)
                 }
             } catch (error: any) {
                 console.error("Failed to initialize WebLLM:", error)
