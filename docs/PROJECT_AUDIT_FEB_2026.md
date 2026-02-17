@@ -46,7 +46,7 @@ The current README immediately jumps into "Live Demo" URLs and env var configs. 
   <!-- Badges -->
   ![CI](https://github.com/TrentPierce/Shard/actions/workflows/ci.yml/badge.svg)
   ![License](https://img.shields.io/badge/license-BUSL--1.1-blue)
-  ![Version](https://img.shields.io/badge/version-0.4.4-green)
+  ![Version](https://img.shields.io/badge/version-0.4.5-green)
   ![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen)
 
   [Live Demo](https://shard.network) · [White Paper](docs/Shard-White-Paper-Feb-2026.pdf) · [API Docs](docs/API.md) · [Get Started](#quick-start)
