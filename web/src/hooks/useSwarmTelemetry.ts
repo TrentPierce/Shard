@@ -56,6 +56,7 @@ async function fetchRealTelemetry(): Promise<SwarmTelemetrySnapshot> {
     Number(
       peersData?.peers?.length ??
       peersData?.count ??
+      health?.active_scouts ??
       health?.connected_peers ??
       0
     ) || 0
