@@ -7,9 +7,13 @@ on:
     types: [created]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     strategy:
+      fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
@@ -40,9 +44,9 @@ jobs:
           mkdir -p release
           cd desktop/rust
           if [ "${{ matrix.os }}" = "windows-latest" ]; then
-            cp target/release/shard-daemon.exe ../../release/
+            cp target/release/shard-daemon.exe ../../release/shard-daemon-${{ matrix.target }}.exe
           else
-            cp target/release/shard-daemon ../../release/
+            cp target/release/shard-daemon ../../release/shard-daemon-${{ matrix.target }}
           fi
 
       - name: Upload Release Asset
