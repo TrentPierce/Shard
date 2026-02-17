@@ -12,7 +12,10 @@
 use anyhow::Result;
 use axum::{
     extract::Query,
-    extract::{ws::{Message, WebSocket, WebSocketUpgrade}, State as AxumState},
+    extract::{
+        ws::{Message, WebSocket, WebSocketUpgrade},
+        State as AxumState,
+    },
     http::{HeaderValue, Method},
     response::IntoResponse,
     routing::{get, post},
@@ -833,7 +836,9 @@ async fn ws_generate_stream(mut socket: WebSocket, state: SharedState) {
     }
 
     let _ = socket
-        .send(Message::Text(serde_json::json!({"event": "done"}).to_string()))
+        .send(Message::Text(
+            serde_json::json!({"event": "done"}).to_string(),
+        ))
         .await;
 }
 
@@ -945,14 +950,14 @@ async fn main() -> Result<()> {
         Vec::new()
     };
     let persisted_bootstrap = load_persisted_peers(&known_peers_path).await;
-    
+
     // Default bootstrap peers - public Shard nodes that are always online
     // New nodes will automatically connect to the network via these
     let default_bootstrap = vec![
         // Add your EC2 or other known nodes here
         // Format: "/ip4/<IP>/tcp/<PORT>/p2p/<PEER_ID>"
     ];
-    
+
     let bootstrap_addrs = unique_addrs(
         default_bootstrap
             .into_iter()
