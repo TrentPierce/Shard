@@ -86,8 +86,8 @@ export default function NetworkTelemetryPage() {
               </div>
             </div>
             <div className="node-mix__legend">
-              <p><span className="dot dot--violet" />Scouts · {telemetry.scoutCount}</p>
-              <p><span className="dot dot--emerald" />Shards · {telemetry.shardCount}</p>
+              <p><span className="dot dot--violet" />Scouts ï¿½ {telemetry.scoutCount}</p>
+              <p><span className="dot dot--emerald" />Shards ï¿½ {telemetry.shardCount}</p>
             </div>
           </div>
         </div>
