@@ -23,9 +23,18 @@ export default function NetworkTelemetryPage() {
     <main className="network-page">
       <div className="network-page__noise" aria-hidden />
       <section className="network-page__hero">
-        <p className="network-page__kicker">Shard Network Operations</p>
-        <h1>Live Swarm Telemetry Dashboard</h1>
-        <span className="network-page__badge">{statusLabel}</span>
+        <p className="network-page__kicker">Operations Console</p>
+        <h1>Shard Telemetry</h1>
+        <p className="network-page__summary">
+          Real-time network health for contributors, operators, and API consumers.
+          Distributed performance improves as both Scout and Shard participation rises.
+        </p>
+        <div className="network-page__hero-meta">
+          <span className="network-page__badge">{statusLabel}</span>
+          <a className="network-page__link" href="https://github.com/TrentPierce/Shard/blob/main/docs/join-network.md" target="_blank" rel="noreferrer">
+            How to contribute
+          </a>
+        </div>
       </section>
 
       <section className="network-grid network-grid--stats">
@@ -38,13 +47,13 @@ export default function NetworkTelemetryPage() {
         <TelemetryStatCard
           label="Active WebGPU Scouts"
           value={compactNumber(telemetry.scoutCount)}
-          hint="browser nodes processing distributed prompts"
+          hint="browser draft generators"
           accent="violet"
         />
         <TelemetryStatCard
           label="Active Desktop Shards"
           value={compactNumber(telemetry.shardCount)}
-          hint="persistent desktop agents in routing mesh"
+          hint="full-model verifiers"
           accent="emerald"
         />
       </section>
@@ -52,7 +61,7 @@ export default function NetworkTelemetryPage() {
       <section className="network-grid network-grid--main">
         <div className="network-card network-card--wide">
           <div className="network-card__header">
-            <h2>Swarm Throughput Timeline</h2>
+            <h2>Throughput Timeline</h2>
             <span>last {telemetry.throughputHistory.length} samples</span>
           </div>
           <SwarmThroughputCanvas samples={telemetry.throughputHistory} />
@@ -60,14 +69,14 @@ export default function NetworkTelemetryPage() {
 
         <div className="network-card">
           <div className="network-card__header">
-            <h2>Node Type Mix</h2>
+            <h2>Node Mix</h2>
             <span>{compactNumber(totalNodes)} active nodes</span>
           </div>
           <div className="node-mix">
             <div
               className="node-mix__donut"
               style={{
-                background: `conic-gradient(#8b5cf6 0% ${scoutRatio.toFixed(2)}%, #34d399 ${scoutRatio.toFixed(2)}% 100%)`,
+                background: `conic-gradient(#6f5ef9 0% ${scoutRatio.toFixed(2)}%, #1dbf89 ${scoutRatio.toFixed(2)}% 100%)`,
               }}
               aria-label="Donut chart showing scouts and shards"
             >
@@ -77,8 +86,8 @@ export default function NetworkTelemetryPage() {
               </div>
             </div>
             <div className="node-mix__legend">
-              <p><span className="dot dot--violet" />Scouts Â· {telemetry.scoutCount}</p>
-              <p><span className="dot dot--emerald" />Shards Â· {telemetry.shardCount}</p>
+              <p><span className="dot dot--violet" />Scouts · {telemetry.scoutCount}</p>
+              <p><span className="dot dot--emerald" />Shards · {telemetry.shardCount}</p>
             </div>
           </div>
         </div>
