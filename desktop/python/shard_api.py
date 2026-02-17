@@ -409,6 +409,22 @@ def _merge_text_tokens(tokens: list[str]) -> str:
     return "".join(merged).strip()
 
 
+def _condense_response_text(text: str) -> str:
+    compact = re.sub(r"\s+", " ", text).strip()
+    if not compact:
+        return "Please ask a specific question."
+    first_line = compact.split(" (", 1)[0].strip()
+    parts = re.split(r"(?<=[.!?])\s+", first_line)
+    concise = parts[0].strip() if parts else first_line
+    if not concise:
+        concise = first_line
+    if len(concise) > 220:
+        concise = concise[:220].rstrip()
+        if not concise.endswith((".", "!", "?")):
+            concise += "."
+    return concise
+
+
 def _latest_user_message(messages: list["ChatMessage"]) -> str:
     for message in reversed(messages):
         if message.role == "user":
@@ -1129,6 +1145,8 @@ async def chat_completions(
         await control.close()
 
     content = _merge_text_tokens(tokens)
+    if CONCISE_MODE:
+        content = _condense_response_text(content)
     return ChatResponse(
         id=completion_id,
         choices=[Choice(index=0, message={"role": "assistant", "content": content})],
@@ -1173,6 +1191,7 @@ async def _stream_generate(
         return
 
     try:
+        token_buffer: list[str] = []
         async for token in cooperative_generate(
             prompt=prompt,
             local_model_generate=_local_generate,
@@ -1184,6 +1203,9 @@ async def _stream_generate(
         ):
             if _is_special_text_token(token):
                 break
+            if CONCISE_MODE:
+                token_buffer.append(token)
+                continue
             chunk = {
                 "id": completion_id,
                 "object": "chat.completion.chunk",
@@ -1199,6 +1221,23 @@ async def _stream_generate(
             }
             yield f"data: {json.dumps(chunk)}\n\n"
             await asyncio.sleep(0.005)
+
+        if CONCISE_MODE:
+            concise = _condense_response_text(_merge_text_tokens(token_buffer))
+            chunk = {
+                "id": completion_id,
+                "object": "chat.completion.chunk",
+                "created": int(time.time()),
+                "model": "shard-hybrid",
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": {"content": concise},
+                        "finish_reason": None,
+                    }
+                ],
+            }
+            yield f"data: {json.dumps(chunk)}\n\n"
     except Exception as exc:
         METRICS["chat_failures_total"] += 1
         LOGGER.exception("Streaming inference failed")
