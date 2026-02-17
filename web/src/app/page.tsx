@@ -15,6 +15,7 @@ import {
     publishResult,
     type Topology,
 } from "@/lib/swarm"
+import { PREFER_LOCAL_SHARD } from "@/lib/config"
 import {
     initWebLLM,
     checkWebGPUSupport,
@@ -48,62 +49,61 @@ export default function HomePage() {
 
     useEffect(() => {
         const boot = async () => {
-            // 1. Check for local Shard exe
-            const probe = await probeLocalShard()
-            if (probe.available) {
-                setMode("local-shard")
-                return
+            // Prefer Scout mode for browser visitors by default.
+            if (PREFER_LOCAL_SHARD) {
+                const probe = await probeLocalShard()
+                if (probe.available) {
+                    setMode("local-shard")
+                    return
+                }
             }
 
-            // If no local shard was found, initialize WebLLM for Scout mode
-            if (!probe.available) {
-                setMode("scout-initializing")
+            setMode("scout-initializing")
 
-                try {
-                    // Check WebGPU support first
-                    const gpuStatus = await checkWebGPUSupport()
-                    if (!gpuStatus.supported) {
-                        setWebLLMError(
-                            `WebGPU not available: ${gpuStatus.reason}. Cannot run Scout mode.`
-                        )
-                        setMode("leech")
-                        return
-                    }
-
-                    // Initialize WebLLM with progress callback
-                    await initWebLLM((progress) => {
-                        setWebLLMProgress(progress)
-                    })
-
-                    // Clear progress and transition to scout mode
-                    setWebLLMProgress(null)
-                    setWebLLMError(null)
-                    setMode("scout")
-
-                    // Initialize P2P connection to the network
-                    try {
-                        const peerId = await initP2P({
-                            emitSelf: false,
-                        })
-                        console.log('[p2p] Connected as scout, peerId:', peerId)
-
-                        // Subscribe to work topics
-                        subscribeToWork((work) => {
-                            console.log("Received work:", work.request_id)
-                        })
-                        subscribeToResults((result) => {
-                            console.log("Work result:", result.request_id)
-                            // Publish result back to network
-                            publishResult(result)
-                        })
-                    } catch (p2pError) {
-                        console.error('[p2p] Failed to initialize P2P:', p2pError)
-                    }
-                } catch (error: any) {
-                    console.error("Failed to initialize WebLLM:", error)
-                    setWebLLMError(error?.message ?? "Failed to initialize Scout mode")
+            try {
+                // Check WebGPU support first
+                const gpuStatus = await checkWebGPUSupport()
+                if (!gpuStatus.supported) {
+                    setWebLLMError(
+                        `WebGPU not available: ${gpuStatus.reason}. Cannot run Scout mode.`
+                    )
                     setMode("leech")
+                    return
                 }
+
+                // Initialize WebLLM with progress callback
+                await initWebLLM((progress) => {
+                    setWebLLMProgress(progress)
+                })
+
+                // Clear progress and transition to scout mode
+                setWebLLMProgress(null)
+                setWebLLMError(null)
+                setMode("scout")
+
+                // Initialize P2P connection to the network
+                try {
+                    const peerId = await initP2P({
+                        emitSelf: false,
+                    })
+                    console.log('[p2p] Connected as scout, peerId:', peerId)
+
+                    // Subscribe to work topics
+                    subscribeToWork((work) => {
+                        console.log("Received work:", work.request_id)
+                    })
+                    subscribeToResults((result) => {
+                        console.log("Work result:", result.request_id)
+                        // Publish result back to network
+                        publishResult(result)
+                    })
+                } catch (p2pError) {
+                    console.error('[p2p] Failed to initialize P2P:', p2pError)
+                }
+            } catch (error: any) {
+                console.error("Failed to initialize WebLLM:", error)
+                setWebLLMError(error?.message ?? "Failed to initialize Scout mode")
+                setMode("leech")
             }
         }
 

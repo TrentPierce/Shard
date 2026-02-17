@@ -56,7 +56,7 @@ cd Shard
 3. Add the upstream remote:
 
 ```bash
-git remote add upstream https://github.com/ShardNetwork/Shard.git
+git remote add upstream https://github.com/TrentPierce/Shard.git
 ```
 
 ### Build the Project
@@ -206,7 +206,7 @@ Shard/
 
 Before reporting a bug:
 
-1. Check existing [issues](https://github.com/ShardNetwork/Shard/issues)
+1. Check existing [issues](https://github.com/TrentPierce/Shard/issues)
 2. Search the documentation for known solutions
 3. Reproduce the issue with the latest version
 
@@ -631,9 +631,9 @@ Contributors will be recognized in:
 
 If you need assistance:
 
-1. Check the [documentation](https://github.com/ShardNetwork/Shard/tree/main/docs)
-2. Search existing [issues](https://github.com/ShardNetwork/Shard/issues)
-3. Start a [discussion](https://github.com/ShardNetwork/Shard/discussions)
+1. Check the [documentation](https://github.com/TrentPierce/Shard/tree/main/docs)
+2. Search existing [issues](https://github.com/TrentPierce/Shard/issues)
+3. Start a [discussion](https://github.com/TrentPierce/Shard/discussions)
 4. Ask in the community chat (if available)
 
 ---

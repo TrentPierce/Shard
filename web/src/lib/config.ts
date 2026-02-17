@@ -23,6 +23,12 @@ export const API_BASE = process.env.NEXT_PUBLIC_API_URL
 export const RUST_BASE = process.env.NEXT_PUBLIC_RUST_URL || "http://127.0.0.1:9091"
 
 /**
+ * Whether the browser should prefer local shard mode when a localhost daemon is detected.
+ * Default is false so normal visitors contribute as Scout nodes by default.
+ */
+export const PREFER_LOCAL_SHARD = process.env.NEXT_PUBLIC_PREFER_LOCAL_SHARD === "true"
+
+/**
  * Get the API URL for the Python Shard API.
  * Returns full URL for API requests.
  */
