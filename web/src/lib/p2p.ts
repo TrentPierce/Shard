@@ -161,16 +161,6 @@ export async function initP2P(config: P2PConfig = {}): Promise<string> {
 
     isInitialized = true;
 
-    // Explicitly dial bootstraps once to accelerate first connection.
-    for (const addr of bootstrapPeers) {
-      try {
-        await p2pNode.dial(addr);
-        console.log('[p2p] Dialed bootstrap peer:', addr);
-      } catch (dialError) {
-        console.warn('[p2p] Bootstrap dial failed:', addr, dialError);
-      }
-    }
-
     console.log('[p2p] Initialized successfully');
     console.log('[p2p] Peer ID:', p2pNode.peerId.toString());
     console.log('[p2p] Multiaddrs:', p2pNode.getMultiaddrs().map(m => m.toString()));
