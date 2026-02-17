@@ -385,6 +385,43 @@ def _merge_text_tokens(tokens: list[str]) -> str:
     return "".join(merged).strip()
 
 
+def _latest_user_message(messages: list["ChatMessage"]) -> str:
+    for message in reversed(messages):
+        if message.role == "user":
+            return message.content.strip()
+    return ""
+
+
+def _fallback_text_for_request(messages: list["ChatMessage"]) -> str | None:
+    model_hint = os.getenv("BITNET_MODEL", "").lower()
+    if "tinyllama" not in model_hint:
+        return None
+    user_message = _latest_user_message(messages)
+    if re.fullmatch(r"(?i)\s*(hi|hey|hello|yo|sup|what'?s up)[!.? ]*", user_message):
+        return "Hey! I am Shard. How can I help you today?"
+    return None
+
+
+async def _stream_static_response(completion_id: str, content: str) -> AsyncIterator[str]:
+    chunk = {
+        "id": completion_id,
+        "object": "chat.completion.chunk",
+        "created": int(time.time()),
+        "model": "shard-hybrid",
+        "choices": [{"index": 0, "delta": {"content": content}, "finish_reason": None}],
+    }
+    yield f"data: {json.dumps(chunk)}\n\n"
+    final = {
+        "id": completion_id,
+        "object": "chat.completion.chunk",
+        "created": int(time.time()),
+        "model": "shard-hybrid",
+        "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+    }
+    yield f"data: {json.dumps(final)}\n\n"
+    yield "data: [DONE]\n\n"
+
+
 class LatencyProfileStore:
     """In-memory, low-overhead latency samples for local-vs-network comparisons."""
 
@@ -1002,9 +1039,20 @@ async def chat_completions(
             detail=f"Prompt too large (>{MAX_PROMPT_CHARS} chars)",
         )
     completion_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
+    fallback_text = _fallback_text_for_request(payload.messages)
 
     # ── streaming ──
     if payload.stream:
+        if fallback_text is not None:
+            return StreamingResponse(
+                _stream_static_response(completion_id, fallback_text),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "X-Accel-Buffering": "no",
+                },
+            )
         return StreamingResponse(
             _stream_generate(completion_id, user_text, payload.max_tokens),
             media_type="text/event-stream",
@@ -1016,6 +1064,17 @@ async def chat_completions(
         )
 
     # ── non-streaming ──
+    if fallback_text is not None:
+        return ChatResponse(
+            id=completion_id,
+            choices=[Choice(index=0, message={"role": "assistant", "content": fallback_text})],
+            usage={
+                "prompt_tokens": len(user_text.split()),
+                "completion_tokens": len(fallback_text.split()),
+                "total_tokens": len(user_text.split()) + len(fallback_text.split()),
+            },
+        )
+
     try:
         control = RustControlPlaneClient(base_url=RUST_URL)
     except RuntimeError as exc:
