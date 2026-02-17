@@ -45,6 +45,7 @@ jobs:
           fi
 
       - name: Upload Release Asset
+        if: github.event_name == 'release'
         uses: softprops/action-gh-release@v1
         with:
           files: release/*

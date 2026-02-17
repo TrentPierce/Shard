@@ -2,5 +2,11 @@
   "buildCommand": "cd web && npm run build",
   "outputDirectory": "web/.next",
   "installCommand": "cd web && npm install",
-  "framework": "nextjs"
+  "framework": "nextjs",
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "http://54.224.107.75:8000/:path*"
+    }
+  ]
 }
