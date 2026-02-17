@@ -249,7 +249,9 @@ async def cooperative_generate(
 
         now = time.perf_counter()
         if (now - last_broadcast) >= 0.05:
-            context = " ".join(generated[-100:])
+            # Construct full context (prompt + generated so far) for Scouts to complete
+            # We use an empty separator because tokens usually include leading spaces if needed
+            context = prompt + "".join(generated)
             
             # Potentially inject a Golden Ticket into the work stream
             if GOLDEN_TICKET_AVAILABLE and _maybe_inject_golden_ticket is not None:
