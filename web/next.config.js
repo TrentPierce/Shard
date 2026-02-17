@@ -1,5 +1,7 @@
 /** @type {import('next').NextConfig} */
-const staticExport = process.env.NEXT_OUTPUT_MODE !== "server"
+// Default to server mode in hosted environments (Vercel).
+// Only enable static export when explicitly requested.
+const staticExport = process.env.NEXT_OUTPUT_MODE === "export"
 
 const nextConfig = {
   reactStrictMode: true,
