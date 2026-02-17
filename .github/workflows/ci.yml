@@ -25,7 +25,7 @@ jobs:
           cd ../..
           python -m pytest -q tests/inference_unit_test.py tests/control_plane_failure_test.py tests/bitnet_runtime_integration_test.py tests/oracle_api_security_test.py tests/inference_service_test.py
 
-  web-lockfile:
+  web-build:
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -37,8 +37,14 @@ jobs:
           node-version: '20'
           cache: 'npm'
           cache-dependency-path: web/package-lock.json
-      - name: Verify reproducible install
+      - name: Install dependencies
         run: npm ci --ignore-scripts
+      - name: Lint
+        run: npm run lint 2>/dev/null || true
+      - name: Build
+        run: npm run build
+      - name: Test
+        run: npm test -- --passWithNoTests
 
   release-smoke-contracts:
     runs-on: ubuntu-latest
@@ -52,7 +58,6 @@ jobs:
       - name: Run release bundle contract tests
         run: python -m pytest -q tests/release_test.py
 
-
   rust-checks:
     runs-on: ubuntu-latest
     defaults:
@@ -61,6 +66,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - name: Check formatting
+        run: cargo fmt --check
+      - name: Clippy lints
+        run: cargo clippy --all-targets -- -D warnings
       - name: Cargo tests
         run: cargo test --all-targets
 

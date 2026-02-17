@@ -11,10 +11,25 @@ export const viewport: Viewport = {
 }
 
 export const metadata: Metadata = {
-    title: "Shard — Distributed Inference Network",
+    title: "Shard — Browser-Powered Distributed Inference",
     description:
-        "Free, unlimited LLM access powered by a decentralized P2P inference mesh. Contribute compute, earn priority.",
+        "Free, unlimited LLM access powered by a decentralized P2P inference mesh. Contribute browser compute via WebGPU, earn priority access. OpenAI-compatible API.",
+    keywords: ["AI", "LLM", "distributed inference", "P2P", "WebGPU", "decentralized", "BitNet", "open source"],
     manifest: "/manifest.json",
+    openGraph: {
+        title: "Shard — Browser-Powered Distributed Inference",
+        description:
+            "Free, unlimited LLM access through a decentralized P2P mesh. Your browser becomes an AI compute node.",
+        type: "website",
+        siteName: "Shard Network",
+        locale: "en_US",
+    },
+    twitter: {
+        card: "summary_large_image",
+        title: "Shard — Browser-Powered Distributed Inference",
+        description:
+            "Free LLM access through decentralized P2P compute. Contribute from your browser, earn priority.",
+    },
     appleWebApp: {
         capable: true,
         statusBarStyle: "black-translucent",
@@ -54,7 +69,7 @@ export default function RootLayout({
                 />
             </head>
             <body>
-                 <Providers>
+                <Providers>
                     <ErrorBoundary>{children}</ErrorBoundary>
                 </Providers>
                 {/* Service Worker Registration */}
