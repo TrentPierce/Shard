@@ -167,7 +167,15 @@ def test_prompt_format_auto_detects_tinyllama_chatml(monkeypatch) -> None:
 
     assert module._resolved_prompt_format() == "chatml"
     prompt = module._build_chat_prompt([module.Message(role="user", content="Hey")])
-    assert prompt == "<|user|>\nHey</s>\n<|assistant|>\n"
+    assert prompt == "<|user|>\nHey\n<|assistant|>\n"
+
+
+def test_merge_text_tokens_stops_on_special_tokens(monkeypatch) -> None:
+    monkeypatch.setenv("SHARD_TESTING", "1")
+    module = importlib.import_module("shard_api")
+    module = importlib.reload(module)
+    merged = module._merge_text_tokens(["Hello", " world", "</s>", "ignored"])
+    assert merged == "Hello world"
 
 
 def test_latency_profile_endpoint(monkeypatch) -> None:
