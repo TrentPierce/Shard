@@ -8,6 +8,7 @@ type HealthSnapshot = {
   rust_uptime_ms?: number
   rust_version?: string
   connected_peers?: number
+  active_scouts?: number
   bitnet_loaded?: boolean
   last_incident?: string
 }
@@ -102,7 +103,7 @@ export function useProductSignals() {
     let cancelled = false
     const loadHealth = async () => {
       try {
-        const res = await fetch(apiUrl("/health"))
+        const res = await fetch(apiUrl("/health"), { cache: "no-store" })
         if (!res.ok) return
         const data = (await res.json()) as HealthSnapshot
         if (!cancelled) setHealth(data)

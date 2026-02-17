@@ -35,6 +35,7 @@ export default function NetworkTelemetryPage() {
           <span className="network-page__badge">{statusLabel}</span>
           <span className="network-page__badge">Model: shard-hybrid</span>
           <span className="network-page__badge">Sessions: {analytics.sessions}</span>
+          <span className="network-page__badge">Active scouts: {health.active_scouts ?? 0}</span>
           <span className="network-page__badge">Success: {successRate}%</span>
           <span className="network-page__badge">
             Avg latency: {analytics.avgLatencyMs > 0 ? `${analytics.avgLatencyMs}ms` : "n/a"}
