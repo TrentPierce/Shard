@@ -2,21 +2,7 @@ name: CI
 
 on:
   push:
-    paths:
-      - ".github/workflows/ci.yml"
-      - "desktop/**"
-      - "web/**"
-      - "tests/**"
-      - "pyproject.toml"
-      - "Makefile"
   pull_request:
-    paths:
-      - ".github/workflows/ci.yml"
-      - "desktop/**"
-      - "web/**"
-      - "tests/**"
-      - "pyproject.toml"
-      - "Makefile"
 
 jobs:
   python-tests:
