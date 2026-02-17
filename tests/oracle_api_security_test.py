@@ -203,6 +203,18 @@ def test_tinyllama_greeting_fallback_stream(monkeypatch) -> None:
     assert "Hey! I am Shard. How can I help you today?" in body
 
 
+def test_prompt_format_auto_detects_phi(monkeypatch) -> None:
+    monkeypatch.setenv("SHARD_PROMPT_FORMAT", "auto")
+    monkeypatch.setenv("BITNET_MODEL", "/home/ubuntu/models/phi-3-mini-4k-instruct.Q4_K_M.gguf")
+    monkeypatch.setenv("SHARD_TESTING", "1")
+    module = importlib.import_module("shard_api")
+    module = importlib.reload(module)
+
+    assert module._resolved_prompt_format() == "phi"
+    prompt = module._build_chat_prompt([module.Message(role="user", content="Hey")])
+    assert prompt == "<|user|>\nHey<|end|>\n<|assistant|>\n"
+
+
 def test_latency_profile_endpoint(monkeypatch) -> None:
     client = _load_client(monkeypatch)
 
