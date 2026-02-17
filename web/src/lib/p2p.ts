@@ -133,7 +133,9 @@ export async function initP2P(config: P2PConfig = {}): Promise<string> {
 
       // Services
       services: {
-        identify: identify(),
+        // Compatibility cast: libp2p package versions can disagree on PeerId types
+        // across transitive deps in CI/Vercel, but runtime service contract is compatible.
+        identify: identify() as any,
         pubsub: createGossipSub({
           emitSelf: config.emitSelf ?? false,
           fallbackToFloodsub: true,
