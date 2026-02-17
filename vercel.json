@@ -1,5 +1,5 @@
 {
-  "buildCommand": "cd web && npm run build && cd .. && rm -rf .next && cp -R web/.next .next",
+  "buildCommand": "cd web && npm run build && cd .. && rm -rf .next && cp -R web/.next .next && cp web/package.json package.json",
   "installCommand": "cd web && npm install",
   "framework": "nextjs",
   "rewrites": [
