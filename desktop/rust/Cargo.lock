@@ -3375,7 +3375,7 @@ dependencies = [
 
 [[package]]
 name = "shard-daemon"
-version = "0.4.4"
+version = "0.4.5"
 dependencies = [
  "anyhow",
  "async-trait",
