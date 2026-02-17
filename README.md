@@ -112,6 +112,42 @@ curl http://localhost:8000/health
 curl http://localhost:8000/v1/system/topology
 ```
 
+### Run a Shard Node from Release Binary (v0.4.7+)
+
+`v0.4.7` binaries include built-in public bootstrap peers. In most cases, you only need to run the binary.
+
+#### Windows (PowerShell)
+```powershell
+& ".\shard-daemon-x86_64-pc-windows-msvc.exe"
+```
+
+#### Linux
+```bash
+chmod +x ./shard-daemon-x86_64-unknown-linux-gnu
+./shard-daemon-x86_64-unknown-linux-gnu
+```
+
+#### macOS (Apple Silicon)
+```bash
+chmod +x ./shard-daemon-aarch64-apple-darwin
+./shard-daemon-aarch64-apple-darwin
+```
+
+Quick check (daemon local control API):
+```bash
+curl http://127.0.0.1:9091/health
+```
+
+If port `4001` is already in use, launch with a different P2P port:
+```powershell
+# Windows
+& ".\shard-daemon-x86_64-pc-windows-msvc.exe" --tcp-port 4011
+```
+```bash
+# Linux/macOS
+./<daemon-binary> --tcp-port 4011
+```
+
 ### Prerequisites
 
 - **Rust** 1.75+ — [rustup.rs](https://rustup.rs)
