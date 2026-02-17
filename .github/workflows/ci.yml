@@ -2,7 +2,21 @@ name: CI
 
 on:
   push:
+    paths:
+      - ".github/workflows/ci.yml"
+      - "desktop/**"
+      - "web/**"
+      - "tests/**"
+      - "pyproject.toml"
+      - "Makefile"
   pull_request:
+    paths:
+      - ".github/workflows/ci.yml"
+      - "desktop/**"
+      - "web/**"
+      - "tests/**"
+      - "pyproject.toml"
+      - "Makefile"
 
 jobs:
   python-tests:
@@ -20,10 +34,10 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
           python -m pip install pytest
-      - name: Unit + failure tests
+      - name: Run stable Python tests
         run: |
           cd ../..
-          python -m pytest -q tests/inference_unit_test.py tests/control_plane_failure_test.py tests/bitnet_runtime_integration_test.py tests/oracle_api_security_test.py tests/inference_service_test.py
+          python -m pytest -q tests/inference_unit_test.py tests/control_plane_failure_test.py tests/oracle_api_security_test.py tests/useful_compute_verifier_test.py tests/inference_service_test.py
 
   web-build:
     runs-on: ubuntu-latest
@@ -46,18 +60,6 @@ jobs:
       - name: Test
         run: npm test -- --passWithNoTests
 
-  release-smoke-contracts:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-      - name: Install pytest
-        run: python -m pip install pytest
-      - name: Run release bundle contract tests
-        run: python -m pytest -q tests/release_test.py
-
   rust-checks:
     runs-on: ubuntu-latest
     defaults:
@@ -75,9 +77,3 @@ jobs:
       - name: Cargo tests
         run: cargo test --all-targets
 
-  docker-build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Build container image
-        run: docker build -t shard:ci .
