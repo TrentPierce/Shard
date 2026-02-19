@@ -1,0 +1,163 @@
+services:
+  node-a:
+    build:
+      context: ../..
+      dockerfile: Dockerfile.daemon
+    command:
+      - shard-daemon
+      - --control-port
+      - "9091"
+      - --telemetry-ws-port
+      - "9191"
+      - --tcp-port
+      - "4001"
+      - --webrtc-port
+      - "9090"
+      - --quic-port
+      - "9092"
+      - --model-id
+      - "${MODEL_ID:-test-gguf}"
+      - --layer-start
+      - "${NODE_A_LAYER_START:-1}"
+      - --layer-end
+      - "${NODE_A_LAYER_END:-10}"
+    ports:
+      - "19091:9091"
+      - "14001:4001"
+      - "19090:9090/udp"
+      - "19092:9092/udp"
+    networks: [pipeline-net]
+
+  node-b:
+    build:
+      context: ../..
+      dockerfile: Dockerfile.daemon
+    command:
+      - shard-daemon
+      - --control-port
+      - "9091"
+      - --telemetry-ws-port
+      - "9191"
+      - --tcp-port
+      - "4001"
+      - --webrtc-port
+      - "9090"
+      - --quic-port
+      - "9092"
+      - --model-id
+      - "${MODEL_ID:-test-gguf}"
+      - --layer-start
+      - "${NODE_B_LAYER_START:-1}"
+      - --layer-end
+      - "${NODE_B_LAYER_END:-10}"
+      - --bootstrap
+      - /dns4/node-a/tcp/4001
+    ports:
+      - "29091:9091"
+      - "24001:4001"
+      - "29090:9090/udp"
+      - "29092:9092/udp"
+    depends_on: [node-a]
+    networks: [pipeline-net]
+
+  node-c:
+    build:
+      context: ../..
+      dockerfile: Dockerfile.daemon
+    command:
+      - shard-daemon
+      - --control-port
+      - "9091"
+      - --telemetry-ws-port
+      - "9191"
+      - --tcp-port
+      - "4001"
+      - --webrtc-port
+      - "9090"
+      - --quic-port
+      - "9092"
+      - --model-id
+      - "${MODEL_ID:-test-gguf}"
+      - --layer-start
+      - "${NODE_C_LAYER_START:-11}"
+      - --layer-end
+      - "${NODE_C_LAYER_END:-20}"
+      - --bootstrap
+      - /dns4/node-a/tcp/4001
+    ports:
+      - "39091:9091"
+      - "34001:4001"
+      - "39090:9090/udp"
+      - "39092:9092/udp"
+    depends_on: [node-a]
+    networks: [pipeline-net]
+
+  node-d:
+    build:
+      context: ../..
+      dockerfile: Dockerfile.daemon
+    profiles: ["five-node"]
+    command:
+      - shard-daemon
+      - --control-port
+      - "9091"
+      - --telemetry-ws-port
+      - "9191"
+      - --tcp-port
+      - "4001"
+      - --webrtc-port
+      - "9090"
+      - --quic-port
+      - "9092"
+      - --model-id
+      - "${MODEL_ID:-test-gguf}"
+      - --layer-start
+      - "${NODE_D_LAYER_START:-11}"
+      - --layer-end
+      - "${NODE_D_LAYER_END:-20}"
+      - --bootstrap
+      - /dns4/node-a/tcp/4001
+    ports:
+      - "49091:9091"
+      - "44001:4001"
+      - "49090:9090/udp"
+      - "49092:9092/udp"
+    depends_on: [node-a]
+    networks: [pipeline-net]
+
+  node-e:
+    build:
+      context: ../..
+      dockerfile: Dockerfile.daemon
+    profiles: ["five-node"]
+    command:
+      - shard-daemon
+      - --control-port
+      - "9091"
+      - --telemetry-ws-port
+      - "9191"
+      - --tcp-port
+      - "4001"
+      - --webrtc-port
+      - "9090"
+      - --quic-port
+      - "9092"
+      - --model-id
+      - "${MODEL_ID:-test-gguf}"
+      - --layer-start
+      - "${NODE_E_LAYER_START:-21}"
+      - --layer-end
+      - "${NODE_E_LAYER_END:-30}"
+      - --bootstrap
+      - /dns4/node-a/tcp/4001
+    ports:
+      - "59091:9091"
+      - "54001:4001"
+      - "59090:9090/udp"
+      - "59092:9092/udp"
+    depends_on: [node-a]
+    networks: [pipeline-net]
+
+networks:
+  pipeline-net:
+    driver: bridge
