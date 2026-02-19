@@ -18,7 +18,6 @@ import { yamux } from '@chainsafe/libp2p-yamux';
 import { mplex } from '@libp2p/mplex';
 import { gossipsub as createGossipSub } from '@chainsafe/libp2p-gossipsub';
 import { bootstrap } from '@libp2p/bootstrap';
-import { identify } from '@libp2p/identify';
 import type { Libp2p } from 'libp2p';
 import type { GossipSub } from '@chainsafe/libp2p-gossipsub';
 import type { Message } from '@libp2p/interface';
@@ -129,9 +128,6 @@ export async function initP2P(config: P2PConfig = {}): Promise<string> {
 
       // Services
       services: {
-        // Compatibility cast: libp2p package versions can disagree on PeerId types
-        // across transitive deps in CI/Vercel, but runtime service contract is compatible.
-        identify: identify() as any,
         pubsub: createGossipSub({
           emitSelf: config.emitSelf ?? false,
           fallbackToFloodsub: true,

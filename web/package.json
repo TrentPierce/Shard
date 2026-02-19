@@ -6,6 +6,7 @@
     "dev": "next dev --port 3000",
     "build": "next build",
     "start": "next start",
+    "deploy:prod": "vercel --prod",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage"
@@ -15,7 +16,6 @@
     "@chainsafe/libp2p-noise": "^15.1.0",
     "@chainsafe/libp2p-yamux": "^6.0.1",
     "@libp2p/bootstrap": "^10.1.0",
-    "@libp2p/identify": "^3.0.36",
     "@libp2p/mplex": "^10.0.1",
     "@libp2p/websockets": "^8.0.17",
     "@libp2p/webrtc": "^4.0.0",

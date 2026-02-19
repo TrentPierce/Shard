@@ -23,6 +23,7 @@ import {
     checkWebGPUSupport,
     type ModelProgress,
 } from "@/lib/webllm"
+import { startBrowserLayerHost } from "@/lib/layer-host"
 
 export type NodeMode =
     | "loading"
@@ -41,6 +42,7 @@ export default function HomePage() {
     const [scoutRetryNonce, setScoutRetryNonce] = useState(0)
     const scoutBootedRef = useRef(false)
     const stopScoutWorkerRef = useRef<(() => void) | null>(null)
+    const stopLayerHostRef = useRef<(() => void) | null>(null)
 
     const getBootstrapPeersFromTopology = useCallback((topo: Topology | null): string[] => {
         if (!topo) return []
@@ -103,6 +105,10 @@ export default function HomePage() {
             if (stopScoutWorkerRef.current) {
                 stopScoutWorkerRef.current()
                 stopScoutWorkerRef.current = null
+            }
+            if (stopLayerHostRef.current) {
+                stopLayerHostRef.current()
+                stopLayerHostRef.current = null
             }
             scoutBootedRef.current = false
             setWebLLMError(null)
@@ -173,6 +179,17 @@ export default function HomePage() {
                 }
 
                 try {
+                    const stopLayerHost = await startBrowserLayerHost({
+                        modelId: "default-model",
+                        layerStart: 0,
+                        layerEnd: 1,
+                    })
+                    stopLayerHostRef.current = stopLayerHost
+                } catch (layerHostError) {
+                    console.warn("[layer-host] Browser layer host disabled:", layerHostError)
+                }
+
+                try {
                     const liveTopology = await fetchTopology()
                     const bootstrapPeers = getBootstrapPeersFromTopology(liveTopology)
                     const peerId = await initP2P({
@@ -204,6 +221,10 @@ export default function HomePage() {
             if (stopScoutWorkerRef.current) {
                 stopScoutWorkerRef.current()
                 stopScoutWorkerRef.current = null
+            }
+            if (stopLayerHostRef.current) {
+                stopLayerHostRef.current()
+                stopLayerHostRef.current = null
             }
         }
     }, [showLanding, scoutRetryNonce])
