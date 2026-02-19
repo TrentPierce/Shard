@@ -1,20 +1,13 @@
 # syntax=docker/dockerfile:1.7
 
-FROM rust:1.88-bookworm AS rust-builder
+FROM rust:1.88-bookworm AS builder
 WORKDIR /build
 COPY desktop/rust/Cargo.toml desktop/rust/Cargo.lock* ./desktop/rust/
 COPY desktop/rust/src ./desktop/rust/src
-RUN cd desktop/rust && cargo build --release
+RUN cd desktop/rust && cargo build --release --bin shard-daemon
 
-FROM python:3.11-slim-bookworm AS python-runtime
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
-WORKDIR /app
-COPY desktop/python/requirements.txt ./desktop/python/requirements.txt
-RUN pip install --no-cache-dir -r desktop/python/requirements.txt
-COPY desktop/python ./desktop/python
-COPY --from=rust-builder /build/desktop/rust/target/release/shard-daemon /usr/local/bin/shard-daemon
-COPY scripts/docker-entrypoint.sh /usr/local/bin/shard-entrypoint
-RUN chmod +x /usr/local/bin/shard-entrypoint
-EXPOSE 8000 9091 4001 4101
-ENTRYPOINT ["shard-entrypoint"]
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
+COPY --from=builder /build/desktop/rust/target/release/shard-daemon /usr/local/bin/shard-daemon
+EXPOSE 9091 4001 4101 9090/udp 9092/udp
+ENTRYPOINT ["shard-daemon"]

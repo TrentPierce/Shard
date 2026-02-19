@@ -112,13 +112,13 @@ If you want a quick explanation of roles, contribution, and why distributed mode
 
 #### Run as Shard (one-command local stack)
 ```bash
-docker compose up --build shard-daemon shard-inference shard-api
+docker compose up --build shard-daemon
 ```
 
 Verify:
 ```bash
-curl http://localhost:8000/health
-curl http://localhost:8000/v1/system/topology
+curl http://localhost:9091/health
+curl http://localhost:9091/topology
 ```
 
 ### Run a Shard Node from Release Binary (v0.4.8+)
@@ -210,7 +210,7 @@ Durable ledger files (auto-managed per node):
 
 If API credit-gating is enabled, include your wallet on requests:
 ```bash
-curl http://localhost:8000/v1/chat/completions \
+curl http://localhost:9091/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "X-Shard-Wallet: <wallet>" \
   -d '{"model":"shard-hybrid","messages":[{"role":"user","content":"Hello!"}]}'
@@ -242,8 +242,7 @@ If port `4001` is already in use, launch with a different P2P port:
 ### Prerequisites
 
 - **Rust** 1.75+ — [rustup.rs](https://rustup.rs)
-- **Python** 3.11+ — with pip
-- **Node.js** 18+ — with npm
+- **Node.js** 18+ with npm
 
 ### Web Client (Browser Scout)
 
@@ -269,7 +268,7 @@ Phase 4 browser layer hosting is enabled in the web client:
 - Activation payloads are obfuscated in transit and processed in a WebGPU pass-through stage before return.
 
 <details>
-<summary><strong>🖥️ Desktop Shard Node (Rust Daemon + Python API)</strong></summary>
+<summary><strong>Desktop Shard Node (Rust Daemon)</strong></summary>
 
 #### 1. Start the P2P Daemon
 
@@ -283,19 +282,7 @@ cargo build --release
   --quic-port 9092
 ```
 
-#### 2. Start the Inference API
-
-```bash
-cd desktop/python
-python -m venv .venv
-# Windows: .venv\Scripts\activate
-# Linux/macOS: source .venv/bin/activate
-pip install -r requirements.txt
-BITNET_LIB=/path/to/libshard_engine.so \
-BITNET_MODEL=/path/to/model.gguf \
-python run.py --rust-url http://127.0.0.1:9091
-```
-
+The daemon currently exposes the primary API surface directly on the control port (including `/v1/chat/completions`).`r`n`r`n
 </details>
 
 <details>
@@ -313,8 +300,6 @@ Services:
 | Service | Port | Description |
 |---------|------|-------------|
 | `shard-daemon` | 9091, 4001 | P2P networking (libp2p) |
-| `shard-api` | 8000 | OpenAI-compatible API |
-| `shard-inference` | 7000 | BitNet inference engine |
 | `prometheus` | 9095 | Metrics (monitoring profile) |
 | `grafana` | 3001 | Dashboards (monitoring profile) |
 
@@ -350,7 +335,7 @@ Shard is **OpenAI-compatible** — use any existing client library:
 from openai import OpenAI
 
 client = OpenAI(
-    base_url="http://localhost:8000/v1",
+    base_url="http://localhost:9091/v1",
     api_key="your-api-key",  # optional
 )
 
@@ -366,7 +351,7 @@ for chunk in response:
 
 ```bash
 # Or with cURL
-curl http://localhost:8000/v1/chat/completions \
+curl http://localhost:9091/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{"model": "shard-hybrid", "messages": [{"role": "user", "content": "Hello!"}]}'
 ```
@@ -380,9 +365,7 @@ curl http://localhost:8000/v1/chat/completions \
 | Component | Language | Purpose |
 |-----------|----------|---------|
 | **Web Client** | TypeScript / React | Browser UI, WebLLM scout engine, P2P mesh |
-| **Shard API** | Python (FastAPI) | OpenAI-compatible API, inference orchestration |
-| **Rust Daemon** | Rust (libp2p) | P2P networking, peer discovery, gossipsub |
-| **BitNet Bridge** | Python (ctypes) | Local model verification via BitNet 1.58-bit |
+| **Rust Daemon** | Rust (libp2p + axum) | P2P networking, peer discovery, control/API surface |
 
 ### Key Technologies
 
@@ -477,5 +460,7 @@ Converts to Apache 2.0 on February 13, 2036.
 <div align="center">
   <sub>Built with 🧊 by the <a href="https://github.com/TrentPierce/Shard">Shard</a> community</sub>
 </div>
+
+
 
 

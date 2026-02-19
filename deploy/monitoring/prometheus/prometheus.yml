@@ -3,7 +3,7 @@ global:
   evaluation_interval: 15s
 
 scrape_configs:
-  - job_name: shard-api
+  - job_name: shard-daemon
     metrics_path: /metrics
     static_configs:
-      - targets: ["shard-api:8000"]
+      - targets: ["shard-daemon:9091"]
