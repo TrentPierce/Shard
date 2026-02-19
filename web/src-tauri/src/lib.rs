@@ -76,27 +76,36 @@ pub fn run() {
 
                 if !bitnet_model.exists() {
                     println!("Model not found at {:?}, downloading...", bitnet_model);
-                    // Replace with actual BitNet model URL
                     let model_url = "https://huggingface.co/radames/bitnet-llama-2/resolve/main/ggml-model-i2_s.gguf"; 
                     if let Ok(response) = reqwest::get(model_url).await {
+                        let total_size = response.content_length().unwrap_or(1);
+                        let mut downloaded = 0;
                         if let Ok(mut file) = File::create(&bitnet_model).await {
                             let mut stream = response.bytes_stream();
                             while let Some(chunk) = stream.next().await {
                                 if let Ok(bytes) = chunk {
+                                    downloaded += bytes.len() as u64;
+                                    let progress = (downloaded as f64 / total_size as f64) * 100.0;
+                                    let _ = app_handle.emit("download-progress", progress);
                                     let _ = file.write_all(&bytes).await;
                                 }
                             }
+                            let _ = app_handle.emit("download-complete", true);
                         }
                     }
+                } else {
+                    let _ = app_handle.emit("download-complete", true);
                 }
 
-                println!("Launching shard-daemon sidecar...");
+                // Launch the daemon with explicit ports matching the dev environment
                 let sidecar_command = app_handle
                     .shell()
                     .sidecar("shard-daemon")
                     .expect("failed to create sidecar command")
+                    .args(["--control-port", "9091", "--tcp-port", "4001"])
                     .env("BITNET_LIB", bitnet_lib.to_string_lossy().to_string())
-                    .env("BITNET_MODEL", bitnet_model.to_string_lossy().to_string());
+                    .env("BITNET_MODEL", bitnet_model.to_string_lossy().to_string())
+                    .env("RUST_LOG", "info");
 
                 let (mut rx, mut _child) = sidecar_command
                     .spawn()

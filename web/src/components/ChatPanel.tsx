@@ -85,8 +85,8 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
                     updated[updated.length - 1] = {
                         ...last,
                         content:
-                            "Connection error: " +
-                            (err?.message ?? "Could not reach the Shard API at port 8000."),
+                            "Network unavailable: " +
+                            (err?.message ?? "Could not connect to the local Shard daemon. Ensure the background process is running and the model is downloaded."),
                     }
                 }
                 return updated
@@ -122,43 +122,49 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
     ]
 
     return (
-        <div className="chat" role="main" aria-label="Chat interface">
-            <div className="chat__header">
-                <div>
-                    <h2 className="chat__title">Conversation</h2>
-                    <p className="chat__subtitle">OpenAI-compatible chat routed through Shard verification.</p>
-                    <div className="chat__signal-row">
-                        <span className="chat__signal-chip">Model: {modelLabel}</span>
-                        <span className="chat__signal-chip">{versionLabel}</span>
-                        <span className="chat__signal-chip">{uptimeLabel}</span>
-                        <span className="chat__signal-chip">{lastIncidentLabel}</span>
+        <div className="flex flex-col flex-1 h-screen overflow-hidden bg-primary" role="main">
+            <div className="px-8 py-6 border-b border-glass-border bg-glass-bg/50 backdrop-blur-md flex justify-between items-center shrink-0">
+                <div className="flex flex-col gap-1">
+                    <h2 className="text-lg font-display font-bold text-white tracking-tight">Intelligence Gateway</h2>
+                    <div className="flex items-center gap-3">
+                        <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-accent-cyan/10 border border-accent-cyan/20 text-[10px] text-accent-cyan font-mono uppercase tracking-wider">
+                            {modelLabel}
+                        </div>
+                        <div className="h-1 w-1 rounded-full bg-muted"></div>
+                        <div className="text-[10px] text-muted font-medium uppercase tracking-wider">{versionLabel}</div>
                     </div>
                 </div>
-                <div className="chat__status-group">
-                    <span className={`chat__status ${ready ? "chat__status--ok" : "chat__status--pending"}`}>
-                        {ready ? "Network Ready" : "Connecting"}
-                    </span>
-                    <span className="chat__status chat__status--neutral">{assistantMessages} replies</span>
-                    <span className="chat__status chat__status--neutral">{analytics.sessions} sessions</span>
-                    <span className="chat__status chat__status--neutral">{successRate}% success</span>
+                <div className="flex items-center gap-4">
+                    <div className="flex flex-col items-end gap-1">
+                        <div className={`text-[10px] font-bold uppercase tracking-widest ${ready ? "text-accent-emerald" : "text-accent-rose"}`}>
+                            {ready ? "● Sync Active" : "○ Disconnected"}
+                        </div>
+                        <div className="text-[9px] text-muted uppercase tracking-tighter tabular-nums">
+                            {analytics.sessions} sessions · {successRate}% reliability
+                        </div>
+                    </div>
                 </div>
             </div>
 
-            <div className="chat__messages" role="log" aria-live="polite" aria-atomic="false" aria-label="Chat messages">
+            <div className="flex-1 overflow-y-auto px-8 py-8 flex flex-col gap-6" role="log">
                 {messages.length === 0 ? (
-                    <div className="chat__empty animate-slide-up">
-                        <div className="chat__empty-icon">S</div>
-                        <div className="chat__empty-title">Start a request</div>
-                        <div className="chat__empty-hint">
-                            Messages run through the verification pipeline. Scouts can draft tokens and
-                            Shards validate final output.
+                    <div className="flex-1 flex flex-col items-center justify-center gap-8 max-w-xl mx-auto text-center opacity-80 scale-95 transition-all duration-700">
+                        <div className="w-20 h-20 rounded-3xl bg-gradient-to-br from-accent-cyan to-accent-blue flex items-center justify-center text-3xl font-bold text-white shadow-glow-cyan overflow-hidden relative">
+                            <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre.png')] opacity-20"></div>
+                            S
                         </div>
-                        <div className="chat__quick-prompts">
+                        <div className="flex flex-col gap-3">
+                            <h3 className="text-2xl font-display font-extrabold text-white">How can Shard help you?</h3>
+                            <p className="text-secondary text-sm leading-relaxed px-4">
+                                Experience trustless distributed inference. Your requests are parallel-vetted across the network for cryptographic correctness and output integrity.
+                            </p>
+                        </div>
+                        <div className="flex flex-wrap justify-center gap-3">
                             {quickPrompts.map((prompt) => (
                                 <button
                                     key={prompt}
                                     type="button"
-                                    className="chat__quick-btn"
+                                    className="px-4 py-2 rounded-xl bg-tertiary border border-glass-border text-xs text-secondary hover:text-white hover:border-accent-cyan/40 hover:bg-tertiary/80 transition-smooth"
                                     onClick={() => setInput(prompt)}
                                 >
                                     {prompt}
@@ -170,25 +176,31 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
                     messages.map((msg, i) => (
                         <div
                             key={i}
-                            className={`message message--${msg.role}`}
-                            role="article"
-                            aria-labelledby={`msg-sender-${i}`}
+                            className={`flex gap-5 max-w-4xl ${msg.role === "user" ? "ml-auto flex-row-reverse" : "mr-auto"}`}
                         >
-                            <div className="message__avatar" id={`msg-sender-${i}`} aria-hidden="true">
-                                {msg.role === "user" ? "You" : "Shard"}
+                            <div className={`w-10 h-10 rounded-2xl shrink-0 flex items-center justify-center text-[10px] font-bold uppercase tracking-tighter
+                                ${msg.role === "user"
+                                    ? "bg-tertiary border border-glass-border text-muted"
+                                    : "bg-accent-cyan/10 border border-accent-cyan/20 text-accent-cyan"}`}
+                            >
+                                {msg.role === "user" ? "USR" : "SHD"}
                             </div>
-                            <div>
-                                <div className="message__bubble" role="alert" aria-live="off">
+                            <div className={`flex flex-col gap-2 ${msg.role === "user" ? "items-end text-right" : "items-start text-left"}`}>
+                                <div className={`px-5 py-4 rounded-2xl text-sm leading-relaxed shadow-sm
+                                    ${msg.role === "user"
+                                        ? "bg-secondary text-primary border border-glass-border rounded-tr-none"
+                                        : "bg-tertiary/50 text-primary border border-glass-border rounded-tl-none"}`}
+                                >
                                     {msg.content || (
-                                        <div className="typing">
-                                            <div className="typing__dot" />
-                                            <div className="typing__dot" />
-                                            <div className="typing__dot" />
+                                        <div className="flex gap-1.5 py-1.5">
+                                            <div className="w-1.5 h-1.5 rounded-full bg-accent-cyan animate-bounce [animation-delay:-0.3s]" />
+                                            <div className="w-1.5 h-1.5 rounded-full bg-accent-cyan animate-bounce [animation-delay:-0.15s]" />
+                                            <div className="w-1.5 h-1.5 rounded-full bg-accent-cyan animate-bounce" />
                                         </div>
                                     )}
                                 </div>
-                                <div className="message__meta">
-                                    {msg.role === "assistant" ? "shard-hybrid" : "you"} | {new Date(msg.timestamp).toLocaleTimeString()}
+                                <div className="text-[10px] text-muted font-mono uppercase opacity-60">
+                                    {msg.role === "assistant" ? "shard-hybrid-v1" : "local-auth-node"} · {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                                 </div>
                             </div>
                         </div>
@@ -197,34 +209,42 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
                 <div ref={messagesEndRef} />
             </div>
 
-            <div className="chat__input-area">
-                <div className="chat__input-wrapper">
-                    <textarea
-                        ref={textareaRef}
-                        className="chat__input"
-                        id="chat-input"
-                        name="chat-input"
-                        placeholder={mode === "loading" ? "Connecting to network..." : "Ask a question..."}
-                        value={input}
-                        onChange={(e) => setInput(e.target.value)}
-                        onKeyDown={handleKeyDown}
-                        disabled={mode === "loading"}
-                        rows={1}
-                        aria-label="Type your message here"
-                        aria-describedby="chat-hint"
-                    />
-                    <button
-                        className="chat__send-btn"
-                        onClick={handleSend}
-                        disabled={!input.trim() || streaming || mode === "loading"}
-                        title="Send message"
-                        type="submit"
-                        aria-label="Send message"
-                    >
-                        <span aria-hidden="true">^</span>
-                    </button>
+            <div className="px-8 pb-8 pt-2 bg-gradient-to-t from-primary via-primary to-transparent">
+                <div className="relative group max-w-4xl mx-auto">
+                    <div className="absolute -inset-0.5 bg-gradient-to-r from-accent-cyan to-accent-blue rounded-3xl blur opacity-10 group-focus-within:opacity-30 transition-smooth"></div>
+                    <div className="relative flex flex-col bg-secondary border border-glass-border rounded-2xl overflow-hidden shadow-2xl">
+                        <textarea
+                            ref={textareaRef}
+                            className="w-full bg-transparent px-6 py-5 text-sm text-primary placeholder:text-muted focus:outline-none resize-none min-h-[60px]"
+                            id="chat-input"
+                            name="chat-input"
+                            placeholder={mode === "loading" ? "Establishing secure channel..." : "Message the Shard network..."}
+                            value={input}
+                            onChange={(e) => setInput(e.target.value)}
+                            onKeyDown={handleKeyDown}
+                            disabled={mode === "loading"}
+                            rows={1}
+                            aria-label="Type your message here"
+                        />
+                        <div className="px-6 py-3 border-t border-glass-border bg-tertiary/30 flex justify-between items-center">
+                            <span className="text-[10px] text-muted font-medium uppercase tracking-widest">
+                                Verification active · {input.length} chars
+                            </span>
+                            <button
+                                className="px-4 py-1.5 rounded-lg bg-accent-cyan text-primary text-[11px] font-bold uppercase tracking-widest hover:brightness-110 active:scale-95 disabled:opacity-30 disabled:grayscale transition-smooth"
+                                onClick={handleSend}
+                                disabled={!input.trim() || streaming || mode === "loading"}
+                                title="Send message"
+                                type="submit"
+                            >
+                                Dispatch
+                            </button>
+                        </div>
+                    </div>
                 </div>
-                <p className="chat__input-hint">Enter to send | Shift+Enter for newline</p>
+                <p className="text-center mt-4 text-[9px] text-muted uppercase tracking-[0.2em] opacity-40">
+                    Trust but verify · Shard Distributed v0.4.9
+                </p>
             </div>
         </div>
     )
