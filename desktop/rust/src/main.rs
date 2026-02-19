@@ -44,7 +44,7 @@ use std::{
     net::SocketAddr,
     path::{Path, PathBuf},
     sync::{
-        atomic::{AtomicU32, AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
         Arc,
     },
     time::{Duration, SystemTime, UNIX_EPOCH},
@@ -63,6 +63,7 @@ mod metrics;
 mod network;
 mod scheduler;
 mod telemetry_ws;
+use common::node_config::{NodeRole, NodeRuntimeConfig};
 use common::signed_envelope::SignedEnvelope;
 use crypto::wallet_backup::{export_wallet, import_wallet, verify_backup};
 use gateway::validate_work_request;
@@ -392,6 +393,20 @@ struct SharedState {
     idempotent_results: Arc<Mutex<HashMap<String, WorkResponse>>>,
     node_reputation: Arc<Mutex<HashMap<String, NodeReputation>>>,
     node_reputation_path: PathBuf,
+    node_role: String,
+    participation_enabled: Arc<AtomicBool>,
+    resource_policy: ResourcePolicy,
+    event_log: Arc<Mutex<VecDeque<String>>>,
+    node_public_key: String,
+    heartbeat_interval_seconds: u64,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct ResourcePolicy {
+    max_cpu_usage: f32,
+    max_gpu_usage: f32,
+    idle_only_mode: bool,
+    load_threshold_cutoff: f32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -453,6 +468,11 @@ struct NextLayerQuery {
 struct ForwardResultQuery {
     request_id: Option<String>,
     step_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ParticipationToggle {
+    enabled: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -902,6 +922,31 @@ async fn save_persisted_peers(path: &Path, peers: &[String]) {
     }
 }
 
+async fn append_event_log(state: &SharedState, event: impl Into<String>) {
+    let mut log = state.event_log.lock().await;
+    log.push_back(format!("{} {}", now_ms(), event.into()));
+    while log.len() > 200 {
+        log.pop_front();
+    }
+}
+
+fn should_accept_work(state: &SharedState) -> Result<(), String> {
+    if !state.participation_enabled.load(Ordering::Relaxed) {
+        return Err("node participation disabled".to_string());
+    }
+    let capacity = state.capacity.load(Ordering::Relaxed).max(1);
+    let load = state.current_load.load(Ordering::Relaxed);
+    let load_ratio = load as f32 / capacity as f32;
+
+    if state.resource_policy.idle_only_mode && load > 0 {
+        return Err("idle_only_mode enabled and node is busy".to_string());
+    }
+    if load_ratio > state.resource_policy.load_threshold_cutoff {
+        return Err("load threshold cutoff reached".to_string());
+    }
+    Ok(())
+}
+
 // ─── HTTP Control-Plane Handlers ────────────────────────────────────────────
 
 async fn health_handler(AxumState(state): AxumState<SharedState>) -> Json<serde_json::Value> {
@@ -935,6 +980,82 @@ async fn health_handler(AxumState(state): AxumState<SharedState>) -> Json<serde_
         "load": load,
         "latency_ms": latency_ms,
     }))
+}
+
+async fn node_status_handler(AxumState(state): AxumState<SharedState>) -> Json<serde_json::Value> {
+    let topo = state.topology.lock().await;
+    let logs = state.event_log.lock().await;
+    Json(serde_json::json!({
+        "ok": true,
+        "node_role": state.node_role,
+        "node_public_key": state.node_public_key,
+        "participation_enabled": state.participation_enabled.load(Ordering::Relaxed),
+        "resource_policy": state.resource_policy,
+        "current_load": state.current_load.load(Ordering::Relaxed),
+        "capacity": state.capacity.load(Ordering::Relaxed),
+        "latency_ms": state.avg_latency_ms.load(Ordering::Relaxed),
+        "health_status": if state.participation_enabled.load(Ordering::Relaxed) { "healthy" } else { "paused" },
+        "peer_id": topo.local_peer_id,
+        "recent_logs": logs.iter().cloned().collect::<Vec<String>>(),
+    }))
+}
+
+async fn node_toggle_participation_handler(
+    AxumState(state): AxumState<SharedState>,
+    Json(toggle): Json<ParticipationToggle>,
+) -> Json<serde_json::Value> {
+    state
+        .participation_enabled
+        .store(toggle.enabled, Ordering::Relaxed);
+    append_event_log(
+        &state,
+        format!("participation toggled to {}", toggle.enabled),
+    )
+    .await;
+    Json(serde_json::json!({
+        "ok": true,
+        "participation_enabled": toggle.enabled,
+    }))
+}
+
+async fn node_logs_handler(AxumState(state): AxumState<SharedState>) -> Json<serde_json::Value> {
+    let logs = state.event_log.lock().await;
+    Json(serde_json::json!({
+        "ok": true,
+        "logs": logs.iter().cloned().collect::<Vec<String>>(),
+    }))
+}
+
+async fn node_ui_handler() -> Html<&'static str> {
+    Html(
+        r#"<!doctype html>
+<html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Shard Node UI</title>
+<style>
+body{font-family:"IBM Plex Sans","Segoe UI",sans-serif;background:#101a26;color:#e8f2ff;margin:0;padding:20px}
+.card{background:#162536;border:1px solid #264a6e;border-radius:12px;padding:14px;margin-bottom:12px}
+button{background:#2aa7df;color:#021019;border:0;padding:8px 10px;border-radius:8px;font-weight:700;cursor:pointer}
+pre{white-space:pre-wrap;max-height:300px;overflow:auto}
+</style></head><body>
+<h1>Shard Node Control</h1>
+<div class="card"><h3>Status</h3><pre id="status">loading...</pre></div>
+<div class="card"><button onclick="toggle()">Toggle Participation</button></div>
+<div class="card"><h3>Logs</h3><pre id="logs">loading...</pre></div>
+<script>
+async function refresh(){
+  const s = await fetch('/node/status').then(r=>r.json());
+  const l = await fetch('/node/logs').then(r=>r.json());
+  document.getElementById('status').textContent = JSON.stringify(s,null,2);
+  document.getElementById('logs').textContent = (l.logs||[]).join('\n');
+}
+async function toggle(){
+  const s = await fetch('/node/status').then(r=>r.json());
+  await fetch('/node/toggle-participation',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({enabled:!s.participation_enabled})});
+  await refresh();
+}
+refresh(); setInterval(refresh, 4000);
+</script></body></html>"#,
+    )
 }
 
 async fn topology_handler(AxumState(state): AxumState<SharedState>) -> Json<serde_json::Value> {
@@ -1341,6 +1462,10 @@ async fn process_work_request(state: &SharedState, req: WorkRequest) -> Json<ser
         state.system_metrics.inc_task_failures();
         return Json(serde_json::json!({ "ok": false, "detail": detail }));
     }
+    if let Err(detail) = should_accept_work(state) {
+        state.system_metrics.inc_task_failures();
+        return Json(serde_json::json!({ "ok": false, "detail": detail }));
+    }
 
     {
         let mut queue = state.scout_work.lock().await;
@@ -1602,6 +1727,15 @@ async fn ws_generate_stream(mut socket: WebSocket, state: SharedState) {
     };
 
     if let Err(detail) = validate_work_request(&work) {
+        state.system_metrics.inc_task_failures();
+        let _ = socket
+            .send(Message::Text(
+                serde_json::json!({"error": detail, "event": "done"}).to_string(),
+            ))
+            .await;
+        return;
+    }
+    if let Err(detail) = should_accept_work(&state) {
         state.system_metrics.inc_task_failures();
         let _ = socket
             .send(Message::Text(
@@ -2312,6 +2446,13 @@ fn create_router(state: SharedState) -> Router {
         .route("/topology", get(topology_handler))
         .route("/v1/system/topology", get(topology_handler))
         .route("/wallet/address", get(wallet_address_handler))
+        .route("/node/status", get(node_status_handler))
+        .route("/node/ui", get(node_ui_handler))
+        .route(
+            "/node/toggle-participation",
+            post(node_toggle_participation_handler),
+        )
+        .route("/node/logs", get(node_logs_handler))
         .route("/peers", get(peers_handler))
         .route("/v1/system/peers", get(peers_handler))
         .route("/ledger/head", get(ledger_head_handler))
@@ -2369,6 +2510,19 @@ async fn main() -> Result<()> {
     let mut cli = Cli::parse();
     let data = data_dir();
     tokio::fs::create_dir_all(&data).await?;
+    let config_path = std::env::var("SHARD_NODE_CONFIG")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| data.join("shard-node.yaml"));
+    let node_cfg = NodeRuntimeConfig::load_with_env(&config_path);
+    let node_role = match node_cfg.node_role {
+        NodeRole::Gateway => "gateway",
+        NodeRole::Shard => "shard",
+        NodeRole::Scout => "scout",
+    }
+    .to_string();
+    if node_role == "scout" {
+        cli.contribute = true;
+    }
     let identity_path = data.join("identity.json");
 
     if let Some(command) = cli.command.clone() {
@@ -2498,6 +2652,17 @@ async fn main() -> Result<()> {
         idempotent_results: Arc::new(Mutex::new(HashMap::new())),
         node_reputation: Arc::new(Mutex::new(loaded_reputation)),
         node_reputation_path,
+        node_role,
+        participation_enabled: Arc::new(AtomicBool::new(true)),
+        resource_policy: ResourcePolicy {
+            max_cpu_usage: node_cfg.max_cpu,
+            max_gpu_usage: node_cfg.max_gpu,
+            idle_only_mode: node_cfg.idle_only,
+            load_threshold_cutoff: node_cfg.load_threshold_cutoff,
+        },
+        event_log: Arc::new(Mutex::new(VecDeque::new())),
+        node_public_key: node_wallet.clone(),
+        heartbeat_interval_seconds: node_cfg.heartbeat_interval_seconds,
     };
 
     #[cfg(target_os = "windows")]
@@ -2719,6 +2884,128 @@ async fn main() -> Result<()> {
         axum::serve(listener, app)
             .await
             .expect("control-plane server crashed");
+    });
+
+    // Signed self-registration and heartbeat loop for controlled clusters.
+    let heartbeat_state = state.clone();
+    let heartbeat_signing_key = signing_key.clone();
+    tokio::spawn(async move {
+        let mut nonce = 1u64;
+        let pubkey = hex::encode(heartbeat_signing_key.verifying_key().to_bytes());
+        let role = heartbeat_state.node_role.clone();
+        let register = SignedEnvelope::sign(
+            NodeRegistration {
+                node_pubkey: pubkey.clone(),
+                role: role.clone(),
+                capacity: Some(heartbeat_state.capacity.load(Ordering::Relaxed) as u64),
+                timestamp_ms: Some(now_ms()),
+            },
+            &heartbeat_signing_key,
+            nonce,
+            now_ms(),
+        );
+        nonce = nonce.saturating_add(1);
+        if register.verify().is_ok()
+            && accept_replay_nonce(
+                &heartbeat_state.replay_nonces,
+                &register.signer_pubkey_hex,
+                register.nonce,
+            )
+            .await
+        {
+            upsert_node_snapshot(
+                &heartbeat_state,
+                pubkey.clone(),
+                role.clone(),
+                0,
+                0,
+                0,
+                now_ms(),
+            )
+            .await;
+            append_event_log(
+                &heartbeat_state,
+                format!("signed registration accepted for {}", pubkey),
+            )
+            .await;
+        }
+
+        loop {
+            tokio::time::sleep(Duration::from_secs(
+                heartbeat_state.heartbeat_interval_seconds,
+            ))
+            .await;
+            let heartbeat = SignedEnvelope::sign(
+                NodeHeartbeat {
+                    node_pubkey: pubkey.clone(),
+                    role: role.clone(),
+                    queue_depth: heartbeat_state.scout_work.lock().await.len() as u64,
+                    node_latency_ms: heartbeat_state.avg_latency_ms.load(Ordering::Relaxed) as u64,
+                    uptime_seconds: ((now_ms().saturating_sub(heartbeat_state.daemon_start)) / 1000)
+                        as u64,
+                    timestamp_ms: Some(now_ms()),
+                },
+                &heartbeat_signing_key,
+                nonce,
+                now_ms(),
+            );
+            nonce = nonce.saturating_add(1);
+            if heartbeat.verify().is_err() {
+                continue;
+            }
+            if !accept_replay_nonce(
+                &heartbeat_state.replay_nonces,
+                &heartbeat.signer_pubkey_hex,
+                heartbeat.nonce,
+            )
+            .await
+            {
+                continue;
+            }
+            let payload = heartbeat.payload;
+            upsert_node_snapshot(
+                &heartbeat_state,
+                payload.node_pubkey,
+                payload.role,
+                payload.queue_depth,
+                payload.node_latency_ms,
+                payload.uptime_seconds,
+                payload.timestamp_ms.unwrap_or_else(now_ms),
+            )
+            .await;
+        }
+    });
+
+    // Graceful signed deregistration signal handler.
+    let shutdown_state = state.clone();
+    let shutdown_signing_key = signing_key.clone();
+    tokio::spawn(async move {
+        if tokio::signal::ctrl_c().await.is_ok() {
+            let envelope = SignedEnvelope::sign(
+                NodeRegistration {
+                    node_pubkey: shutdown_state.node_public_key.clone(),
+                    role: shutdown_state.node_role.clone(),
+                    capacity: Some(shutdown_state.capacity.load(Ordering::Relaxed) as u64),
+                    timestamp_ms: Some(now_ms()),
+                },
+                &shutdown_signing_key,
+                u64::MAX - 1,
+                now_ms(),
+            );
+            if envelope.verify().is_ok() {
+                let mut reports = shutdown_state.node_metric_reports.lock().await;
+                reports.remove(shutdown_state.node_public_key.as_str());
+                append_event_log(
+                    &shutdown_state,
+                    format!(
+                        "signed deregistration for {}",
+                        shutdown_state.node_public_key
+                    ),
+                )
+                .await;
+            }
+            std::process::exit(0);
+        }
     });
 
     println!();

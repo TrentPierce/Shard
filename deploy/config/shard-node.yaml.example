@@ -1,0 +1,6 @@
+node_role: shard
+max_cpu: 0.5
+max_gpu: 0.5
+idle_only: false
+load_threshold_cutoff: 0.85
+heartbeat_interval_seconds: 10

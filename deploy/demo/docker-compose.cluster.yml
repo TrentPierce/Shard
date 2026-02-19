@@ -1,0 +1,89 @@
+services:
+  gateway:
+    build:
+      context: ../..
+      dockerfile: Dockerfile.daemon
+    command: ["shard-daemon", "--control-port", "9091", "--tcp-port", "4001", "--webrtc-port", "9090", "--quic-port", "9092", "--public-api", "true"]
+    environment:
+      SHARD_NODE_ROLE: gateway
+      SHARD_METRICS_BACKEND: sqlite
+      SHARD_HEARTBEAT_TIMEOUT_MS: "30000"
+    ports:
+      - "9091:9091"
+      - "4001:4001"
+      - "4101:4101"
+      - "9090:9090/udp"
+      - "9092:9092/udp"
+    networks: [shard-net]
+
+  shard-1:
+    build:
+      context: ../..
+      dockerfile: Dockerfile.daemon
+    command: ["shard-daemon", "--control-port", "9191", "--tcp-port", "5001", "--webrtc-port", "9190", "--quic-port", "9192", "--bootstrap", "/dns4/gateway/tcp/4001/p2p/12D3KooWGATEWAYPLACEHOLDER"]
+    environment:
+      SHARD_NODE_ROLE: shard
+      SHARD_NODE_CONFIG: /config/shard-node.yaml
+    volumes:
+      - ../config/shard-node.yaml.example:/config/shard-node.yaml:ro
+    networks: [shard-net]
+    depends_on: [gateway]
+
+  shard-2:
+    build:
+      context: ../..
+      dockerfile: Dockerfile.daemon
+    command: ["shard-daemon", "--control-port", "9291", "--tcp-port", "5002", "--webrtc-port", "9290", "--quic-port", "9292", "--bootstrap", "/dns4/gateway/tcp/4001/p2p/12D3KooWGATEWAYPLACEHOLDER"]
+    environment:
+      SHARD_NODE_ROLE: shard
+    networks: [shard-net]
+    depends_on: [gateway]
+
+  shard-3:
+    build:
+      context: ../..
+      dockerfile: Dockerfile.daemon
+    command: ["shard-daemon", "--control-port", "9391", "--tcp-port", "5003", "--webrtc-port", "9390", "--quic-port", "9392", "--bootstrap", "/dns4/gateway/tcp/4001/p2p/12D3KooWGATEWAYPLACEHOLDER"]
+    environment:
+      SHARD_NODE_ROLE: shard
+    networks: [shard-net]
+    depends_on: [gateway]
+
+  scout-1:
+    build: { context: ../.., dockerfile: Dockerfile.daemon }
+    command: ["shard-daemon", "--control-port", "9491", "--tcp-port", "6001", "--webrtc-port", "9490", "--quic-port", "9492", "--bootstrap", "/dns4/gateway/tcp/4001/p2p/12D3KooWGATEWAYPLACEHOLDER"]
+    environment: { SHARD_NODE_ROLE: scout, SHARD_IDLE_ONLY: "true" }
+    networks: [shard-net]
+    depends_on: [gateway]
+
+  scout-2:
+    build: { context: ../.., dockerfile: Dockerfile.daemon }
+    command: ["shard-daemon", "--control-port", "9591", "--tcp-port", "6002", "--webrtc-port", "9590", "--quic-port", "9592", "--bootstrap", "/dns4/gateway/tcp/4001/p2p/12D3KooWGATEWAYPLACEHOLDER"]
+    environment: { SHARD_NODE_ROLE: scout, SHARD_IDLE_ONLY: "true" }
+    networks: [shard-net]
+    depends_on: [gateway]
+
+  scout-3:
+    build: { context: ../.., dockerfile: Dockerfile.daemon }
+    command: ["shard-daemon", "--control-port", "9691", "--tcp-port", "6003", "--webrtc-port", "9690", "--quic-port", "9692", "--bootstrap", "/dns4/gateway/tcp/4001/p2p/12D3KooWGATEWAYPLACEHOLDER"]
+    environment: { SHARD_NODE_ROLE: scout, SHARD_IDLE_ONLY: "true" }
+    networks: [shard-net]
+    depends_on: [gateway]
+
+  scout-4:
+    build: { context: ../.., dockerfile: Dockerfile.daemon }
+    command: ["shard-daemon", "--control-port", "9791", "--tcp-port", "6004", "--webrtc-port", "9790", "--quic-port", "9792", "--bootstrap", "/dns4/gateway/tcp/4001/p2p/12D3KooWGATEWAYPLACEHOLDER"]
+    environment: { SHARD_NODE_ROLE: scout, SHARD_IDLE_ONLY: "true" }
+    networks: [shard-net]
+    depends_on: [gateway]
+
+  scout-5:
+    build: { context: ../.., dockerfile: Dockerfile.daemon }
+    command: ["shard-daemon", "--control-port", "9891", "--tcp-port", "6005", "--webrtc-port", "9890", "--quic-port", "9892", "--bootstrap", "/dns4/gateway/tcp/4001/p2p/12D3KooWGATEWAYPLACEHOLDER"]
+    environment: { SHARD_NODE_ROLE: scout, SHARD_IDLE_ONLY: "true" }
+    networks: [shard-net]
+    depends_on: [gateway]
+
+networks:
+  shard-net:
+    driver: bridge
