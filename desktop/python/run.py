@@ -39,6 +39,17 @@ def main() -> None:
     parser.add_argument("--public-api", action="store_true", help="Expose API publicly to internet")
     parser.add_argument("--public-host", type=str, default=None, help="Public hostname/IP for API (auto-detect if not set)")
     parser.add_argument("--https", action="store_true", help="Enable HTTPS with Let's Encrypt")
+    parser.add_argument(
+        "--require-credits",
+        action="store_true",
+        help="Require shard credits for inference requests",
+    )
+    parser.add_argument(
+        "--min-credits",
+        type=int,
+        default=1,
+        help="Minimum shard credits required per inference request (default: 1)",
+    )
     args = parser.parse_args()
 
     # Expose sidecar URL as env var so shard_api can read it
@@ -50,6 +61,9 @@ def main() -> None:
         os.environ["SHARD_PUBLIC_HOST"] = args.public_host
     if args.https:
         os.environ["SHARD_HTTPS"] = "true"
+    if args.require_credits:
+        os.environ["SHARD_REQUIRE_CREDITS"] = "true"
+    os.environ.setdefault("SHARD_MIN_CREDITS", str(args.min_credits))
 
     try:
         import uvicorn
