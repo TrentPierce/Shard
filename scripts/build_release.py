@@ -107,7 +107,7 @@ def freeze_python(daemon_bin: Path, engine_lib: Path, web_out: Path) -> Path:
     
     # Copy installer script and README to distribution
     frozen = DIST / "ShardAI"
-    installer_script = ROOT / "scripts" / "install.bat"
+    installer_script = ROOT / "installers" / "windows" / "install.bat"
     if installer_script.exists():
         shutil.copy2(installer_script, frozen / "install.bat")
     

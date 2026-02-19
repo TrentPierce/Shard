@@ -1,30 +1,10 @@
-name: CI
+﻿name: CI
 
 on:
   push:
   pull_request:
 
 jobs:
-  python-tests:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: desktop/python
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-      - name: Install Python deps
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install -r requirements.txt
-          python -m pip install pytest
-      - name: Run stable Python tests
-        run: |
-          cd ../..
-          python -m pytest -q tests/inference_unit_test.py tests/control_plane_failure_test.py tests/oracle_api_security_test.py tests/useful_compute_verifier_test.py tests/inference_service_test.py
-
   web-build:
     runs-on: ubuntu-latest
     defaults:
@@ -62,4 +42,3 @@ jobs:
         run: cargo clippy --all-targets -- -D warnings
       - name: Cargo tests
         run: cargo test --all-targets
-

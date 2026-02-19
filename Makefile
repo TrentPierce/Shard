@@ -8,11 +8,11 @@ version: ## Show current unified project version
 	@cat VERSION
 
 version-sync: ## Sync all component versions from VERSION file
-	python scripts/sync_versions.py
+	python manage.py version
 
 version-set: ## Set a new version and sync all component versions (usage: make version-set V=0.4.6)
 	@if [ -z "$(V)" ]; then echo "Usage: make version-set V=0.4.6"; exit 1; fi
-	python scripts/sync_versions.py --set $(V)
+	python manage.py version --set $(V)
 	@echo "  Shard — Distributed Inference Network"
 	@echo "  ======================================"
 	@echo ""
@@ -22,16 +22,12 @@ version-set: ## Set a new version and sync all component versions (usage: make v
 
 # ── Setup ──────────────────────────────────────────────────────────
 
-setup: setup-rust setup-python setup-web ## Install all dependencies
+setup: setup-rust setup-web ## Install all dependencies
 	@echo "\n✅ All dependencies installed."
 
 setup-rust: ## Build the Rust daemon
 	@echo "🦀 Building Rust daemon..."
 	cd desktop/rust && cargo build --release
-
-setup-python: ## Install Python dependencies
-	@echo "🐍 Setting up Python environment..."
-	cd desktop/python && python -m pip install -r requirements.txt
 
 setup-web: ## Install web dependencies
 	@echo "🌐 Installing web dependencies..."
@@ -45,33 +41,23 @@ dev: ## Start all services for local development
 	@echo "Starting Rust daemon on :9091..."
 	@cd desktop/rust && cargo run --release -- --control-port 9091 --tcp-port 4001 &
 	@sleep 2
-	@echo "Starting Python API on :8000..."
-	@cd desktop/python && python run.py --rust-url http://127.0.0.1:9091 &
-	@sleep 1
 	@echo "Starting web UI on :3000..."
 	@cd web && npm run dev
 
 dev-web: ## Start only the web UI
 	cd web && npm run dev
 
-dev-api: ## Start only the Python API
-	cd desktop/python && python run.py --rust-url http://127.0.0.1:9091
-
 dev-daemon: ## Start only the Rust daemon
 	cd desktop/rust && cargo run --release -- --control-port 9091 --tcp-port 4001
 
 # ── Tests ──────────────────────────────────────────────────────────
 
-test: test-rust test-python test-web ## Run all test suites
+test: test-rust test-web ## Run all test suites
 	@echo "\n✅ All tests passed."
 
 test-rust: ## Run Rust tests
 	@echo "🦀 Running Rust tests..."
 	cd desktop/rust && cargo test --all-targets
-
-test-python: ## Run Python tests
-	@echo "🐍 Running Python tests..."
-	python -m pytest -q tests/
 
 test-web: ## Run web tests
 	@echo "🌐 Running web tests..."

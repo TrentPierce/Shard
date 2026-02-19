@@ -21,61 +21,7 @@ services:
       - shard-net
     restart: unless-stopped
 
-  shard-inference:
-    build:
-      context: .
-      dockerfile: Dockerfile.inference
-    container_name: shard-inference
-    environment:
-      NVIDIA_VISIBLE_DEVICES: ${NVIDIA_VISIBLE_DEVICES:-all}
-      NVIDIA_DRIVER_CAPABILITIES: ${NVIDIA_DRIVER_CAPABILITIES:-compute,utility}
-    gpus: all
-    expose:
-      - "7000"
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:7000/health', timeout=3)"]
-      interval: 15s
-      timeout: 5s
-      retries: 10
-      start_period: 25s
-    networks:
-      - shard-net
-    restart: unless-stopped
 
-  shard-api:
-    build:
-      context: .
-      dockerfile: Dockerfile.api
-    container_name: shard-api
-    depends_on:
-      shard-daemon:
-        condition: service_healthy
-      shard-inference:
-        condition: service_healthy
-    environment:
-      SHARD_RUST_URL: http://shard-daemon:9091
-      SHARD_INFERENCE_URL: http://shard-inference:7000
-      SHARD_LOG_LEVEL: ${SHARD_LOG_LEVEL:-INFO}
-      BITNET_LIB: ${BITNET_LIB:-}
-      BITNET_MODEL: ${BITNET_MODEL:-}
-      SHARD_API_KEYS: ${SHARD_API_KEYS:-}
-      SHARD_REQUIRE_API_KEY: ${SHARD_REQUIRE_API_KEY:-false}
-      SHARD_RATE_LIMIT_PER_MINUTE: ${SHARD_RATE_LIMIT_PER_MINUTE:-120}
-      SHARD_SCOUT_RATE_LIMIT_PER_MINUTE: ${SHARD_SCOUT_RATE_LIMIT_PER_MINUTE:-180}
-      SHARD_CORS_ORIGINS: ${SHARD_CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
-    command: ["python", "run.py", "--host", "0.0.0.0", "--port", "8000", "--rust-url", "http://shard-daemon:9091"]
-    working_dir: /app/desktop/python
-    ports:
-      - "8000:8000"
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
-      interval: 15s
-      timeout: 5s
-      retries: 10
-      start_period: 20s
-    networks:
-      - shard-net
-    restart: unless-stopped
 
   prometheus:
     image: prom/prometheus:v2.55.1
@@ -93,7 +39,7 @@ services:
     networks:
       - shard-net
     depends_on:
-      shard-api:
+      shard-daemon:
         condition: service_healthy
     restart: unless-stopped
 
