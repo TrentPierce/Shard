@@ -195,6 +195,19 @@ Check a specific credit transaction:
 curl http://127.0.0.1:9091/credits/tx/<tx_id>
 ```
 
+Ledger diagnostics:
+```bash
+curl http://127.0.0.1:9091/ledger/head
+curl http://127.0.0.1:9091/ledger/stats
+curl "http://127.0.0.1:9091/ledger/export?from_height=1&limit=100"
+```
+
+Durable ledger files (auto-managed per node):
+
+- `ledger.wal` (append-only signed transaction log)
+- `ledger.snapshot.json` (periodic compact state snapshot)
+- `ledger.meta.json` (schema + head metadata)
+
 If API credit-gating is enabled, include your wallet on requests:
 ```bash
 curl http://localhost:8000/v1/chat/completions \

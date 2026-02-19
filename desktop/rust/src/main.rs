@@ -59,6 +59,8 @@ mod telemetry_ws;
 use crypto::identity::NodeIdentity;
 use crypto::wallet_backup::{export_wallet, import_wallet, verify_backup};
 use ledger::state::{ComputeCreditTx, LedgerState};
+use ledger::store::LedgerStore;
+use ledger::sync::{hash_probe_segments, LedgerSyncRequest, LedgerSyncResponse};
 use mesh::race_router::{RaceKey, RaceRouter, RaceSubmitOutcome};
 use network::layer_registry::{provider_key, LayerHostAnnouncement, LayerRoutingTable};
 use network::obfuscation::{deobfuscate_bytes, obfuscate_bytes, random_nonce};
@@ -358,6 +360,7 @@ struct SharedState {
     layer_routes: Arc<Mutex<LayerRoutingTable>>,
     race_router: Arc<Mutex<RaceRouter>>,
     ledger: Arc<Mutex<LedgerState>>,
+    ledger_store: Arc<LedgerStore>,
     browser_sessions: Arc<Mutex<HashMap<String, BrowserLayerSession>>>,
     browser_work: Arc<Mutex<VecDeque<BrowserLayerWorkItem>>>,
     node_wallet: String,
@@ -402,6 +405,12 @@ struct NextLayerQuery {
 struct ForwardResultQuery {
     request_id: Option<String>,
     step_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct LedgerExportQuery {
+    from_height: Option<u64>,
+    limit: Option<usize>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -714,6 +723,7 @@ struct ShardBehaviour {
     handshake: request_response::cbor::Behaviour<Heartbeat, Heartbeat>,
     verify: request_response::cbor::Behaviour<DraftSubmission, String>,
     control_work: request_response::cbor::Behaviour<WorkRequest, String>,
+    ledger_sync: request_response::cbor::Behaviour<LedgerSyncRequest, LedgerSyncResponse>,
     relay_server: relay::Behaviour,
     dcutr: dcutr::Behaviour,
     autonat: autonat::v1::Behaviour,
@@ -960,6 +970,36 @@ async fn credits_tx_handler(
         Some(tx) => Json(serde_json::json!({ "ok": true, "tx": tx })),
         None => Json(serde_json::json!({ "ok": false, "detail": "transaction not found" })),
     }
+}
+
+async fn ledger_head_handler(AxumState(state): AxumState<SharedState>) -> Json<serde_json::Value> {
+    let ledger = state.ledger.lock().await;
+    Json(serde_json::json!({
+        "ok": true,
+        "head": ledger.head(),
+    }))
+}
+
+async fn ledger_stats_handler(AxumState(state): AxumState<SharedState>) -> Json<serde_json::Value> {
+    let ledger = state.ledger.lock().await;
+    Json(serde_json::json!({
+        "ok": true,
+        "stats": ledger.stats(),
+    }))
+}
+
+async fn ledger_export_handler(
+    AxumState(state): AxumState<SharedState>,
+    Query(query): Query<LedgerExportQuery>,
+) -> Json<serde_json::Value> {
+    let from_height = query.from_height.unwrap_or(1);
+    let limit = query.limit.unwrap_or(512).clamp(1, 4096);
+    let ledger = state.ledger.lock().await;
+    let export = ledger.export_range(from_height, limit);
+    Json(serde_json::json!({
+        "ok": true,
+        "export": export,
+    }))
 }
 
 async fn next_layer_handler(
@@ -1440,6 +1480,9 @@ fn create_router(state: SharedState) -> Router {
         .route("/topology", get(topology_handler))
         .route("/wallet/address", get(wallet_address_handler))
         .route("/peers", get(peers_handler))
+        .route("/ledger/head", get(ledger_head_handler))
+        .route("/ledger/stats", get(ledger_stats_handler))
+        .route("/ledger/export", get(ledger_export_handler))
         .route("/layers/next", get(next_layer_handler))
         .route(
             "/browser-layer/register",
@@ -1539,7 +1582,10 @@ async fn main() -> Result<()> {
     let signing_key = node_identity.signing_key().clone();
     let id_keys = node_identity.libp2p_keypair()?;
     let local_peer_id = PeerId::from(id_keys.public());
+    let ledger_store = Arc::new(LedgerStore::new(&data));
+    let loaded_ledger = ledger_store.load_or_init()?;
 
+    let initial_credit_nonce = loaded_ledger.head().height.saturating_add(1);
     let state = SharedState {
         topology: Arc::new(Mutex::new(TopologyState {
             local_peer_id: local_peer_id.to_string(),
@@ -1567,12 +1613,13 @@ async fn main() -> Result<()> {
         current_load: Arc::new(AtomicU32::new(0)),
         avg_latency_ms: Arc::new(AtomicU32::new(0)),
         gossipsub_latency_hist: Arc::new(LatencyHistogram::new()),
-        credit_nonce: Arc::new(AtomicU64::new(1)),
+        credit_nonce: Arc::new(AtomicU64::new(initial_credit_nonce)),
         scout_penalties: Arc::new(Mutex::new(ScoutPenaltyBook::default())),
         backward_passes: Arc::new(Mutex::new(VecDeque::new())),
         layer_routes: Arc::new(Mutex::new(LayerRoutingTable::default())),
         race_router: Arc::new(Mutex::new(RaceRouter::default())),
-        ledger: Arc::new(Mutex::new(LedgerState::default())),
+        ledger: Arc::new(Mutex::new(loaded_ledger)),
+        ledger_store,
         browser_sessions: Arc::new(Mutex::new(HashMap::new())),
         browser_work: Arc::new(Mutex::new(VecDeque::new())),
         node_wallet: node_wallet.clone(),
@@ -1652,6 +1699,13 @@ async fn main() -> Result<()> {
             )],
             request_response::Config::default(),
         );
+        let ledger_sync = request_response::cbor::Behaviour::new(
+            [(
+                StreamProtocol::new("/shard/ledger/sync/1.0.0"),
+                ProtocolSupport::Full,
+            )],
+            request_response::Config::default(),
+        );
         let relay_server = relay::Behaviour::new(local_peer_id, Default::default());
         let dcutr = dcutr::Behaviour::new(local_peer_id);
         let autonat = autonat::v1::Behaviour::new(local_peer_id, autonat::v1::Config::default());
@@ -1666,6 +1720,7 @@ async fn main() -> Result<()> {
             handshake,
             verify,
             control_work,
+            ledger_sync,
             relay_server,
             dcutr,
             autonat,
@@ -1816,8 +1871,10 @@ async fn main() -> Result<()> {
     let mut reconnect_tick = tokio::time::interval(Duration::from_secs(cli.reconnect_seconds));
     let mut pending_handshakes: HashMap<OutboundRequestId, PeerId> = HashMap::new();
     let mut pending_layer_queries: HashMap<libp2p::kad::QueryId, (String, u32)> = HashMap::new();
+    let mut pending_ledger_sync: HashMap<OutboundRequestId, (PeerId, u64)> = HashMap::new();
     let layer_ttl_ms: u128 = 60_000;
     let mut next_layer_announcement_ms = 0u128;
+    let mut next_ledger_snapshot_ms = 0u128;
 
     // ── main event loop ──
     loop {
@@ -1874,6 +1931,37 @@ async fn main() -> Result<()> {
                 {
                     let mut router = state.race_router.lock().await;
                     router.prune_expired(now);
+                }
+
+                if now >= next_ledger_snapshot_ms {
+                    let snapshot_result = {
+                        let ledger = state.ledger.lock().await;
+                        state.ledger_store.write_snapshot(&ledger)
+                    };
+                    if let Err(e) = snapshot_result {
+                        tracing::warn!(%e, "failed to write ledger snapshot");
+                    }
+                    next_ledger_snapshot_ms = now + 30_000;
+                }
+
+                // Request missing ledger transactions from connected peers.
+                let local_head = {
+                    let ledger = state.ledger.lock().await;
+                    ledger.head().height
+                };
+                let peers_snapshot = state.peers.lock().await.clone();
+                for peer_id_str in peers_snapshot.keys() {
+                    if let Ok(peer_id) = peer_id_str.parse::<PeerId>() {
+                        let req = LedgerSyncRequest::RangeRequest {
+                            from_height: local_head.saturating_add(1),
+                            max_items: 512,
+                        };
+                        let request_id = swarm
+                            .behaviour_mut()
+                            .ledger_sync
+                            .send_request(&peer_id, req);
+                        pending_ledger_sync.insert(request_id, (peer_id, local_head));
+                    }
                 }
             }
 
@@ -1988,8 +2076,12 @@ async fn main() -> Result<()> {
                             match serde_json::from_slice::<ComputeCreditTx>(&message.data) {
                                 Ok(tx) => {
                                     let mut ledger = state.ledger.lock().await;
-                                    if let Err(e) = ledger.apply_signed_tx(tx) {
+                                    if let Err(e) = ledger.apply_signed_tx(tx.clone()) {
                                         tracing::warn!(%e, "failed to apply credit transaction");
+                                    } else if let Err(e) =
+                                        state.ledger_store.append_tx(&tx, ledger.head())
+                                    {
+                                        tracing::warn!(%e, "failed to persist applied credit transaction");
                                     }
                                 }
                                 Err(e) => tracing::warn!(%e, "invalid ledger transaction packet; ignoring"),
@@ -2052,7 +2144,13 @@ async fn main() -> Result<()> {
                                         );
                                         {
                                             let mut ledger = state.ledger.lock().await;
-                                            let _ = ledger.apply_signed_tx(tx.clone());
+                                            if let Err(e) = ledger.apply_signed_tx(tx.clone()) {
+                                                tracing::warn!(%e, "failed to apply locally generated credit transaction");
+                                            } else if let Err(e) =
+                                                state.ledger_store.append_tx(&tx, ledger.head())
+                                            {
+                                                tracing::warn!(%e, "failed to persist locally generated credit transaction");
+                                            }
                                         }
                                         if let Ok(payload) = serde_json::to_vec(&tx) {
                                             let _ = swarm
@@ -2251,6 +2349,98 @@ async fn main() -> Result<()> {
                                         info.verified = true;
                                     }
                                 }
+                            }
+                        }
+                    }
+
+                    // ── ledger sync protocol ──
+                    SwarmEvent::Behaviour(ShardBehaviourEvent::LedgerSync(event)) => {
+                        match event {
+                            request_response::Event::Message { peer, message, .. } => match message {
+                                request_response::Message::Request {
+                                    request, channel, ..
+                                } => {
+                                    let response = match request {
+                                        LedgerSyncRequest::HeadRequest => {
+                                            let ledger = state.ledger.lock().await;
+                                            LedgerSyncResponse::HeadResponse { head: ledger.head() }
+                                        }
+                                        LedgerSyncRequest::RangeRequest {
+                                            from_height,
+                                            max_items,
+                                        } => {
+                                            let ledger = state.ledger.lock().await;
+                                            let export =
+                                                ledger.export_range(from_height, max_items.clamp(1, 4096));
+                                            LedgerSyncResponse::RangeResponse {
+                                                from_height: export.from_height,
+                                                end_height: export.end_height,
+                                                has_more: export.has_more,
+                                                txs: export.txs,
+                                            }
+                                        }
+                                        LedgerSyncRequest::HashProbe {
+                                            from_height,
+                                            to_height,
+                                        } => {
+                                            let ledger = state.ledger.lock().await;
+                                            let hashes = hash_probe_segments(
+                                                ledger.txs(),
+                                                from_height,
+                                                to_height,
+                                                64,
+                                            );
+                                            LedgerSyncResponse::HashProbeResponse {
+                                                from_height,
+                                                to_height,
+                                                segment_hashes: hashes,
+                                            }
+                                        }
+                                    };
+                                    let _ = swarm
+                                        .behaviour_mut()
+                                        .ledger_sync
+                                        .send_response(channel, response);
+                                }
+                                request_response::Message::Response {
+                                    response,
+                                    request_id,
+                                } => {
+                                    let _ = pending_ledger_sync.remove(&request_id);
+                                    if let LedgerSyncResponse::RangeResponse { txs, .. } = response {
+                                        if !txs.is_empty() {
+                                            let mut ledger = state.ledger.lock().await;
+                                            for tx in txs {
+                                                if ledger.apply_signed_tx(tx.clone()).is_ok() {
+                                                    if let Err(e) =
+                                                        state.ledger_store.append_tx(&tx, ledger.head())
+                                                    {
+                                                        tracing::warn!(
+                                                            %e,
+                                                            %peer,
+                                                            "failed to persist synced ledger tx"
+                                                        );
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            },
+                            request_response::Event::OutboundFailure {
+                                request_id,
+                                error,
+                                peer,
+                                ..
+                            } => {
+                                pending_ledger_sync.remove(&request_id);
+                                tracing::debug!(%peer, %error, "ledger sync outbound failure");
+                            }
+                            request_response::Event::InboundFailure { peer, error, .. } => {
+                                tracing::debug!(%peer, %error, "ledger sync inbound failure");
+                            }
+                            request_response::Event::ResponseSent { peer, .. } => {
+                                tracing::debug!(%peer, "ledger sync response sent");
                             }
                         }
                     }
