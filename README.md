@@ -303,6 +303,17 @@ Services:
 | `prometheus` | 9095 | Metrics (monitoring profile) |
 | `grafana` | 3001 | Dashboards (monitoring profile) |
 
+Daemon observability endpoints:
+- `GET /metrics` (Prometheus exposition)
+- `GET /metrics/summary` (JSON summary for dashboards)
+- `GET /dashboard` (auto-refresh operations dashboard)
+
+Metrics persistence backends:
+- `SHARD_METRICS_BACKEND=sqlite` (default, dev)
+- `SHARD_METRICS_SQLITE_PATH=/path/to/metrics.db`
+- `SHARD_METRICS_BACKEND=postgres` with `SHARD_METRICS_POSTGRES_URL=postgres://...`
+- `SHARD_METRICS_BACKEND=none` (disable persistence)
+
 </details>
 
 <details>
