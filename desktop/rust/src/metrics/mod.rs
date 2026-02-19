@@ -1,3 +1,4 @@
+pub mod cost;
 pub mod persistence;
 
 use serde::{Deserialize, Serialize};

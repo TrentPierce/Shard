@@ -1,9 +1,10 @@
-"use client"
+﻿"use client"
 
 import { useEffect, useRef, useState } from "react"
 import type { NodeMode } from "@/app/page"
 import { sendMessage, type ChatMessage } from "@/lib/api"
 import { useProductSignals } from "@/hooks/useProductSignals"
+import { apiUrl } from "@/lib/config"
 
 interface ChatPanelProps {
     mode: NodeMode
@@ -16,6 +17,8 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
     const messagesEndRef = useRef<HTMLDivElement>(null)
     const textareaRef = useRef<HTMLTextAreaElement>(null)
     const { health, analytics, successRate } = useProductSignals()
+    const [inferenceMode, setInferenceMode] = useState<"standard" | "distributed">("distributed")
+    const [opsSummary, setOpsSummary] = useState<{ active_nodes?: number; offload_percentage_estimate?: number; estimated_gpu_savings_percent?: number; p95_latency_ms?: number }>({})
 
     const scrollToBottom = () => {
         messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
@@ -32,6 +35,26 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
             el.style.height = Math.min(el.scrollHeight, 120) + "px"
         }
     }, [input])
+
+    useEffect(() => {
+        let cancelled = false
+        const poll = async () => {
+            try {
+                const res = await fetch(apiUrl("/metrics/summary"), { cache: "no-store" })
+                if (!res.ok) return
+                const data = await res.json()
+                if (!cancelled) setOpsSummary(data ?? {})
+            } catch {
+                // ignore telemetry polling failures
+            }
+        }
+        poll()
+        const timer = setInterval(poll, 5000)
+        return () => {
+            cancelled = true
+            clearInterval(timer)
+        }
+    }, [])
 
     const handleSend = async () => {
         const text = input.trim()
@@ -73,6 +96,7 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
                 () => {
                     setStreaming(false)
                 },
+                inferenceMode,
             )
         } catch (err: any) {
             if (typeof window !== "undefined") {
@@ -132,15 +156,31 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
                         </div>
                         <div className="h-1 w-1 rounded-full bg-muted"></div>
                         <div className="text-[10px] text-muted font-medium uppercase tracking-wider">{versionLabel}</div>
+                        <div className="h-1 w-1 rounded-full bg-muted"></div>
+                        <select
+                            value={inferenceMode}
+                            onChange={(e) => setInferenceMode(e.target.value as "standard" | "distributed")}
+                            className="text-[10px] bg-transparent border border-glass-border rounded px-2 py-1 text-muted uppercase"
+                            aria-label="Inference mode"
+                        >
+                            <option value="standard">Standard inference</option>
+                            <option value="distributed">Shard distributed</option>
+                        </select>
                     </div>
                 </div>
                 <div className="flex items-center gap-4">
                     <div className="flex flex-col items-end gap-1">
                         <div className={`text-[10px] font-bold uppercase tracking-widest ${ready ? "text-accent-emerald" : "text-accent-rose"}`}>
-                            {ready ? "● Sync Active" : "○ Disconnected"}
+                            {ready ? "â— Sync Active" : "â—‹ Disconnected"}
                         </div>
                         <div className="text-[9px] text-muted uppercase tracking-tighter tabular-nums">
-                            {analytics.sessions} sessions · {successRate}% reliability
+                            {analytics.sessions} sessions Â· {successRate}% reliability
+                        </div>
+                        <div className="text-[9px] text-muted uppercase tracking-tighter tabular-nums">
+                            {opsSummary.active_nodes ?? 0} nodes · p95 {Math.round(opsSummary.p95_latency_ms ?? 0)}ms
+                        </div>
+                        <div className="text-[9px] text-muted uppercase tracking-tighter tabular-nums">
+                            offload {Math.round(opsSummary.offload_percentage_estimate ?? 0)}% · savings {Math.round(opsSummary.estimated_gpu_savings_percent ?? 0)}%
                         </div>
                     </div>
                 </div>
@@ -200,7 +240,7 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
                                     )}
                                 </div>
                                 <div className="text-[10px] text-muted font-mono uppercase opacity-60">
-                                    {msg.role === "assistant" ? "shard-hybrid-v1" : "local-auth-node"} · {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                    {msg.role === "assistant" ? "shard-hybrid-v1" : "local-auth-node"} Â· {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                                 </div>
                             </div>
                         </div>
@@ -228,7 +268,7 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
                         />
                         <div className="px-6 py-3 border-t border-glass-border bg-tertiary/30 flex justify-between items-center">
                             <span className="text-[10px] text-muted font-medium uppercase tracking-widest">
-                                Verification active · {input.length} chars
+                                Verification active Â· {input.length} chars
                             </span>
                             <button
                                 className="px-4 py-1.5 rounded-lg bg-accent-cyan text-primary text-[11px] font-bold uppercase tracking-widest hover:brightness-110 active:scale-95 disabled:opacity-30 disabled:grayscale transition-smooth"
@@ -243,9 +283,10 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
                     </div>
                 </div>
                 <p className="text-center mt-4 text-[9px] text-muted uppercase tracking-[0.2em] opacity-40">
-                    Trust but verify · Shard Distributed v0.4.9
+                    Trust but verify Â· Shard Distributed v0.4.9
                 </p>
             </div>
         </div>
     )
 }
+
