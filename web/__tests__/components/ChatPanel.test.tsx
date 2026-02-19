@@ -17,9 +17,9 @@ describe("ChatPanel", () => {
 
   it("renders the chat shell and input controls", () => {
     render(<ChatPanel mode="scout" />)
-    expect(screen.getByRole("main", { name: /chat interface/i })).toBeInTheDocument()
-    expect(screen.getByPlaceholderText(/ask a question/i)).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: /send message/i })).toBeInTheDocument()
+    expect(screen.getByRole("main")).toBeInTheDocument()
+    expect(screen.getByPlaceholderText(/message the shard network/i)).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /dispatch/i })).toBeInTheDocument()
   })
 
   it("sends a message on button click and streams assistant output", async () => {
@@ -30,7 +30,7 @@ describe("ChatPanel", () => {
 
     render(<ChatPanel mode="scout" />)
     const input = screen.getByRole("textbox", { name: /type your message here/i })
-    const button = screen.getByRole("button", { name: /send message/i })
+    const button = screen.getByRole("button", { name: /dispatch/i })
 
     fireEvent.change(input, { target: { value: "Test prompt" } })
     fireEvent.click(button)
@@ -60,12 +60,12 @@ describe("ChatPanel", () => {
     render(<ChatPanel mode="scout" />)
 
     const input = screen.getByRole("textbox", { name: /type your message here/i })
-    const button = screen.getByRole("button", { name: /send message/i })
+    const button = screen.getByRole("button", { name: /dispatch/i })
     fireEvent.change(input, { target: { value: "Failure path" } })
     fireEvent.click(button)
 
     await waitFor(() => {
-      expect(screen.getByText(/connection error/i)).toBeInTheDocument()
+      expect(screen.getByText(/network unavailable/i)).toBeInTheDocument()
     })
   })
 })

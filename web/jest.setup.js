@@ -16,3 +16,22 @@ global.IntersectionObserver = jest.fn().mockImplementation(() => ({
   unobserve: jest.fn(),
   disconnect: jest.fn(),
 }))
+
+// Mock Tauri internals for tests running in jsdom.
+if (!window.__TAURI_INTERNALS__) {
+  window.__TAURI_INTERNALS__ = {
+    transformCallback: jest.fn(() => 0),
+  }
+}
+
+jest.mock("@tauri-apps/api/event", () => ({
+  listen: jest.fn(async () => jest.fn()),
+}))
+
+jest.mock("@tauri-apps/api/window", () => ({
+  getCurrentWindow: jest.fn(async () => ({
+    isFullscreen: jest.fn(async () => false),
+    setFullscreen: jest.fn(async () => {}),
+    close: jest.fn(async () => {}),
+  })),
+}))

@@ -1,5 +1,8 @@
 # Shard Architecture Documentation
 
+> Note: this document contains historical references to a Python API layer.
+> Current repository runtime is Rust-daemon-centric (`desktop/rust`).
+
 ## v0.4.0+ Production Updates
 
 This document outlines the key architectural features implemented in Shard v0.4.0 for production readiness.
