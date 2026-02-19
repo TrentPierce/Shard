@@ -129,7 +129,7 @@ export default function HomePage() {
         staleTime: 5000,
     })
 
-    const rustStatus: "connected" | "unreachable" = topology?.status === "ok" ? "connected" : "unreachable"
+    const rustStatus = (topology?.status === "ok" ? "connected" : "unreachable") as "connected" | "unreachable" | "downloading"
     const topologyData: Topology | null = topology ?? null
 
     useEffect(() => {

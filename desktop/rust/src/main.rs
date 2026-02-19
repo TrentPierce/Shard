@@ -10,6 +10,7 @@
 //! Run:     ./shard-daemon --control-port 9091
 
 use anyhow::Result;
+use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::{
     extract::Path as AxumPath,
     extract::Query,
@@ -22,7 +23,6 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-use axum::response::sse::{Event, KeepAlive, Sse};
 use clap::{Args, Parser, Subcommand};
 use libp2p::{
     autonat, dcutr,
@@ -1448,7 +1448,10 @@ async fn chat_completions_handler(
     let mut prompt = String::new();
     prompt.push_str("<|begin_of_text|>");
     for msg in &req.messages {
-        prompt.push_str(&format!("<|start_header_id|>{}\n\n{}<|eot_id|>", msg.role, msg.content));
+        prompt.push_str(&format!(
+            "<|start_header_id|>{}\n\n{}<|eot_id|>",
+            msg.role, msg.content
+        ));
     }
     prompt.push_str("<|start_header_id|>assistant<|end_header_id|>\n\n");
 
@@ -1489,7 +1492,7 @@ async fn chat_completions_handler(
                                     });
                                     yield Ok::<_, std::convert::Infallible>(Event::default().data(chunk.to_string()));
                                 }
-                                
+
                                 if engine.eval(&[best_idx as i32]).is_err() {
                                     break;
                                 }
@@ -1516,7 +1519,9 @@ async fn chat_completions_handler(
             yield Ok(Event::default().data("[DONE]"));
         };
 
-        Sse::new(stream).keep_alive(KeepAlive::default()).into_response()
+        Sse::new(stream)
+            .keep_alive(KeepAlive::default())
+            .into_response()
     } else {
         // Run synchronously but hold the lock
         let mut full_text = String::new();
@@ -1547,7 +1552,7 @@ async fn chat_completions_handler(
                                 if let Ok(piece) = engine.token_to_piece(best_idx as i32) {
                                     full_text.push_str(&piece);
                                 }
-                                
+
                                 if engine.eval(&[best_idx as i32]).is_err() {
                                     break;
                                 }
@@ -1813,7 +1818,11 @@ async fn main() -> Result<()> {
         let config = crate::inference::ShardInitConfig {
             model_path: model_c.as_ptr(),
             layer_start: cli.layer_start as std::ffi::c_int,
-            layer_end: if cli.layer_end == 0 { -1 } else { cli.layer_end as std::ffi::c_int },
+            layer_end: if cli.layer_end == 0 {
+                -1
+            } else {
+                cli.layer_end as std::ffi::c_int
+            },
             model_id: model_id_c.as_ptr(),
             pipeline_mode: 0,
         };

@@ -1,7 +1,7 @@
-use libloading::{Library, Symbol};
-use std::ffi::{c_char, c_int, c_ulonglong, c_void, CStr, CString};
-use std::path::Path;
 use anyhow::{Context, Result};
+use libloading::{Library, Symbol};
+use std::ffi::{c_char, c_int, c_ulonglong, c_void, CString};
+use std::path::Path;
 
 #[repr(C)]
 pub struct ShardInitConfig {
@@ -24,48 +24,76 @@ pub struct ShardTensorView {
 pub struct ShardEngine {
     _lib: Library,
     handle: *mut c_void,
-    
+
     // Function pointers must outlive _lib, which they do because struct drop order
     eval_fn: Symbol<'static, unsafe extern "C" fn(*mut c_void, *const c_int, c_int) -> c_int>,
     get_logits_fn: Symbol<'static, unsafe extern "C" fn(*mut c_void, *mut f32, c_int) -> c_int>,
     rollback_fn: Symbol<'static, unsafe extern "C" fn(*mut c_void, c_int) -> c_int>,
-    tokenize_fn: Symbol<'static, unsafe extern "C" fn(*mut c_void, *const c_char, *mut c_int, c_int) -> c_int>,
-    token_to_piece_fn: Symbol<'static, unsafe extern "C" fn(*mut c_void, c_int, *mut c_char, c_int) -> c_int>,
+    tokenize_fn: Symbol<
+        'static,
+        unsafe extern "C" fn(*mut c_void, *const c_char, *mut c_int, c_int) -> c_int,
+    >,
+    token_to_piece_fn:
+        Symbol<'static, unsafe extern "C" fn(*mut c_void, c_int, *mut c_char, c_int) -> c_int>,
     free_fn: Symbol<'static, unsafe extern "C" fn(*mut c_void)>,
 }
 
-// Safety: The C API uses internal locking or is thread-unsafe by design. 
+// Safety: The C API uses internal locking or is thread-unsafe by design.
 // Assuming it's safe to send between threads but maybe not Sync.
 unsafe impl Send for ShardEngine {}
 
 impl ShardEngine {
+    #[allow(missing_transmute_annotations)]
     pub fn load<P: AsRef<Path>>(dll_path: P, config: &ShardInitConfig) -> Result<Self> {
-        let pathStr = dll_path.as_ref().to_str().unwrap_or_default();
-        if pathStr.is_empty() {
+        let path_str = dll_path.as_ref().to_str().unwrap_or_default();
+        if path_str.is_empty() {
             anyhow::bail!("Invalid library path");
         }
-        
+
         unsafe {
-            let lib = Library::new(pathStr).context("Failed to load shard_engine library")?;
-            
+            let lib = Library::new(path_str).context("Failed to load shard_engine library")?;
+
             // Load initialization function
-            let init_fn: Symbol<unsafe extern "C" fn(*const ShardInitConfig) -> *mut c_void> = 
+            let init_fn: Symbol<unsafe extern "C" fn(*const ShardInitConfig) -> *mut c_void> =
                 lib.get(b"shard_init_ex").context("Missing shard_init_ex")?;
-                
+
             let handle = init_fn(config);
             if handle.is_null() {
                 anyhow::bail!("shard_init_ex returned null handle");
             }
-            
-            // Extend lifetimes to static since they are bound to `_lib` 
+
+            // Extend lifetimes to static since they are bound to `_lib`
             // and `_lib` is dropped last in the struct.
-            let eval_fn = std::mem::transmute(lib.get::<unsafe extern "C" fn(*mut c_void, *const c_int, c_int) -> c_int>(b"shard_eval")?);
-            let get_logits_fn = std::mem::transmute(lib.get::<unsafe extern "C" fn(*mut c_void, *mut f32, c_int) -> c_int>(b"shard_get_logits")?);
-            let rollback_fn = std::mem::transmute(lib.get::<unsafe extern "C" fn(*mut c_void, c_int) -> c_int>(b"shard_rollback")?);
-            let tokenize_fn = std::mem::transmute(lib.get::<unsafe extern "C" fn(*mut c_void, *const c_char, *mut c_int, c_int) -> c_int>(b"shard_tokenize")?);
-            let token_to_piece_fn = std::mem::transmute(lib.get::<unsafe extern "C" fn(*mut c_void, c_int, *mut c_char, c_int) -> c_int>(b"shard_token_to_piece")?);
-            let free_fn = std::mem::transmute(lib.get::<unsafe extern "C" fn(*mut c_void)>(b"shard_free")?);
-            
+            let eval_fn = std::mem::transmute(lib.get::<unsafe extern "C" fn(
+                *mut c_void,
+                *const c_int,
+                c_int,
+            ) -> c_int>(b"shard_eval")?);
+            let get_logits_fn =
+                std::mem::transmute(lib.get::<unsafe extern "C" fn(
+                    *mut c_void,
+                    *mut f32,
+                    c_int,
+                ) -> c_int>(b"shard_get_logits")?);
+            let rollback_fn = std::mem::transmute(
+                lib.get::<unsafe extern "C" fn(*mut c_void, c_int) -> c_int>(b"shard_rollback")?,
+            );
+            let tokenize_fn = std::mem::transmute(lib.get::<unsafe extern "C" fn(
+                *mut c_void,
+                *const c_char,
+                *mut c_int,
+                c_int,
+            ) -> c_int>(b"shard_tokenize")?);
+            let token_to_piece_fn =
+                std::mem::transmute(lib.get::<unsafe extern "C" fn(
+                    *mut c_void,
+                    c_int,
+                    *mut c_char,
+                    c_int,
+                ) -> c_int>(b"shard_token_to_piece")?);
+            let free_fn =
+                std::mem::transmute(lib.get::<unsafe extern "C" fn(*mut c_void)>(b"shard_free")?);
+
             Ok(Self {
                 _lib: lib,
                 handle,
@@ -93,7 +121,12 @@ impl ShardEngine {
         let c_text = CString::new(text)?;
         let mut tokens = vec![0i32; max_tokens];
         unsafe {
-            let count = (self.tokenize_fn)(self.handle, c_text.as_ptr(), tokens.as_mut_ptr(), max_tokens as c_int);
+            let count = (self.tokenize_fn)(
+                self.handle,
+                c_text.as_ptr(),
+                tokens.as_mut_ptr(),
+                max_tokens as c_int,
+            );
             if count < 0 {
                 anyhow::bail!("Tokenization failed");
             }
@@ -117,7 +150,12 @@ impl ShardEngine {
     pub fn token_to_piece(&self, token_id: i32) -> Result<String> {
         let mut buf = vec![0u8; 128];
         unsafe {
-            let n = (self.token_to_piece_fn)(self.handle, token_id, buf.as_mut_ptr() as *mut c_char, 128);
+            let n = (self.token_to_piece_fn)(
+                self.handle,
+                token_id,
+                buf.as_mut_ptr() as *mut c_char,
+                128,
+            );
             if n > 0 {
                 buf.truncate(n as usize);
                 Ok(String::from_utf8_lossy(&buf).into_owned())

@@ -6,10 +6,10 @@ import { ThemeToggle } from "./ThemeToggle"
 
 interface HeaderProps {
     mode: NodeMode
-    rustStatus: "connected" | "unreachable"
+    rustStatus: "connected" | "unreachable" | "downloading"
 }
 
-const modeLabels: Record<NodeMode, string> = {
+export const modeLabels: Record<NodeMode, string> = {
     loading: "Bootstrapping",
     "local-shard": "Shard",
     "scout-initializing": "Scout (Loading)",
@@ -45,43 +45,33 @@ export default function Header({ mode, rustStatus }: HeaderProps) {
         getCurrentWindow().close()
     }
 
-    const dotClass =
-        rustStatus === "connected" ? "status-dot--live" : "status-dot--dead"
-
     return (
-        <header className="header" role="banner" data-tauri-drag-region>
-            <div className="header__brand" aria-label="Application brand" style={{ pointerEvents: 'none' }}>
-                <div className="header__logo" aria-label="Shard logo" role="img">S</div>
-                <div>
-                    <div className="header__title">Shard</div>
-                    <div className="header__subtitle">Distributed Inference Network</div>
+        <header className="h-16 border-b border-glass-border bg-glass-bg/80 backdrop-blur-xl px-8 flex items-center justify-between select-none z-[100] sticky top-0" data-tauri-drag-region>
+            <div className="flex items-center gap-4 pointer-events-none">
+                <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-accent-cyan to-accent-blue flex items-center justify-center text-primary font-bold shadow-glow-cyan text-xl">S</div>
+                <div className="flex flex-col">
+                    <h1 className="text-sm font-display font-black text-white tracking-widest uppercase italic">Shard</h1>
+                    <span className="text-[10px] text-muted font-medium uppercase tracking-[0.3em] opacity-60">Neural Mesh v0.4.9</span>
                 </div>
             </div>
 
-            <div style={{ display: "flex", alignItems: "center", gap: "16px", zIndex: 10 }}>
-                <div
-                    className={`header__mode header__mode--${mode === "local-shard" ? "shard" : mode}`}
-                    title={modeDescriptions[mode]}
-                    role="status"
-                >
-                    <span className={`status-dot ${dotClass}`} aria-hidden="true" />
-                    <span aria-label={`Current mode: ${modeLabels[mode]}`}>{modeLabels[mode]}</span>
+            <div className="flex items-center gap-6">
+                <div className="flex items-center gap-4 px-4 py-2 rounded-2xl bg-tertiary/40 border border-glass-border">
+                    <div className="flex items-center gap-2">
+                        <div className={`w-2 h-2 rounded-full animate-pulse shadow-sm ${rustStatus === "connected" ? "bg-accent-emerald shadow-accent-emerald/40" : rustStatus === "downloading" ? "bg-accent-amber shadow-accent-amber/40" : "bg-accent-rose shadow-accent-rose/40"}`}></div>
+                        <span className="text-[10px] font-bold text-white uppercase tracking-wider">{rustStatus}</span>
+                    </div>
+                    <div className="h-3 w-[1px] bg-glass-border"></div>
+                    <div className="text-[10px] font-bold text-accent-cyan uppercase tracking-wider tabular-nums">{modeLabels[mode]}</div>
                 </div>
+
                 <ThemeToggle />
+
                 {isDesktop && (
-                    <div style={{ display: "flex", gap: "8px", marginLeft: "12px" }}>
+                    <div className="flex items-center gap-2 ml-2">
                         <button
                             onClick={handleMinimize}
-                            title="Minimize"
-                            style={{
-                                width: "28px", height: "28px", borderRadius: "50%",
-                                border: "1px solid rgba(148,163,184,0.3)", background: "var(--bg-card)",
-                                color: "var(--text-muted)", cursor: "pointer", display: "flex",
-                                alignItems: "center", justifyContent: "center", fontSize: "16px",
-                                transition: "all 0.2s ease"
-                            }}
-                            onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text-primary)"; e.currentTarget.style.borderColor = "var(--border-glow)"; }}
-                            onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-muted)"; e.currentTarget.style.borderColor = "rgba(148,163,184,0.3)"; }}
+                            className="w-8 h-8 rounded-xl border border-glass-border bg-tertiary/40 text-muted hover:text-white hover:border-accent-cyan/40 flex items-center justify-center transition-smooth"
                         >
                             <svg width="12" height="2" viewBox="0 0 12 2" fill="currentColor">
                                 <rect width="12" height="2" rx="1" />
@@ -89,16 +79,7 @@ export default function Header({ mode, rustStatus }: HeaderProps) {
                         </button>
                         <button
                             onClick={handleClose}
-                            title="Minimize to Tray"
-                            style={{
-                                width: "28px", height: "28px", borderRadius: "50%",
-                                border: "1px solid rgba(148,163,184,0.3)", background: "var(--bg-card)",
-                                color: "var(--text-muted)", cursor: "pointer", display: "flex",
-                                alignItems: "center", justifyContent: "center", fontSize: "16px",
-                                transition: "all 0.2s ease"
-                            }}
-                            onMouseEnter={(e) => { e.currentTarget.style.color = "var(--accent-rose)"; e.currentTarget.style.borderColor = "var(--accent-rose)"; }}
-                            onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-muted)"; e.currentTarget.style.borderColor = "rgba(148,163,184,0.3)"; }}
+                            className="w-8 h-8 rounded-xl border border-glass-border bg-tertiary/40 text-muted hover:text-accent-rose hover:border-accent-rose/40 flex items-center justify-center transition-smooth"
                         >
                             <svg width="10" height="10" viewBox="0 0 12 12" fill="currentColor">
                                 <path d="M10.7 1.3c-.4-.4-1-.4-1.4 0L6 4.6 2.7 1.3c-.4-.4-1-.4-1.4 0-.4.4-.4 1 0 1.4L4.6 6 1.3 9.3c-.4.4-.4 1 0 1.4.2.2.5.3.7.3.2 0 .5-.1.7-.3L6 7.4l3.3 3.3c.2.2.5.3.7.3.2 0 .5-.1.7-.3.4-.4.4-1 0-1.4L7.4 6l3.3-3.3c.4-.4.4-1 0-1.4z" />

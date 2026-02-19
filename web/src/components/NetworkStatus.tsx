@@ -6,11 +6,13 @@ import type { Topology } from "@/lib/swarm"
 import { heartbeatShard } from "@/lib/swarm"
 import type { ModelProgress } from "@/lib/webllm"
 import { apiUrl } from "@/lib/config"
+import { listen } from '@tauri-apps/api/event';
+import { modeLabels } from "./Header"
 
 interface NetworkStatusProps {
     mode: NodeMode
     topology: Topology | null
-    rustStatus: "connected" | "unreachable"
+    rustStatus: "connected" | "unreachable" | "downloading"
     webLLMProgress: ModelProgress | null
     webLLMError: string | null
 }
@@ -31,6 +33,22 @@ export default function NetworkStatus({
     const [peers, setPeers] = useState<PeerData[]>([])
     const [heartbeat, setHeartbeat] = useState("idle")
     const [pinging, setPinging] = useState(false)
+    const [downloadProgress, setDownloadProgress] = useState<number | null>(null)
+
+    useEffect(() => {
+        const unlistenProgress = listen<number>('download-progress', (event) => {
+            setDownloadProgress(event.payload);
+        });
+
+        const unlistenComplete = listen<boolean>('download-complete', () => {
+            setDownloadProgress(null);
+        });
+
+        return () => {
+            unlistenProgress.then(f => f());
+            unlistenComplete.then(f => f());
+        };
+    }, []);
 
     useEffect(() => {
         const fetchPeers = async () => {
@@ -69,338 +87,188 @@ export default function NetworkStatus({
     }
 
     return (
-        <aside className="sidebar animate-fade-in" role="complementary" aria-label="Network status and information">
-            {/* ── Daemon ── */}
-            <div className="sidebar__section">
-                <div className="sidebar__section-title">
-                    <span className="sidebar__section-icon" aria-hidden="true">⚡</span>
-                    Daemon Status
-                </div>
-                <div className="stat-row">
-                    <span className="stat-label" id="rust-status-label">Rust Sidecar</span>
-                    <span
-                        className={`stat-value ${rustStatus === "connected"
-                            ? "stat-value--accent"
-                            : "stat-value--error"
-                            }`}
-                        aria-labelledby="rust-status-label"
-                    >
-                        {rustStatus}
-                    </span>
-                </div>
-                <div className="stat-row">
-                    <span className="stat-label" id="node-mode-label">Node Mode</span>
-                    <span className="stat-value" aria-labelledby="node-mode-label">
-                        {mode === "local-shard"
-                            ? "Shard"
-                            : mode === "scout"
-                                ? "Scout"
-                                : mode === "scout-initializing"
-                                    ? "Scout (Initializing…)"
-                                    : mode}
-                    </span>
-                </div>
-                <div className="stat-row">
-                    <span className="stat-label">API</span>
-                    <span className="stat-value" style={{ fontSize: "10px" }}>
-                        :8000
-                    </span>
-                </div>
-                <div className="stat-row">
-                    <span className="stat-label">Control Plane</span>
-                    <span className="stat-value" style={{ fontSize: "10px" }}>
-                        :9091
-                    </span>
-                </div>
-            </div>
-
-            {/* ── Wallet & Earnings ── */}
-            <div className="sidebar__section">
-                <div className="sidebar__section-title">
-                    <span className="sidebar__section-icon" aria-hidden="true">💎</span>
-                    Wallet & Earnings
-                </div>
-                <div className="stat-row">
-                    <span className="stat-label">Balance</span>
-                    <span className="stat-value" style={{ color: "var(--accent-cyan)", fontSize: "14px", fontWeight: 700 }}>
-                        2,450 SHRD
-                    </span>
-                </div>
-                <div className="stat-row">
-                    <span className="stat-label">Drafts Verified</span>
-                    <span className="stat-value">14,204</span>
-                </div>
-                <div className="stat-row">
-                    <span className="stat-label">Est. Earnings</span>
-                    <span className="stat-value" style={{ color: "var(--accent-emerald)" }}>+12 SHRD/hr</span>
-                </div>
-                <div style={{
-                    marginTop: "12px",
-                    background: "rgba(56, 139, 180, 0.1)",
-                    border: "1px solid rgba(56, 139, 180, 0.2)",
-                    borderRadius: "6px",
-                    padding: "8px",
-                    textAlign: "center"
-                }}>
-                    <div style={{ fontSize: "10px", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Wallet Connected</div>
-                    <div style={{ fontFamily: "var(--font-mono)", fontSize: "11px", color: "var(--text-primary)", marginTop: "2px", opacity: 0.8 }}>
-                        0x7F4...3b9A
+        <aside className="w-[340px] shrink-0 bg-secondary border-r border-glass-border p-8 flex flex-col gap-10 h-screen overflow-y-auto select-none" role="complementary">
+            {/* ── Neural Core ── */}
+            <div className="flex flex-col gap-5">
+                <div className="flex items-center justify-between">
+                    <div className="text-[10px] uppercase tracking-[0.25em] text-muted font-black flex items-center gap-2.5">
+                        <div className="w-1.5 h-1.5 rounded-full bg-accent-cyan shadow-glow-cyan"></div>
+                        Neural Core
                     </div>
                 </div>
-            </div>
 
-            {/* ── WebLLM Status (Scout Mode) ── */}
-            {(mode === "scout" || mode === "scout-initializing" || webLLMError) && (
-                <div className="sidebar__section">
-                    <div className="sidebar__section-title">
-                        <span className="sidebar__section-icon">🧠</span>
-                        WebLLM (Scout)
-                    </div>
-                    {webLLMError ? (
-                        <div
-                            style={{
-                                fontSize: "11px",
-                                color: "var(--accent-rose)",
-                                marginBottom: "8px",
-                                lineHeight: "1.4",
-                            }}
-                        >
-                            {webLLMError}
+                <div className="relative group">
+                    <div className="absolute -inset-0.5 bg-gradient-to-br from-accent-cyan to-accent-blue rounded-3xl blur opacity-5 group-hover:opacity-10 transition-smooth"></div>
+                    <div className="relative bg-tertiary/30 rounded-2xl p-6 border border-glass-border flex flex-col gap-5">
+                        <div className="flex justify-between items-center">
+                            <span className="text-[11px] text-secondary font-medium tracking-tight">Sync Protocol</span>
+                            <div className="flex flex-col items-end">
+                                <span className={`text-[11px] font-black uppercase tracking-wider ${rustStatus === "connected" ? "text-accent-emerald" : rustStatus === "downloading" ? "text-accent-amber" : "text-accent-rose"}`}>
+                                    {rustStatus}
+                                </span>
+                                {rustStatus === "unreachable" && downloadProgress === null && (
+                                    <button
+                                        className="text-[9px] text-accent-blue hover:text-white underline mt-1 transition-smooth"
+                                        onClick={() => window.location.reload()}
+                                    >
+                                        Re-establish link
+                                    </button>
+                                )}
+                            </div>
                         </div>
-                    ) : webLLMProgress ? (
-                        <>
-                            <div className="stat-row">
-                                <span className="stat-label">Status</span>
-                                <span className="stat-value">
-                                    {Math.round(webLLMProgress.progress * 100)}%
-                                </span>
+
+                        {downloadProgress !== null && (
+                            <div className="flex flex-col gap-2 pt-1">
+                                <div className="h-1.5 w-full bg-primary/60 rounded-full overflow-hidden border border-glass-border/30">
+                                    <div
+                                        className="h-full bg-gradient-to-r from-accent-cyan to-accent-blue shadow-glow-cyan transition-all duration-300"
+                                        style={{ width: `${downloadProgress}%` }}
+                                    ></div>
+                                </div>
+                                <div className="flex justify-between text-[10px] items-center">
+                                    <span className="text-secondary font-mono">Weight Transfer</span>
+                                    <span className="text-primary font-black tabular-nums">{downloadProgress.toFixed(1)}%</span>
+                                </div>
                             </div>
-                            <div
-                                style={{
-                                    fontSize: "10px",
-                                    color: "var(--text-muted)",
-                                    marginBottom: "6px",
-                                    lineHeight: "1.3",
-                                    maxHeight: "60px",
-                                    overflow: "hidden",
-                                }}
-                            >
-                                {webLLMProgress.text}
+                        )}
+
+                        <div className="flex justify-between items-center">
+                            <span className="text-[11px] text-secondary font-medium tracking-tight">Active Matrix</span>
+                            <span className="text-[11px] font-bold text-white uppercase tracking-widest">{modeLabels[mode]}</span>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-4 pt-4 border-t border-glass-border/40">
+                            <div className="flex flex-col gap-1">
+                                <span className="text-[9px] uppercase text-muted font-bold tracking-widest leading-none">Control</span>
+                                <span className="text-[10px] font-mono text-primary/80">9091 <span className="text-[8px] opacity-30">HEX</span></span>
                             </div>
-                            <div className="stat-row">
-                                <span className="stat-label">Elapsed</span>
-                                <span className="stat-value" style={{ fontSize: "10px" }}>
-                                    {(webLLMProgress.timeElapsed / 1000).toFixed(1)}s
-                                </span>
+                            <div className="flex flex-col gap-1">
+                                <span className="text-[9px] uppercase text-muted font-bold tracking-widest leading-none">Net Mesh</span>
+                                <span className="text-[10px] font-mono text-primary/80">4001 <span className="text-[8px] opacity-30">P2P</span></span>
                             </div>
-                        </>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            {/* ── Asset Ledger ── */}
+            <div className="flex flex-col gap-5">
+                <div className="text-[10px] uppercase tracking-[0.25em] text-muted font-black flex items-center gap-2.5">
+                    <div className="w-1.5 h-1.5 rounded-full bg-accent-amber shadow-glow-emerald/20"></div>
+                    Ledger
+                </div>
+
+                <div className="bg-tertiary/30 rounded-2xl p-6 border border-glass-border flex flex-col gap-5">
+                    <div className="flex flex-col gap-1.5">
+                        <span className="text-[10px] text-secondary uppercase tracking-widest font-bold">Accumulated Rewards</span>
+                        <div className="flex items-baseline gap-2">
+                            <div className="text-3xl font-display font-black text-white tracking-tighter">2,450.00</div>
+                            <span className="text-xs font-bold text-accent-cyan tracking-widest uppercase">SHRD</span>
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                        <div className="flex flex-col">
+                            <span className="text-[9px] text-muted uppercase font-bold tracking-widest">Verifications</span>
+                            <span className="text-sm font-black text-white/90">14.2k</span>
+                        </div>
+                        <div className="flex flex-col">
+                            <span className="text-[9px] text-muted uppercase font-bold tracking-widest">Yield Rate</span>
+                            <span className="text-sm font-black text-accent-emerald">~12/hr</span>
+                        </div>
+                    </div>
+
+                    <div className="bg-primary/40 rounded-xl p-3 border border-glass-border flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-accent-cyan/10 flex items-center justify-center text-accent-cyan shrink-0">
+                            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" /></svg>
+                        </div>
+                        <div className="flex flex-col min-w-0">
+                            <span className="text-[9px] uppercase text-muted font-bold tracking-widest">Active Identity</span>
+                            <span className="text-[10px] font-mono text-primary/70 truncate uppercase">0x7F4B…3B9A</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            {/* ── Active Swarm ── */}
+            <div className="flex flex-col gap-5">
+                <div className="flex items-center justify-between">
+                    <div className="text-[10px] uppercase tracking-[0.25em] text-muted font-black flex items-center gap-2.5">
+                        <div className="w-1.5 h-1.5 rounded-full bg-accent-emerald"></div>
+                        Active Swarm
+                    </div>
+                    <span className="text-[10px] font-bold text-accent-emerald tabular-nums">0{peers.length}</span>
+                </div>
+
+                <div className="flex flex-col gap-2.5">
+                    {peers.length === 0 ? (
+                        <div className="py-8 px-4 border border-dashed border-glass-border rounded-2xl flex flex-col items-center justify-center text-center gap-2">
+                            <div className="text-xl opacity-20 filter grayscale">🛰️</div>
+                            <div className="text-[11px] text-muted font-medium tracking-tight px-4 leading-relaxed">
+                                No remote peers detected. The matrix is currently silent.
+                            </div>
+                        </div>
                     ) : (
-                        <div
-                            style={{
-                                fontSize: "11px",
-                                color: "var(--accent-emerald)",
-                            }}
-                        >
-                            ✓ Ready (Llama-3.2-1B)
+                        <div className="grid grid-cols-1 gap-2">
+                            {peers.map((p) => (
+                                <div key={p.peer_id} className="flex items-center justify-between px-4 py-3 bg-tertiary/20 rounded-xl border border-glass-border/30 hover:bg-tertiary/40 transition-smooth group">
+                                    <div className="flex items-center gap-3 min-w-0">
+                                        <div className="w-1.5 h-1.5 rounded-full bg-accent-emerald shadow-[0_0_8px_rgba(16,185,129,0.5)] group-hover:scale-125 transition-smooth"></div>
+                                        <span className="text-[11px] font-mono text-primary/60 truncate">{p.peer_id}</span>
+                                    </div>
+                                    <span className="text-[9px] text-muted font-black uppercase opacity-0 group-hover:opacity-100 transition-smooth">LIVE</span>
+                                </div>
+                            ))}
                         </div>
                     )}
                 </div>
-            )}
-
-            {/* ── Topology ── */}
-            <div className="sidebar__section">
-                <div className="sidebar__section-title">
-                    <span className="sidebar__section-icon">🌐</span>
-                    Topology
-                </div>
-                <div className="stat-row">
-                    <span className="stat-label">Peer ID</span>
-                    <span
-                        className="stat-value"
-                        title={topology?.shard_peer_id ?? ""}
-                        style={{ fontSize: "10px", maxWidth: "140px", overflow: "hidden", textOverflow: "ellipsis" }}
-                    >
-                        {topology?.shard_peer_id
-                            ? topology.shard_peer_id.slice(0, 16) + "…"
-                            : "—"}
-                    </span>
-                </div>
-                <div className="stat-row">
-                    <span className="stat-label">WS Addr</span>
-                    <span
-                        className="stat-value"
-                        style={{ fontSize: "9px", maxWidth: "140px", overflow: "hidden", textOverflow: "ellipsis" }}
-                    >
-                        {topology?.shard_ws_multiaddr ? "✓ available" : "—"}
-                    </span>
-                </div>
-                <div className="stat-row">
-                    <span className="stat-label">WebRTC Addr</span>
-                    <span
-                        className="stat-value"
-                        style={{ fontSize: "9px", maxWidth: "140px", overflow: "hidden", textOverflow: "ellipsis" }}
-                    >
-                        {topology?.shard_webrtc_multiaddr ? "✓ available" : "—"}
-                    </span>
-                </div>
-                <div className="stat-row">
-                    <span className="stat-label">QUIC Addr</span>
-                    <span
-                        className="stat-value"
-                        style={{ fontSize: "9px", maxWidth: "140px", overflow: "hidden", textOverflow: "ellipsis" }}
-                    >
-                        {topology?.shard_quic_multiaddr ? "✓ available" : "—"}
-                    </span>
-                </div>
             </div>
 
-            {/* ── Peers ── */}
-            <div className="sidebar__section">
-                <div className="sidebar__section-title">
-                    <span className="sidebar__section-icon">👥</span>
-                    Connected Peers ({peers.length})
-                </div>
-                {peers.length === 0 ? (
-                    <div
-                        style={{
-                            fontSize: "12px",
-                            color: "var(--text-muted)",
-                            textAlign: "center",
-                            padding: "12px 0",
-                        }}
-                    >
-                        No peers connected yet.
-                        <br />
-                        <span style={{ fontSize: "10px" }}>
-                            Share your multiaddr to connect.
-                        </span>
+            {/* ── Intelligence Layer ── */}
+            {(mode === "scout" || mode === "scout-initializing" || webLLMError) && (
+                <div className="flex flex-col gap-5 mt-auto pt-6 border-t border-glass-border">
+                    <div className="text-[10px] uppercase tracking-[0.25em] text-muted font-black flex items-center gap-2.5">
+                        <div className="w-1.5 h-1.5 rounded-full bg-accent-blue shadow-glow-cyan/20"></div>
+                        Intel Layer
                     </div>
-                ) : (
-                    <ul className="peer-list">
-                        {peers.map((p) => (
-                            <li key={p.peer_id} className="peer-item">
-                                <span className="status-dot status-dot--live" />
-                                <span className="peer-item__id">{p.peer_id.slice(0, 20)}…</span>
-                            </li>
-                        ))}
-                    </ul>
-                )}
-            </div>
 
-            {/* ── Queue Status (Leech Mode) ── */}
-            {mode === "leech" && (
-                <div className="sidebar__section">
-                    <div className="sidebar__section-title">
-                        <span className="sidebar__section-icon">⏳</span>
-                        Queue Status
-                    </div>
-                    <div className="stat-row">
-                        <span className="stat-label">Priority</span>
-                        <span className="stat-value" style={{ color: "#f59e0b" }}>Low</span>
-                    </div>
-                    <div
-                        style={{
-                            fontSize: "11px",
-                            color: "var(--text-muted)",
-                            marginTop: "8px",
-                            padding: "10px",
-                            background: "rgba(245, 158, 11, 0.1)",
-                            borderRadius: "6px",
-                            border: "1px solid rgba(245, 158, 11, 0.2)",
-                            lineHeight: "1.4",
-                        }}
-                    >
-                        <strong style={{ color: "#f59e0b" }}>Leech Mode Active</strong>
-                        <br />
-                        You have lowest priority. Enable Scout mode to skip the queue and earn priority tokens.
-                    </div>
-                    <button
-                        className="btn-ping"
-                        style={{
-                            background: "linear-gradient(135deg, #f59e0b, #d97706)",
-                            marginTop: "12px",
-                            width: "100%",
-                        }}
-                        onClick={() => {
-                            window.dispatchEvent(new Event("shard:retry-scout-init"))
-                        }}
-                    >
-                        Enable Scout Mode
-                    </button>
-                </div>
-            )}
+                    <div className="bg-accent-blue/5 rounded-2xl p-5 border border-accent-blue/20 flex flex-col gap-4 relative overflow-hidden group">
+                        <div className="absolute top-0 right-0 w-24 h-24 bg-accent-blue/5 rounded-full -mr-12 -mt-12 blur-3xl group-hover:bg-accent-blue/10 transition-smooth"></div>
 
-            {/* ── Scout Status ── */}
-            {(mode === "scout" || mode === "scout-initializing") && (
-                <div className="sidebar__section">
-                    <div className="sidebar__section-title">
-                        <span className="sidebar__section-icon">🔍</span>
-                        Scout Status
-                    </div>
-                    <div className="stat-row">
-                        <span className="stat-label">Priority</span>
-                        <span className="stat-value stat-value--accent">High</span>
-                    </div>
-                    <div className="stat-row">
-                        <span className="stat-label">Contribution</span>
-                        <span className="stat-value" style={{ color: "#10b981" }}>Active</span>
-                    </div>
-                    <div
-                        style={{
-                            fontSize: "11px",
-                            color: "var(--text-muted)",
-                            marginTop: "8px",
-                            padding: "10px",
-                            background: "rgba(16, 185, 129, 0.1)",
-                            borderRadius: "6px",
-                            border: "1px solid rgba(16, 185, 129, 0.2)",
-                            lineHeight: "1.4",
-                        }}
-                    >
-                        <strong style={{ color: "#10b981" }}>Scout Mode Active</strong>
-                        <br />
-                        Your browser is generating draft tokens and contributing to the network. You have high priority access.
+                        {webLLMError ? (
+                            <div className="text-[11px] text-accent-rose font-medium leading-relaxed italic">{webLLMError}</div>
+                        ) : webLLMProgress ? (
+                            <div className="flex flex-col gap-3">
+                                <div className="flex justify-between items-center text-[11px]">
+                                    <span className="text-accent-blue font-bold uppercase tracking-widest">Scout Initializing</span>
+                                    <span className="text-white font-black tabular-nums">{Math.round(webLLMProgress.progress * 100)}%</span>
+                                </div>
+                                <div className="h-1 w-full bg-accent-blue/10 rounded-full overflow-hidden">
+                                    <div
+                                        className="h-full bg-accent-blue shadow-glow-cyan transition-all duration-300"
+                                        style={{ width: `${webLLMProgress.progress * 100}%` }}
+                                    ></div>
+                                </div>
+                                <div className="text-[9px] text-accent-blue/60 font-medium leading-tight line-clamp-2 italic">{webLLMProgress.text}</div>
+                            </div>
+                        ) : (
+                            <div className="flex flex-col gap-3">
+                                <div className="flex justify-between items-center">
+                                    <span className="text-[11px] text-accent-emerald font-black uppercase tracking-widest">Active Contributor</span>
+                                    <div className="flex gap-1">
+                                        <div className="w-1 h-3 bg-accent-emerald/20 rounded-full animate-[pulse_1s_infinite]"></div>
+                                        <div className="w-1 h-3 bg-accent-emerald/40 rounded-full animate-[pulse_1.2s_infinite]"></div>
+                                        <div className="w-1 h-3 bg-accent-emerald/60 rounded-full animate-[pulse_1.4s_infinite]"></div>
+                                    </div>
+                                </div>
+                                <p className="text-[10px] text-secondary/80 leading-relaxed font-medium">
+                                    Accelerating the Shard network via WebGPU draft generation. Enhanced priority enabled.
+                                </p>
+                            </div>
+                        )}
                     </div>
                 </div>
             )}
-
-            {/* ── Heartbeat ── */}
-            <div className="sidebar__section">
-                <div className="sidebar__section-title">
-                    <span className="sidebar__section-icon">💓</span>
-                    Heartbeat
-                </div>
-                <div
-                    style={{
-                        fontSize: "12px",
-                        fontFamily: "var(--font-mono)",
-                        color:
-                            heartbeat.includes("PONG")
-                                ? "var(--accent-emerald)"
-                                : heartbeat.includes("fail")
-                                    ? "var(--accent-rose)"
-                                    : "var(--text-secondary)",
-                        marginBottom: "10px",
-                        minHeight: "18px",
-                    }}
-                    role="status"
-                    aria-live="polite"
-                    aria-atomic="true"
-                    id="heartbeat-status"
-                >
-                    {heartbeat}
-                </div>
-                <button
-                    className="btn-ping"
-                    onClick={doPing}
-                    disabled={pinging}
-                    type="button"
-                    aria-label="Send network ping"
-                    aria-describedby="heartbeat-status"
-                >
-                    {pinging ? "Pinging…" : "Send PING"}
-                </button>
-            </div>
         </aside>
     )
 }
