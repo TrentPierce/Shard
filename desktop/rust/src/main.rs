@@ -19,7 +19,7 @@ use axum::{
         State as AxumState,
     },
     http::{HeaderValue, Method},
-    response::IntoResponse,
+    response::{Html, IntoResponse, Response},
     routing::{get, post},
     Json, Router,
 };
@@ -59,6 +59,7 @@ mod identity;
 pub mod inference;
 mod ledger;
 mod mesh;
+mod metrics;
 mod network;
 mod telemetry_ws;
 use common::signed_envelope::SignedEnvelope;
@@ -69,6 +70,8 @@ use ledger::state::{ComputeCreditTx, LedgerState};
 use ledger::store::LedgerStore;
 use ledger::sync::{hash_probe_segments, LedgerSyncRequest, LedgerSyncResponse};
 use mesh::race_router::{RaceKey, RaceRouter, RaceSubmitOutcome};
+use metrics::persistence::{MetricsPersistence, PersistedNodeMetricReport};
+use metrics::{NodeMetricReport, NodeMetricSnapshot, SystemMetrics};
 use network::layer_registry::{provider_key, LayerHostAnnouncement, LayerRoutingTable};
 use network::obfuscation::{deobfuscate_bytes, obfuscate_bytes, random_nonce};
 use network::tensor_wire::TensorWirePacket;
@@ -378,6 +381,11 @@ struct SharedState {
     race_timeout_ms: u64,
     engine: Arc<Mutex<Option<crate::inference::ShardEngine>>>,
     replay_nonces: Arc<Mutex<HashMap<String, u64>>>,
+    system_metrics: Arc<SystemMetrics>,
+    node_metric_reports: Arc<Mutex<HashMap<String, NodeMetricSnapshot>>>,
+    metrics_persistence: Arc<MetricsPersistence>,
+    heartbeat_timeout_ms: u128,
+    idempotent_results: Arc<Mutex<HashMap<String, WorkResponse>>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -401,6 +409,26 @@ struct DraftResultSubmission {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct SignedRequest<T> {
     envelope: SignedEnvelope<T>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct NodeRegistration {
+    node_pubkey: String,
+    role: String,
+    capacity: Option<u64>,
+    #[serde(default)]
+    timestamp_ms: Option<u128>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct NodeHeartbeat {
+    node_pubkey: String,
+    role: String,
+    queue_depth: u64,
+    node_latency_ms: u64,
+    uptime_seconds: u64,
+    #[serde(default)]
+    timestamp_ms: Option<u128>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -757,6 +785,25 @@ fn data_dir() -> std::path::PathBuf {
     dirs::data_local_dir()
         .unwrap_or_else(|| std::path::PathBuf::from("."))
         .join("shard")
+}
+
+fn resolve_metrics_persistence(data: &Path) -> MetricsPersistence {
+    match std::env::var("SHARD_METRICS_BACKEND")
+        .unwrap_or_else(|_| "sqlite".to_string())
+        .to_lowercase()
+        .as_str()
+    {
+        "none" => MetricsPersistence::None,
+        "postgres" => std::env::var("SHARD_METRICS_POSTGRES_URL")
+            .map(|dsn| MetricsPersistence::Postgres { dsn })
+            .unwrap_or(MetricsPersistence::None),
+        _ => {
+            let path = std::env::var("SHARD_METRICS_SQLITE_PATH")
+                .map(PathBuf::from)
+                .unwrap_or_else(|_| data.join("metrics.db"));
+            MetricsPersistence::Sqlite { path }
+        }
+    }
 }
 
 fn wallet_password_from_env(env_name: &str) -> Result<String> {
@@ -1238,6 +1285,7 @@ async fn signed_broadcast_work_handler(
     Json(req): Json<SignedRequest<WorkRequest>>,
 ) -> Json<serde_json::Value> {
     if let Err(detail) = req.envelope.verify() {
+        state.system_metrics.inc_signature_verification_failures();
         return Json(serde_json::json!({ "ok": false, "detail": detail }));
     }
     if !accept_replay_nonce(
@@ -1247,6 +1295,7 @@ async fn signed_broadcast_work_handler(
     )
     .await
     {
+        state.system_metrics.inc_node_identity_auth_failures();
         return Json(serde_json::json!({ "ok": false, "detail": "stale or replayed nonce" }));
     }
     process_work_request(&state, req.envelope.payload).await
@@ -1254,6 +1303,7 @@ async fn signed_broadcast_work_handler(
 
 async fn process_work_request(state: &SharedState, req: WorkRequest) -> Json<serde_json::Value> {
     if let Err(detail) = validate_work_request(&req) {
+        state.system_metrics.inc_task_failures();
         return Json(serde_json::json!({ "ok": false, "detail": detail }));
     }
 
@@ -1267,7 +1317,10 @@ async fn process_work_request(state: &SharedState, req: WorkRequest) -> Json<ser
 
     match state.work_tx.send(req).await {
         Ok(_) => Json(serde_json::json!({ "ok": true, "detail": "queued for gossipsub publish" })),
-        Err(e) => Json(serde_json::json!({ "ok": false, "detail": format!("channel error: {e}") })),
+        Err(e) => {
+            state.system_metrics.inc_task_failures();
+            Json(serde_json::json!({ "ok": false, "detail": format!("channel error: {e}") }))
+        }
     }
 }
 
@@ -1275,10 +1328,23 @@ async fn pop_result_handler(
     AxumState(state): AxumState<SharedState>,
     Query(query): Query<PopResultQuery>,
 ) -> Json<serde_json::Value> {
+    if let Some(request_id) = query.request_id.clone() {
+        let mut by_id = state.idempotent_results.lock().await;
+        if let Some(result) = by_id.remove(&request_id) {
+            state
+                .system_metrics
+                .inc_tokens_processed(result.draft_tokens.len() as u64);
+            return Json(serde_json::json!({ "result": result }));
+        }
+    }
+
     let mut results = state.results.lock().await;
     if let Some(request_id) = query.request_id {
         if let Some(idx) = results.iter().position(|r| r.request_id == request_id) {
             if let Some(result) = results.remove(idx) {
+                state
+                    .system_metrics
+                    .inc_tokens_processed(result.draft_tokens.len() as u64);
                 return Json(serde_json::json!({ "result": result }));
             }
         }
@@ -1286,7 +1352,12 @@ async fn pop_result_handler(
     }
 
     match results.pop_front() {
-        Some(result) => Json(serde_json::json!({ "result": result })),
+        Some(result) => {
+            state
+                .system_metrics
+                .inc_tokens_processed(result.draft_tokens.len() as u64);
+            Json(serde_json::json!({ "result": result }))
+        }
         None => Json(serde_json::json!({ "result": null })),
     }
 }
@@ -1311,6 +1382,7 @@ async fn signed_submit_draft_handler(
     Json(req): Json<SignedRequest<DraftResultSubmission>>,
 ) -> Json<serde_json::Value> {
     if let Err(detail) = req.envelope.verify() {
+        state.system_metrics.inc_signature_verification_failures();
         return Json(serde_json::json!({ "ok": false, "detail": detail }));
     }
     if !accept_replay_nonce(
@@ -1320,6 +1392,7 @@ async fn signed_submit_draft_handler(
     )
     .await
     {
+        state.system_metrics.inc_node_identity_auth_failures();
         return Json(serde_json::json!({ "ok": false, "detail": "stale or replayed nonce" }));
     }
     process_draft_submission(&state, req.envelope.payload).await
@@ -1330,6 +1403,7 @@ async fn process_draft_submission(
     submission: DraftResultSubmission,
 ) -> Json<serde_json::Value> {
     if submission.work_id.trim().is_empty() || submission.scout_id.trim().is_empty() {
+        state.system_metrics.inc_task_failures();
         return Json(serde_json::json!({
             "ok": false,
             "detail": "work_id and scout_id are required",
@@ -1352,6 +1426,21 @@ async fn process_draft_submission(
         latency_ms: 0.0,
         created_at_ms: Some(created_at_ms),
     };
+
+    {
+        let mut by_id = state.idempotent_results.lock().await;
+        if by_id.contains_key(response.request_id.as_str()) {
+            return Json(serde_json::json!({
+                "ok": true,
+                "detail": "duplicate draft ignored (idempotent)",
+            }));
+        }
+        by_id.insert(response.request_id.clone(), response.clone());
+    }
+
+    state
+        .system_metrics
+        .inc_tokens_offloaded_to_scouts(response.draft_tokens.len() as u64);
 
     let mut results = state.results.lock().await;
     results.push_back(response);
@@ -1420,6 +1509,7 @@ async fn ws_generate_stream(mut socket: WebSocket, state: SharedState) {
     };
 
     if let Err(detail) = validate_work_request(&work) {
+        state.system_metrics.inc_task_failures();
         let _ = socket
             .send(Message::Text(
                 serde_json::json!({"error": detail, "event": "done"}).to_string(),
@@ -1437,6 +1527,8 @@ async fn ws_generate_stream(mut socket: WebSocket, state: SharedState) {
     }
 
     if state.work_tx.send(work).await.is_err() {
+        state.system_metrics.inc_task_failures();
+        state.system_metrics.inc_verification_fallback();
         let _ = socket
             .send(Message::Text(
                 serde_json::json!({"error": "work queue unavailable", "event": "done"}).to_string(),
@@ -1652,6 +1744,34 @@ async fn latency_profile_handler(
     }))
 }
 
+async fn metrics_handler(AxumState(state): AxumState<SharedState>) -> Response {
+    let queue_depth = state.scout_work.lock().await.len();
+    let active_node_count = state.node_metric_reports.lock().await.len();
+    let node_latency_ms = state.avg_latency_ms.load(Ordering::Relaxed);
+    let p = state.gossipsub_latency_hist.percentiles();
+    let uptime_seconds = ((now_ms().saturating_sub(state.daemon_start)) / 1000) as u64;
+
+    let body = state.system_metrics.render_prometheus(
+        queue_depth,
+        active_node_count,
+        node_latency_ms,
+        0,
+        p.p50_ms,
+        p.p90_ms,
+        p.p99_ms,
+        uptime_seconds,
+    );
+
+    (
+        [(
+            axum::http::header::CONTENT_TYPE,
+            "text/plain; version=0.0.4",
+        )],
+        body,
+    )
+        .into_response()
+}
+
 async fn scout_penalty_update_handler(
     AxumState(state): AxumState<SharedState>,
     Json(update): Json<ScoutPenaltyUpdate>,
@@ -1669,6 +1789,334 @@ async fn scout_penalty_status_handler(
         "ok": true,
         "peers": penalties.all_statuses(),
     }))
+}
+
+fn node_is_healthy(last_report_ms: u128, now: u128, timeout_ms: u128) -> bool {
+    now.saturating_sub(last_report_ms) <= timeout_ms
+}
+
+async fn upsert_node_snapshot(
+    state: &SharedState,
+    node_pubkey: String,
+    role: String,
+    queue_depth: u64,
+    node_latency_ms: u64,
+    uptime_seconds: u64,
+    reported_at_ms: u128,
+) {
+    let now = now_ms();
+    let healthy = node_is_healthy(reported_at_ms, now, state.heartbeat_timeout_ms);
+    let mut reports = state.node_metric_reports.lock().await;
+    reports.insert(
+        node_pubkey.clone(),
+        NodeMetricSnapshot {
+            node_pubkey,
+            role,
+            queue_depth,
+            node_latency_ms,
+            uptime_seconds,
+            last_report_ms: reported_at_ms,
+            healthy,
+        },
+    );
+}
+
+async fn signed_register_node_handler(
+    AxumState(state): AxumState<SharedState>,
+    Json(req): Json<SignedRequest<NodeRegistration>>,
+) -> Json<serde_json::Value> {
+    if let Err(detail) = req.envelope.verify() {
+        state.system_metrics.inc_signature_verification_failures();
+        return Json(serde_json::json!({ "ok": false, "detail": detail }));
+    }
+
+    if req.envelope.signer_pubkey_hex != req.envelope.payload.node_pubkey {
+        state.system_metrics.inc_node_identity_auth_failures();
+        return Json(serde_json::json!({
+            "ok": false,
+            "detail": "signer pubkey does not match registration payload",
+        }));
+    }
+
+    if !accept_replay_nonce(
+        &state.replay_nonces,
+        &req.envelope.signer_pubkey_hex,
+        req.envelope.nonce,
+    )
+    .await
+    {
+        state.system_metrics.inc_node_identity_auth_failures();
+        return Json(serde_json::json!({ "ok": false, "detail": "stale or replayed nonce" }));
+    }
+
+    let ts = req.envelope.payload.timestamp_ms.unwrap_or_else(now_ms);
+    upsert_node_snapshot(
+        &state,
+        req.envelope.payload.node_pubkey,
+        req.envelope.payload.role,
+        0,
+        0,
+        0,
+        ts,
+    )
+    .await;
+
+    Json(serde_json::json!({ "ok": true, "detail": "registered" }))
+}
+
+async fn signed_heartbeat_handler(
+    AxumState(state): AxumState<SharedState>,
+    Json(req): Json<SignedRequest<NodeHeartbeat>>,
+) -> Json<serde_json::Value> {
+    if let Err(detail) = req.envelope.verify() {
+        state.system_metrics.inc_signature_verification_failures();
+        return Json(serde_json::json!({ "ok": false, "detail": detail }));
+    }
+
+    if req.envelope.signer_pubkey_hex != req.envelope.payload.node_pubkey {
+        state.system_metrics.inc_node_identity_auth_failures();
+        return Json(serde_json::json!({
+            "ok": false,
+            "detail": "signer pubkey does not match heartbeat payload",
+        }));
+    }
+
+    if !accept_replay_nonce(
+        &state.replay_nonces,
+        &req.envelope.signer_pubkey_hex,
+        req.envelope.nonce,
+    )
+    .await
+    {
+        state.system_metrics.inc_node_identity_auth_failures();
+        return Json(serde_json::json!({ "ok": false, "detail": "stale or replayed nonce" }));
+    }
+
+    let heartbeat = req.envelope.payload;
+    let ts = heartbeat.timestamp_ms.unwrap_or_else(now_ms);
+    upsert_node_snapshot(
+        &state,
+        heartbeat.node_pubkey,
+        heartbeat.role,
+        heartbeat.queue_depth,
+        heartbeat.node_latency_ms,
+        heartbeat.uptime_seconds,
+        ts,
+    )
+    .await;
+
+    Json(serde_json::json!({ "ok": true, "detail": "heartbeat accepted" }))
+}
+
+async fn signed_metrics_report_handler(
+    AxumState(state): AxumState<SharedState>,
+    Json(req): Json<SignedRequest<NodeMetricReport>>,
+) -> Json<serde_json::Value> {
+    if let Err(detail) = req.envelope.verify() {
+        state.system_metrics.inc_signature_verification_failures();
+        return Json(serde_json::json!({ "ok": false, "detail": detail }));
+    }
+
+    if req.envelope.signer_pubkey_hex != req.envelope.payload.node_pubkey {
+        state.system_metrics.inc_node_identity_auth_failures();
+        return Json(serde_json::json!({
+            "ok": false,
+            "detail": "signer pubkey does not match metrics payload",
+        }));
+    }
+
+    if !accept_replay_nonce(
+        &state.replay_nonces,
+        &req.envelope.signer_pubkey_hex,
+        req.envelope.nonce,
+    )
+    .await
+    {
+        state.system_metrics.inc_node_identity_auth_failures();
+        return Json(serde_json::json!({ "ok": false, "detail": "stale or replayed nonce" }));
+    }
+
+    let report = req.envelope.payload;
+    let ts = report.timestamp_ms.unwrap_or_else(now_ms);
+
+    upsert_node_snapshot(
+        &state,
+        report.node_pubkey.clone(),
+        report.role.clone(),
+        report.queue_depth,
+        report.node_latency_ms,
+        report.uptime_seconds,
+        ts,
+    )
+    .await;
+
+    let persist = PersistedNodeMetricReport {
+        node_pubkey: report.node_pubkey,
+        role: report.role,
+        queue_depth: report.queue_depth,
+        node_latency_ms: report.node_latency_ms,
+        uptime_seconds: report.uptime_seconds,
+        timestamp_ms: ts,
+    };
+    if let Err(e) = state.metrics_persistence.persist_report(&persist).await {
+        tracing::warn!(%e, "failed to persist metric report");
+    }
+
+    Json(serde_json::json!({ "ok": true, "detail": "metrics report accepted" }))
+}
+
+async fn signed_deregister_node_handler(
+    AxumState(state): AxumState<SharedState>,
+    Json(req): Json<SignedRequest<NodeRegistration>>,
+) -> Json<serde_json::Value> {
+    if let Err(detail) = req.envelope.verify() {
+        state.system_metrics.inc_signature_verification_failures();
+        return Json(serde_json::json!({ "ok": false, "detail": detail }));
+    }
+
+    if req.envelope.signer_pubkey_hex != req.envelope.payload.node_pubkey {
+        state.system_metrics.inc_node_identity_auth_failures();
+        return Json(serde_json::json!({
+            "ok": false,
+            "detail": "signer pubkey does not match deregistration payload",
+        }));
+    }
+
+    if !accept_replay_nonce(
+        &state.replay_nonces,
+        &req.envelope.signer_pubkey_hex,
+        req.envelope.nonce,
+    )
+    .await
+    {
+        state.system_metrics.inc_node_identity_auth_failures();
+        return Json(serde_json::json!({ "ok": false, "detail": "stale or replayed nonce" }));
+    }
+
+    let mut reports = state.node_metric_reports.lock().await;
+    reports.remove(req.envelope.payload.node_pubkey.as_str());
+    Json(serde_json::json!({ "ok": true, "detail": "deregistered" }))
+}
+
+async fn metrics_summary_handler(
+    AxumState(state): AxumState<SharedState>,
+) -> Json<serde_json::Value> {
+    let p = state.gossipsub_latency_hist.percentiles();
+    let now = now_ms();
+    let queue_depth = state.scout_work.lock().await.len();
+    let mut reports = state.node_metric_reports.lock().await;
+    let mut active_nodes = 0usize;
+    let mut healthy_nodes = 0usize;
+    let mut unhealthy_nodes = 0usize;
+
+    for snapshot in reports.values_mut() {
+        snapshot.healthy =
+            node_is_healthy(snapshot.last_report_ms, now, state.heartbeat_timeout_ms);
+        active_nodes += 1;
+        if snapshot.healthy {
+            healthy_nodes += 1;
+        } else {
+            unhealthy_nodes += 1;
+        }
+    }
+
+    let counters = state.system_metrics.snapshot();
+    let total_tokens = counters
+        .tokens_processed_total
+        .saturating_add(counters.tokens_offloaded_to_scouts_total);
+    let offload_percentage = if total_tokens == 0 {
+        0.0
+    } else {
+        (counters.tokens_offloaded_to_scouts_total as f64 / total_tokens as f64) * 100.0
+    };
+    let verification_rate = if counters.tokens_offloaded_to_scouts_total == 0 {
+        100.0
+    } else {
+        ((counters.tokens_processed_total as f64
+            / counters.tokens_offloaded_to_scouts_total as f64)
+            * 100.0)
+            .min(100.0)
+    };
+    let auth_failure_rate = if total_tokens == 0 {
+        0.0
+    } else {
+        (counters.node_identity_auth_failures_total as f64 / total_tokens as f64) * 100.0
+    };
+    let estimated_gpu_savings_percent = (offload_percentage * 0.8).min(95.0);
+
+    Json(serde_json::json!({
+        "active_nodes": active_nodes,
+        "healthy_nodes": healthy_nodes,
+        "unhealthy_nodes": unhealthy_nodes,
+        "queue_depth": queue_depth,
+        "node_identity_status": if unhealthy_nodes == 0 { "ok" } else { "degraded" },
+        "average_latency_ms": state.avg_latency_ms.load(Ordering::Relaxed),
+        "p95_latency_ms": p.p90_ms,
+        "p99_latency_ms": p.p99_ms,
+        "offload_percentage_estimate": offload_percentage,
+        "verification_rate": verification_rate,
+        "estimated_gpu_savings_percent": estimated_gpu_savings_percent,
+        "authentication_failure_rate": auth_failure_rate,
+        "tokens_processed_total": counters.tokens_processed_total,
+        "tokens_offloaded_to_scouts_total": counters.tokens_offloaded_to_scouts_total,
+        "verification_fallback_total": counters.verification_fallback_total,
+        "task_failures_total": counters.task_failures_total,
+        "signature_verification_failures_total": counters.signature_verification_failures_total,
+        "node_identity_auth_failures_total": counters.node_identity_auth_failures_total,
+        "nodes": reports.values().cloned().collect::<Vec<NodeMetricSnapshot>>(),
+    }))
+}
+
+async fn dashboard_handler() -> Html<&'static str> {
+    Html(
+        r#"<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Shard Operations Dashboard</title>
+  <style>
+    :root { --bg:#09121a; --card:#132534; --fg:#d9e9f7; --muted:#8fb2cf; --accent:#44d2ff; --ok:#4ae596; --warn:#ffbe55; }
+    body { margin:0; font-family: "IBM Plex Sans", "Segoe UI", sans-serif; background: radial-gradient(circle at top, #163149, var(--bg)); color: var(--fg); }
+    main { max-width: 1080px; margin: 0 auto; padding: 24px; }
+    h1 { margin: 0 0 18px 0; font-size: 28px; letter-spacing: .02em; }
+    .grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(220px,1fr)); gap: 14px; }
+    .card { background: linear-gradient(180deg, #173147, var(--card)); border:1px solid #295170; border-radius: 12px; padding: 14px; }
+    .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .08em; }
+    .value { font-size: 26px; margin-top: 4px; }
+    table { width:100%; border-collapse: collapse; margin-top: 16px; }
+    th, td { text-align:left; padding: 8px; border-bottom: 1px solid #26465f; }
+    .ok { color: var(--ok); } .warn { color: var(--warn); }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Shard Operations Dashboard</h1>
+  <div class="grid" id="cards"></div>
+  <table>
+    <thead><tr><th>Node</th><th>Role</th><th>Queue</th><th>Latency</th><th>Uptime</th><th>Status</th></tr></thead>
+    <tbody id="nodes"></tbody>
+  </table>
+</main>
+<script>
+async function refresh() {
+  const res = await fetch('/metrics/summary', { cache: 'no-store' });
+  const data = await res.json();
+  const cards = [
+    ['Active nodes', data.active_nodes],
+    ['Healthy nodes', data.healthy_nodes],
+    ['Average latency', data.average_latency_ms + ' ms'],
+    ['P95 latency', data.p95_latency_ms + ' ms'],
+    ['Queue depth', data.queue_depth],
+    ['Identity status', data.node_identity_status],
+  ];
+  document.getElementById('cards').innerHTML = cards.map(([k,v]) => `<div class="card"><div class="label">${k}</div><div class="value">${v}</div></div>`).join('');
+  document.getElementById('nodes').innerHTML = (data.nodes || []).map(n => `<tr><td>${n.node_pubkey.slice(0,16)}...</td><td>${n.role}</td><td>${n.queue_depth}</td><td>${n.node_latency_ms} ms</td><td>${n.uptime_seconds}s</td><td class="${n.healthy ? 'ok' : 'warn'}">${n.healthy ? 'healthy' : 'unhealthy'}</td></tr>`).join('');
+}
+refresh(); setInterval(refresh, 5000);
+</script>
+</body></html>"#,
+    )
 }
 
 fn create_router(state: SharedState) -> Router {
@@ -1694,9 +2142,12 @@ fn create_router(state: SharedState) -> Router {
 
     Router::new()
         .route("/health", get(health_handler))
+        .route("/v1/system/health", get(health_handler))
         .route("/topology", get(topology_handler))
+        .route("/v1/system/topology", get(topology_handler))
         .route("/wallet/address", get(wallet_address_handler))
         .route("/peers", get(peers_handler))
+        .route("/v1/system/peers", get(peers_handler))
         .route("/ledger/head", get(ledger_head_handler))
         .route("/ledger/stats", get(ledger_stats_handler))
         .route("/ledger/export", get(ledger_export_handler))
@@ -1723,11 +2174,24 @@ fn create_router(state: SharedState) -> Router {
         .route("/pop-work", get(pop_work_handler))
         .route("/submit-draft", post(submit_draft_handler))
         .route("/signed/submit-draft", post(signed_submit_draft_handler))
+        .route("/signed/register-node", post(signed_register_node_handler))
+        .route("/signed/heartbeat", post(signed_heartbeat_handler))
+        .route(
+            "/signed/deregister-node",
+            post(signed_deregister_node_handler),
+        )
+        .route(
+            "/signed/metrics-report",
+            post(signed_metrics_report_handler),
+        )
         .route("/v1/chat/completions", post(chat_completions_handler))
         .route("/ws/generate", get(ws_generate_handler))
         .route("/scout/penalty", post(scout_penalty_update_handler))
         .route("/scout/penalty", get(scout_penalty_status_handler))
+        .route("/metrics", get(metrics_handler))
+        .route("/metrics/summary", get(metrics_summary_handler))
         .route("/metrics/latency-profile", get(latency_profile_handler))
+        .route("/dashboard", get(dashboard_handler))
         .layer(cors)
         .with_state(state)
 }
@@ -1807,6 +2271,12 @@ async fn main() -> Result<()> {
     let local_peer_id = PeerId::from(id_keys.public());
     let ledger_store = Arc::new(LedgerStore::new(&data));
     let loaded_ledger = ledger_store.load_or_init()?;
+    let metrics_persistence = Arc::new(resolve_metrics_persistence(&data));
+    metrics_persistence.initialize().await?;
+    let heartbeat_timeout_ms = std::env::var("SHARD_HEARTBEAT_TIMEOUT_MS")
+        .ok()
+        .and_then(|v| v.parse::<u128>().ok())
+        .unwrap_or(30_000);
 
     let initial_credit_nonce = loaded_ledger.head().height.saturating_add(1);
     let state = SharedState {
@@ -1853,6 +2323,11 @@ async fn main() -> Result<()> {
         race_timeout_ms: cli.race_timeout_ms,
         engine: Arc::new(Mutex::new(None)),
         replay_nonces: Arc::new(Mutex::new(HashMap::new())),
+        system_metrics: Arc::new(SystemMetrics::default()),
+        node_metric_reports: Arc::new(Mutex::new(HashMap::new())),
+        metrics_persistence,
+        heartbeat_timeout_ms,
+        idempotent_results: Arc::new(Mutex::new(HashMap::new())),
     };
 
     #[cfg(target_os = "windows")]
