@@ -34,6 +34,15 @@ The result: **server-grade AI quality at zero cost**, powered by the collective 
 
 ---
 
+## Token & Affiliation Policy
+
+- Shard is **not affiliated** with any external cryptocurrency, blockchain, or token project.
+- Cryptography in this repository is used only for **node identity, proof-of-compute accounting, and internal anti-abuse controls**.
+- The in-network credits are called **Shards**.
+- Shards are an internal project credit unit for this network and are **not marketed as or intended to be an external token**.
+
+---
+
 ## Why Shard?
 
 | | Traditional Cloud AI | Shard Network |
@@ -169,7 +178,19 @@ npm run dev
 # → http://localhost:3000
 ```
 
+Deploy to Vercel using CLI:
+```bash
+cd web
+npm run deploy:prod
+```
+
 Your browser enters **Scout mode** automatically — loading a draft model via WebGPU and contributing compute to the mesh.
+
+Phase 4 browser layer hosting is enabled in the web client:
+
+- The browser profiles WebGPU capabilities at boot.
+- The browser registers a hosted layer slice with the Rust daemon.
+- Activation payloads are obfuscated in transit and processed in a WebGPU pass-through stage before return.
 
 <details>
 <summary><strong>🖥️ Desktop Shard Node (Rust Daemon + Python API)</strong></summary>

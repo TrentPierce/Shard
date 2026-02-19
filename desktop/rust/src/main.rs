@@ -60,6 +60,7 @@ use crypto::identity::NodeIdentity;
 use ledger::state::{ComputeCreditTx, LedgerState};
 use mesh::race_router::{RaceKey, RaceRouter, RaceSubmitOutcome};
 use network::layer_registry::{provider_key, LayerHostAnnouncement, LayerRoutingTable};
+use network::obfuscation::{deobfuscate_bytes, obfuscate_bytes, random_nonce};
 use network::tensor_wire::TensorWirePacket;
 
 // ─── CLI ────────────────────────────────────────────────────────────────────
@@ -293,6 +294,7 @@ struct SharedState {
     scout_work: Arc<Mutex<VecDeque<WorkRequest>>>,
     work_tx: mpsc::Sender<WorkRequest>,
     pipeline_tx: mpsc::Sender<PipelineDispatch>,
+    browser_result_tx: mpsc::Sender<ForwardPassActivation>,
     daemon_start: u128,
     capacity: Arc<AtomicU32>,
     current_load: Arc<AtomicU32>,
@@ -304,6 +306,8 @@ struct SharedState {
     layer_routes: Arc<Mutex<LayerRoutingTable>>,
     race_router: Arc<Mutex<RaceRouter>>,
     ledger: Arc<Mutex<LedgerState>>,
+    browser_sessions: Arc<Mutex<HashMap<String, BrowserLayerSession>>>,
+    browser_work: Arc<Mutex<VecDeque<BrowserLayerWorkItem>>>,
     node_wallet: String,
     model_id: String,
     layer_start: u32,
@@ -360,6 +364,80 @@ struct PipelineDispatch {
     model_id: String,
     current_layer: u32,
     packet: ForwardPassActivation,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct BrowserLayerProfile {
+    supports_webgpu: bool,
+    webgpu_vendor: Option<String>,
+    max_buffer_size_mb: Option<u32>,
+    max_storage_buffers_per_stage: Option<u32>,
+    user_agent: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct BrowserLayerRegisterRequest {
+    model_id: Option<String>,
+    layer_start: u32,
+    layer_end: u32,
+    profile: BrowserLayerProfile,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct BrowserLayerRegisterResponse {
+    ok: bool,
+    session_id: String,
+    model_id: String,
+    layer_start: u32,
+    layer_end: u32,
+    expires_at_ms: u128,
+    obfuscation_key_hex: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct BrowserLayerSession {
+    session_id: String,
+    model_id: String,
+    layer_start: u32,
+    layer_end: u32,
+    profile: BrowserLayerProfile,
+    obfuscation_key: Vec<u8>,
+    last_seen_ms: u128,
+    expires_at_ms: u128,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct BrowserLayerWorkItem {
+    work_id: String,
+    session_id: String,
+    request_id: String,
+    step_id: String,
+    source_peer_id: String,
+    tensor_name: String,
+    dtype: u8,
+    shape: Vec<u32>,
+    nonce_hex: String,
+    obfuscated_tensor_hex: String,
+    created_at_ms: u128,
+}
+
+#[derive(Debug, Deserialize)]
+struct BrowserLayerWorkQuery {
+    session_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct BrowserLayerResultSubmit {
+    session_id: String,
+    work_id: String,
+    request_id: String,
+    step_id: String,
+    source_peer_id: String,
+    tensor_name: String,
+    dtype: u8,
+    shape: Vec<u32>,
+    nonce_hex: String,
+    obfuscated_tensor_hex: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -736,6 +814,22 @@ async fn peers_handler(AxumState(state): AxumState<SharedState>) -> Json<serde_j
     Json(serde_json::json!({ "peers": list, "count": list.len() }))
 }
 
+const BROWSER_SESSION_TTL_MS: u128 = 5 * 60 * 1000;
+
+fn parse_nonce_hex(raw: &str) -> Result<[u8; 12], String> {
+    let bytes = hex::decode(raw).map_err(|e| format!("invalid nonce hex: {e}"))?;
+    if bytes.len() != 12 {
+        return Err("nonce must be 12 bytes".into());
+    }
+    let mut nonce = [0u8; 12];
+    nonce.copy_from_slice(&bytes);
+    Ok(nonce)
+}
+
+fn prune_browser_sessions(sessions: &mut HashMap<String, BrowserLayerSession>, now: u128) {
+    sessions.retain(|_, session| session.expires_at_ms > now);
+}
+
 async fn credits_balance_handler(
     AxumPath(wallet): AxumPath<String>,
     AxumState(state): AxumState<SharedState>,
@@ -829,6 +923,155 @@ async fn pipeline_pop_forward_result_handler(
     match result {
         Some(res) => Json(serde_json::json!({ "ok": true, "result": res })),
         None => Json(serde_json::json!({ "ok": false, "detail": "no completed race result available" })),
+    }
+}
+
+async fn browser_layer_register_handler(
+    AxumState(state): AxumState<SharedState>,
+    Json(req): Json<BrowserLayerRegisterRequest>,
+) -> Json<serde_json::Value> {
+    if req.layer_end < req.layer_start {
+        return Json(serde_json::json!({
+            "ok": false,
+            "detail": "layer_end must be >= layer_start",
+        }));
+    }
+    if !req.profile.supports_webgpu {
+        return Json(serde_json::json!({
+            "ok": false,
+            "detail": "webgpu support is required for browser layer hosting",
+        }));
+    }
+
+    let model_id = req
+        .model_id
+        .as_deref()
+        .unwrap_or(state.model_id.as_str())
+        .to_string();
+    let now = now_ms();
+    let session_id = uuid::Uuid::new_v4().to_string();
+    let obfuscation_key = rand::random::<[u8; 32]>().to_vec();
+    let expires_at_ms = now + BROWSER_SESSION_TTL_MS;
+    let session = BrowserLayerSession {
+        session_id: session_id.clone(),
+        model_id: model_id.clone(),
+        layer_start: req.layer_start,
+        layer_end: req.layer_end,
+        profile: req.profile,
+        obfuscation_key: obfuscation_key.clone(),
+        last_seen_ms: now,
+        expires_at_ms,
+    };
+    {
+        let mut sessions = state.browser_sessions.lock().await;
+        prune_browser_sessions(&mut sessions, now);
+        sessions.insert(session_id.clone(), session);
+    }
+
+    Json(serde_json::json!(BrowserLayerRegisterResponse {
+        ok: true,
+        session_id,
+        model_id,
+        layer_start: req.layer_start,
+        layer_end: req.layer_end,
+        expires_at_ms,
+        obfuscation_key_hex: hex::encode(obfuscation_key),
+    }))
+}
+
+async fn browser_layer_work_handler(
+    AxumState(state): AxumState<SharedState>,
+    Query(query): Query<BrowserLayerWorkQuery>,
+) -> Json<serde_json::Value> {
+    let now = now_ms();
+    {
+        let mut sessions = state.browser_sessions.lock().await;
+        prune_browser_sessions(&mut sessions, now);
+        let Some(session) = sessions.get_mut(query.session_id.as_str()) else {
+            return Json(serde_json::json!({"ok": false, "detail": "invalid session_id"}));
+        };
+        session.last_seen_ms = now;
+        session.expires_at_ms = now + BROWSER_SESSION_TTL_MS;
+    }
+
+    let mut queue = state.browser_work.lock().await;
+    if let Some(pos) = queue.iter().position(|item| item.session_id == query.session_id) {
+        if let Some(work) = queue.remove(pos) {
+            return Json(serde_json::json!({
+                "ok": true,
+                "work": work,
+            }));
+        }
+    }
+    Json(serde_json::json!({"ok": true, "status": "empty"}))
+}
+
+async fn browser_layer_submit_handler(
+    AxumState(state): AxumState<SharedState>,
+    Json(req): Json<BrowserLayerResultSubmit>,
+) -> Json<serde_json::Value> {
+    let key = {
+        let mut sessions = state.browser_sessions.lock().await;
+        prune_browser_sessions(&mut sessions, now_ms());
+        let Some(session) = sessions.get_mut(req.session_id.as_str()) else {
+            return Json(serde_json::json!({"ok": false, "detail": "invalid session_id"}));
+        };
+        session.last_seen_ms = now_ms();
+        session.expires_at_ms = now_ms() + BROWSER_SESSION_TTL_MS;
+        session.obfuscation_key.clone()
+    };
+    let topo_peer_id = state.topology.lock().await.local_peer_id.clone();
+
+    let nonce = match parse_nonce_hex(req.nonce_hex.as_str()) {
+        Ok(nonce) => nonce,
+        Err(detail) => return Json(serde_json::json!({"ok": false, "detail": detail})),
+    };
+    let cipher = match hex::decode(req.obfuscated_tensor_hex.as_str()) {
+        Ok(raw) => raw,
+        Err(e) => {
+            return Json(serde_json::json!({
+                "ok": false,
+                "detail": format!("invalid obfuscated_tensor_hex: {e}"),
+            }))
+        }
+    };
+    let plain = deobfuscate_bytes(&key, &nonce, &cipher);
+    let wire = TensorWirePacket {
+        tensor_name: req.tensor_name.clone(),
+        dtype: req.dtype,
+        shape: req.shape.clone(),
+        data: plain,
+    };
+    let encoded = wire.encode();
+    let response_packet = ForwardPassActivation {
+        request_id: req.request_id.clone(),
+        step_id: req.step_id.clone(),
+        source_peer_id: topo_peer_id,
+        target_peer_id: Some(req.source_peer_id.clone()),
+        target_peer_pool: None,
+        tensor_name: req.tensor_name,
+        shape: req.shape.iter().map(|v| *v as usize).collect(),
+        format: TensorDataFormat::Quantized,
+        chunk: Some(TensorChunkRef {
+            chunk_index: 0,
+            total_chunks: 1,
+            byte_size: encoded.len() as u64,
+            checksum_blake3: None,
+            data: format!("wire1:{}", hex::encode(encoded)),
+        }),
+        blob_ref: None,
+        created_at_ms: Some(now_ms()),
+    };
+
+    match state.browser_result_tx.send(response_packet).await {
+        Ok(_) => Json(serde_json::json!({
+            "ok": true,
+            "detail": "accepted browser activation result",
+        })),
+        Err(e) => Json(serde_json::json!({
+            "ok": false,
+            "detail": format!("failed to enqueue browser activation result: {e}"),
+        })),
     }
 }
 
@@ -1084,6 +1327,9 @@ fn create_router(state: SharedState) -> Router {
         .route("/topology", get(topology_handler))
         .route("/peers", get(peers_handler))
         .route("/layers/next", get(next_layer_handler))
+        .route("/browser-layer/register", post(browser_layer_register_handler))
+        .route("/browser-layer/work", get(browser_layer_work_handler))
+        .route("/browser-layer/submit", post(browser_layer_submit_handler))
         .route("/credits/:wallet", get(credits_balance_handler))
         .route("/credits/tx/:tx_id", get(credits_tx_handler))
         .route("/pipeline/forward", post(pipeline_forward_handler))
@@ -1159,6 +1405,7 @@ async fn main() -> Result<()> {
     // ── channels ──
     let (work_tx, mut work_rx) = mpsc::channel::<WorkRequest>(256);
     let (pipeline_tx, mut pipeline_rx) = mpsc::channel::<PipelineDispatch>(256);
+    let (browser_result_tx, mut browser_result_rx) = mpsc::channel::<ForwardPassActivation>(256);
 
     let node_identity = NodeIdentity::load_or_create(&identity_path)?;
     let node_wallet = node_identity.wallet_address();
@@ -1187,6 +1434,7 @@ async fn main() -> Result<()> {
         scout_work: Arc::new(Mutex::new(VecDeque::new())),
         work_tx,
         pipeline_tx,
+        browser_result_tx,
         daemon_start: now_ms(),
         capacity: Arc::new(AtomicU32::new(100)), // Default: 100 tokens/sec
         current_load: Arc::new(AtomicU32::new(0)),
@@ -1198,6 +1446,8 @@ async fn main() -> Result<()> {
         layer_routes: Arc::new(Mutex::new(LayerRoutingTable::default())),
         race_router: Arc::new(Mutex::new(RaceRouter::default())),
         ledger: Arc::new(Mutex::new(LedgerState::default())),
+        browser_sessions: Arc::new(Mutex::new(HashMap::new())),
+        browser_work: Arc::new(Mutex::new(VecDeque::new())),
         node_wallet: node_wallet.clone(),
         model_id: cli.model_id.clone(),
         layer_start: cli.layer_start,
@@ -1557,6 +1807,16 @@ async fn main() -> Result<()> {
                 }
             }
 
+            // ── inbound browser layer results (HTTP -> gossipsub forward-result) ──
+            Some(packet) = browser_result_rx.recv() => {
+                if let Ok(payload) = serde_json::to_vec(&TrainingGossipPacket::ForwardPass(packet)) {
+                    let _ = swarm
+                        .behaviour_mut()
+                        .gossipsub
+                        .publish(forward_result_topic.clone(), payload);
+                }
+            }
+
             // ── swarm events ──
             event = swarm.select_next_some() => {
                 match event {
@@ -1716,6 +1976,53 @@ async fn main() -> Result<()> {
                                         .map(|p| p == local_peer_id.to_string())
                                         .unwrap_or(false);
                                     if is_targeted_to_me {
+                                        let browser_session = {
+                                            let mut sessions = state.browser_sessions.lock().await;
+                                            prune_browser_sessions(&mut sessions, now_ms());
+                                            sessions
+                                                .values()
+                                                .find(|session| session.model_id == cli.model_id)
+                                                .map(|session| {
+                                                    (
+                                                        session.session_id.clone(),
+                                                        session.obfuscation_key.clone(),
+                                                    )
+                                                })
+                                        };
+
+                                        if let Some((session_id, obfuscation_key)) = browser_session {
+                                            if let Some(chunk) = packet.chunk.as_ref() {
+                                                if let Some(wire_hex) = chunk.data.strip_prefix("wire1:") {
+                                                    if let Ok(raw) = hex::decode(wire_hex) {
+                                                        if let Ok(wire) = TensorWirePacket::decode(&raw) {
+                                                            let nonce = random_nonce();
+                                                            let obfuscated =
+                                                                obfuscate_bytes(&obfuscation_key, &nonce, &wire.data);
+                                                            let work_item = BrowserLayerWorkItem {
+                                                                work_id: uuid::Uuid::new_v4().to_string(),
+                                                                session_id,
+                                                                request_id: packet.request_id.clone(),
+                                                                step_id: packet.step_id.clone(),
+                                                                source_peer_id: packet.source_peer_id.clone(),
+                                                                tensor_name: wire.tensor_name,
+                                                                dtype: wire.dtype,
+                                                                shape: wire.shape,
+                                                                nonce_hex: hex::encode(nonce),
+                                                                obfuscated_tensor_hex: hex::encode(obfuscated),
+                                                                created_at_ms: now_ms(),
+                                                            };
+                                                            let mut queue = state.browser_work.lock().await;
+                                                            queue.push_back(work_item);
+                                                            while queue.len() > 2048 {
+                                                                queue.pop_front();
+                                                            }
+                                                            continue;
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+
                                         let mut result = packet.clone();
                                         result.source_peer_id = local_peer_id.to_string();
                                         result.target_peer_id = Some(packet.source_peer_id.clone());
