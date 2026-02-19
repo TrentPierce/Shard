@@ -61,6 +61,7 @@ mod ledger;
 mod mesh;
 mod network;
 mod telemetry_ws;
+use common::signed_envelope::SignedEnvelope;
 use crypto::wallet_backup::{export_wallet, import_wallet, verify_backup};
 use gateway::validate_work_request;
 use identity::NodeIdentity;
@@ -376,6 +377,7 @@ struct SharedState {
     race_pool_size: usize,
     race_timeout_ms: u64,
     engine: Arc<Mutex<Option<crate::inference::ShardEngine>>>,
+    replay_nonces: Arc<Mutex<HashMap<String, u64>>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -394,6 +396,11 @@ struct DraftResultSubmission {
     draft_text: String,
     #[serde(default)]
     timestamp: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct SignedRequest<T> {
+    envelope: SignedEnvelope<T>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1223,6 +1230,29 @@ async fn broadcast_work_handler(
     AxumState(state): AxumState<SharedState>,
     Json(req): Json<WorkRequest>,
 ) -> Json<serde_json::Value> {
+    process_work_request(&state, req).await
+}
+
+async fn signed_broadcast_work_handler(
+    AxumState(state): AxumState<SharedState>,
+    Json(req): Json<SignedRequest<WorkRequest>>,
+) -> Json<serde_json::Value> {
+    if let Err(detail) = req.envelope.verify() {
+        return Json(serde_json::json!({ "ok": false, "detail": detail }));
+    }
+    if !accept_replay_nonce(
+        &state.replay_nonces,
+        &req.envelope.signer_pubkey_hex,
+        req.envelope.nonce,
+    )
+    .await
+    {
+        return Json(serde_json::json!({ "ok": false, "detail": "stale or replayed nonce" }));
+    }
+    process_work_request(&state, req.envelope.payload).await
+}
+
+async fn process_work_request(state: &SharedState, req: WorkRequest) -> Json<serde_json::Value> {
     if let Err(detail) = validate_work_request(&req) {
         return Json(serde_json::json!({ "ok": false, "detail": detail }));
     }
@@ -1273,6 +1303,32 @@ async fn submit_draft_handler(
     AxumState(state): AxumState<SharedState>,
     Json(submission): Json<DraftResultSubmission>,
 ) -> Json<serde_json::Value> {
+    process_draft_submission(&state, submission).await
+}
+
+async fn signed_submit_draft_handler(
+    AxumState(state): AxumState<SharedState>,
+    Json(req): Json<SignedRequest<DraftResultSubmission>>,
+) -> Json<serde_json::Value> {
+    if let Err(detail) = req.envelope.verify() {
+        return Json(serde_json::json!({ "ok": false, "detail": detail }));
+    }
+    if !accept_replay_nonce(
+        &state.replay_nonces,
+        &req.envelope.signer_pubkey_hex,
+        req.envelope.nonce,
+    )
+    .await
+    {
+        return Json(serde_json::json!({ "ok": false, "detail": "stale or replayed nonce" }));
+    }
+    process_draft_submission(&state, req.envelope.payload).await
+}
+
+async fn process_draft_submission(
+    state: &SharedState,
+    submission: DraftResultSubmission,
+) -> Json<serde_json::Value> {
     if submission.work_id.trim().is_empty() || submission.scout_id.trim().is_empty() {
         return Json(serde_json::json!({
             "ok": false,
@@ -1304,6 +1360,20 @@ async fn submit_draft_handler(
     }
 
     Json(serde_json::json!({ "ok": true, "detail": "draft queued" }))
+}
+
+async fn accept_replay_nonce(
+    replay_nonces: &Arc<Mutex<HashMap<String, u64>>>,
+    signer_pubkey_hex: &str,
+    nonce: u64,
+) -> bool {
+    let mut guard = replay_nonces.lock().await;
+    let previous = guard.get(signer_pubkey_hex).copied().unwrap_or(0);
+    if nonce <= previous {
+        return false;
+    }
+    guard.insert(signer_pubkey_hex.to_string(), nonce);
+    true
 }
 
 async fn ws_generate_handler(
@@ -1645,9 +1715,14 @@ fn create_router(state: SharedState) -> Router {
             get(pipeline_pop_forward_result_handler),
         )
         .route("/broadcast-work", post(broadcast_work_handler))
+        .route(
+            "/signed/broadcast-work",
+            post(signed_broadcast_work_handler),
+        )
         .route("/pop-result", get(pop_result_handler))
         .route("/pop-work", get(pop_work_handler))
         .route("/submit-draft", post(submit_draft_handler))
+        .route("/signed/submit-draft", post(signed_submit_draft_handler))
         .route("/v1/chat/completions", post(chat_completions_handler))
         .route("/ws/generate", get(ws_generate_handler))
         .route("/scout/penalty", post(scout_penalty_update_handler))
@@ -1777,6 +1852,7 @@ async fn main() -> Result<()> {
         race_pool_size: cli.race_pool_size,
         race_timeout_ms: cli.race_timeout_ms,
         engine: Arc::new(Mutex::new(None)),
+        replay_nonces: Arc::new(Mutex::new(HashMap::new())),
     };
 
     #[cfg(target_os = "windows")]
@@ -2847,9 +2923,12 @@ async fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        should_reject_peer_connection, unique_addrs, validate_work_request, LatencyHistogram,
-        ScoutPenaltyBook, ScoutPenaltyUpdate, WorkRequest,
+        accept_replay_nonce, should_reject_peer_connection, unique_addrs, validate_work_request,
+        LatencyHistogram, ScoutPenaltyBook, ScoutPenaltyUpdate, WorkRequest,
     };
+    use std::collections::HashMap;
+    use std::sync::Arc;
+    use tokio::sync::Mutex;
 
     #[test]
     fn unique_addrs_removes_duplicates() {
@@ -3001,5 +3080,14 @@ mod tests {
         }
 
         assert!(should_reject_peer_connection(&mut penalties, &peer_id));
+    }
+
+    #[tokio::test]
+    async fn replay_nonce_rejects_stale_values() {
+        let replay = Arc::new(Mutex::new(HashMap::new()));
+        let signer = "abcd".to_string();
+        assert!(accept_replay_nonce(&replay, &signer, 1).await);
+        assert!(!accept_replay_nonce(&replay, &signer, 1).await);
+        assert!(accept_replay_nonce(&replay, &signer, 2).await);
     }
 }
