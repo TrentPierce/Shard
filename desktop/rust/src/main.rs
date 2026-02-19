@@ -61,6 +61,7 @@ mod ledger;
 mod mesh;
 mod metrics;
 mod network;
+mod scheduler;
 mod telemetry_ws;
 use common::signed_envelope::SignedEnvelope;
 use crypto::wallet_backup::{export_wallet, import_wallet, verify_backup};
@@ -75,6 +76,9 @@ use metrics::{NodeMetricReport, NodeMetricSnapshot, SystemMetrics};
 use network::layer_registry::{provider_key, LayerHostAnnouncement, LayerRoutingTable};
 use network::obfuscation::{deobfuscate_bytes, obfuscate_bytes, random_nonce};
 use network::tensor_wire::TensorWirePacket;
+use scheduler::{
+    load_reputation, save_reputation, weighted_select, NodeReputation, NodeSchedulerInput,
+};
 
 // ─── CLI ────────────────────────────────────────────────────────────────────
 
@@ -386,6 +390,8 @@ struct SharedState {
     metrics_persistence: Arc<MetricsPersistence>,
     heartbeat_timeout_ms: u128,
     idempotent_results: Arc<Mutex<HashMap<String, WorkResponse>>>,
+    node_reputation: Arc<Mutex<HashMap<String, NodeReputation>>>,
+    node_reputation_path: PathBuf,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1060,13 +1066,39 @@ async fn next_layer_handler(
     let mut routes = state.layer_routes.lock().await;
     routes.prune_expired(now_ms());
     let peers = routes.find_next_layer_peers(&model_id, query.current_layer, limit);
+    drop(routes);
+
+    let snapshots = state.node_metric_reports.lock().await.clone();
+    let reputation = state.node_reputation.lock().await.clone();
+    let scheduler_inputs = peers
+        .iter()
+        .map(|peer_id| {
+            let snapshot = snapshots.get(peer_id);
+            let rep = reputation.get(peer_id);
+            NodeSchedulerInput {
+                node_id: peer_id.clone(),
+                load: snapshot
+                    .map(|s| (s.queue_depth as f64 / 64.0).min(1.0))
+                    .unwrap_or(0.25),
+                latency_ms: snapshot.map(|s| s.node_latency_ms as f64).unwrap_or(250.0),
+                reliability_score: rep.map(NodeReputation::reliability_score).unwrap_or(0.8),
+                hardware_capability_score: rep
+                    .map(|r| r.hardware_capability_score)
+                    .filter(|v| *v > 0.0)
+                    .unwrap_or(0.7),
+                identity_reputation_score: rep.map(|r| r.identity_score).unwrap_or(0.75),
+            }
+        })
+        .collect::<Vec<_>>();
+    let selected = weighted_select(scheduler_inputs, limit);
+
     Json(serde_json::json!({
         "ok": true,
         "model_id": model_id,
         "current_layer": query.current_layer,
         "next_layer": query.current_layer.saturating_add(1),
-        "peers": peers,
-        "count": peers.len(),
+        "peers": selected,
+        "count": selected.len(),
     }))
 }
 
@@ -1284,8 +1316,10 @@ async fn signed_broadcast_work_handler(
     AxumState(state): AxumState<SharedState>,
     Json(req): Json<SignedRequest<WorkRequest>>,
 ) -> Json<serde_json::Value> {
+    let signer = req.envelope.signer_pubkey_hex.clone();
     if let Err(detail) = req.envelope.verify() {
         state.system_metrics.inc_signature_verification_failures();
+        mark_node_failure(&state, &signer).await;
         return Json(serde_json::json!({ "ok": false, "detail": detail }));
     }
     if !accept_replay_nonce(
@@ -1296,6 +1330,7 @@ async fn signed_broadcast_work_handler(
     .await
     {
         state.system_metrics.inc_node_identity_auth_failures();
+        mark_node_failure(&state, &signer).await;
         return Json(serde_json::json!({ "ok": false, "detail": "stale or replayed nonce" }));
     }
     process_work_request(&state, req.envelope.payload).await
@@ -1381,8 +1416,10 @@ async fn signed_submit_draft_handler(
     AxumState(state): AxumState<SharedState>,
     Json(req): Json<SignedRequest<DraftResultSubmission>>,
 ) -> Json<serde_json::Value> {
+    let signer = req.envelope.signer_pubkey_hex.clone();
     if let Err(detail) = req.envelope.verify() {
         state.system_metrics.inc_signature_verification_failures();
+        mark_node_failure(&state, &signer).await;
         return Json(serde_json::json!({ "ok": false, "detail": detail }));
     }
     if !accept_replay_nonce(
@@ -1393,6 +1430,7 @@ async fn signed_submit_draft_handler(
     .await
     {
         state.system_metrics.inc_node_identity_auth_failures();
+        mark_node_failure(&state, &signer).await;
         return Json(serde_json::json!({ "ok": false, "detail": "stale or replayed nonce" }));
     }
     process_draft_submission(&state, req.envelope.payload).await
@@ -1404,6 +1442,9 @@ async fn process_draft_submission(
 ) -> Json<serde_json::Value> {
     if submission.work_id.trim().is_empty() || submission.scout_id.trim().is_empty() {
         state.system_metrics.inc_task_failures();
+        if !submission.scout_id.trim().is_empty() {
+            mark_node_failure(state, submission.scout_id.as_str()).await;
+        }
         return Json(serde_json::json!({
             "ok": false,
             "detail": "work_id and scout_id are required",
@@ -1430,6 +1471,7 @@ async fn process_draft_submission(
     {
         let mut by_id = state.idempotent_results.lock().await;
         if by_id.contains_key(response.request_id.as_str()) {
+            mark_node_success(state, response.peer_id.as_str(), 0.0).await;
             return Json(serde_json::json!({
                 "ok": true,
                 "detail": "duplicate draft ignored (idempotent)",
@@ -1443,10 +1485,12 @@ async fn process_draft_submission(
         .inc_tokens_offloaded_to_scouts(response.draft_tokens.len() as u64);
 
     let mut results = state.results.lock().await;
-    results.push_back(response);
+    results.push_back(response.clone());
     while results.len() > 2048 {
         results.pop_front();
     }
+
+    mark_node_success(state, response.peer_id.as_str(), response.latency_ms as f64).await;
 
     Json(serde_json::json!({ "ok": true, "detail": "draft queued" }))
 }
@@ -1463,6 +1507,55 @@ async fn accept_replay_nonce(
     }
     guard.insert(signer_pubkey_hex.to_string(), nonce);
     true
+}
+
+async fn generate_local_fallback_tokens(
+    state: &SharedState,
+    prompt_context: &str,
+    max_new_tokens: u32,
+) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut engine_guard = state.engine.lock().await;
+    let Some(engine) = engine_guard.as_mut() else {
+        return out;
+    };
+
+    let Ok(mut tokens) = engine.tokenize(prompt_context, 4096) else {
+        return out;
+    };
+    if !tokens.is_empty() && tokens[0] == 128000 {
+        tokens.remove(0);
+    }
+    if engine.eval(&tokens).is_err() {
+        return out;
+    }
+
+    let mut emitted = 0u32;
+    while emitted < max_new_tokens {
+        let Ok(logits) = engine.get_logits(128256) else {
+            break;
+        };
+
+        let mut best_idx = 0usize;
+        let mut best_val = -f32::INFINITY;
+        for (idx, val) in logits.iter().enumerate() {
+            if *val > best_val {
+                best_val = *val;
+                best_idx = idx;
+            }
+        }
+        if best_idx == 128001 || best_idx == 128009 {
+            break;
+        }
+        if let Ok(piece) = engine.token_to_piece(best_idx as i32) {
+            out.push(piece);
+        }
+        if engine.eval(&[best_idx as i32]).is_err() {
+            break;
+        }
+        emitted += 1;
+    }
+    out
 }
 
 async fn ws_generate_handler(
@@ -1503,7 +1596,7 @@ async fn ws_generate_stream(mut socket: WebSocket, state: SharedState) {
 
     let work = WorkRequest {
         request_id: request_id.clone(),
-        prompt_context,
+        prompt_context: prompt_context.clone(),
         min_tokens: 1,
         created_at_ms: Some(now_ms()),
     };
@@ -1564,6 +1657,18 @@ async fn ws_generate_stream(mut socket: WebSocket, state: SharedState) {
         }
 
         tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    if emitted == 0 {
+        state.system_metrics.inc_verification_fallback();
+        let fallback =
+            generate_local_fallback_tokens(&state, prompt_context.as_str(), max_new_tokens).await;
+        for token in fallback {
+            let payload = serde_json::json!({ "token": token }).to_string();
+            if socket.send(Message::Text(payload)).await.is_err() {
+                return;
+            }
+        }
     }
 
     let _ = socket
@@ -1821,17 +1926,62 @@ async fn upsert_node_snapshot(
     );
 }
 
+async fn persist_reputation_map(
+    reputation_path: PathBuf,
+    reputation: HashMap<String, NodeReputation>,
+) {
+    let _ = tokio::task::spawn_blocking(move || {
+        save_reputation(&reputation_path, &reputation);
+    })
+    .await;
+}
+
+async fn mark_node_success(state: &SharedState, node_id: &str, latency_ms: f64) {
+    let (path, snapshot) = {
+        let mut rep = state.node_reputation.lock().await;
+        let entry = rep
+            .entry(node_id.to_string())
+            .or_insert_with(|| NodeReputation {
+                identity_score: 0.8,
+                hardware_capability_score: 0.7,
+                ..NodeReputation::default()
+            });
+        entry.update_success(latency_ms, now_ms());
+        (state.node_reputation_path.clone(), rep.clone())
+    };
+    persist_reputation_map(path, snapshot).await;
+}
+
+async fn mark_node_failure(state: &SharedState, node_id: &str) {
+    let (path, snapshot) = {
+        let mut rep = state.node_reputation.lock().await;
+        let entry = rep
+            .entry(node_id.to_string())
+            .or_insert_with(|| NodeReputation {
+                identity_score: 0.8,
+                hardware_capability_score: 0.7,
+                ..NodeReputation::default()
+            });
+        entry.update_failure(now_ms());
+        (state.node_reputation_path.clone(), rep.clone())
+    };
+    persist_reputation_map(path, snapshot).await;
+}
+
 async fn signed_register_node_handler(
     AxumState(state): AxumState<SharedState>,
     Json(req): Json<SignedRequest<NodeRegistration>>,
 ) -> Json<serde_json::Value> {
+    let signer = req.envelope.signer_pubkey_hex.clone();
     if let Err(detail) = req.envelope.verify() {
         state.system_metrics.inc_signature_verification_failures();
+        mark_node_failure(&state, &signer).await;
         return Json(serde_json::json!({ "ok": false, "detail": detail }));
     }
 
     if req.envelope.signer_pubkey_hex != req.envelope.payload.node_pubkey {
         state.system_metrics.inc_node_identity_auth_failures();
+        mark_node_failure(&state, &signer).await;
         return Json(serde_json::json!({
             "ok": false,
             "detail": "signer pubkey does not match registration payload",
@@ -1846,6 +1996,7 @@ async fn signed_register_node_handler(
     .await
     {
         state.system_metrics.inc_node_identity_auth_failures();
+        mark_node_failure(&state, &signer).await;
         return Json(serde_json::json!({ "ok": false, "detail": "stale or replayed nonce" }));
     }
 
@@ -1860,6 +2011,7 @@ async fn signed_register_node_handler(
         ts,
     )
     .await;
+    mark_node_success(&state, &signer, 0.0).await;
 
     Json(serde_json::json!({ "ok": true, "detail": "registered" }))
 }
@@ -1868,13 +2020,16 @@ async fn signed_heartbeat_handler(
     AxumState(state): AxumState<SharedState>,
     Json(req): Json<SignedRequest<NodeHeartbeat>>,
 ) -> Json<serde_json::Value> {
+    let signer = req.envelope.signer_pubkey_hex.clone();
     if let Err(detail) = req.envelope.verify() {
         state.system_metrics.inc_signature_verification_failures();
+        mark_node_failure(&state, &signer).await;
         return Json(serde_json::json!({ "ok": false, "detail": detail }));
     }
 
     if req.envelope.signer_pubkey_hex != req.envelope.payload.node_pubkey {
         state.system_metrics.inc_node_identity_auth_failures();
+        mark_node_failure(&state, &signer).await;
         return Json(serde_json::json!({
             "ok": false,
             "detail": "signer pubkey does not match heartbeat payload",
@@ -1889,6 +2044,7 @@ async fn signed_heartbeat_handler(
     .await
     {
         state.system_metrics.inc_node_identity_auth_failures();
+        mark_node_failure(&state, &signer).await;
         return Json(serde_json::json!({ "ok": false, "detail": "stale or replayed nonce" }));
     }
 
@@ -1904,6 +2060,7 @@ async fn signed_heartbeat_handler(
         ts,
     )
     .await;
+    mark_node_success(&state, &signer, heartbeat.node_latency_ms as f64).await;
 
     Json(serde_json::json!({ "ok": true, "detail": "heartbeat accepted" }))
 }
@@ -1912,13 +2069,16 @@ async fn signed_metrics_report_handler(
     AxumState(state): AxumState<SharedState>,
     Json(req): Json<SignedRequest<NodeMetricReport>>,
 ) -> Json<serde_json::Value> {
+    let signer = req.envelope.signer_pubkey_hex.clone();
     if let Err(detail) = req.envelope.verify() {
         state.system_metrics.inc_signature_verification_failures();
+        mark_node_failure(&state, &signer).await;
         return Json(serde_json::json!({ "ok": false, "detail": detail }));
     }
 
     if req.envelope.signer_pubkey_hex != req.envelope.payload.node_pubkey {
         state.system_metrics.inc_node_identity_auth_failures();
+        mark_node_failure(&state, &signer).await;
         return Json(serde_json::json!({
             "ok": false,
             "detail": "signer pubkey does not match metrics payload",
@@ -1933,6 +2093,7 @@ async fn signed_metrics_report_handler(
     .await
     {
         state.system_metrics.inc_node_identity_auth_failures();
+        mark_node_failure(&state, &signer).await;
         return Json(serde_json::json!({ "ok": false, "detail": "stale or replayed nonce" }));
     }
 
@@ -1961,6 +2122,7 @@ async fn signed_metrics_report_handler(
     if let Err(e) = state.metrics_persistence.persist_report(&persist).await {
         tracing::warn!(%e, "failed to persist metric report");
     }
+    mark_node_success(&state, &signer, report.node_latency_ms as f64).await;
 
     Json(serde_json::json!({ "ok": true, "detail": "metrics report accepted" }))
 }
@@ -1969,13 +2131,16 @@ async fn signed_deregister_node_handler(
     AxumState(state): AxumState<SharedState>,
     Json(req): Json<SignedRequest<NodeRegistration>>,
 ) -> Json<serde_json::Value> {
+    let signer = req.envelope.signer_pubkey_hex.clone();
     if let Err(detail) = req.envelope.verify() {
         state.system_metrics.inc_signature_verification_failures();
+        mark_node_failure(&state, &signer).await;
         return Json(serde_json::json!({ "ok": false, "detail": detail }));
     }
 
     if req.envelope.signer_pubkey_hex != req.envelope.payload.node_pubkey {
         state.system_metrics.inc_node_identity_auth_failures();
+        mark_node_failure(&state, &signer).await;
         return Json(serde_json::json!({
             "ok": false,
             "detail": "signer pubkey does not match deregistration payload",
@@ -1990,6 +2155,7 @@ async fn signed_deregister_node_handler(
     .await
     {
         state.system_metrics.inc_node_identity_auth_failures();
+        mark_node_failure(&state, &signer).await;
         return Json(serde_json::json!({ "ok": false, "detail": "stale or replayed nonce" }));
     }
 
@@ -2271,6 +2437,8 @@ async fn main() -> Result<()> {
     let local_peer_id = PeerId::from(id_keys.public());
     let ledger_store = Arc::new(LedgerStore::new(&data));
     let loaded_ledger = ledger_store.load_or_init()?;
+    let node_reputation_path = data.join("node_reputation.json");
+    let loaded_reputation = load_reputation(&node_reputation_path);
     let metrics_persistence = Arc::new(resolve_metrics_persistence(&data));
     metrics_persistence.initialize().await?;
     let heartbeat_timeout_ms = std::env::var("SHARD_HEARTBEAT_TIMEOUT_MS")
@@ -2328,6 +2496,8 @@ async fn main() -> Result<()> {
         metrics_persistence,
         heartbeat_timeout_ms,
         idempotent_results: Arc::new(Mutex::new(HashMap::new())),
+        node_reputation: Arc::new(Mutex::new(loaded_reputation)),
+        node_reputation_path,
     };
 
     #[cfg(target_os = "windows")]
@@ -3398,8 +3568,8 @@ async fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        accept_replay_nonce, should_reject_peer_connection, unique_addrs, validate_work_request,
-        LatencyHistogram, ScoutPenaltyBook, ScoutPenaltyUpdate, WorkRequest,
+        accept_replay_nonce, node_is_healthy, should_reject_peer_connection, unique_addrs,
+        validate_work_request, LatencyHistogram, ScoutPenaltyBook, ScoutPenaltyUpdate, WorkRequest,
     };
     use std::collections::HashMap;
     use std::sync::Arc;
@@ -3564,5 +3734,11 @@ mod tests {
         assert!(accept_replay_nonce(&replay, &signer, 1).await);
         assert!(!accept_replay_nonce(&replay, &signer, 1).await);
         assert!(accept_replay_nonce(&replay, &signer, 2).await);
+    }
+
+    #[test]
+    fn node_health_timeout_marks_stale_unhealthy() {
+        assert!(node_is_healthy(10_000, 15_000, 5_000));
+        assert!(!node_is_healthy(10_000, 20_001, 5_000));
     }
 }
