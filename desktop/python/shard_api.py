@@ -255,6 +255,8 @@ app.add_middleware(
 )
 
 RUST_URL = os.getenv("SHARD_RUST_URL", "http://127.0.0.1:9091")
+REQUIRE_CREDITS = os.getenv("SHARD_REQUIRE_CREDITS", "false").lower() == "true"
+MIN_SHARD_CREDITS = int(os.getenv("SHARD_MIN_CREDITS", "1"))
 
 # ─── State ───────────────────────────────────────────────────────────────────
 
@@ -602,6 +604,46 @@ async def require_api_key(
         raise _auth_error()
 
     return candidate
+
+
+async def require_credit_balance(
+    x_shard_wallet: Annotated[str | None, Header(alias="X-Shard-Wallet")] = None,
+) -> str:
+    if not REQUIRE_CREDITS:
+        return x_shard_wallet or "credits-disabled"
+
+    if not x_shard_wallet or not x_shard_wallet.strip():
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail="X-Shard-Wallet header is required when credit gating is enabled",
+        )
+
+    client = _get_http_client()
+    try:
+        r = await client.get(f"/credits/{x_shard_wallet}")
+    except httpx.HTTPError as exc:
+        LOGGER.warning("Credit lookup failed: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Unable to verify shard credits",
+        ) from exc
+
+    if r.status_code != 200:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Sidecar credit endpoint returned HTTP {r.status_code}",
+        )
+    body = r.json()
+    balance = int(body.get("balance", 0))
+    if balance < MIN_SHARD_CREDITS:
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail=(
+                f"Insufficient shard credits: balance={balance}, "
+                f"required={MIN_SHARD_CREDITS}"
+            ),
+        )
+    return x_shard_wallet
 
 
 async def enforce_rate_limit(request: Request, principal: str) -> None:
@@ -1132,6 +1174,7 @@ async def chat_completions(
     payload: ChatRequest,
     request: Request,
     principal: str = Depends(require_api_key),
+    _wallet: str = Depends(require_credit_balance),
 ) -> Any:
     STATE.last_local_activity_ts = time.time()
     METRICS["chat_requests_total"] += 1

@@ -11,6 +11,7 @@
 
 use anyhow::Result;
 use axum::{
+    extract::Path as AxumPath,
     extract::Query,
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
@@ -26,7 +27,7 @@ use libp2p::{
     autonat, dcutr,
     futures::StreamExt,
     gossipsub::{self, IdentTopic, MessageAuthenticity},
-    identify, identity,
+    identify,
     kad::{
         store::MemoryStore, Behaviour as KadBehaviour, Event as KadEvent, GetProvidersOk,
         QueryResult,
@@ -51,8 +52,12 @@ use tokio::sync::{mpsc, Mutex};
 use tower_http::cors::{Any, CorsLayer};
 
 mod mesh;
+mod crypto;
+mod ledger;
 mod network;
 mod telemetry_ws;
+use crypto::identity::NodeIdentity;
+use ledger::state::{ComputeCreditTx, LedgerState};
 use mesh::race_router::{RaceKey, RaceRouter, RaceSubmitOutcome};
 use network::layer_registry::{provider_key, LayerHostAnnouncement, LayerRoutingTable};
 use network::tensor_wire::TensorWirePacket;
@@ -293,10 +298,13 @@ struct SharedState {
     current_load: Arc<AtomicU32>,
     avg_latency_ms: Arc<AtomicU32>,
     gossipsub_latency_hist: Arc<LatencyHistogram>,
+    credit_nonce: Arc<AtomicU64>,
     scout_penalties: Arc<Mutex<ScoutPenaltyBook>>,
     backward_passes: Arc<Mutex<VecDeque<BackwardPassGradient>>>,
     layer_routes: Arc<Mutex<LayerRoutingTable>>,
     race_router: Arc<Mutex<RaceRouter>>,
+    ledger: Arc<Mutex<LedgerState>>,
+    node_wallet: String,
     model_id: String,
     layer_start: u32,
     layer_end: u32,
@@ -679,6 +687,7 @@ async fn health_handler(AxumState(state): AxumState<SharedState>) -> Json<serde_
         "public_api_addr": topo.public_api_addr,
         "relay_server": topo.relay_server_enabled,
         "contribute": topo.contribute_enabled,
+        "wallet": state.node_wallet.clone(),
         "model_id": state.model_id.clone(),
         "layer_start": state.layer_start,
         "layer_end": state.layer_end,
@@ -709,6 +718,7 @@ async fn topology_handler(AxumState(state): AxumState<SharedState>) -> Json<serd
         "public_api_addr": topo.public_api_addr,
         "relay_server": topo.relay_server_enabled,
         "contribute": topo.contribute_enabled,
+        "wallet": state.node_wallet.clone(),
         "model_id": state.model_id.clone(),
         "layer_start": state.layer_start,
         "layer_end": state.layer_end,
@@ -724,6 +734,30 @@ async fn peers_handler(AxumState(state): AxumState<SharedState>) -> Json<serde_j
     let peers = state.peers.lock().await;
     let list: Vec<&PeerInfo> = peers.values().collect();
     Json(serde_json::json!({ "peers": list, "count": list.len() }))
+}
+
+async fn credits_balance_handler(
+    AxumPath(wallet): AxumPath<String>,
+    AxumState(state): AxumState<SharedState>,
+) -> Json<serde_json::Value> {
+    let ledger = state.ledger.lock().await;
+    let balance = ledger.balance_of(wallet.as_str());
+    Json(serde_json::json!({
+        "ok": true,
+        "wallet": wallet,
+        "balance": balance,
+    }))
+}
+
+async fn credits_tx_handler(
+    AxumPath(tx_id): AxumPath<String>,
+    AxumState(state): AxumState<SharedState>,
+) -> Json<serde_json::Value> {
+    let ledger = state.ledger.lock().await;
+    match ledger.tx_by_id(tx_id.as_str()) {
+        Some(tx) => Json(serde_json::json!({ "ok": true, "tx": tx })),
+        None => Json(serde_json::json!({ "ok": false, "detail": "transaction not found" })),
+    }
 }
 
 async fn next_layer_handler(
@@ -1050,6 +1084,8 @@ fn create_router(state: SharedState) -> Router {
         .route("/topology", get(topology_handler))
         .route("/peers", get(peers_handler))
         .route("/layers/next", get(next_layer_handler))
+        .route("/credits/:wallet", get(credits_balance_handler))
+        .route("/credits/tx/:tx_id", get(credits_tx_handler))
         .route("/pipeline/forward", post(pipeline_forward_handler))
         .route("/pipeline/pop-forward-result", get(pipeline_pop_forward_result_handler))
         .route("/broadcast-work", post(broadcast_work_handler))
@@ -1094,6 +1130,7 @@ async fn main() -> Result<()> {
 
     let topo_path = data.join("topology.json");
     let known_peers_path = data.join("known_peers.json");
+    let identity_path = data.join("identity.json");
 
     let file_bootstrap = if let Some(path) = &cli.bootstrap_file {
         read_bootstrap_file(path).await
@@ -1123,7 +1160,10 @@ async fn main() -> Result<()> {
     let (work_tx, mut work_rx) = mpsc::channel::<WorkRequest>(256);
     let (pipeline_tx, mut pipeline_rx) = mpsc::channel::<PipelineDispatch>(256);
 
-    let id_keys = identity::Keypair::generate_ed25519();
+    let node_identity = NodeIdentity::load_or_create(&identity_path)?;
+    let node_wallet = node_identity.wallet_address();
+    let signing_key = node_identity.signing_key().clone();
+    let id_keys = node_identity.libp2p_keypair()?;
     let local_peer_id = PeerId::from(id_keys.public());
 
     let state = SharedState {
@@ -1152,10 +1192,13 @@ async fn main() -> Result<()> {
         current_load: Arc::new(AtomicU32::new(0)),
         avg_latency_ms: Arc::new(AtomicU32::new(0)),
         gossipsub_latency_hist: Arc::new(LatencyHistogram::new()),
+        credit_nonce: Arc::new(AtomicU64::new(1)),
         scout_penalties: Arc::new(Mutex::new(ScoutPenaltyBook::default())),
         backward_passes: Arc::new(Mutex::new(VecDeque::new())),
         layer_routes: Arc::new(Mutex::new(LayerRoutingTable::default())),
         race_router: Arc::new(Mutex::new(RaceRouter::default())),
+        ledger: Arc::new(Mutex::new(LedgerState::default())),
+        node_wallet: node_wallet.clone(),
         model_id: cli.model_id.clone(),
         layer_start: cli.layer_start,
         layer_end: cli.layer_end,
@@ -1267,6 +1310,7 @@ async fn main() -> Result<()> {
     let forward_topic = IdentTopic::new("shard-forward-pass");
     let forward_result_topic = IdentTopic::new("shard-forward-result");
     let backward_topic = IdentTopic::new("shard-backward-pass");
+    let ledger_topic = IdentTopic::new("shard-ledger-tx");
     let layer_announce_topic = IdentTopic::new("shard-layer-announcements");
     let auction_topic = IdentTopic::new("auction.prompt");
     swarm.behaviour_mut().gossipsub.subscribe(&work_topic)?;
@@ -1274,6 +1318,7 @@ async fn main() -> Result<()> {
     swarm.behaviour_mut().gossipsub.subscribe(&forward_topic)?;
     swarm.behaviour_mut().gossipsub.subscribe(&forward_result_topic)?;
     swarm.behaviour_mut().gossipsub.subscribe(&backward_topic)?;
+    swarm.behaviour_mut().gossipsub.subscribe(&ledger_topic)?;
     swarm.behaviour_mut().gossipsub.subscribe(&layer_announce_topic)?;
     swarm.behaviour_mut().gossipsub.subscribe(&auction_topic)?;
 
@@ -1546,6 +1591,16 @@ async fn main() -> Result<()> {
                                 q.push_back(result);
                                 while q.len() > 128 { q.pop_front(); }
                             }
+                        } else if message.topic == ledger_topic.hash() {
+                            match serde_json::from_slice::<ComputeCreditTx>(&message.data) {
+                                Ok(tx) => {
+                                    let mut ledger = state.ledger.lock().await;
+                                    if let Err(e) = ledger.apply_signed_tx(tx) {
+                                        tracing::warn!(%e, "failed to apply credit transaction");
+                                    }
+                                }
+                                Err(e) => tracing::warn!(%e, "invalid ledger transaction packet; ignoring"),
+                            }
                         } else if message.topic == layer_announce_topic.hash() {
                             match serde_json::from_slice::<LayerHostAnnouncement>(&message.data) {
                                 Ok(ann) => {
@@ -1589,6 +1644,28 @@ async fn main() -> Result<()> {
                                                 winner = %packet.source_peer_id,
                                                 "accepted first forward tensor from race pool"
                                             );
+
+                                            let nonce = state.credit_nonce.fetch_add(1, Ordering::Relaxed);
+                                            let tx = LedgerState::sign_reward_tx(
+                                                &signing_key,
+                                                &node_wallet,
+                                                &packet.source_peer_id,
+                                                1,
+                                                &packet.request_id,
+                                                &packet.step_id,
+                                                nonce,
+                                                now_ms(),
+                                            );
+                                            {
+                                                let mut ledger = state.ledger.lock().await;
+                                                let _ = ledger.apply_signed_tx(tx.clone());
+                                            }
+                                            if let Ok(payload) = serde_json::to_vec(&tx) {
+                                                let _ = swarm
+                                                    .behaviour_mut()
+                                                    .gossipsub
+                                                    .publish(ledger_topic.clone(), payload);
+                                            }
                                         }
                                         RaceSubmitOutcome::RejectedLate => {
                                             tracing::debug!(
