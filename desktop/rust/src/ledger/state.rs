@@ -32,6 +32,7 @@ impl LedgerState {
         self.tx_log.iter().find(|t| t.tx_id == tx_id).cloned()
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn sign_reward_tx(
         signing_key: &SigningKey,
         from_wallet: &str,
@@ -119,6 +120,7 @@ impl LedgerState {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn signing_payload(
     tx_id: &str,
     from_wallet: &str,
@@ -151,16 +153,8 @@ mod tests {
     fn signed_tx_applies_balance() {
         let signing = key();
         let mut ledger = LedgerState::default();
-        let tx = LedgerState::sign_reward_tx(
-            &signing,
-            "wallet-a",
-            "wallet-b",
-            3,
-            "r1",
-            "s1",
-            1,
-            100,
-        );
+        let tx =
+            LedgerState::sign_reward_tx(&signing, "wallet-a", "wallet-b", 3, "r1", "s1", 1, 100);
         ledger.apply_signed_tx(tx).expect("apply");
         assert_eq!(ledger.balance_of("wallet-b"), 3);
         assert_eq!(ledger.balance_of("wallet-a"), -3);

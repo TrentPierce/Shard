@@ -15,18 +15,23 @@ struct PersistedIdentity {
 }
 
 impl NodeIdentity {
+    pub fn load(path: &Path) -> Result<Self> {
+        let raw = std::fs::read(path)?;
+        let parsed: PersistedIdentity = serde_json::from_slice(&raw)?;
+        let secret = hex::decode(parsed.secret_key_hex)?;
+        if secret.len() != 32 {
+            return Err(anyhow!("invalid persisted ed25519 secret length"));
+        }
+        let mut sk = [0u8; 32];
+        sk.copy_from_slice(&secret);
+        Ok(Self {
+            signing_key: SigningKey::from_bytes(&sk),
+        })
+    }
+
     pub fn load_or_create(path: &Path) -> Result<Self> {
-        if let Ok(raw) = std::fs::read(path) {
-            let parsed: PersistedIdentity = serde_json::from_slice(&raw)?;
-            let secret = hex::decode(parsed.secret_key_hex)?;
-            if secret.len() != 32 {
-                return Err(anyhow!("invalid persisted ed25519 secret length"));
-            }
-            let mut sk = [0u8; 32];
-            sk.copy_from_slice(&secret);
-            return Ok(Self {
-                signing_key: SigningKey::from_bytes(&sk),
-            });
+        if path.exists() {
+            return Self::load(path);
         }
 
         let mut sk = [0u8; 32];
@@ -42,6 +47,27 @@ impl NodeIdentity {
         }
         std::fs::write(path, serde_json::to_vec_pretty(&persisted)?)?;
         Ok(identity)
+    }
+
+    pub fn from_secret_bytes(secret: [u8; 32]) -> Self {
+        Self {
+            signing_key: SigningKey::from_bytes(&secret),
+        }
+    }
+
+    pub fn secret_bytes(&self) -> [u8; 32] {
+        self.signing_key.to_bytes()
+    }
+
+    pub fn save(&self, path: &Path) -> Result<()> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let persisted = PersistedIdentity {
+            secret_key_hex: hex::encode(self.signing_key.to_bytes()),
+        };
+        std::fs::write(path, serde_json::to_vec_pretty(&persisted)?)?;
+        Ok(())
     }
 
     pub fn signing_key(&self) -> &SigningKey {

@@ -22,7 +22,7 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-use clap::Parser;
+use clap::{Args, Parser, Subcommand};
 use libp2p::{
     autonat, dcutr,
     futures::StreamExt,
@@ -41,7 +41,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     net::SocketAddr,
-    path::Path,
+    path::{Path, PathBuf},
     sync::{
         atomic::{AtomicU32, AtomicU64, Ordering},
         Arc,
@@ -51,12 +51,13 @@ use std::{
 use tokio::sync::{mpsc, Mutex};
 use tower_http::cors::{Any, CorsLayer};
 
-mod mesh;
 mod crypto;
 mod ledger;
+mod mesh;
 mod network;
 mod telemetry_ws;
 use crypto::identity::NodeIdentity;
+use crypto::wallet_backup::{export_wallet, import_wallet, verify_backup};
 use ledger::state::{ComputeCreditTx, LedgerState};
 use mesh::race_router::{RaceKey, RaceRouter, RaceSubmitOutcome};
 use network::layer_registry::{provider_key, LayerHostAnnouncement, LayerRoutingTable};
@@ -68,6 +69,9 @@ use network::tensor_wire::TensorWirePacket;
 #[derive(Parser, Debug, Clone)]
 #[command(name = "shard-daemon", version, about = "Shard P2P Daemon")]
 struct Cli {
+    #[command(subcommand)]
+    command: Option<DaemonCommand>,
+
     /// Port for the embedded HTTP control-plane API
     #[arg(long, default_value = "9091")]
     control_port: u16,
@@ -143,6 +147,54 @@ struct Cli {
     /// Race timeout in milliseconds.
     #[arg(long, default_value = "3000")]
     race_timeout_ms: u64,
+}
+
+#[derive(Subcommand, Debug, Clone)]
+enum DaemonCommand {
+    Wallet {
+        #[command(subcommand)]
+        command: WalletCommand,
+    },
+}
+
+#[derive(Subcommand, Debug, Clone)]
+enum WalletCommand {
+    Show,
+    Export(WalletExportArgs),
+    Import(WalletImportArgs),
+    VerifyBackup(WalletVerifyArgs),
+}
+
+#[derive(Args, Debug, Clone)]
+struct WalletExportArgs {
+    #[arg(long)]
+    out: PathBuf,
+    #[arg(long, default_value = "SHARD_WALLET_PASSWORD")]
+    password_env: String,
+    #[arg(long, default_value_t = 65_536)]
+    kdf_memory_kib: u32,
+    #[arg(long, default_value_t = 3)]
+    kdf_iterations: u32,
+    #[arg(long, default_value_t = 1)]
+    kdf_parallelism: u32,
+}
+
+#[derive(Args, Debug, Clone)]
+struct WalletImportArgs {
+    #[arg(long = "in")]
+    in_path: PathBuf,
+    #[arg(long, default_value = "SHARD_WALLET_PASSWORD")]
+    password_env: String,
+    #[arg(long, default_value_t = false)]
+    force: bool,
+}
+
+#[derive(Args, Debug, Clone)]
+struct WalletVerifyArgs {
+    #[arg(long = "in")]
+    in_path: PathBuf,
+    #[arg(long, default_value = "SHARD_WALLET_PASSWORD")]
+    password_env: String,
 }
 
 // ─── Protocol Messages ─────────────────────────────────────────────────────
@@ -683,6 +735,53 @@ fn data_dir() -> std::path::PathBuf {
         .join("shard")
 }
 
+fn wallet_password_from_env(env_name: &str) -> Result<String> {
+    let value = std::env::var(env_name).map_err(|_| {
+        anyhow::anyhow!(
+            "missing wallet password env var {env_name}; set it before running wallet command"
+        )
+    })?;
+    if value.is_empty() {
+        return Err(anyhow::anyhow!("wallet password cannot be empty"));
+    }
+    Ok(value)
+}
+
+fn handle_wallet_command(command: WalletCommand, identity_path: &Path) -> Result<()> {
+    match command {
+        WalletCommand::Show => {
+            let identity = NodeIdentity::load_or_create(identity_path)?;
+            println!("wallet_address={}", identity.wallet_address());
+        }
+        WalletCommand::Export(args) => {
+            let password = wallet_password_from_env(&args.password_env)?;
+            let wallet = export_wallet(
+                identity_path,
+                &args.out,
+                &password,
+                args.kdf_memory_kib,
+                args.kdf_iterations,
+                args.kdf_parallelism,
+            )?;
+            println!("exported_wallet={wallet}");
+            println!("backup_file={}", args.out.display());
+        }
+        WalletCommand::Import(args) => {
+            let password = wallet_password_from_env(&args.password_env)?;
+            let wallet = import_wallet(&args.in_path, identity_path, &password, args.force)?;
+            println!("imported_wallet={wallet}");
+            println!("identity_file={}", identity_path.display());
+        }
+        WalletCommand::VerifyBackup(args) => {
+            let password = wallet_password_from_env(&args.password_env)?;
+            let wallet = verify_backup(&args.in_path, &password)?;
+            println!("verified_wallet={wallet}");
+            println!("backup_file={}", args.in_path.display());
+        }
+    }
+    Ok(())
+}
+
 fn unique_addrs(addrs: Vec<String>) -> Vec<String> {
     let mut seen = HashSet::new();
     let mut out = Vec::new();
@@ -843,6 +942,15 @@ async fn credits_balance_handler(
     }))
 }
 
+async fn wallet_address_handler(
+    AxumState(state): AxumState<SharedState>,
+) -> Json<serde_json::Value> {
+    Json(serde_json::json!({
+        "ok": true,
+        "wallet": state.node_wallet.clone(),
+    }))
+}
+
 async fn credits_tx_handler(
     AxumPath(tx_id): AxumPath<String>,
     AxumState(state): AxumState<SharedState>,
@@ -922,7 +1030,9 @@ async fn pipeline_pop_forward_result_handler(
 
     match result {
         Some(res) => Json(serde_json::json!({ "ok": true, "result": res })),
-        None => Json(serde_json::json!({ "ok": false, "detail": "no completed race result available" })),
+        None => {
+            Json(serde_json::json!({ "ok": false, "detail": "no completed race result available" }))
+        }
     }
 }
 
@@ -995,7 +1105,10 @@ async fn browser_layer_work_handler(
     }
 
     let mut queue = state.browser_work.lock().await;
-    if let Some(pos) = queue.iter().position(|item| item.session_id == query.session_id) {
+    if let Some(pos) = queue
+        .iter()
+        .position(|item| item.session_id == query.session_id)
+    {
         if let Some(work) = queue.remove(pos) {
             return Json(serde_json::json!({
                 "ok": true,
@@ -1325,15 +1438,22 @@ fn create_router(state: SharedState) -> Router {
     Router::new()
         .route("/health", get(health_handler))
         .route("/topology", get(topology_handler))
+        .route("/wallet/address", get(wallet_address_handler))
         .route("/peers", get(peers_handler))
         .route("/layers/next", get(next_layer_handler))
-        .route("/browser-layer/register", post(browser_layer_register_handler))
+        .route(
+            "/browser-layer/register",
+            post(browser_layer_register_handler),
+        )
         .route("/browser-layer/work", get(browser_layer_work_handler))
         .route("/browser-layer/submit", post(browser_layer_submit_handler))
         .route("/credits/:wallet", get(credits_balance_handler))
         .route("/credits/tx/:tx_id", get(credits_tx_handler))
         .route("/pipeline/forward", post(pipeline_forward_handler))
-        .route("/pipeline/pop-forward-result", get(pipeline_pop_forward_result_handler))
+        .route(
+            "/pipeline/pop-forward-result",
+            get(pipeline_pop_forward_result_handler),
+        )
         .route("/broadcast-work", post(broadcast_work_handler))
         .route("/pop-result", get(pop_result_handler))
         .route("/pop-work", get(pop_work_handler))
@@ -1351,6 +1471,18 @@ fn create_router(state: SharedState) -> Router {
 #[tokio::main]
 async fn main() -> Result<()> {
     let mut cli = Cli::parse();
+    let data = data_dir();
+    tokio::fs::create_dir_all(&data).await?;
+    let identity_path = data.join("identity.json");
+
+    if let Some(command) = cli.command.clone() {
+        match command {
+            DaemonCommand::Wallet { command } => {
+                handle_wallet_command(command, &identity_path)?;
+                return Ok(());
+            }
+        }
+    }
 
     if let Ok(port_from_env) = std::env::var("PORT") {
         match port_from_env.parse::<u16>() {
@@ -1370,13 +1502,8 @@ async fn main() -> Result<()> {
         )
         .init();
 
-    // Ensure data directory exists
-    let data = data_dir();
-    tokio::fs::create_dir_all(&data).await?;
-
     let topo_path = data.join("topology.json");
     let known_peers_path = data.join("known_peers.json");
-    let identity_path = data.join("identity.json");
 
     let file_bootstrap = if let Some(path) = &cli.bootstrap_file {
         read_bootstrap_file(path).await
@@ -1566,10 +1693,16 @@ async fn main() -> Result<()> {
     swarm.behaviour_mut().gossipsub.subscribe(&work_topic)?;
     swarm.behaviour_mut().gossipsub.subscribe(&result_topic)?;
     swarm.behaviour_mut().gossipsub.subscribe(&forward_topic)?;
-    swarm.behaviour_mut().gossipsub.subscribe(&forward_result_topic)?;
+    swarm
+        .behaviour_mut()
+        .gossipsub
+        .subscribe(&forward_result_topic)?;
     swarm.behaviour_mut().gossipsub.subscribe(&backward_topic)?;
     swarm.behaviour_mut().gossipsub.subscribe(&ledger_topic)?;
-    swarm.behaviour_mut().gossipsub.subscribe(&layer_announce_topic)?;
+    swarm
+        .behaviour_mut()
+        .gossipsub
+        .subscribe(&layer_announce_topic)?;
     swarm.behaviour_mut().gossipsub.subscribe(&auction_topic)?;
 
     // ── listen addresses ──
@@ -1762,7 +1895,7 @@ async fn main() -> Result<()> {
 
             // ── inbound pipeline forward requests (HTTP -> pooled gossipsub fanout) ──
             Some(dispatch) = pipeline_rx.recv() => {
-                let pool_size = state.race_pool_size.max(1).min(8);
+                let pool_size = state.race_pool_size.clamp(1, 8);
                 let pool = {
                     let mut routes = state.layer_routes.lock().await;
                     routes.prune_expired(now_ms());
@@ -1871,82 +2004,81 @@ async fn main() -> Result<()> {
                                 Err(e) => tracing::warn!(%e, "invalid layer announcement packet; ignoring"),
                             }
                         } else if message.topic == forward_result_topic.hash() {
-                            match serde_json::from_slice::<TrainingGossipPacket>(&message.data) {
-                                Ok(TrainingGossipPacket::ForwardPass(packet)) => {
-                                    let is_for_me = packet
-                                        .target_peer_id
-                                        .as_deref()
-                                        .map(|p| p == local_peer_id.to_string())
-                                        .unwrap_or(false);
-                                    if !is_for_me {
-                                        continue;
-                                    }
-                                    let key = RaceKey {
-                                        request_id: packet.request_id.clone(),
-                                        step_id: packet.step_id.clone(),
-                                    };
-                                    let dtype = format!("{:?}", packet.format).to_lowercase();
-                                    let outcome = {
-                                        let mut router = state.race_router.lock().await;
-                                        router.submit_candidate(
-                                            now_ms(),
-                                            &key,
-                                            &packet.source_peer_id,
-                                            &packet.shape,
-                                            &dtype,
-                                        )
-                                    };
-                                    match outcome {
-                                        RaceSubmitOutcome::AcceptedFirst => {
-                                            tracing::info!(
-                                                request_id = %packet.request_id,
-                                                step_id = %packet.step_id,
-                                                winner = %packet.source_peer_id,
-                                                "accepted first forward tensor from race pool"
-                                            );
-
-                                            let nonce = state.credit_nonce.fetch_add(1, Ordering::Relaxed);
-                                            let tx = LedgerState::sign_reward_tx(
-                                                &signing_key,
-                                                &node_wallet,
-                                                &packet.source_peer_id,
-                                                1,
-                                                &packet.request_id,
-                                                &packet.step_id,
-                                                nonce,
-                                                now_ms(),
-                                            );
-                                            {
-                                                let mut ledger = state.ledger.lock().await;
-                                                let _ = ledger.apply_signed_tx(tx.clone());
-                                            }
-                                            if let Ok(payload) = serde_json::to_vec(&tx) {
-                                                let _ = swarm
-                                                    .behaviour_mut()
-                                                    .gossipsub
-                                                    .publish(ledger_topic.clone(), payload);
-                                            }
-                                        }
-                                        RaceSubmitOutcome::RejectedLate => {
-                                            tracing::debug!(
-                                                request_id = %packet.request_id,
-                                                step_id = %packet.step_id,
-                                                peer = %packet.source_peer_id,
-                                                "dropped late forward tensor response"
-                                            );
-                                        }
-                                        RaceSubmitOutcome::RejectedInvalid => {
-                                            tracing::warn!(
-                                                request_id = %packet.request_id,
-                                                step_id = %packet.step_id,
-                                                peer = %packet.source_peer_id,
-                                                "rejected invalid forward tensor response"
-                                            );
-                                        }
-                                        RaceSubmitOutcome::UnknownRace => {}
-                                    }
+                            if let Ok(TrainingGossipPacket::ForwardPass(packet)) =
+                                serde_json::from_slice::<TrainingGossipPacket>(&message.data)
+                            {
+                                let is_for_me = packet
+                                    .target_peer_id
+                                    .as_deref()
+                                    .map(|p| p == local_peer_id.to_string())
+                                    .unwrap_or(false);
+                                if !is_for_me {
+                                    continue;
                                 }
-                                _ => {}
+                                let key = RaceKey {
+                                    request_id: packet.request_id.clone(),
+                                    step_id: packet.step_id.clone(),
+                                };
+                                let dtype = format!("{:?}", packet.format).to_lowercase();
+                                let outcome = {
+                                    let mut router = state.race_router.lock().await;
+                                    router.submit_candidate(
+                                        now_ms(),
+                                        &key,
+                                        &packet.source_peer_id,
+                                        &packet.shape,
+                                        &dtype,
+                                    )
+                                };
+                                match outcome {
+                                    RaceSubmitOutcome::AcceptedFirst => {
+                                        tracing::info!(
+                                            request_id = %packet.request_id,
+                                            step_id = %packet.step_id,
+                                            winner = %packet.source_peer_id,
+                                            "accepted first forward tensor from race pool"
+                                        );
+
+                                        let nonce = state.credit_nonce.fetch_add(1, Ordering::Relaxed);
+                                        let tx = LedgerState::sign_reward_tx(
+                                            &signing_key,
+                                            &node_wallet,
+                                            &packet.source_peer_id,
+                                            1,
+                                            &packet.request_id,
+                                            &packet.step_id,
+                                            nonce,
+                                            now_ms(),
+                                        );
+                                        {
+                                            let mut ledger = state.ledger.lock().await;
+                                            let _ = ledger.apply_signed_tx(tx.clone());
+                                        }
+                                        if let Ok(payload) = serde_json::to_vec(&tx) {
+                                            let _ = swarm
+                                                .behaviour_mut()
+                                                .gossipsub
+                                                .publish(ledger_topic.clone(), payload);
+                                        }
+                                    }
+                                    RaceSubmitOutcome::RejectedLate => {
+                                        tracing::debug!(
+                                            request_id = %packet.request_id,
+                                            step_id = %packet.step_id,
+                                            peer = %packet.source_peer_id,
+                                            "dropped late forward tensor response"
+                                        );
+                                    }
+                                    RaceSubmitOutcome::RejectedInvalid => {
+                                        tracing::warn!(
+                                            request_id = %packet.request_id,
+                                            step_id = %packet.step_id,
+                                            peer = %packet.source_peer_id,
+                                            "rejected invalid forward tensor response"
+                                        );
+                                    }
+                                    RaceSubmitOutcome::UnknownRace => {}
+                                }
                             }
                         } else if message.topic == forward_topic.hash() || message.topic == backward_topic.hash() {
                             match serde_json::from_slice::<TrainingGossipPacket>(&message.data) {
