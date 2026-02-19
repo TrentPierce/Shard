@@ -31,6 +31,10 @@ class BitNetConfig:
     n_threads: int = 8
     top_k: int = 32
     max_kv_snapshot_bytes: int = 256 * 1024 * 1024
+    layer_start: int = 0
+    layer_end: int = -1
+    model_id: str = "default-model"
+    pipeline_mode: int = 0
 
 
 class BitNetRuntime:
@@ -57,7 +61,17 @@ class BitNetRuntime:
         elif hasattr(self._lib, "shard_init"):
             self._abi = "shard"
             self._bind_shard_abi()
-            self._handle = self._lib.shard_init(cfg.model_path.encode("utf-8"))
+            if hasattr(self._lib, "shard_init_ex"):
+                init_cfg = self._ShardInitConfig(
+                    cfg.model_path.encode("utf-8"),
+                    int(cfg.layer_start),
+                    int(cfg.layer_end),
+                    cfg.model_id.encode("utf-8"),
+                    int(cfg.pipeline_mode),
+                )
+                self._handle = self._lib.shard_init_ex(ctypes.byref(init_cfg))
+            else:
+                self._handle = self._lib.shard_init(cfg.model_path.encode("utf-8"))
             if not self._handle:
                 raise RuntimeError("shard_init returned null")
         else:
@@ -77,8 +91,21 @@ class BitNetRuntime:
         self._lib.bitnet_verify_tokens.restype = ctypes.c_size_t
 
     def _bind_shard_abi(self) -> None:
+        class ShardInitConfig(ctypes.Structure):
+            _fields_ = [
+                ("model_path", ctypes.c_char_p),
+                ("layer_start", ctypes.c_int),
+                ("layer_end", ctypes.c_int),
+                ("model_id", ctypes.c_char_p),
+                ("pipeline_mode", ctypes.c_int),
+            ]
+
+        self._ShardInitConfig = ShardInitConfig
         self._lib.shard_init.argtypes = [ctypes.c_char_p]
         self._lib.shard_init.restype = ctypes.c_void_p
+        if hasattr(self._lib, "shard_init_ex"):
+            self._lib.shard_init_ex.argtypes = [ctypes.POINTER(ShardInitConfig)]
+            self._lib.shard_init_ex.restype = ctypes.c_void_p
         self._lib.shard_free.argtypes = [ctypes.c_void_p]
         self._lib.shard_free.restype = None
         self._lib.shard_eval.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_int), ctypes.c_int]
