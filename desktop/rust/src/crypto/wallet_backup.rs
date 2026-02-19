@@ -1,4 +1,4 @@
-use crate::crypto::identity::NodeIdentity;
+use crate::identity::NodeIdentity;
 use anyhow::{anyhow, Result};
 use argon2::{Algorithm, Argon2, Params, Version};
 use chacha20poly1305::{
