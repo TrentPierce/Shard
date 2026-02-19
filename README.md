@@ -165,6 +165,57 @@ SHARD_WALLET_PASSWORD='strong-password' ./shard-daemon wallet verify-backup --in
 SHARD_WALLET_PASSWORD='strong-password' ./shard-daemon wallet import --in ./my-wallet.shard-wallet --password-env SHARD_WALLET_PASSWORD
 ```
 
+### Wallets & Shards Credits
+
+Show wallet address from the daemon:
+```bash
+./shard-daemon wallet show
+```
+
+Wallet API endpoint:
+```bash
+curl http://127.0.0.1:9091/wallet/address
+```
+
+Wallet storage path (`identity.json`):
+
+- Windows: `%LOCALAPPDATA%\shard\identity.json`
+- Linux: `~/.local/share/shard/identity.json`
+- macOS: `~/Library/Application Support/shard/identity.json`
+
+Check Shards balance:
+```bash
+# Replace <wallet> with your wallet address
+curl http://127.0.0.1:9091/credits/<wallet>
+```
+
+Check a specific credit transaction:
+```bash
+# Replace <tx_id> with transaction id
+curl http://127.0.0.1:9091/credits/tx/<tx_id>
+```
+
+If API credit-gating is enabled, include your wallet on requests:
+```bash
+curl http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "X-Shard-Wallet: <wallet>" \
+  -d '{"model":"shard-hybrid","messages":[{"role":"user","content":"Hello!"}]}'
+```
+
+#### Wallet Migration Example (Windows PowerShell)
+
+```powershell
+$env:SHARD_WALLET_PASSWORD = "strong-password"
+.\shard-daemon.exe wallet export --out .\my-wallet.shard-wallet --password-env SHARD_WALLET_PASSWORD
+.\shard-daemon.exe wallet verify-backup --in .\my-wallet.shard-wallet --password-env SHARD_WALLET_PASSWORD
+
+# On new machine:
+.\shard-daemon.exe wallet import --in .\my-wallet.shard-wallet --password-env SHARD_WALLET_PASSWORD
+```
+
+Keep your backup file and password separate. Anyone with both can control your wallet identity.
+
 If port `4001` is already in use, launch with a different P2P port:
 ```powershell
 # Windows
