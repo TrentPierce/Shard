@@ -52,14 +52,18 @@ use std::{
 use tokio::sync::{mpsc, Mutex};
 use tower_http::cors::{Any, CorsLayer};
 
+mod common;
 mod crypto;
+mod gateway;
+mod identity;
 pub mod inference;
 mod ledger;
 mod mesh;
 mod network;
 mod telemetry_ws;
-use crypto::identity::NodeIdentity;
 use crypto::wallet_backup::{export_wallet, import_wallet, verify_backup};
+use gateway::validate_work_request;
+use identity::NodeIdentity;
 use ledger::state::{ComputeCreditTx, LedgerState};
 use ledger::store::LedgerStore;
 use ledger::sync::{hash_probe_segments, LedgerSyncRequest, LedgerSyncResponse};
@@ -836,22 +840,6 @@ async fn save_persisted_peers(path: &Path, peers: &[String]) {
     if let Ok(bytes) = serde_json::to_vec_pretty(&payload) {
         let _ = tokio::fs::write(path, bytes).await;
     }
-}
-
-fn validate_work_request(req: &WorkRequest) -> Result<(), String> {
-    if req.request_id.trim().is_empty() || req.request_id.len() > 128 {
-        return Err("request_id must be non-empty and <= 128 chars".into());
-    }
-    if req.prompt_context.trim().is_empty() {
-        return Err("prompt_context must be non-empty".into());
-    }
-    if req.prompt_context.len() > 16000 {
-        return Err("prompt_context exceeds 16000 chars".into());
-    }
-    if req.min_tokens <= 0 || req.min_tokens > 512 {
-        return Err("min_tokens must be between 1 and 512".into());
-    }
-    Ok(())
 }
 
 // ─── HTTP Control-Plane Handlers ────────────────────────────────────────────
