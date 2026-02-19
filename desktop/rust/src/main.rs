@@ -72,6 +72,7 @@ use ledger::state::{ComputeCreditTx, LedgerState};
 use ledger::store::LedgerStore;
 use ledger::sync::{hash_probe_segments, LedgerSyncRequest, LedgerSyncResponse};
 use mesh::race_router::{RaceKey, RaceRouter, RaceSubmitOutcome};
+use metrics::cost::{estimate as estimate_cost, CostEstimateInput};
 use metrics::persistence::{MetricsPersistence, PersistedNodeMetricReport};
 use metrics::{NodeMetricReport, NodeMetricSnapshot, SystemMetrics};
 use network::layer_registry::{provider_key, LayerHostAnnouncement, LayerRoutingTable};
@@ -2342,7 +2343,12 @@ async fn metrics_summary_handler(
     } else {
         (counters.node_identity_auth_failures_total as f64 / total_tokens as f64) * 100.0
     };
-    let estimated_gpu_savings_percent = (offload_percentage * 0.8).min(95.0);
+    let cost = estimate_cost(&CostEstimateInput {
+        tokens_processed_total: counters.tokens_processed_total,
+        offload_percent: offload_percentage,
+        gpu_utilization_delta_percent: (offload_percentage * 0.6).min(90.0),
+        cloud_gpu_usd_per_million_tokens: 4.0,
+    });
 
     Json(serde_json::json!({
         "active_nodes": active_nodes,
@@ -2355,7 +2361,9 @@ async fn metrics_summary_handler(
         "p99_latency_ms": p.p99_ms,
         "offload_percentage_estimate": offload_percentage,
         "verification_rate": verification_rate,
-        "estimated_gpu_savings_percent": estimated_gpu_savings_percent,
+        "estimated_gpu_savings_percent": cost.estimated_savings_percent,
+        "equivalent_cloud_gpu_cost_usd": cost.equivalent_cloud_gpu_cost_usd,
+        "estimated_gpu_savings_usd": cost.estimated_savings_usd,
         "authentication_failure_rate": auth_failure_rate,
         "tokens_processed_total": counters.tokens_processed_total,
         "tokens_offloaded_to_scouts_total": counters.tokens_offloaded_to_scouts_total,

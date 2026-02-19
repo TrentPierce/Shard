@@ -119,6 +119,16 @@ Verify:
 ```bash
 curl http://localhost:9091/health
 curl http://localhost:9091/topology
+curl http://localhost:9091/node/status
+curl http://localhost:9091/metrics/summary
+```
+
+One-command local install:
+```bash
+./scripts/install.sh
+```
+```powershell
+./scripts/install.ps1
 ```
 
 ### Run a Shard Node from Release Binary (v0.4.8+)
@@ -313,6 +323,29 @@ Metrics persistence backends:
 - `SHARD_METRICS_SQLITE_PATH=/path/to/metrics.db`
 - `SHARD_METRICS_BACKEND=postgres` with `SHARD_METRICS_POSTGRES_URL=postgres://...`
 - `SHARD_METRICS_BACKEND=none` (disable persistence)
+
+Single node config (YAML + env overrides):
+```yaml
+node_role: shard
+max_cpu: 0.5
+max_gpu: 0.5
+idle_only: false
+load_threshold_cutoff: 0.85
+heartbeat_interval_seconds: 10
+```
+Use `deploy/config/shard-node.yaml.example` and set `SHARD_NODE_CONFIG=/path/to/shard-node.yaml`.
+
+Local node UI:
+- `GET /node/ui`
+- `GET /node/status`
+- `POST /node/toggle-participation`
+- `GET /node/logs`
+
+Synthetic load testing:
+```bash
+cd desktop/rust
+cargo run --release --bin shard-load-test -- --base-url http://127.0.0.1:9091 --requests 1000 --concurrency 1000 --mode all --out-dir ../../benchmarks
+```
 
 </details>
 

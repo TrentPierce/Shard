@@ -41,7 +41,8 @@ function authHeaders(): Record<string, string> {
 export async function sendMessage(
     history: ChatMessage[],
     onToken: (token: string) => void,
-    onDone: () => void
+    onDone: () => void,
+    inferenceMode: "standard" | "distributed" = "distributed"
 ): Promise<void> {
     const startedAt = performance.now()
     // Use direct API URL instead of discovery for reliability
@@ -57,6 +58,7 @@ export async function sendMessage(
         method: "POST",
         headers: { 
             "Content-Type": "application/json",
+            "X-Shard-Inference-Mode": inferenceMode,
             ...authHeaders(),
         },
         body: JSON.stringify(body),
