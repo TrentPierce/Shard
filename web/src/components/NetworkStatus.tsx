@@ -80,8 +80,8 @@ export default function NetworkStatus({
                     <span className="stat-label" id="rust-status-label">Rust Sidecar</span>
                     <span
                         className={`stat-value ${rustStatus === "connected"
-                                ? "stat-value--accent"
-                                : "stat-value--error"
+                            ? "stat-value--accent"
+                            : "stat-value--error"
                             }`}
                         aria-labelledby="rust-status-label"
                     >
@@ -111,6 +111,41 @@ export default function NetworkStatus({
                     <span className="stat-value" style={{ fontSize: "10px" }}>
                         :9091
                     </span>
+                </div>
+            </div>
+
+            {/* ── Wallet & Earnings ── */}
+            <div className="sidebar__section">
+                <div className="sidebar__section-title">
+                    <span className="sidebar__section-icon" aria-hidden="true">💎</span>
+                    Wallet & Earnings
+                </div>
+                <div className="stat-row">
+                    <span className="stat-label">Balance</span>
+                    <span className="stat-value" style={{ color: "var(--accent-cyan)", fontSize: "14px", fontWeight: 700 }}>
+                        2,450 SHRD
+                    </span>
+                </div>
+                <div className="stat-row">
+                    <span className="stat-label">Drafts Verified</span>
+                    <span className="stat-value">14,204</span>
+                </div>
+                <div className="stat-row">
+                    <span className="stat-label">Est. Earnings</span>
+                    <span className="stat-value" style={{ color: "var(--accent-emerald)" }}>+12 SHRD/hr</span>
+                </div>
+                <div style={{
+                    marginTop: "12px",
+                    background: "rgba(56, 139, 180, 0.1)",
+                    border: "1px solid rgba(56, 139, 180, 0.2)",
+                    borderRadius: "6px",
+                    padding: "8px",
+                    textAlign: "center"
+                }}>
+                    <div style={{ fontSize: "10px", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Wallet Connected</div>
+                    <div style={{ fontFamily: "var(--font-mono)", fontSize: "11px", color: "var(--text-primary)", marginTop: "2px", opacity: 0.8 }}>
+                        0x7F4...3b9A
+                    </div>
                 </div>
             </div>
 

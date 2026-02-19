@@ -22,6 +22,7 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
+use axum::response::sse::{Event, KeepAlive, Sse};
 use clap::{Args, Parser, Subcommand};
 use libp2p::{
     autonat, dcutr,
@@ -52,6 +53,7 @@ use tokio::sync::{mpsc, Mutex};
 use tower_http::cors::{Any, CorsLayer};
 
 mod crypto;
+pub mod inference;
 mod ledger;
 mod mesh;
 mod network;
@@ -369,6 +371,7 @@ struct SharedState {
     layer_end: u32,
     race_pool_size: usize,
     race_timeout_ms: u64,
+    engine: Arc<Mutex<Option<crate::inference::ShardEngine>>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1420,6 +1423,157 @@ async fn ws_generate_stream(mut socket: WebSocket, state: SharedState) {
         .await;
 }
 
+#[derive(Debug, Deserialize)]
+struct ChatMessage {
+    role: String,
+    content: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct ChatRequest {
+    model: Option<String>,
+    messages: Vec<ChatMessage>,
+    stream: Option<bool>,
+    max_tokens: Option<u32>,
+    max_new_tokens: Option<u32>,
+}
+
+async fn chat_completions_handler(
+    AxumState(state): AxumState<SharedState>,
+    Json(req): Json<ChatRequest>,
+) -> impl IntoResponse {
+    let stream_mode = req.stream.unwrap_or(false);
+    let max_tokens = req.max_tokens.or(req.max_new_tokens).unwrap_or(256);
+
+    let mut prompt = String::new();
+    prompt.push_str("<|begin_of_text|>");
+    for msg in &req.messages {
+        prompt.push_str(&format!("<|start_header_id|>{}\n\n{}<|eot_id|>", msg.role, msg.content));
+    }
+    prompt.push_str("<|start_header_id|>assistant<|end_header_id|>\n\n");
+
+    let request_id = format!("req-{}", now_ms());
+
+    if stream_mode {
+        let stream = async_stream::stream! {
+            let mut engine_guard = state.engine.lock().await;
+            if let Some(engine) = engine_guard.as_mut() {
+                if let Ok(mut tokens) = engine.tokenize(&prompt, 4096) {
+                    if !tokens.is_empty() && tokens[0] == 128000 {
+                        tokens.remove(0);
+                    }
+                    if engine.eval(&tokens).is_ok() {
+                        let mut emitted = 0;
+                        while emitted < max_tokens {
+                            if let Ok(logits) = engine.get_logits(128256) {
+                                let mut best_idx = 0;
+                                let mut best_val = -f32::INFINITY;
+                                for (i, &val) in logits.iter().enumerate() {
+                                    if val > best_val {
+                                        best_val = val;
+                                        best_idx = i;
+                                    }
+                                }
+
+                                if best_idx == 128001 || best_idx == 128009 {
+                                    break;
+                                }
+
+                                if let Ok(piece) = engine.token_to_piece(best_idx as i32) {
+                                    let chunk = serde_json::json!({
+                                        "id": request_id,
+                                        "object": "chat.completion.chunk",
+                                        "created": now_ms() / 1000,
+                                        "model": req.model.as_deref().unwrap_or("shard-hybrid"),
+                                        "choices": [{"index": 0, "delta": {"content": piece}, "finish_reason": serde_json::Value::Null}],
+                                    });
+                                    yield Ok::<_, std::convert::Infallible>(Event::default().data(chunk.to_string()));
+                                }
+                                
+                                if engine.eval(&[best_idx as i32]).is_err() {
+                                    break;
+                                }
+                                emitted += 1;
+                            } else {
+                                break;
+                            }
+                        }
+                    }
+                }
+            } else {
+                let err = serde_json::json!({"error": "No model engine loaded in this daemon"});
+                yield Ok(Event::default().data(err.to_string()));
+            }
+
+            let final_chunk = serde_json::json!({
+                "id": request_id,
+                "object": "chat.completion.chunk",
+                "created": now_ms() / 1000,
+                "model": req.model.as_deref().unwrap_or("shard-hybrid"),
+                "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+            });
+            yield Ok(Event::default().data(final_chunk.to_string()));
+            yield Ok(Event::default().data("[DONE]"));
+        };
+
+        Sse::new(stream).keep_alive(KeepAlive::default()).into_response()
+    } else {
+        // Run synchronously but hold the lock
+        let mut full_text = String::new();
+        {
+            let mut engine_guard = state.engine.lock().await;
+            if let Some(engine) = engine_guard.as_mut() {
+                if let Ok(mut tokens) = engine.tokenize(&prompt, 4096) {
+                    if !tokens.is_empty() && tokens[0] == 128000 {
+                        tokens.remove(0);
+                    }
+                    if engine.eval(&tokens).is_ok() {
+                        let mut emitted = 0;
+                        while emitted < max_tokens {
+                            if let Ok(logits) = engine.get_logits(128256) {
+                                let mut best_idx = 0;
+                                let mut best_val = -f32::INFINITY;
+                                for (i, &val) in logits.iter().enumerate() {
+                                    if val > best_val {
+                                        best_val = val;
+                                        best_idx = i;
+                                    }
+                                }
+
+                                if best_idx == 128001 || best_idx == 128009 {
+                                    break;
+                                }
+
+                                if let Ok(piece) = engine.token_to_piece(best_idx as i32) {
+                                    full_text.push_str(&piece);
+                                }
+                                
+                                if engine.eval(&[best_idx as i32]).is_err() {
+                                    break;
+                                }
+                                emitted += 1;
+                            } else {
+                                break;
+                            }
+                        }
+                    }
+                }
+            } else {
+                full_text = "No model engine loaded in this daemon".to_string();
+            }
+        }
+
+        Json(serde_json::json!({
+            "id": request_id,
+            "object": "chat.completion",
+            "created": now_ms() / 1000,
+            "model": req.model.as_deref().unwrap_or("shard-hybrid"),
+            "choices": [{"index": 0, "message": {"role": "assistant", "content": full_text}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        })).into_response()
+    }
+}
+
 async fn latency_profile_handler(
     AxumState(state): AxumState<SharedState>,
 ) -> Json<serde_json::Value> {
@@ -1501,6 +1655,7 @@ fn create_router(state: SharedState) -> Router {
         .route("/pop-result", get(pop_result_handler))
         .route("/pop-work", get(pop_work_handler))
         .route("/submit-draft", post(submit_draft_handler))
+        .route("/v1/chat/completions", post(chat_completions_handler))
         .route("/ws/generate", get(ws_generate_handler))
         .route("/scout/penalty", post(scout_penalty_update_handler))
         .route("/scout/penalty", get(scout_penalty_status_handler))
@@ -1628,7 +1783,53 @@ async fn main() -> Result<()> {
         layer_end: cli.layer_end,
         race_pool_size: cli.race_pool_size,
         race_timeout_ms: cli.race_timeout_ms,
+        engine: Arc::new(Mutex::new(None)),
     };
+
+    #[cfg(target_os = "windows")]
+    const LIB_NAME: &str = "shard_engine.dll";
+    #[cfg(target_os = "macos")]
+    const LIB_NAME: &str = "libshard_engine.dylib";
+    #[cfg(target_os = "linux")]
+    const LIB_NAME: &str = "libshard_engine.so";
+
+    let lib_path_opt = std::env::var("BITNET_LIB").or_else(|_| {
+        let local_path = std::path::PathBuf::from(LIB_NAME);
+        if local_path.exists() {
+            Ok(local_path.to_string_lossy().into_owned())
+        } else {
+            let nested_path = std::path::PathBuf::from("bitnet").join(LIB_NAME);
+            if nested_path.exists() {
+                Ok(nested_path.to_string_lossy().into_owned())
+            } else {
+                Err(std::env::VarError::NotPresent)
+            }
+        }
+    });
+
+    if let (Ok(lib_path), Ok(model_path)) = (lib_path_opt, std::env::var("BITNET_MODEL")) {
+        let model_c = std::ffi::CString::new(model_path).unwrap();
+        let model_id_c = std::ffi::CString::new(cli.model_id.clone()).unwrap();
+        let config = crate::inference::ShardInitConfig {
+            model_path: model_c.as_ptr(),
+            layer_start: cli.layer_start as std::ffi::c_int,
+            layer_end: if cli.layer_end == 0 { -1 } else { cli.layer_end as std::ffi::c_int },
+            model_id: model_id_c.as_ptr(),
+            pipeline_mode: 0,
+        };
+        match crate::inference::ShardEngine::load(&lib_path, &config) {
+            Ok(engine) => {
+                tracing::info!("Loaded ShardEngine from {}", lib_path);
+                *state.engine.lock().await = Some(engine);
+            }
+            Err(err) => {
+                tracing::warn!(%err, "Failed to load ShardEngine");
+            }
+        }
+    } else {
+        // Fallback or explicit auto-detect logic can be implemented here later
+        tracing::debug!("BITNET_LIB or BITNET_MODEL not set, ShardEngine unavailable");
+    }
 
     // ── build swarm ──
     // ── build transport ──

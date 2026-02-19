@@ -9,8 +9,8 @@
 // ─── Imports ───────────────────────────────────────────────────────────────
 
 import {
-    CreateMLCEngine,
-    type MLCEngine,
+    CreateWebWorkerMLCEngine,
+    type WebWorkerMLCEngine,
     type InitProgressReport,
 } from "@mlc-ai/web-llm"
 
@@ -63,7 +63,7 @@ const DEFAULT_DRAFT_OPTIONS: DraftGenerationOptions = {
 
 // ─── State ─────────────────────────────────────────────────────────────────
 
-let engine: MLCEngine | null = null
+let engine: WebWorkerMLCEngine | null = null
 let isLoading = false
 let currentModel: string = DRAFT_MODEL
 
@@ -236,8 +236,10 @@ export async function initWebLLM(
         const model = getModelForDevice()
         currentModel = model
 
-        // Initialize MLCEngine with the appropriate draft model
-        engine = await CreateMLCEngine(
+        // Initialize MLCEngine with the appropriate draft model using a background Web Worker
+        const worker = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' })
+        engine = await CreateWebWorkerMLCEngine(
+            worker,
             model,
             {
                 initProgressCallback: wrappedCallback,

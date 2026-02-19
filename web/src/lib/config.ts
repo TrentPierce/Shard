@@ -5,8 +5,8 @@
  * Uses Next.js environment variables with sensible fallbacks for development.
  * 
  * On Vercel: uses relative "/api" prefix so vercel.json rewrites proxy
- *            requests to the EC2 Python/Rust backend.
- * Locally:   hits http://127.0.0.1:8000 directly.
+ *            requests to the EC2 backend.
+ * Locally:   hits http://127.0.0.1:9091 directly.
  */
 
 // ─── API Configuration ──────────────────────────────────────────────────────
@@ -32,7 +32,7 @@ function isDeployed(): boolean {
  * Priority:
  * 1. NEXT_PUBLIC_API_URL env var (explicit override)
  * 2. "/api" relative prefix when deployed (Vercel rewrites to EC2)
- * 3. "http://127.0.0.1:8000" for local development
+ * 3. "http://127.0.0.1:9091" for local development
  */
 export const API_BASE = process.env.NEXT_PUBLIC_API_URL || ""
 
@@ -66,8 +66,8 @@ export function apiUrl(path: string = "/v1"): string {
     return `/api${cleanPath}`
   }
 
-  // Local development: hit the Python API directly
-  return `http://127.0.0.1:8000${cleanPath}`
+  // Local development: hit the Rust daemon directly
+  return `http://127.0.0.1:9091${cleanPath}`
 }
 
 /**
