@@ -137,13 +137,7 @@ mod tests {
             request_id: "r2".into(),
             step_id: "s2".into(),
         };
-        router.start_race(
-            key.clone(),
-            vec![2, 8],
-            "fp32",
-            vec!["p1".into()],
-            10_000,
-        );
+        router.start_race(key.clone(), vec![2, 8], "fp32", vec!["p1".into()], 10_000);
         assert_eq!(
             router.submit_candidate(100, &key, "p2", &[2, 8], "fp32"),
             RaceSubmitOutcome::RejectedInvalid

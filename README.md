@@ -153,6 +153,18 @@ Quick check (daemon local control API):
 curl http://127.0.0.1:9091/health
 ```
 
+Wallet portability (move identity to a new machine):
+```bash
+# Export encrypted wallet backup from old node
+SHARD_WALLET_PASSWORD='strong-password' ./shard-daemon wallet export --out ./my-wallet.shard-wallet --password-env SHARD_WALLET_PASSWORD
+
+# Verify backup file
+SHARD_WALLET_PASSWORD='strong-password' ./shard-daemon wallet verify-backup --in ./my-wallet.shard-wallet --password-env SHARD_WALLET_PASSWORD
+
+# Import on new node (before starting daemon normally)
+SHARD_WALLET_PASSWORD='strong-password' ./shard-daemon wallet import --in ./my-wallet.shard-wallet --password-env SHARD_WALLET_PASSWORD
+```
+
 If port `4001` is already in use, launch with a different P2P port:
 ```powershell
 # Windows
