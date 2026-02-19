@@ -50,8 +50,10 @@ use std::{
 use tokio::sync::{mpsc, Mutex};
 use tower_http::cors::{Any, CorsLayer};
 
+mod mesh;
 mod network;
 mod telemetry_ws;
+use mesh::race_router::{RaceKey, RaceRouter, RaceSubmitOutcome};
 use network::layer_registry::{provider_key, LayerHostAnnouncement, LayerRoutingTable};
 use network::tensor_wire::TensorWirePacket;
 
@@ -127,6 +129,14 @@ struct Cli {
     /// Last transformer layer hosted by this node (inclusive).
     #[arg(long, default_value = "0")]
     layer_end: u32,
+
+    /// Maximum peers to race for the next-layer activation.
+    #[arg(long, default_value = "3")]
+    race_pool_size: usize,
+
+    /// Race timeout in milliseconds.
+    #[arg(long, default_value = "3000")]
+    race_timeout_ms: u64,
 }
 
 // ─── Protocol Messages ─────────────────────────────────────────────────────
@@ -197,6 +207,8 @@ pub struct ForwardPassActivation {
     pub step_id: String,
     pub source_peer_id: String,
     pub target_peer_id: Option<String>,
+    #[serde(default)]
+    pub target_peer_pool: Option<Vec<String>>,
     pub tensor_name: String,
     pub shape: Vec<usize>,
     pub format: TensorDataFormat,
@@ -275,6 +287,7 @@ struct SharedState {
     results: Arc<Mutex<VecDeque<WorkResponse>>>,
     scout_work: Arc<Mutex<VecDeque<WorkRequest>>>,
     work_tx: mpsc::Sender<WorkRequest>,
+    pipeline_tx: mpsc::Sender<PipelineDispatch>,
     daemon_start: u128,
     capacity: Arc<AtomicU32>,
     current_load: Arc<AtomicU32>,
@@ -283,9 +296,12 @@ struct SharedState {
     scout_penalties: Arc<Mutex<ScoutPenaltyBook>>,
     backward_passes: Arc<Mutex<VecDeque<BackwardPassGradient>>>,
     layer_routes: Arc<Mutex<LayerRoutingTable>>,
+    race_router: Arc<Mutex<RaceRouter>>,
     model_id: String,
     layer_start: u32,
     layer_end: u32,
+    race_pool_size: usize,
+    race_timeout_ms: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -316,6 +332,26 @@ struct NextLayerQuery {
     model_id: Option<String>,
     current_layer: u32,
     limit: Option<usize>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ForwardResultQuery {
+    request_id: Option<String>,
+    step_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PipelineForwardRequest {
+    model_id: Option<String>,
+    current_layer: u32,
+    packet: ForwardPassActivation,
+}
+
+#[derive(Debug, Clone)]
+struct PipelineDispatch {
+    model_id: String,
+    current_layer: u32,
+    packet: ForwardPassActivation,
 }
 
 #[derive(Debug, Deserialize)]
@@ -646,6 +682,8 @@ async fn health_handler(AxumState(state): AxumState<SharedState>) -> Json<serde_
         "model_id": state.model_id.clone(),
         "layer_start": state.layer_start,
         "layer_end": state.layer_end,
+        "race_pool_size": state.race_pool_size,
+        "race_timeout_ms": state.race_timeout_ms,
         "capacity": capacity,
         "load": load,
         "latency_ms": latency_ms,
@@ -674,6 +712,8 @@ async fn topology_handler(AxumState(state): AxumState<SharedState>) -> Json<serd
         "model_id": state.model_id.clone(),
         "layer_start": state.layer_start,
         "layer_end": state.layer_end,
+        "race_pool_size": state.race_pool_size,
+        "race_timeout_ms": state.race_timeout_ms,
         "capacity": capacity,
         "load": load,
         "latency_ms": latency_ms,
@@ -707,6 +747,55 @@ async fn next_layer_handler(
         "peers": peers,
         "count": peers.len(),
     }))
+}
+
+async fn pipeline_forward_handler(
+    AxumState(state): AxumState<SharedState>,
+    Json(req): Json<PipelineForwardRequest>,
+) -> Json<serde_json::Value> {
+    let model_id = req
+        .model_id
+        .as_deref()
+        .unwrap_or(state.model_id.as_str())
+        .to_string();
+    let dispatch = PipelineDispatch {
+        model_id,
+        current_layer: req.current_layer,
+        packet: req.packet,
+    };
+    match state.pipeline_tx.send(dispatch).await {
+        Ok(_) => Json(serde_json::json!({
+            "ok": true,
+            "detail": "queued for pooled forward dispatch"
+        })),
+        Err(e) => Json(serde_json::json!({
+            "ok": false,
+            "detail": format!("channel error: {e}")
+        })),
+    }
+}
+
+async fn pipeline_pop_forward_result_handler(
+    AxumState(state): AxumState<SharedState>,
+    Query(query): Query<ForwardResultQuery>,
+) -> Json<serde_json::Value> {
+    let key = match (&query.request_id, &query.step_id) {
+        (Some(r), Some(s)) => Some(RaceKey {
+            request_id: r.clone(),
+            step_id: s.clone(),
+        }),
+        _ => None,
+    };
+
+    let result = {
+        let mut router = state.race_router.lock().await;
+        router.pop_completed(key.as_ref())
+    };
+
+    match result {
+        Some(res) => Json(serde_json::json!({ "ok": true, "result": res })),
+        None => Json(serde_json::json!({ "ok": false, "detail": "no completed race result available" })),
+    }
 }
 
 async fn broadcast_work_handler(
@@ -961,6 +1050,8 @@ fn create_router(state: SharedState) -> Router {
         .route("/topology", get(topology_handler))
         .route("/peers", get(peers_handler))
         .route("/layers/next", get(next_layer_handler))
+        .route("/pipeline/forward", post(pipeline_forward_handler))
+        .route("/pipeline/pop-forward-result", get(pipeline_pop_forward_result_handler))
         .route("/broadcast-work", post(broadcast_work_handler))
         .route("/pop-result", get(pop_result_handler))
         .route("/pop-work", get(pop_work_handler))
@@ -1030,6 +1121,7 @@ async fn main() -> Result<()> {
 
     // ── channels ──
     let (work_tx, mut work_rx) = mpsc::channel::<WorkRequest>(256);
+    let (pipeline_tx, mut pipeline_rx) = mpsc::channel::<PipelineDispatch>(256);
 
     let id_keys = identity::Keypair::generate_ed25519();
     let local_peer_id = PeerId::from(id_keys.public());
@@ -1054,6 +1146,7 @@ async fn main() -> Result<()> {
         results: Arc::new(Mutex::new(VecDeque::new())),
         scout_work: Arc::new(Mutex::new(VecDeque::new())),
         work_tx,
+        pipeline_tx,
         daemon_start: now_ms(),
         capacity: Arc::new(AtomicU32::new(100)), // Default: 100 tokens/sec
         current_load: Arc::new(AtomicU32::new(0)),
@@ -1062,9 +1155,12 @@ async fn main() -> Result<()> {
         scout_penalties: Arc::new(Mutex::new(ScoutPenaltyBook::default())),
         backward_passes: Arc::new(Mutex::new(VecDeque::new())),
         layer_routes: Arc::new(Mutex::new(LayerRoutingTable::default())),
+        race_router: Arc::new(Mutex::new(RaceRouter::default())),
         model_id: cli.model_id.clone(),
         layer_start: cli.layer_start,
         layer_end: cli.layer_end,
+        race_pool_size: cli.race_pool_size,
+        race_timeout_ms: cli.race_timeout_ms,
     };
 
     // ── build swarm ──
@@ -1169,12 +1265,14 @@ async fn main() -> Result<()> {
     let work_topic = IdentTopic::new("shard-work");
     let result_topic = IdentTopic::new("shard-work-result");
     let forward_topic = IdentTopic::new("shard-forward-pass");
+    let forward_result_topic = IdentTopic::new("shard-forward-result");
     let backward_topic = IdentTopic::new("shard-backward-pass");
     let layer_announce_topic = IdentTopic::new("shard-layer-announcements");
     let auction_topic = IdentTopic::new("auction.prompt");
     swarm.behaviour_mut().gossipsub.subscribe(&work_topic)?;
     swarm.behaviour_mut().gossipsub.subscribe(&result_topic)?;
     swarm.behaviour_mut().gossipsub.subscribe(&forward_topic)?;
+    swarm.behaviour_mut().gossipsub.subscribe(&forward_result_topic)?;
     swarm.behaviour_mut().gossipsub.subscribe(&backward_topic)?;
     swarm.behaviour_mut().gossipsub.subscribe(&layer_announce_topic)?;
     swarm.behaviour_mut().gossipsub.subscribe(&auction_topic)?;
@@ -1344,6 +1442,11 @@ async fn main() -> Result<()> {
                     .kad
                     .get_providers(provider_key(&cli.model_id, next_layer_start));
                 pending_layer_queries.insert(qid, (cli.model_id.clone(), next_layer_start));
+
+                {
+                    let mut router = state.race_router.lock().await;
+                    router.prune_expired(now);
+                }
             }
 
             // ── inbound work from Python driver (HTTP → gossipsub) ──
@@ -1359,6 +1462,53 @@ async fn main() -> Result<()> {
                         }
                     }
                     Err(e) => tracing::error!(%e, "failed to serialize WorkRequest"),
+                }
+            }
+
+            // ── inbound pipeline forward requests (HTTP -> pooled gossipsub fanout) ──
+            Some(dispatch) = pipeline_rx.recv() => {
+                let pool_size = state.race_pool_size.max(1).min(8);
+                let pool = {
+                    let mut routes = state.layer_routes.lock().await;
+                    routes.prune_expired(now_ms());
+                    routes.find_next_layer_peers(&dispatch.model_id, dispatch.current_layer, pool_size)
+                };
+                if pool.is_empty() {
+                    tracing::warn!(
+                        request_id = %dispatch.packet.request_id,
+                        step_id = %dispatch.packet.step_id,
+                        model_id = %dispatch.model_id,
+                        current_layer = dispatch.current_layer,
+                        "pipeline dispatch skipped; no next-layer peers found"
+                    );
+                    continue;
+                }
+
+                let race_key = RaceKey {
+                    request_id: dispatch.packet.request_id.clone(),
+                    step_id: dispatch.packet.step_id.clone(),
+                };
+                {
+                    let mut router = state.race_router.lock().await;
+                    router.start_race(
+                        race_key,
+                        dispatch.packet.shape.clone(),
+                        format!("{:?}", dispatch.packet.format).to_lowercase(),
+                        pool.clone(),
+                        now_ms().saturating_add(state.race_timeout_ms as u128),
+                    );
+                }
+
+                for peer in &pool {
+                    let mut p = dispatch.packet.clone();
+                    p.target_peer_id = Some(peer.clone());
+                    p.target_peer_pool = Some(pool.clone());
+                    if p.created_at_ms.is_none() {
+                        p.created_at_ms = Some(now_ms());
+                    }
+                    if let Ok(payload) = serde_json::to_vec(&TrainingGossipPacket::ForwardPass(p)) {
+                        let _ = swarm.behaviour_mut().gossipsub.publish(forward_topic.clone(), payload);
+                    }
                 }
             }
 
@@ -1405,6 +1555,62 @@ async fn main() -> Result<()> {
                                 }
                                 Err(e) => tracing::warn!(%e, "invalid layer announcement packet; ignoring"),
                             }
+                        } else if message.topic == forward_result_topic.hash() {
+                            match serde_json::from_slice::<TrainingGossipPacket>(&message.data) {
+                                Ok(TrainingGossipPacket::ForwardPass(packet)) => {
+                                    let is_for_me = packet
+                                        .target_peer_id
+                                        .as_deref()
+                                        .map(|p| p == local_peer_id.to_string())
+                                        .unwrap_or(false);
+                                    if !is_for_me {
+                                        continue;
+                                    }
+                                    let key = RaceKey {
+                                        request_id: packet.request_id.clone(),
+                                        step_id: packet.step_id.clone(),
+                                    };
+                                    let dtype = format!("{:?}", packet.format).to_lowercase();
+                                    let outcome = {
+                                        let mut router = state.race_router.lock().await;
+                                        router.submit_candidate(
+                                            now_ms(),
+                                            &key,
+                                            &packet.source_peer_id,
+                                            &packet.shape,
+                                            &dtype,
+                                        )
+                                    };
+                                    match outcome {
+                                        RaceSubmitOutcome::AcceptedFirst => {
+                                            tracing::info!(
+                                                request_id = %packet.request_id,
+                                                step_id = %packet.step_id,
+                                                winner = %packet.source_peer_id,
+                                                "accepted first forward tensor from race pool"
+                                            );
+                                        }
+                                        RaceSubmitOutcome::RejectedLate => {
+                                            tracing::debug!(
+                                                request_id = %packet.request_id,
+                                                step_id = %packet.step_id,
+                                                peer = %packet.source_peer_id,
+                                                "dropped late forward tensor response"
+                                            );
+                                        }
+                                        RaceSubmitOutcome::RejectedInvalid => {
+                                            tracing::warn!(
+                                                request_id = %packet.request_id,
+                                                step_id = %packet.step_id,
+                                                peer = %packet.source_peer_id,
+                                                "rejected invalid forward tensor response"
+                                            );
+                                        }
+                                        RaceSubmitOutcome::UnknownRace => {}
+                                    }
+                                }
+                                _ => {}
+                            }
                         } else if message.topic == forward_topic.hash() || message.topic == backward_topic.hash() {
                             match serde_json::from_slice::<TrainingGossipPacket>(&message.data) {
                                 Ok(TrainingGossipPacket::ForwardPass(packet)) => {
@@ -1425,6 +1631,27 @@ async fn main() -> Result<()> {
                                         has_blob_ref = packet.blob_ref.is_some(),
                                         "received forward-pass activation packet"
                                     );
+
+                                    // If this node is one of the selected pool peers, compute and return tensor.
+                                    let is_targeted_to_me = packet
+                                        .target_peer_id
+                                        .as_deref()
+                                        .map(|p| p == local_peer_id.to_string())
+                                        .unwrap_or(false);
+                                    if is_targeted_to_me {
+                                        let mut result = packet.clone();
+                                        result.source_peer_id = local_peer_id.to_string();
+                                        result.target_peer_id = Some(packet.source_peer_id.clone());
+                                        result.created_at_ms = Some(now_ms());
+                                        if let Ok(payload) =
+                                            serde_json::to_vec(&TrainingGossipPacket::ForwardPass(result))
+                                        {
+                                            let _ = swarm
+                                                .behaviour_mut()
+                                                .gossipsub
+                                                .publish(forward_result_topic.clone(), payload);
+                                        }
+                                    }
                                 }
                                 Ok(TrainingGossipPacket::BackwardPass(packet)) => {
                                     tracing::info!(
