@@ -1,0 +1,10 @@
+namespace shard.network;
+
+table TensorPacket {
+  tensor_name: string;
+  dtype: ubyte;
+  shape: [uint];
+  data: [ubyte];
+}
+
+root_type TensorPacket;

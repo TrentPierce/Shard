@@ -11,14 +11,33 @@
 #endif
 
 extern "C" {
+typedef struct shard_init_config {
+    const char* model_path;
+    int layer_start;
+    int layer_end;
+    const char* model_id;
+    int pipeline_mode;
+} shard_init_config;
+
+typedef struct shard_tensor_view {
+    void* data;
+    unsigned long long byte_size;
+    int n_dims;
+    unsigned long long dims[4];
+    int dtype; // 1 = f32 (current supported type)
+} shard_tensor_view;
+
 // Lifecycle
 SHARD_API void* shard_init(const char* model_path);
+SHARD_API void* shard_init_ex(const shard_init_config* config);
 SHARD_API void shard_free(void* handle);
 
 // Peeking API (mandatory)
 SHARD_API int shard_eval(void* handle, const int* tokens, int num_tokens);
 SHARD_API int shard_get_logits(void* handle, float* out_buffer, int top_k_size);
 SHARD_API int shard_rollback(void* handle, int steps);
+SHARD_API int shard_get_layer_range(void* handle, int* out_layer_start, int* out_layer_end);
+SHARD_API int shard_eval_hidden(void* handle, const shard_tensor_view* in_tensor, shard_tensor_view* out_tensor);
 
 // Tokenization
 SHARD_API int shard_tokenize(void* handle, const char* text, int* out_tokens, int max_tokens);

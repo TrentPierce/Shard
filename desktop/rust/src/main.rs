@@ -27,7 +27,10 @@ use libp2p::{
     futures::StreamExt,
     gossipsub::{self, IdentTopic, MessageAuthenticity},
     identify, identity,
-    kad::{store::MemoryStore, Behaviour as KadBehaviour},
+    kad::{
+        store::MemoryStore, Behaviour as KadBehaviour, Event as KadEvent, GetProvidersOk,
+        QueryResult,
+    },
     ping, relay,
     request_response::{self, OutboundRequestId, ProtocolSupport},
     swarm::{NetworkBehaviour, SwarmEvent},
@@ -47,7 +50,10 @@ use std::{
 use tokio::sync::{mpsc, Mutex};
 use tower_http::cors::{Any, CorsLayer};
 
+mod network;
 mod telemetry_ws;
+use network::layer_registry::{provider_key, LayerHostAnnouncement, LayerRoutingTable};
+use network::tensor_wire::TensorWirePacket;
 
 // ─── CLI ────────────────────────────────────────────────────────────────────
 
@@ -109,6 +115,18 @@ struct Cli {
     /// Enable NAT traversal (circuit relay + hole punching)
     #[arg(long, default_value = "true")]
     nat_traversal: bool,
+
+    /// Hosted model identifier for layer routing announcements.
+    #[arg(long, default_value = "default-model")]
+    model_id: String,
+
+    /// First transformer layer hosted by this node.
+    #[arg(long, default_value = "0")]
+    layer_start: u32,
+
+    /// Last transformer layer hosted by this node (inclusive).
+    #[arg(long, default_value = "0")]
+    layer_end: u32,
 }
 
 // ─── Protocol Messages ─────────────────────────────────────────────────────
@@ -264,6 +282,10 @@ struct SharedState {
     gossipsub_latency_hist: Arc<LatencyHistogram>,
     scout_penalties: Arc<Mutex<ScoutPenaltyBook>>,
     backward_passes: Arc<Mutex<VecDeque<BackwardPassGradient>>>,
+    layer_routes: Arc<Mutex<LayerRoutingTable>>,
+    model_id: String,
+    layer_start: u32,
+    layer_end: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -287,6 +309,13 @@ struct DraftResultSubmission {
 #[derive(Debug, Deserialize)]
 struct PopResultQuery {
     request_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct NextLayerQuery {
+    model_id: Option<String>,
+    current_layer: u32,
+    limit: Option<usize>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -614,6 +643,9 @@ async fn health_handler(AxumState(state): AxumState<SharedState>) -> Json<serde_
         "public_api_addr": topo.public_api_addr,
         "relay_server": topo.relay_server_enabled,
         "contribute": topo.contribute_enabled,
+        "model_id": state.model_id.clone(),
+        "layer_start": state.layer_start,
+        "layer_end": state.layer_end,
         "capacity": capacity,
         "load": load,
         "latency_ms": latency_ms,
@@ -639,6 +671,9 @@ async fn topology_handler(AxumState(state): AxumState<SharedState>) -> Json<serd
         "public_api_addr": topo.public_api_addr,
         "relay_server": topo.relay_server_enabled,
         "contribute": topo.contribute_enabled,
+        "model_id": state.model_id.clone(),
+        "layer_start": state.layer_start,
+        "layer_end": state.layer_end,
         "capacity": capacity,
         "load": load,
         "latency_ms": latency_ms,
@@ -649,6 +684,29 @@ async fn peers_handler(AxumState(state): AxumState<SharedState>) -> Json<serde_j
     let peers = state.peers.lock().await;
     let list: Vec<&PeerInfo> = peers.values().collect();
     Json(serde_json::json!({ "peers": list, "count": list.len() }))
+}
+
+async fn next_layer_handler(
+    AxumState(state): AxumState<SharedState>,
+    Query(query): Query<NextLayerQuery>,
+) -> Json<serde_json::Value> {
+    let model_id = query
+        .model_id
+        .as_deref()
+        .unwrap_or(state.model_id.as_str())
+        .to_string();
+    let limit = query.limit.unwrap_or(3).clamp(1, 16);
+    let mut routes = state.layer_routes.lock().await;
+    routes.prune_expired(now_ms());
+    let peers = routes.find_next_layer_peers(&model_id, query.current_layer, limit);
+    Json(serde_json::json!({
+        "ok": true,
+        "model_id": model_id,
+        "current_layer": query.current_layer,
+        "next_layer": query.current_layer.saturating_add(1),
+        "peers": peers,
+        "count": peers.len(),
+    }))
 }
 
 async fn broadcast_work_handler(
@@ -902,6 +960,7 @@ fn create_router(state: SharedState) -> Router {
         .route("/health", get(health_handler))
         .route("/topology", get(topology_handler))
         .route("/peers", get(peers_handler))
+        .route("/layers/next", get(next_layer_handler))
         .route("/broadcast-work", post(broadcast_work_handler))
         .route("/pop-result", get(pop_result_handler))
         .route("/pop-work", get(pop_work_handler))
@@ -1002,6 +1061,10 @@ async fn main() -> Result<()> {
         gossipsub_latency_hist: Arc::new(LatencyHistogram::new()),
         scout_penalties: Arc::new(Mutex::new(ScoutPenaltyBook::default())),
         backward_passes: Arc::new(Mutex::new(VecDeque::new())),
+        layer_routes: Arc::new(Mutex::new(LayerRoutingTable::default())),
+        model_id: cli.model_id.clone(),
+        layer_start: cli.layer_start,
+        layer_end: cli.layer_end,
     };
 
     // ── build swarm ──
@@ -1107,11 +1170,13 @@ async fn main() -> Result<()> {
     let result_topic = IdentTopic::new("shard-work-result");
     let forward_topic = IdentTopic::new("shard-forward-pass");
     let backward_topic = IdentTopic::new("shard-backward-pass");
+    let layer_announce_topic = IdentTopic::new("shard-layer-announcements");
     let auction_topic = IdentTopic::new("auction.prompt");
     swarm.behaviour_mut().gossipsub.subscribe(&work_topic)?;
     swarm.behaviour_mut().gossipsub.subscribe(&result_topic)?;
     swarm.behaviour_mut().gossipsub.subscribe(&forward_topic)?;
     swarm.behaviour_mut().gossipsub.subscribe(&backward_topic)?;
+    swarm.behaviour_mut().gossipsub.subscribe(&layer_announce_topic)?;
     swarm.behaviour_mut().gossipsub.subscribe(&auction_topic)?;
 
     // ── listen addresses ──
@@ -1131,6 +1196,12 @@ async fn main() -> Result<()> {
             tracing::info!(%addr, "dialing bootstrap peer");
             let _ = swarm.dial(addr);
         }
+    }
+
+    // Advertise hosted layer start in Kademlia DHT provider index.
+    let local_layer_key = provider_key(&cli.model_id, cli.layer_start);
+    if let Err(e) = swarm.behaviour_mut().kad.start_providing(local_layer_key) {
+        tracing::warn!(%e, "failed to publish local layer provider record");
     }
 
     telemetry_ws::spawn_telemetry_ws_server(state.clone(), cli.telemetry_ws_port);
@@ -1218,6 +1289,9 @@ async fn main() -> Result<()> {
 
     let mut reconnect_tick = tokio::time::interval(Duration::from_secs(cli.reconnect_seconds));
     let mut pending_handshakes: HashMap<OutboundRequestId, PeerId> = HashMap::new();
+    let mut pending_layer_queries: HashMap<libp2p::kad::QueryId, (String, u32)> = HashMap::new();
+    let layer_ttl_ms: u128 = 60_000;
+    let mut next_layer_announcement_ms = 0u128;
 
     // ── main event loop ──
     loop {
@@ -1238,6 +1312,38 @@ async fn main() -> Result<()> {
                         }
                     }
                 }
+
+                // Refresh local layer announcement and query providers for the next layer start.
+                let now = now_ms();
+                if now >= next_layer_announcement_ms {
+                    let announcement = LayerHostAnnouncement {
+                        model_id: cli.model_id.clone(),
+                        layer_start: cli.layer_start,
+                        layer_end: cli.layer_end,
+                        peer_id: local_peer_id.to_string(),
+                        announced_at_ms: now,
+                        expires_at_ms: now + layer_ttl_ms,
+                    };
+                    if let Ok(payload) = serde_json::to_vec(&announcement) {
+                        let _ = swarm
+                            .behaviour_mut()
+                            .gossipsub
+                            .publish(layer_announce_topic.clone(), payload);
+                    }
+                    {
+                        let mut routes = state.layer_routes.lock().await;
+                        routes.upsert(announcement);
+                        routes.prune_expired(now);
+                    }
+                    next_layer_announcement_ms = now + (layer_ttl_ms / 2);
+                }
+
+                let next_layer_start = cli.layer_end.saturating_add(1);
+                let qid = swarm
+                    .behaviour_mut()
+                    .kad
+                    .get_providers(provider_key(&cli.model_id, next_layer_start));
+                pending_layer_queries.insert(qid, (cli.model_id.clone(), next_layer_start));
             }
 
             // ── inbound work from Python driver (HTTP → gossipsub) ──
@@ -1290,9 +1396,25 @@ async fn main() -> Result<()> {
                                 q.push_back(result);
                                 while q.len() > 128 { q.pop_front(); }
                             }
+                        } else if message.topic == layer_announce_topic.hash() {
+                            match serde_json::from_slice::<LayerHostAnnouncement>(&message.data) {
+                                Ok(ann) => {
+                                    let mut routes = state.layer_routes.lock().await;
+                                    routes.upsert(ann);
+                                    routes.prune_expired(now_ms());
+                                }
+                                Err(e) => tracing::warn!(%e, "invalid layer announcement packet; ignoring"),
+                            }
                         } else if message.topic == forward_topic.hash() || message.topic == backward_topic.hash() {
                             match serde_json::from_slice::<TrainingGossipPacket>(&message.data) {
                                 Ok(TrainingGossipPacket::ForwardPass(packet)) => {
+                                    if let Some(chunk) = packet.chunk.as_ref() {
+                                        if let Some(wire_hex) = chunk.data.strip_prefix("wire1:") {
+                                            if let Ok(raw) = hex::decode(wire_hex) {
+                                                let _ = TensorWirePacket::decode(&raw);
+                                            }
+                                        }
+                                    }
                                     tracing::info!(
                                         request_id = %packet.request_id,
                                         step_id = %packet.step_id,
@@ -1397,7 +1519,41 @@ async fn main() -> Result<()> {
 
                     // ── kademlia ──
                     SwarmEvent::Behaviour(ShardBehaviourEvent::Kad(event)) => {
-                        tracing::debug!(?event, "kademlia event");
+                        match event {
+                            KadEvent::OutboundQueryProgressed { id, result, .. } => {
+                                match result {
+                                    QueryResult::GetProviders(Ok(GetProvidersOk::FoundProviders { providers, .. })) => {
+                                        if let Some((model_id, layer_start)) = pending_layer_queries.get(&id).cloned() {
+                                            let now = now_ms();
+                                            let expires = now + layer_ttl_ms;
+                                            let mut routes = state.layer_routes.lock().await;
+                                            for peer in providers {
+                                                let ann = LayerHostAnnouncement {
+                                                    model_id: model_id.clone(),
+                                                    layer_start,
+                                                    layer_end: layer_start,
+                                                    peer_id: peer.to_string(),
+                                                    announced_at_ms: now,
+                                                    expires_at_ms: expires,
+                                                };
+                                                routes.upsert(ann);
+                                            }
+                                            routes.prune_expired(now);
+                                        }
+                                    }
+                                    QueryResult::GetProviders(Ok(GetProvidersOk::FinishedWithNoAdditionalRecord { .. })) => {
+                                        pending_layer_queries.remove(&id);
+                                    }
+                                    QueryResult::StartProviding(Ok(_)) => {
+                                        tracing::debug!("kademlia start_providing succeeded");
+                                    }
+                                    other => {
+                                        tracing::debug!(?other, "kademlia query progressed");
+                                    }
+                                }
+                            }
+                            other => tracing::debug!(?other, "kademlia event"),
+                        }
                     }
 
                     // Note: relay client disabled - libp2p API changed

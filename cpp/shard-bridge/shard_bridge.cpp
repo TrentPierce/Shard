@@ -14,6 +14,11 @@ struct ShardEngineState {
     llama_context* ctx = nullptr;
     int32_t n_ctx = 4096;
     int32_t n_past = 0;
+    int32_t n_layer_total = 0;
+    int32_t layer_start = 0;
+    int32_t layer_end = 0;
+    std::string model_id;
+    int32_t pipeline_mode = 0;
 };
 
 namespace {
@@ -33,6 +38,20 @@ struct ShardSnapshotHeader {
 extern "C" {
 
 SHARD_API void* shard_init(const char* model_path) {
+    shard_init_config cfg{};
+    cfg.model_path = model_path;
+    cfg.layer_start = 0;
+    cfg.layer_end = -1;
+    cfg.model_id = "";
+    cfg.pipeline_mode = 0;
+    return shard_init_ex(&cfg);
+}
+
+SHARD_API void* shard_init_ex(const shard_init_config* config) {
+    if (config == nullptr) {
+        return nullptr;
+    }
+    const char* model_path = config->model_path;
     if (model_path == nullptr || std::strlen(model_path) == 0) {
         return nullptr;
     }
@@ -65,6 +84,18 @@ SHARD_API void* shard_init(const char* model_path) {
     state->ctx = ctx;
     state->n_ctx = cparams.n_ctx;
     state->n_past = 0;
+    state->n_layer_total = llama_model_n_layer(model);
+    state->layer_start = std::max(0, config->layer_start);
+    state->layer_end = config->layer_end < 0 ? (state->n_layer_total - 1) : config->layer_end;
+    if (state->layer_end >= state->n_layer_total) {
+        state->layer_end = state->n_layer_total - 1;
+    }
+    if (state->layer_start > state->layer_end) {
+        state->layer_start = 0;
+        state->layer_end = state->n_layer_total - 1;
+    }
+    state->model_id = config->model_id ? config->model_id : "";
+    state->pipeline_mode = config->pipeline_mode;
 
     return state;
 }
@@ -128,6 +159,67 @@ SHARD_API int shard_rollback(void* handle, int steps) {
     // p1=-1 means "to end of sequence"
     llama_memory_seq_rm(llama_get_memory(state->ctx), -1, state->n_past, -1);
     
+    return 0;
+}
+
+SHARD_API int shard_get_layer_range(void* handle, int* out_layer_start, int* out_layer_end) {
+    if (handle == nullptr || out_layer_start == nullptr || out_layer_end == nullptr) {
+        return -1;
+    }
+    auto* state = static_cast<ShardEngineState*>(handle);
+    *out_layer_start = state->layer_start;
+    *out_layer_end = state->layer_end;
+    return 0;
+}
+
+SHARD_API int shard_eval_hidden(void* handle, const shard_tensor_view* in_tensor, shard_tensor_view* out_tensor) {
+    if (handle == nullptr || in_tensor == nullptr || out_tensor == nullptr) {
+        return -1;
+    }
+    auto* state = static_cast<ShardEngineState*>(handle);
+    if (in_tensor->dtype != 1 || out_tensor->dtype != 1) {
+        return -2;
+    }
+    if (in_tensor->n_dims < 2 || in_tensor->n_dims > 4 || in_tensor->data == nullptr || out_tensor->data == nullptr) {
+        return -3;
+    }
+
+    const int32_t n_embd = llama_model_n_embd(state->model);
+    const uint64_t tokens = in_tensor->dims[0];
+    const uint64_t hidden = in_tensor->dims[1];
+    if (tokens == 0 || hidden != static_cast<uint64_t>(n_embd)) {
+        return -4;
+    }
+
+    const uint64_t required_bytes = tokens * hidden * sizeof(float);
+    if (in_tensor->byte_size < required_bytes || out_tensor->byte_size < required_bytes) {
+        return -5;
+    }
+
+    // Note: this executes the model from embedding input. The layer-range slicing
+    // metadata is tracked in state for pipeline routing and future load-pruning.
+    llama_batch batch{};
+    batch.n_tokens = static_cast<int32_t>(tokens);
+    batch.token = nullptr;
+    batch.embd = static_cast<float*>(in_tensor->data);
+    batch.pos = nullptr;
+    batch.n_seq_id = nullptr;
+    batch.seq_id = nullptr;
+    batch.logits = nullptr;
+
+    if (llama_decode(state->ctx, batch) != 0) {
+        return -6;
+    }
+
+    float* emb = llama_get_embeddings(state->ctx);
+    if (emb == nullptr) {
+        return -7;
+    }
+
+    std::memcpy(out_tensor->data, emb, static_cast<size_t>(required_bytes));
+    out_tensor->n_dims = in_tensor->n_dims;
+    std::memcpy(out_tensor->dims, in_tensor->dims, sizeof(out_tensor->dims));
+    out_tensor->byte_size = required_bytes;
     return 0;
 }
 
