@@ -75,13 +75,13 @@ use ledger::state::{ComputeCreditTx, LedgerState};
 use ledger::store::LedgerStore;
 use ledger::sync::{hash_probe_segments, LedgerSyncRequest, LedgerSyncResponse};
 use mesh::race_router::{RaceKey, RaceRouter, RaceSubmitOutcome};
-use metrics::alerts::AlertManager;
+use metrics::alerts::{Alert, AlertManager};
 use metrics::cost::{estimate as estimate_cost, CostEstimateInput};
 use metrics::persistence::{MetricsPersistence, PersistedNodeMetricReport};
 use metrics::{NodeMetricReport, NodeMetricSnapshot, PrometheusSample, SystemMetrics};
 use network::layer_registry::{provider_key, LayerHostAnnouncement, LayerRoutingTable};
 use network::obfuscation::{deobfuscate_bytes, obfuscate_bytes, random_nonce};
-use network::private_mesh::PrivateMeshRegistry;
+use network::private_mesh::{hash_api_key, PrivateMeshRegistry, PrivateRouteDecision};
 use network::tensor_wire::TensorWirePacket;
 use scheduler::{
     load_reputation, save_reputation, weighted_select, NodeReputation, NodeSchedulerInput,
@@ -253,6 +253,26 @@ pub struct WorkResponse {
     pub latency_ms: f32,
     #[serde(default)]
     pub created_at_ms: Option<u128>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PrivateMeshRegisterRequest {
+    api_key: String,
+    node_pubkey_hex: String,
+    label: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PrivateMeshDeregisterRequest {
+    api_key: String,
+    node_pubkey_hex: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct PrivateMeshRouteRequest {
+    api_key: String,
+    #[serde(default)]
+    connected_peers: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -429,6 +449,38 @@ struct ResourcePolicy {
     max_gpu_usage: f32,
     idle_only_mode: bool,
     load_threshold_cutoff: f32,
+}
+
+async fn capture_alert<F>(state: &SharedState, f: F)
+where
+    F: FnOnce(&mut AlertManager) -> Option<&Alert>,
+{
+    let mut manager = state.alert_manager.lock().await;
+    if let Some(alert) = f(&mut manager) {
+        let alert = alert.clone();
+        drop(manager);
+        tracing::warn!(
+            kind = ?alert.kind,
+            severity = ?alert.severity,
+            value = ?alert.value,
+            threshold = ?alert.threshold,
+            message = %alert.message,
+            "alert triggered"
+        );
+    }
+}
+
+async fn record_request_alert(state: &SharedState) {
+    capture_alert(state, |manager| manager.on_request()).await;
+}
+
+async fn record_latency_alert(state: &SharedState, latency_ms: f64) {
+    let latency_ms = latency_ms.max(0.0).round() as u64;
+    capture_alert(state, |manager| manager.on_latency(latency_ms)).await;
+}
+
+async fn record_signature_alert(state: &SharedState, success: bool) {
+    capture_alert(state, |manager| manager.on_signature_verification(success)).await;
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1606,6 +1658,7 @@ async fn signed_broadcast_work_handler(
 ) -> Json<serde_json::Value> {
     let signer = req.envelope.signer_pubkey_hex.clone();
     if let Err(detail) = req.envelope.verify() {
+        record_signature_alert(&state, false).await;
         state.system_metrics.inc_signature_verification_failures();
         mark_node_failure(&state, &signer).await;
         return Json(serde_json::json!({ "ok": false, "detail": detail }));
@@ -1621,6 +1674,7 @@ async fn signed_broadcast_work_handler(
         mark_node_failure(&state, &signer).await;
         return Json(serde_json::json!({ "ok": false, "detail": "stale or replayed nonce" }));
     }
+    record_signature_alert(&state, true).await;
     process_work_request(&state, req.envelope.payload).await
 }
 
@@ -1641,6 +1695,8 @@ async fn process_work_request(state: &SharedState, req: WorkRequest) -> Json<ser
             queue.pop_front();
         }
     }
+
+    record_request_alert(state).await;
 
     match state.work_tx.send(req).await {
         Ok(_) => Json(serde_json::json!({ "ok": true, "detail": "queued for gossipsub publish" })),
@@ -1710,6 +1766,7 @@ async fn signed_submit_draft_handler(
 ) -> Json<serde_json::Value> {
     let signer = req.envelope.signer_pubkey_hex.clone();
     if let Err(detail) = req.envelope.verify() {
+        record_signature_alert(&state, false).await;
         state.system_metrics.inc_signature_verification_failures();
         mark_node_failure(&state, &signer).await;
         return Json(serde_json::json!({ "ok": false, "detail": detail }));
@@ -1725,6 +1782,7 @@ async fn signed_submit_draft_handler(
         mark_node_failure(&state, &signer).await;
         return Json(serde_json::json!({ "ok": false, "detail": "stale or replayed nonce" }));
     }
+    record_signature_alert(&state, true).await;
     process_draft_submission(&state, req.envelope.payload).await
 }
 
@@ -1818,7 +1876,13 @@ async fn pow_verify_handler(
 ) -> Json<serde_json::Value> {
     let mut manager = state.pow_manager.lock().await;
     use crate::common::pow_challenge::{PowSolution, PowVerifyResult};
-    let result = manager.verify_solution(&req.peer_id, &PowSolution { nonce: req.nonce, hash_hex: req.hash_hex });
+    let result = manager.verify_solution(
+        &req.peer_id,
+        &PowSolution {
+            nonce: req.nonce,
+            hash_hex: req.hash_hex,
+        },
+    );
     let ok = matches!(result, PowVerifyResult::Accepted);
     Json(serde_json::json!({ "ok": ok }))
 }
@@ -2214,6 +2278,83 @@ async fn metrics_handler(AxumState(state): AxumState<SharedState>) -> Response {
         .into_response()
 }
 
+async fn alerts_handler(AxumState(state): AxumState<SharedState>) -> Json<serde_json::Value> {
+    let alerts = {
+        let manager = state.alert_manager.lock().await;
+        manager.recent_alerts.iter().cloned().collect::<Vec<_>>()
+    };
+    Json(serde_json::json!({ "alerts": alerts }))
+}
+
+async fn private_mesh_register_handler(
+    AxumState(state): AxumState<SharedState>,
+    Json(req): Json<PrivateMeshRegisterRequest>,
+) -> Json<serde_json::Value> {
+    let api_hash = hash_api_key(req.api_key.trim());
+    let mut registry = state.private_mesh.lock().await;
+    registry.register_node(&api_hash, req.node_pubkey_hex.as_str(), req.label.clone());
+    Json(serde_json::json!({
+        "ok": true,
+        "group_count": registry.group_count(),
+    }))
+}
+
+async fn private_mesh_deregister_handler(
+    AxumState(state): AxumState<SharedState>,
+    Json(req): Json<PrivateMeshDeregisterRequest>,
+) -> Json<serde_json::Value> {
+    let api_hash = hash_api_key(req.api_key.trim());
+    let mut registry = state.private_mesh.lock().await;
+    let removed = registry.unregister_node(&api_hash, &req.node_pubkey_hex);
+    Json(serde_json::json!({
+        "ok": true,
+        "removed": removed,
+        "group_count": registry.group_count(),
+    }))
+}
+
+async fn private_mesh_groups_handler(
+    AxumState(state): AxumState<SharedState>,
+) -> Json<serde_json::Value> {
+    let groups = {
+        let registry = state.private_mesh.lock().await;
+        registry
+            .list_groups()
+            .into_iter()
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+    Json(serde_json::json!({
+        "groups": groups,
+        "group_count": groups.len(),
+    }))
+}
+
+async fn private_mesh_route_handler(
+    AxumState(state): AxumState<SharedState>,
+    Json(req): Json<PrivateMeshRouteRequest>,
+) -> Json<serde_json::Value> {
+    let api_hash = hash_api_key(req.api_key.trim());
+    let connected: HashSet<String> = req.connected_peers.into_iter().collect();
+    let decision = {
+        let registry = state.private_mesh.lock().await;
+        registry.route_private(&api_hash, &connected)
+    };
+    let payload = match decision {
+        PrivateRouteDecision::DispatchToPrivateNodes(nodes) => serde_json::json!({
+            "decision": "private_nodes",
+            "nodes": nodes,
+        }),
+        PrivateRouteDecision::FallbackToCentralized => {
+            serde_json::json!({ "decision": "fallback_to_centralized" })
+        }
+    };
+    Json(serde_json::json!({
+        "ok": true,
+        "route": payload,
+    }))
+}
+
 async fn scout_penalty_update_handler(
     AxumState(state): AxumState<SharedState>,
     Json(update): Json<ScoutPenaltyUpdate>,
@@ -2287,6 +2428,8 @@ async fn mark_node_success(state: &SharedState, node_id: &str, latency_ms: f64) 
         (state.node_reputation_path.clone(), rep.clone())
     };
     persist_reputation_map(path, snapshot).await;
+
+    record_latency_alert(state, latency_ms).await;
 }
 
 async fn mark_node_failure(state: &SharedState, node_id: &str) {
@@ -2311,6 +2454,7 @@ async fn signed_register_node_handler(
 ) -> Json<serde_json::Value> {
     let signer = req.envelope.signer_pubkey_hex.clone();
     if let Err(detail) = req.envelope.verify() {
+        record_signature_alert(&state, false).await;
         state.system_metrics.inc_signature_verification_failures();
         mark_node_failure(&state, &signer).await;
         return Json(serde_json::json!({ "ok": false, "detail": detail }));
@@ -2336,6 +2480,7 @@ async fn signed_register_node_handler(
         mark_node_failure(&state, &signer).await;
         return Json(serde_json::json!({ "ok": false, "detail": "stale or replayed nonce" }));
     }
+    record_signature_alert(&state, true).await;
 
     let ts = req.envelope.payload.timestamp_ms.unwrap_or_else(now_ms);
     upsert_node_snapshot(
@@ -2359,6 +2504,7 @@ async fn signed_heartbeat_handler(
 ) -> Json<serde_json::Value> {
     let signer = req.envelope.signer_pubkey_hex.clone();
     if let Err(detail) = req.envelope.verify() {
+        record_signature_alert(&state, false).await;
         state.system_metrics.inc_signature_verification_failures();
         mark_node_failure(&state, &signer).await;
         return Json(serde_json::json!({ "ok": false, "detail": detail }));
@@ -2385,6 +2531,8 @@ async fn signed_heartbeat_handler(
         return Json(serde_json::json!({ "ok": false, "detail": "stale or replayed nonce" }));
     }
 
+    record_signature_alert(&state, true).await;
+
     let heartbeat = req.envelope.payload;
     let ts = heartbeat.timestamp_ms.unwrap_or_else(now_ms);
     upsert_node_snapshot(
@@ -2408,6 +2556,7 @@ async fn signed_metrics_report_handler(
 ) -> Json<serde_json::Value> {
     let signer = req.envelope.signer_pubkey_hex.clone();
     if let Err(detail) = req.envelope.verify() {
+        record_signature_alert(&state, false).await;
         state.system_metrics.inc_signature_verification_failures();
         mark_node_failure(&state, &signer).await;
         return Json(serde_json::json!({ "ok": false, "detail": detail }));
@@ -2433,6 +2582,7 @@ async fn signed_metrics_report_handler(
         mark_node_failure(&state, &signer).await;
         return Json(serde_json::json!({ "ok": false, "detail": "stale or replayed nonce" }));
     }
+    record_signature_alert(&state, true).await;
 
     let report = req.envelope.payload;
     let ts = report.timestamp_ms.unwrap_or_else(now_ms);
@@ -2470,6 +2620,7 @@ async fn signed_deregister_node_handler(
 ) -> Json<serde_json::Value> {
     let signer = req.envelope.signer_pubkey_hex.clone();
     if let Err(detail) = req.envelope.verify() {
+        record_signature_alert(&state, false).await;
         state.system_metrics.inc_signature_verification_failures();
         mark_node_failure(&state, &signer).await;
         return Json(serde_json::json!({ "ok": false, "detail": detail }));
@@ -2495,6 +2646,7 @@ async fn signed_deregister_node_handler(
         mark_node_failure(&state, &signer).await;
         return Json(serde_json::json!({ "ok": false, "detail": "stale or replayed nonce" }));
     }
+    record_signature_alert(&state, true).await;
 
     let mut reports = state.node_metric_reports.lock().await;
     reports.remove(req.envelope.payload.node_pubkey.as_str());
@@ -2705,6 +2857,17 @@ fn create_router(state: SharedState) -> Router {
             "/signed/metrics-report",
             post(signed_metrics_report_handler),
         )
+        .route("/alerts", get(alerts_handler))
+        .route(
+            "/private-mesh/register",
+            post(private_mesh_register_handler),
+        )
+        .route(
+            "/private-mesh/deregister",
+            post(private_mesh_deregister_handler),
+        )
+        .route("/private-mesh/groups", get(private_mesh_groups_handler))
+        .route("/private-mesh/route", post(private_mesh_route_handler))
         .route("/v1/chat/completions", post(chat_completions_handler))
         .route("/ws/generate", get(ws_generate_handler))
         .route("/scout/penalty", post(scout_penalty_update_handler))
@@ -3475,7 +3638,7 @@ async fn main() -> Result<()> {
                         step_id = %dispatch.packet.step_id,
                         "long context RAG prompt detected; bypassing peer mesh and triggering centralized fallback",
                     );
-                    
+
                     let state_clone = state.clone();
                     let packet_clone = dispatch.packet.clone();
                     tokio::spawn(async move {
@@ -3483,7 +3646,7 @@ async fn main() -> Result<()> {
                             let reqs = state_clone.active_requests.lock().await;
                             reqs.get(&packet_clone.request_id).cloned()
                         };
-                        
+
                         if let Some(req) = request_state {
                             state_clone.system_metrics.inc_fallback_invocations();
                             match gateway::fallback::execute_centralized_fallback(&state_clone.fallback_config, &req).await {
@@ -3493,7 +3656,7 @@ async fn main() -> Result<()> {
                                     results.push_back(WorkResponse {
                                         request_id: packet_clone.request_id.clone(),
                                         peer_id: "centralized-fallback".to_string(),
-                                        draft_tokens: vec![response_text], 
+                                        draft_tokens: vec![response_text],
                                         latency_ms: 0.0,
                                         created_at_ms: Some(now_ms()),
                                     });
@@ -3504,7 +3667,7 @@ async fn main() -> Result<()> {
                                     results.push_back(WorkResponse {
                                         request_id: packet_clone.request_id.clone(),
                                         peer_id: "centralized-fallback".to_string(),
-                                        draft_tokens: vec!["Fallback inference failed".to_string()], 
+                                        draft_tokens: vec!["Fallback inference failed".to_string()],
                                         latency_ms: 0.0,
                                         created_at_ms: Some(now_ms()),
                                     });
@@ -3512,10 +3675,10 @@ async fn main() -> Result<()> {
                             }
                         }
                     });
-                    
+
                     continue; // Bypass starting race and broadcasting forward pass via mesh
                 }
-                
+
                 {
                     let mut router = state.race_router.lock().await;
                     router.start_race(
