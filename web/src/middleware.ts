@@ -6,14 +6,17 @@ export function middleware(request: NextRequest) {
 
     const cspHeader = `
     default-src 'self';
-    script-src 'self' 'nonce-${nonce}' 'strict-dynamic' ${process.env.NODE_ENV === 'production' ? '' : "'unsafe-eval'"
-        };
-    style-src 'self' 'nonce-${nonce}' 'unsafe-inline' https://fonts.googleapis.com;
-    font-src 'self' https://fonts.gstatic.com;
-    connect-src 'self' http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:* *;
-    img-src 'self' data: blob:;
+    script-src 'self' 'unsafe-inline' 'unsafe-eval' blob: https:;
+    style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
+    font-src 'self' https://fonts.gstatic.com data:;
+    connect-src 'self' http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:* https: wss: *;
+    img-src 'self' data: blob: https:;
     worker-src 'self' blob:;
     child-src 'self' blob:;
+    object-src 'none';
+    base-uri 'self';
+    form-action 'self';
+    frame-ancestors 'none';
   `.replace(/\s{2,}/g, ' ').trim()
 
     const requestHeaders = new Headers(request.headers)

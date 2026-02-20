@@ -17,7 +17,7 @@
 
   <br/>
 
-  [**Live Demo**](https://shard-trents-projects-20e9a51a.vercel.app) · [**White Paper**](docs/Shard-White-Paper-Feb-2026.pdf) · [**API Docs**](docs/API.md) · [**Get Started**](#quick-start)
+  [**Live Demo**](https://shard-trents-projects-20e9a51a.vercel.app) · [**White Paper**](docs/Shard-White-Paper-Feb-2026.md) · [**API Docs**](docs/API.md) · [**Get Started**](#quick-start)
 </div>
 
 ---
@@ -82,7 +82,7 @@ flowchart LR
 3. **Shards verify drafts** → full BitNet model checks token quality in one parallel pass
 4. **Verified tokens stream back** → statistically indistinguishable from a 70B-parameter model
 
-> 📄 For the full technical deep-dive, read the [**White Paper**](docs/Shard-White-Paper-Feb-2026.pdf)
+> 📄 For the full technical deep-dive, read the [**White Paper**](docs/Shard-White-Paper-Feb-2026.md)
 
 ---
 
