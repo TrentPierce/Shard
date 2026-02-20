@@ -1197,16 +1197,21 @@ async fn health_handler(AxumState(state): AxumState<SharedState>) -> Json<serde_
     let topo = state.topology.lock().await;
     let peers = state.peers.lock().await;
     let known = state.known_peers.lock().await;
+    let browser_sessions = state.browser_sessions.lock().await;
     let verified_count = peers.values().filter(|p| p.verified).count();
     let capacity = state.capacity.load(Ordering::Relaxed);
     let load = state.current_load.load(Ordering::Relaxed);
     let latency_ms = state.avg_latency_ms.load(Ordering::Relaxed);
+    let scout_count = browser_sessions.len();
     Json(serde_json::json!({
         "status": "ok",
-        "version": env!("CARGO_PKG_VERSION"),
+        "rust_sidecar": "connected",
+        "rust_version": env!("CARGO_PKG_VERSION"),
+        "rust_uptime_ms": now_ms() - state.daemon_start,
         "peer_id": topo.local_peer_id,
         "connected_peers": peers.len(),
         "verified_peers": verified_count,
+        "active_scouts": scout_count,
         "known_peers": known.len(),
         "uptime_ms": now_ms() - state.daemon_start,
         "listen_addrs": topo.listen_addrs,
