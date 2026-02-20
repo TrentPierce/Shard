@@ -219,6 +219,28 @@ body {
   gap: 0;
 }
 
+
+.app-shell > header {
+  grid-column: 1 / -1;
+}
+
+.app-main {
+  display: grid;
+  grid-template-columns: 320px 1fr;
+  min-height: 0;
+}
+
+@media (max-width: 1024px) {
+  .app-shell {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr;
+  }
+
+  .app-main {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* â•â•â• Header â•â•â• */
 
 .header {

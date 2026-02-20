@@ -169,11 +169,11 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
     ]
 
     return (
-        <div className="flex flex-col flex-1 h-screen overflow-hidden bg-primary" role="main">
-            <div className="px-8 py-6 border-b border-glass-border bg-glass-bg/50 backdrop-blur-md flex justify-between items-center shrink-0">
+        <div className="flex flex-col flex-1 min-h-0 overflow-hidden bg-primary" role="main">
+            <div className="px-4 py-4 md:px-8 md:py-6 border-b border-glass-border bg-glass-bg/50 backdrop-blur-md flex flex-col md:flex-row justify-between items-start md:items-center gap-4 shrink-0">
                 <div className="flex flex-col gap-1">
                     <h2 className="text-lg font-display font-bold text-white tracking-tight">Intelligence Gateway</h2>
-                    <div className="flex items-center gap-3">
+                    <div className="flex flex-wrap items-center gap-2 md:gap-3">
                         <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-accent-cyan/10 border border-accent-cyan/20 text-[10px] text-accent-cyan font-mono uppercase tracking-wider">
                             {modelLabel}
                         </div>
@@ -191,13 +191,13 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
                         </select>
                     </div>
                 </div>
-                <div className="flex items-center gap-4">
-                    <div className="flex flex-col items-end gap-1">
+                <div className="w-full md:w-auto flex items-center justify-between md:justify-end gap-4">
+                    <div className="flex flex-col items-start md:items-end gap-1">
                         <div className={`text-[10px] font-bold uppercase tracking-widest ${ready ? "text-accent-emerald" : "text-accent-rose"}`}>
-                            {ready ? "â— Sync Active" : "â—‹ Disconnected"}
+                            {ready ? "● Sync Active" : "○ Disconnected"}
                         </div>
                         <div className="text-[9px] text-muted uppercase tracking-tighter tabular-nums">
-                            {analytics.sessions} sessions Â· {successRate}% reliability
+                            {analytics.sessions} sessions · {successRate}% reliability
                         </div>
                         <div className="text-[9px] text-muted uppercase tracking-tighter tabular-nums">
                             {opsSummary.active_nodes ?? 0} nodes · p95 {Math.round(opsSummary.p95_latency_ms ?? 0)}ms
@@ -209,7 +209,7 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
                 </div>
             </div>
 
-            <div className="flex-1 overflow-y-auto px-8 py-8 flex flex-col gap-6" role="log">
+            <div className="flex-1 overflow-y-auto px-4 py-5 md:px-8 md:py-8 flex flex-col gap-4 md:gap-6 min-h-0" role="log">
                 {messages.length === 0 ? (
                     <div className="flex-1 flex flex-col items-center justify-center gap-8 max-w-xl mx-auto text-center opacity-80 scale-95 transition-all duration-700">
                         <div className="w-20 h-20 rounded-3xl bg-gradient-to-br from-accent-cyan to-accent-blue flex items-center justify-center text-3xl font-bold text-white shadow-glow-cyan overflow-hidden relative">
@@ -239,9 +239,9 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
                     messages.map((msg, i) => (
                         <div
                             key={i}
-                            className={`flex gap-5 max-w-4xl ${msg.role === "user" ? "ml-auto flex-row-reverse" : "mr-auto"}`}
+                            className={`flex gap-3 md:gap-5 max-w-full md:max-w-4xl ${msg.role === "user" ? "ml-auto flex-row-reverse" : "mr-auto"}`}
                         >
-                            <div className={`w-10 h-10 rounded-2xl shrink-0 flex items-center justify-center text-[10px] font-bold uppercase tracking-tighter
+                            <div className={`w-8 h-8 md:w-10 md:h-10 rounded-2xl shrink-0 flex items-center justify-center text-[9px] md:text-[10px] font-bold uppercase tracking-tighter
                                 ${msg.role === "user"
                                     ? "bg-tertiary border border-glass-border text-muted"
                                     : "bg-accent-cyan/10 border border-accent-cyan/20 text-accent-cyan"}`}
@@ -249,7 +249,7 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
                                 {msg.role === "user" ? "USR" : "SHD"}
                             </div>
                             <div className={`flex flex-col gap-2 ${msg.role === "user" ? "items-end text-right" : "items-start text-left"}`}>
-                                <div className={`px-5 py-4 rounded-2xl text-sm leading-relaxed shadow-sm
+                                <div className={`px-4 py-3 md:px-5 md:py-4 rounded-2xl text-sm leading-relaxed shadow-sm max-w-[85vw] md:max-w-3xl break-words
                                     ${msg.role === "user"
                                         ? "bg-secondary text-primary border border-glass-border rounded-tr-none"
                                         : "bg-tertiary/50 text-primary border border-glass-border rounded-tl-none"}`}
@@ -263,7 +263,7 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
                                     )}
                                 </div>
                                 <div className="text-[10px] text-muted font-mono uppercase opacity-60">
-                                    {msg.role === "assistant" ? "shard-hybrid-v1" : "local-auth-node"} Â· {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                    {msg.role === "assistant" ? "shard-hybrid-v1" : "local-auth-node"} · {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                                 </div>
                             </div>
                         </div>
@@ -272,13 +272,13 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
                 <div ref={messagesEndRef} />
             </div>
 
-            <div className="px-8 pb-8 pt-2 bg-gradient-to-t from-primary via-primary to-transparent">
+            <div className="px-4 pb-4 md:px-8 md:pb-8 pt-2 bg-gradient-to-t from-primary via-primary to-transparent">
                 <div className="relative group max-w-4xl mx-auto">
                     <div className="absolute -inset-0.5 bg-gradient-to-r from-accent-cyan to-accent-blue rounded-3xl blur opacity-10 group-focus-within:opacity-30 transition-smooth"></div>
                     <div className="relative flex flex-col bg-secondary border border-glass-border rounded-2xl overflow-hidden shadow-2xl">
                         <textarea
                             ref={textareaRef}
-                            className="w-full bg-transparent px-6 py-5 text-sm text-primary placeholder:text-muted focus:outline-none resize-none min-h-[60px]"
+                            className="w-full bg-transparent px-4 py-4 md:px-6 md:py-5 text-sm text-primary placeholder:text-muted focus:outline-none resize-none min-h-[56px]"
                             id="chat-input"
                             name="chat-input"
                             placeholder={mode === "loading" ? "Establishing secure channel..." : "Message the Shard network..."}
@@ -289,9 +289,9 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
                             rows={1}
                             aria-label="Type your message here"
                         />
-                        <div className="px-6 py-3 border-t border-glass-border bg-tertiary/30 flex justify-between items-center">
+                        <div className="px-4 py-3 md:px-6 border-t border-glass-border bg-tertiary/30 flex justify-between items-center gap-3">
                             <span className="text-[10px] text-muted font-medium uppercase tracking-widest">
-                                Verification active Â· {input.length} chars
+                                Verification active · {input.length} chars
                             </span>
                             <button
                                 className="px-4 py-1.5 rounded-lg bg-accent-cyan text-primary text-[11px] font-bold uppercase tracking-widest hover:brightness-110 active:scale-95 disabled:opacity-30 disabled:grayscale transition-smooth"
@@ -306,7 +306,7 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
                     </div>
                 </div>
                 <p className="text-center mt-4 text-[9px] text-muted uppercase tracking-[0.2em] opacity-40">
-                    Trust but verify Â· Shard Distributed v0.4.9
+                    Trust but verify · Shard Distributed v0.4.9
                 </p>
             </div>
         </div>
