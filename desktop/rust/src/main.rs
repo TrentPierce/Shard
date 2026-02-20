@@ -906,7 +906,11 @@ fn normalize_public_host(raw: &str) -> Option<String> {
         .unwrap_or(trimmed);
     let host_port = no_scheme.split('/').next().unwrap_or(no_scheme);
     let host = if host_port.starts_with('[') {
-        host_port.trim_start_matches('[').split(']').next().unwrap_or("")
+        host_port
+            .trim_start_matches('[')
+            .split(']')
+            .next()
+            .unwrap_or("")
     } else {
         host_port.split(':').next().unwrap_or(host_port)
     };
@@ -1007,12 +1011,7 @@ fn outward_topology_addrs(
                     || addr.starts_with("/ip4/192.168."))
             });
             if let Some(ws) = &ws_addr {
-                listen_addrs.push(
-                    ws.split("/p2p/")
-                        .next()
-                        .unwrap_or(ws.as_str())
-                        .to_string(),
-                );
+                listen_addrs.push(ws.split("/p2p/").next().unwrap_or(ws.as_str()).to_string());
             } else {
                 listen_addrs.push(format!(
                     "/{}/{}/tcp/{}/ws",
@@ -2824,7 +2823,10 @@ async fn main() -> Result<()> {
         event_log: Arc::new(Mutex::new(VecDeque::new())),
         node_public_key: node_wallet.clone(),
         heartbeat_interval_seconds: node_cfg.heartbeat_interval_seconds,
-        public_host: cli.public_host.clone().and_then(|h| normalize_public_host(&h)),
+        public_host: cli
+            .public_host
+            .clone()
+            .and_then(|h| normalize_public_host(&h)),
         tcp_port: cli.tcp_port,
         webrtc_port: cli.webrtc_port,
         quic_port: cli.quic_port,
