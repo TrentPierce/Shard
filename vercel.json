@@ -5,7 +5,7 @@
   "rewrites": [
     {
       "source": "/api/:path*",
-      "destination": "http://54.224.107.75:8000/:path*"
+      "destination": "https://54.80.206.54.nip.io/:path*"
     }
   ]
 }
