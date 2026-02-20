@@ -22,15 +22,18 @@
 
 ---
 
-## What Is Shard?
+## Executive Summary
 
-Shard is a **hybrid distributed inference network** that turns every browser tab into an AI compute node. Instead of paying per token to a centralized provider, Shard creates a peer-to-peer mesh where:
+**The Enterprise Problem:** AI scaling is currently bottlenecked by exorbitant centralized GPU compute costs and strict API rate limits.
+**The Solution:** Shard bypasses these constraints by utilizing **WebGPU speculative decoding** across a decentralized peer-to-peer mesh.
 
-- **Scouts** (browser nodes) run lightweight draft models via WebGPU
-- **Shards** (desktop/server nodes) run full BitNet 1.58-bit models to verify drafts
-- **Leeches** (passive users) consume AI without contributing compute
+Shard is a **hybrid distributed inference network** that turns every browser tab into an AI compute node, eliminating centralized per-token pricing:
 
-The result: **server-grade AI quality at zero cost**, powered by the collective compute of anyone who opens the webpage.
+- **Scouts** (browser nodes) run lightweight draft models directly in-browser via WebGPU
+- **Shards** (desktop/server nodes) run full BitNet 1.58-bit models to verify drafts concurrently
+- **Leeches** (passive users) consume AI endpoints without contributing compute
+
+Organizations achieve **server-grade AI quality at zero variable runtime cost**, powered seamlessly by the collective compute of their active users.
 
 ---
 
@@ -80,6 +83,16 @@ flowchart LR
 4. **Verified tokens stream back** → statistically indistinguishable from a 70B-parameter model
 
 > 📄 For the full technical deep-dive, read the [**White Paper**](docs/Shard-White-Paper-Feb-2026.pdf)
+
+---
+
+## Explicit Security Guarantees (v3)
+
+Enterprise security teams evaluating Shard for internal deployment rely on our v3 security protocols:
+
+- **Hardware-Aware Proof-of-Work Gating:** All network ingress and mesh API routes are protected by dynamically calibrated PoW. This ensures malicious actors cannot execute Sybil or DDoS attacks without incurring prohibitive local compute costs.
+- **Probabilistic MatMul Verification:** Draft tokens from untrusted browser Scouts undergo strict probabilistic matrix multiplication checks against the Shard's authoritative BitNet model. Corrupted or hallucinated drafts are mathematically rejected before final client delivery.
+- **Strict Network Isolation (`X-Shard-Route: private`):** By enforcing the `X-Shard-Route: private` HTTP header, enterprise configurations ensure sensitive prompts never touch public bootstrap peers, confining all inference to your trusted internal VPC or intranet mesh.
 
 ---
 
@@ -292,7 +305,8 @@ cargo build --release
   --quic-port 9092
 ```
 
-The daemon currently exposes the primary API surface directly on the control port (including `/v1/chat/completions`).`r`n`r`n
+The daemon currently exposes the primary API surface directly on the control port (including `/v1/chat/completions`).
+
 </details>
 
 <details>
@@ -354,7 +368,7 @@ cargo run --release --bin shard-load-test -- --base-url http://127.0.0.1:9091 --
 
 Bootstrap peer:
 
-```
+```text
 /ip4/54.224.107.75/tcp/4001/p2p/12D3KooWPTDTQBH5JTCxhiaZuL9sr695UAEndMDRj9SJ9pi3agEq
 ```
 
@@ -368,6 +382,27 @@ Bootstrap peer:
 ```
 
 </details>
+
+---
+
+## Infrastructure Deployment & Workarounds
+
+While Shard supports containerized deployments, enterprise cloud environments often introduce specific friction points.
+
+### Amazon EC2 MCP (Model Context Protocol)
+
+If you are attempting to deploy Verifier nodes using the Amazon EC2 MCP, **automated setups frequently fail** or misconfigure routing. You must apply the following manual configuration steps to ensure your node can participate in the mesh seamlessly:
+
+1. **Configure Inbound Security Groups:** The EC2 MCP setup usually fails to perform TCP/UDP hole punching. You must manually allow ingress on:
+   - `TCP 4001` (libp2p control)
+   - `TCP/UDP 9090` (WebRTC)
+   - `UDP 9092` (QUIC)
+2. **Override VPC IP Resolution:** EC2 instances default to internal VPC IPs, which will not route externally. Manually override the announcement address in your environment configuration:
+   ```env
+   SHARD_PUBLIC_IP=<your-elastic-ip>
+   SHARD_ANNOUNCE_ADDR=/ip4/<your-elastic-ip>/tcp/4001
+   ```
+3. **Disable Source/Dest Checks:** In the EC2 Network Interfaces console, you must disable strict source/destination checks to correctly route NAT traffic for inbound browser Scouts.
 
 ---
 
@@ -423,20 +458,18 @@ curl http://localhost:9091/v1/chat/completions \
 
 ---
 
-## Response Quality
+## Response Quality Environment Variables
 
-For non-Llama-3 models (e.g., TinyLlama GGUF):
-```bash
+To ensure compatibility with AI-assisted developer workflows and automated code parsers (like Cursor), define your formatting directly in your deployment `.env` file:
+
+```env
+# For non-Llama-3 models (e.g., TinyLlama GGUF)
 SHARD_PROMPT_FORMAT=chatml
-```
 
-For Llama-3 chat models:
-```bash
-SHARD_PROMPT_FORMAT=llama3  # or 'auto' with matching model names
-```
+# For Llama-3 chat models (or 'auto' for matching names)
+SHARD_PROMPT_FORMAT=llama3
 
-Fallback for generic instruct models:
-```bash
+# Fallback for generic instruct models
 SHARD_PROMPT_FORMAT=plain
 ```
 
@@ -504,7 +537,3 @@ Converts to Apache 2.0 on February 13, 2036.
 <div align="center">
   <sub>Built with 🧊 by the <a href="https://github.com/TrentPierce/Shard">Shard</a> community</sub>
 </div>
-
-
-
-
