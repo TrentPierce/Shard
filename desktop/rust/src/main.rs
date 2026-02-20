@@ -65,19 +65,23 @@ mod scheduler;
 mod telemetry_ws;
 mod verification;
 use common::node_config::{NodeRole, NodeRuntimeConfig};
-use common::signed_envelope::SignedEnvelope;
+use common::pow_challenge::PowChallengeManager;
+use common::signed_envelope::{EnvelopeVerifier, SignedEnvelope};
 use crypto::wallet_backup::{export_wallet, import_wallet, verify_backup};
+use gateway::fallback::{ActiveRequestState, FallbackConfig};
 use gateway::validate_work_request;
 use identity::NodeIdentity;
 use ledger::state::{ComputeCreditTx, LedgerState};
 use ledger::store::LedgerStore;
 use ledger::sync::{hash_probe_segments, LedgerSyncRequest, LedgerSyncResponse};
 use mesh::race_router::{RaceKey, RaceRouter, RaceSubmitOutcome};
+use metrics::alerts::AlertManager;
 use metrics::cost::{estimate as estimate_cost, CostEstimateInput};
 use metrics::persistence::{MetricsPersistence, PersistedNodeMetricReport};
 use metrics::{NodeMetricReport, NodeMetricSnapshot, PrometheusSample, SystemMetrics};
 use network::layer_registry::{provider_key, LayerHostAnnouncement, LayerRoutingTable};
 use network::obfuscation::{deobfuscate_bytes, obfuscate_bytes, random_nonce};
+use network::private_mesh::PrivateMeshRegistry;
 use network::tensor_wire::TensorWirePacket;
 use scheduler::{
     load_reputation, save_reputation, weighted_select, NodeReputation, NodeSchedulerInput,
@@ -405,6 +409,18 @@ struct SharedState {
     tcp_port: u16,
     webrtc_port: u16,
     quic_port: u16,
+    /// Active generation requests for fallback tracking (B3).
+    active_requests: Arc<Mutex<HashMap<String, ActiveRequestState>>>,
+    /// Fallback configuration (B2/B3).
+    fallback_config: Arc<FallbackConfig>,
+    /// Stateful envelope verifier with replay protection (A1).
+    envelope_verifier: Arc<Mutex<EnvelopeVerifier>>,
+    /// PoW challenge manager for Sybil resistance (A5).
+    pow_manager: Arc<Mutex<PowChallengeManager>>,
+    /// Private mesh registry for enterprise prompt privacy (C4).
+    private_mesh: Arc<Mutex<PrivateMeshRegistry>>,
+    /// Alert manager for anomaly detection (D3).
+    alert_manager: Arc<Mutex<AlertManager>>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -2831,6 +2847,12 @@ async fn main() -> Result<()> {
         tcp_port: cli.tcp_port,
         webrtc_port: cli.webrtc_port,
         quic_port: cli.quic_port,
+        active_requests: Arc::new(Mutex::new(HashMap::new())),
+        fallback_config: Arc::new(FallbackConfig::from_env()),
+        envelope_verifier: Arc::new(Mutex::new(EnvelopeVerifier::with_defaults())),
+        pow_manager: Arc::new(Mutex::new(PowChallengeManager::with_defaults())),
+        private_mesh: Arc::new(Mutex::new(PrivateMeshRegistry::new())),
+        alert_manager: Arc::new(Mutex::new(AlertManager::new())),
     };
 
     #[cfg(target_os = "windows")]
@@ -3550,6 +3572,13 @@ async fn main() -> Result<()> {
                                         );
                                     }
                                     RaceSubmitOutcome::UnknownRace => {}
+                                    RaceSubmitOutcome::TimedOut => {
+                                        tracing::warn!(
+                                            request_id = %packet.request_id,
+                                            step_id = %packet.step_id,
+                                            "race timed out — triggering fallback"
+                                        );
+                                    }
                                 }
                             }
                         } else if message.topic == forward_topic.hash() || message.topic == backward_topic.hash() {
