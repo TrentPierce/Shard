@@ -1,0 +1,13 @@
+{
+    "name": "@shard/widget",
+    "version": "1.0.0",
+    "description": "Drop-in browser scout widget for Shard inference network",
+    "main": "dist/scout.js",
+    "scripts": {
+        "build": "esbuild src/index.ts --bundle --minify --format=esm --outfile=dist/scout.js && node scripts/generate-sri.js"
+    },
+    "devDependencies": {
+        "esbuild": "^0.20.0"
+    },
+    "dependencies": {}
+}

@@ -2759,12 +2759,32 @@ async fn main() -> Result<()> {
         }
     }
 
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(&cli.log_level)),
-        )
-        .init();
+    use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+    let filter_layer = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(&cli.log_level));
+
+    let fmt_layer = tracing_subscriber::fmt::layer().json();
+
+    let tracer = opentelemetry_otlp::new_pipeline()
+        .tracing()
+        .with_exporter(opentelemetry_otlp::new_exporter().tonic())
+        .with_trace_config(opentelemetry_sdk::trace::config().with_resource(
+            opentelemetry_sdk::Resource::new(vec![opentelemetry::KeyValue::new(
+                "service.name",
+                "shard-daemon",
+            )]),
+        ))
+        .install_batch(opentelemetry_sdk::runtime::Tokio)
+        .expect("Failed to initialize OpenTelemetry");
+
+    let telemetry_layer = tracing_opentelemetry::layer().with_tracer(tracer);
+
+    tracing_subscriber::registry()
+        .with(filter_layer)
+        .with(fmt_layer)
+        .with(telemetry_layer)
+        .try_init()
+        .expect("Failed to initialize tracing registry");
 
     let topo_path = data.join("topology.json");
     let known_peers_path = data.join("known_peers.json");
@@ -3440,6 +3460,62 @@ async fn main() -> Result<()> {
                     request_id: dispatch.packet.request_id.clone(),
                     step_id: dispatch.packet.step_id.clone(),
                 };
+
+                // Phase B: Long-context guard bypass check
+                let is_long_context = {
+                    let reqs = state.active_requests.lock().await;
+                    reqs.get(&dispatch.packet.request_id)
+                        .map(|req| req.input_token_count > state.fallback_config.long_context_threshold)
+                        .unwrap_or(false)
+                };
+
+                if is_long_context {
+                    tracing::info!(
+                        request_id = %dispatch.packet.request_id,
+                        step_id = %dispatch.packet.step_id,
+                        "long context RAG prompt detected; bypassing peer mesh and triggering centralized fallback",
+                    );
+                    
+                    let state_clone = state.clone();
+                    let packet_clone = dispatch.packet.clone();
+                    tokio::spawn(async move {
+                        let request_state = {
+                            let reqs = state_clone.active_requests.lock().await;
+                            reqs.get(&packet_clone.request_id).cloned()
+                        };
+                        
+                        if let Some(req) = request_state {
+                            state_clone.system_metrics.inc_fallback_invocations();
+                            match gateway::fallback::execute_centralized_fallback(&state_clone.fallback_config, &req).await {
+                                Ok(response_text) => {
+                                    tracing::info!(request_id = %packet_clone.request_id, "Centralized fallback returned response");
+                                    let mut results = state_clone.results.lock().await;
+                                    results.push_back(WorkResponse {
+                                        request_id: packet_clone.request_id.clone(),
+                                        peer_id: "centralized-fallback".to_string(),
+                                        draft_tokens: vec![response_text], 
+                                        latency_ms: 0.0,
+                                        created_at_ms: Some(now_ms()),
+                                    });
+                                }
+                                Err(e) => {
+                                    tracing::error!(request_id = %packet_clone.request_id, "Centralized fallback failed: {}", e);
+                                    let mut results = state_clone.results.lock().await;
+                                    results.push_back(WorkResponse {
+                                        request_id: packet_clone.request_id.clone(),
+                                        peer_id: "centralized-fallback".to_string(),
+                                        draft_tokens: vec!["Fallback inference failed".to_string()], 
+                                        latency_ms: 0.0,
+                                        created_at_ms: Some(now_ms()),
+                                    });
+                                }
+                            }
+                        }
+                    });
+                    
+                    continue; // Bypass starting race and broadcasting forward pass via mesh
+                }
+                
                 {
                     let mut router = state.race_router.lock().await;
                     router.start_race(
