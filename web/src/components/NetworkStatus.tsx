@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import type { NodeMode } from "@/app/page"
+import type { NodeMode } from "@/lib/context"
 import type { Topology } from "@/lib/swarm"
 import { heartbeatShard } from "@/lib/swarm"
 import type { ModelProgress } from "@/lib/webllm"

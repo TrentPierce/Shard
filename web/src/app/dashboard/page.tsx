@@ -1,6 +1,7 @@
 'use client'
 
 import React, { useState, useEffect, useCallback } from 'react'
+import Header from '@/components/Header'
 import { TopologyGraph } from '@/components/dashboard/TopologyGraph'
 import { MeshHealthGauge } from '@/components/dashboard/MeshHealthGauge'
 import { TPSChart } from '@/components/dashboard/TPSChart'
@@ -84,7 +85,6 @@ export default function DashboardPage() {
             const status = await statusRes.json()
             const metricsText = await metricsRes.text()
 
-            // Parse peers
             const peers: Record<string, PeerNode> = {}
             if (status.peers) {
                 for (const [id, info] of Object.entries(status.peers) as [string, any][]) {
@@ -99,7 +99,6 @@ export default function DashboardPage() {
                 }
             }
 
-            // Parse metrics from prometheus text
             const parseMetric = (name: string): number => {
                 const match = metricsText.match(new RegExp(`^${name}\\s+([\\d.]+)`, 'm'))
                 return match ? parseFloat(match[1]) : 0
@@ -118,7 +117,6 @@ export default function DashboardPage() {
                 fallbackInvocations: parseMetric('shard_fallback_invocations_total'),
             }
 
-            // Build topology edges from peer list
             const localId = status.topology?.local_peer_id || 'local'
             const topology: TopologyEdge[] = Object.values(peers).map((p) => ({
                 source: localId,
@@ -127,7 +125,6 @@ export default function DashboardPage() {
                 healthy: p.isHealthy,
             }))
 
-            // Append to history
             const now = Date.now()
             setData((prev) => ({
                 peers,
@@ -156,185 +153,94 @@ export default function DashboardPage() {
     }, [fetchTelemetry])
 
     return (
-        <main className="dashboard-page">
-            <div className="dashboard-header">
-                <h1>Shard Network Dashboard</h1>
-                <div className={`connection-status ${connected ? 'online' : 'offline'}`}>
-                    <span className="status-dot" />
-                    {connected ? 'Connected' : 'Disconnected'}
-                </div>
-            </div>
+        <div className="app-shell">
+            <Header />
+            <main className="network-page">
+                <div className="network-page__noise" aria-hidden />
+                <section className="network-page__hero">
+                    <p className="network-page__kicker">Node Performance</p>
+                    <h1>Network Dashboard</h1>
+                    <div className="network-page__hero-meta">
+                        <span className={`network-page__badge ${connected ? 'status-dot--live' : 'status-dot--dead'}`}>
+                            {connected ? 'CONNECTED' : 'OFFLINE'}
+                        </span>
+                        <span className="network-page__badge">Uptime: {data ? Math.floor(data.metrics.uptime / 3600) : 0}h</span>
+                        <span className="network-page__badge">Peers: {data?.metrics.peerCount || 0}</span>
+                    </div>
+                </section>
 
-            <div className="dashboard-grid">
-                {/* Top row — health gauges */}
-                <div className="dashboard-card gauge-card">
-                    <h2>Mesh Health</h2>
-                    <MeshHealthGauge
-                        peerCount={data?.metrics.peerCount || 0}
-                        avgLatency={data?.metrics.avgLatencyMs || 0}
-                        sigFailureRate={data?.metrics.sigFailureRate || 0}
-                    />
-                </div>
+                <div className="network-grid network-grid--main">
+                    <div className="network-card">
+                        <div className="network-card__header">
+                            <h2>Mesh Health</h2>
+                        </div>
+                        <MeshHealthGauge
+                            peerCount={data?.metrics.peerCount || 0}
+                            avgLatency={data?.metrics.avgLatencyMs || 0}
+                            sigFailureRate={data?.metrics.sigFailureRate || 0}
+                        />
+                    </div>
 
-                <div className="dashboard-card stats-card">
-                    <h2>Key Metrics</h2>
-                    <div className="stats-grid">
-                        <div className="stat">
-                            <span className="stat-value">{data?.metrics.totalTps.toLocaleString() || '0'}</span>
-                            <span className="stat-label">Total Tokens</span>
+                    <div className="network-card">
+                        <div className="network-card__header">
+                            <h2>Key Metrics</h2>
                         </div>
-                        <div className="stat">
-                            <span className="stat-value">{data?.metrics.peerCount || 0}</span>
-                            <span className="stat-label">Active Peers</span>
-                        </div>
-                        <div className="stat">
-                            <span className="stat-value">{data?.metrics.scoutDropoffs || 0}</span>
-                            <span className="stat-label">Scout Dropoffs</span>
-                        </div>
-                        <div className="stat">
-                            <span className="stat-value">{data?.metrics.powChallengesIssued || 0}</span>
-                            <span className="stat-label">PoW Challenges</span>
-                        </div>
-                        <div className="stat">
-                            <span className="stat-value">{data?.metrics.privateRouteRequests || 0}</span>
-                            <span className="stat-label">Private Routes</span>
-                        </div>
-                        <div className="stat">
-                            <span className="stat-value">{data?.metrics.fallbackInvocations || 0}</span>
-                            <span className="stat-label">Fallbacks</span>
+                        <div className="leaderboard">
+                            <div className="leaderboard__row">
+                                <div className="leaderboard__identity">
+                                    <strong>{data?.metrics.totalTps.toLocaleString() || '0'}</strong>
+                                    <small>Total Tokens</small>
+                                </div>
+                            </div>
+                            <div className="leaderboard__row">
+                                <div className="leaderboard__identity">
+                                    <strong>{data?.metrics.scoutDropoffs || 0}</strong>
+                                    <small>Scout Dropoffs</small>
+                                </div>
+                            </div>
+                            <div className="leaderboard__row">
+                                <div className="leaderboard__identity">
+                                    <strong>{data?.metrics.powChallengesIssued || 0}</strong>
+                                    <small>PoW Challenges</small>
+                                </div>
+                            </div>
                         </div>
                     </div>
-                </div>
 
-                {/* Middle row — charts */}
-                <div className="dashboard-card chart-card">
-                    <h2>Token Throughput</h2>
-                    <TPSChart data={data?.tpsHistory || []} />
-                </div>
+                    <div className="network-card network-card--wide">
+                        <div className="network-card__header">
+                            <h2>Token Throughput</h2>
+                        </div>
+                        <TPSChart data={data?.tpsHistory || []} />
+                    </div>
 
-                <div className="dashboard-card chart-card">
-                    <h2>Scout Dropoffs</h2>
-                    <DropoffChart data={data?.dropoffHistory || []} />
-                </div>
+                    <div className="network-card">
+                        <div className="network-card__header">
+                            <h2>Scout Dropoffs</h2>
+                        </div>
+                        <DropoffChart data={data?.dropoffHistory || []} />
+                    </div>
 
-                {/* Bottom row — topology + alerts */}
-                <div className="dashboard-card topology-card">
-                    <h2>Network Topology</h2>
-                    <TopologyGraph
-                        peers={data ? Object.values(data.peers) : []}
-                        edges={data?.topology || []}
-                    />
-                </div>
+                    <div className="network-card network-card--wide">
+                        <div className="network-card__header">
+                            <h2>Network Topology</h2>
+                        </div>
+                        <div style={{ height: '400px' }}>
+                            <TopologyGraph
+                                peers={data ? Object.values(data.peers) : []}
+                                edges={data?.topology || []}
+                            />
+                        </div>
+                    </div>
 
-                <div className="dashboard-card alerts-card">
-                    <h2>Alert Feed</h2>
-                    <AlertFeed alerts={data?.alerts || []} />
+                    <div className="network-card">
+                        <div className="network-card__header">
+                            <h2>Alert Feed</h2>
+                        </div>
+                        <AlertFeed alerts={data?.alerts || []} />
+                    </div>
                 </div>
-            </div>
-
-            <style jsx>{`
-        .dashboard-page {
-          padding: 24px;
-          max-width: 1400px;
-          margin: 0 auto;
-          font-family: 'Inter', -apple-system, sans-serif;
-        }
-        .dashboard-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          margin-bottom: 24px;
-        }
-        .dashboard-header h1 {
-          font-size: 28px;
-          font-weight: 700;
-          background: linear-gradient(135deg, #7c83ff, #a78bfa);
-          -webkit-background-clip: text;
-          -webkit-text-fill-color: transparent;
-        }
-        .connection-status {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          font-size: 13px;
-          font-weight: 500;
-          padding: 6px 14px;
-          border-radius: 20px;
-          background: rgba(255,255,255,0.05);
-          border: 1px solid rgba(255,255,255,0.1);
-        }
-        .connection-status.online { color: #4ade80; }
-        .connection-status.offline { color: #f87171; }
-        .status-dot {
-          width: 8px;
-          height: 8px;
-          border-radius: 50%;
-          background: currentColor;
-          animation: pulse 2s infinite;
-        }
-        @keyframes pulse {
-          0%, 100% { opacity: 1; }
-          50% { opacity: 0.4; }
-        }
-        .dashboard-grid {
-          display: grid;
-          grid-template-columns: 1fr 1fr;
-          gap: 20px;
-        }
-        .dashboard-card {
-          background: rgba(255,255,255,0.03);
-          border: 1px solid rgba(255,255,255,0.08);
-          border-radius: 16px;
-          padding: 20px;
-          backdrop-filter: blur(10px);
-        }
-        .dashboard-card h2 {
-          font-size: 14px;
-          font-weight: 600;
-          text-transform: uppercase;
-          letter-spacing: 0.05em;
-          color: rgba(255,255,255,0.6);
-          margin-bottom: 16px;
-        }
-        .stats-grid {
-          display: grid;
-          grid-template-columns: repeat(3, 1fr);
-          gap: 16px;
-        }
-        .stat {
-          text-align: center;
-          padding: 12px;
-          background: rgba(255,255,255,0.03);
-          border-radius: 12px;
-        }
-        .stat-value {
-          display: block;
-          font-size: 24px;
-          font-weight: 700;
-          color: #a78bfa;
-          font-variant-numeric: tabular-nums;
-        }
-        .stat-label {
-          display: block;
-          font-size: 11px;
-          color: rgba(255,255,255,0.5);
-          margin-top: 4px;
-          text-transform: uppercase;
-          letter-spacing: 0.05em;
-        }
-        .topology-card {
-          min-height: 300px;
-        }
-        .alerts-card {
-          max-height: 400px;
-          overflow-y: auto;
-        }
-        @media (max-width: 768px) {
-          .dashboard-grid {
-            grid-template-columns: 1fr;
-          }
-        }
-      `}</style>
-        </main>
+            </main>
+        </div>
     )
 }

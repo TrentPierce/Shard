@@ -19,9 +19,9 @@ export function MeshHealthGauge({ peerCount, avgLatency, sigFailureRate }: MeshH
     const offset = circumference - (healthScore / 100) * circumference
 
     const color =
-        healthScore >= 80 ? '#4ade80' :
-            healthScore >= 50 ? '#fbbf24' :
-                '#f87171'
+        healthScore >= 80 ? 'var(--accent-emerald)' :
+            healthScore >= 50 ? 'var(--accent-amber)' :
+                'var(--accent-rose)'
 
     return (
         <div className="gauge-container">
@@ -30,7 +30,7 @@ export function MeshHealthGauge({ peerCount, avgLatency, sigFailureRate }: MeshH
                 <circle
                     cx="70" cy="70" r="60"
                     fill="none"
-                    stroke="rgba(255,255,255,0.06)"
+                    stroke="var(--glass-border)"
                     strokeWidth="10"
                 />
                 {/* Value arc */}
@@ -49,7 +49,7 @@ export function MeshHealthGauge({ peerCount, avgLatency, sigFailureRate }: MeshH
                 <text x="70" y="65" textAnchor="middle" fontSize="28" fontWeight="700" fill={color}>
                     {healthScore}
                 </text>
-                <text x="70" y="85" textAnchor="middle" fontSize="10" fill="rgba(255,255,255,0.5)">
+                <text x="70" y="85" textAnchor="middle" fontSize="10" fill="var(--text-muted)">
                     HEALTH SCORE
                 </text>
             </svg>
@@ -96,12 +96,12 @@ export function MeshHealthGauge({ peerCount, avgLatency, sigFailureRate }: MeshH
         .detail-value {
           font-size: 14px;
           font-weight: 600;
-          color: rgba(255,255,255,0.9);
+          color: var(--text-primary);
           font-variant-numeric: tabular-nums;
         }
         .detail-label {
           font-size: 10px;
-          color: rgba(255,255,255,0.4);
+          color: var(--text-muted);
           text-transform: uppercase;
         }
       `}</style>
