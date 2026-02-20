@@ -1,6 +1,6 @@
 # Shard API Documentation
 
-Version: 0.4.0
+Version: 0.4.8
 
 This document provides comprehensive documentation for the Shard API, which follows the OpenAI API specification for compatibility with existing clients.
 
@@ -63,6 +63,15 @@ curl -H "X-API-Key: your-api-key" \
   https://api.shard.network/v1/chat/completions
 ```
 
+### Credit-Gating (Shards)
+
+In decentralized mesh deployments, API requests can be credit-gated using the `X-Shard-Wallet` header. This deducts Shards (the internal compute credit) from your balance:
+
+```bash
+curl -H "X-Shard-Wallet: <your-wallet-address>" \
+  http://127.0.0.1:9091/v1/chat/completions
+```
+
 ### Response
 
 Unauthenticated requests (when authentication is required):
@@ -105,6 +114,8 @@ Creates a model response for the given chat conversation. Supports both streamin
 | `Content-Type` | string | Yes | Must be `application/json` |
 | `Authorization` | string | If auth enabled | Bearer token |
 | `X-API-Key` | string | If auth enabled | API key |
+| `X-Shard-Wallet` | string | Optional | Wallet address for decentralized credit-gating |
+| `X-Shard-Route` | string | Optional | Set to `private` for strict enterprise network isolation. Ensures prompts never route to public bootstrap peers. |
 
 ##### Request Body
 
@@ -385,6 +396,36 @@ Retrieve information about connected peers.
 | `addrs` | array | Peer addresses |
 | `verified` | boolean | Whether peer has completed handshake |
 | `handshake_failures` | number | Number of failed handshake attempts |
+
+---
+
+### Wallet & Ledger Endpoints
+
+The Shard daemon exposes local endpoints for managing your decentralized identity and verifying Shard credit metrics.
+
+#### `GET /wallet/address`
+
+Returns the active wallet address for the local node identity.
+
+#### `GET /credits/<wallet_address>`
+
+Returns the total Shards compute credit balance for the specified wallet.
+
+#### `GET /credits/tx/<tx_id>`
+
+Look up a specific credit transaction by its transaction ID.
+
+#### `GET /ledger/head`
+
+Returns diagnostic information about the current tip of the append-only ledger (`ledger.wal`).
+
+#### `GET /ledger/stats`
+
+Returns aggregation statistics for the node's local ledger state.
+
+#### `GET /ledger/export`
+
+Export a specific range of the ledger. Accepts query parameters `from_height` and `limit`. Example: `/ledger/export?from_height=1&limit=100`.
 
 ---
 
