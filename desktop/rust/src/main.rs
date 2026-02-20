@@ -75,7 +75,7 @@ use common::node_config::{NodeRole, NodeRuntimeConfig};
 use common::pow_challenge::PowChallengeManager;
 use common::signed_envelope::{EnvelopeVerifier, SignedEnvelope};
 use crypto::wallet_backup::{export_wallet, import_wallet, verify_backup};
-use gateway::fallback::{ActiveRequestState, FallbackConfig};
+use gateway::fallback::{ActiveRequestState, execute_centralized_fallback, FallbackConfig};
 use gateway::validate_work_request;
 use identity::NodeIdentity;
 use ledger::state::{ComputeCreditTx, LedgerState};
@@ -1704,6 +1704,7 @@ async fn signed_broadcast_work_handler(
     process_work_request(&state, req.envelope.payload).await
 }
 
+#[tracing::instrument(skip(state, req), fields(id = %req.request_id))]
 async fn process_work_request(state: &SharedState, req: WorkRequest) -> Json<serde_json::Value> {
     if let Err(detail) = validate_work_request(&req) {
         state.system_metrics.inc_task_failures();
@@ -1712,6 +1713,42 @@ async fn process_work_request(state: &SharedState, req: WorkRequest) -> Json<ser
     if let Err(detail) = should_accept_work(state) {
         state.system_metrics.inc_task_failures();
         return Json(serde_json::json!({ "ok": false, "detail": detail }));
+    }
+
+    // Phase B: Long-Context Routing Guard
+    let token_count = {
+        let mut engine_guard = state.engine.lock().await;
+        if let Some(engine) = engine_guard.as_mut() {
+            engine.tokenize(&req.prompt_context, 8192).map(|t| t.len()).unwrap_or(0)
+        } else {
+            // If engine is not available, we can't count tokens precisely. 
+            // Fallback to character length approximation if needed, but here we'll just assume 0.
+            // In a production app, we'd have a lightweight tokenizer.
+            0
+        }
+    };
+
+    if token_count > state.fallback_config.long_context_threshold {
+        tracing::info!(%token_count, threshold = state.fallback_config.long_context_threshold, "routing long prompt to centralized fallback");
+        let active_state = ActiveRequestState {
+            request_id: req.request_id.clone(),
+            input_token_count: token_count,
+            expected_output_tokens: req.min_tokens as usize,
+            tokens_generated_so_far: 0,
+            prompt_context: req.prompt_context.clone(),
+            generated_tokens: Vec::new(),
+            started_at_ms: now_ms(),
+            scout_peer_id: None,
+        };
+        match execute_centralized_fallback(&state.fallback_config, &active_state).await {
+            Ok(res) => return Json(serde_json::json!({ 
+                "ok": true, 
+                "result": res, 
+                "fallback": true,
+                "reason": "LongContext"
+            })),
+            Err(e) => return Json(serde_json::json!({ "ok": false, "detail": format!("fallback failed: {e}") })),
+        }
     }
 
     {
@@ -2120,6 +2157,7 @@ struct ChatRequest {
     max_new_tokens: Option<u32>,
 }
 
+#[tracing::instrument(skip(state, req))]
 async fn chat_completions_handler(
     AxumState(state): AxumState<SharedState>,
     Json(req): Json<ChatRequest>,

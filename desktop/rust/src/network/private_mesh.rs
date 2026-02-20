@@ -21,7 +21,6 @@ pub enum RouteMode {
     Private,
 }
 
-
 /// A registered corporate peer group.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CorporatePeerGroup {
