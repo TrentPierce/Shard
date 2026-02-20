@@ -63,6 +63,7 @@ mod metrics;
 mod network;
 mod scheduler;
 mod telemetry_ws;
+mod verification;
 use common::node_config::{NodeRole, NodeRuntimeConfig};
 use common::signed_envelope::SignedEnvelope;
 use crypto::wallet_backup::{export_wallet, import_wallet, verify_backup};

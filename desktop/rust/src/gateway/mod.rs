@@ -1,3 +1,5 @@
+pub mod fallback;
+
 use crate::WorkRequest;
 
 pub fn validate_work_request(req: &WorkRequest) -> Result<(), String> {
