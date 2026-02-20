@@ -24,7 +24,7 @@ use axum::{
         ws::{Message, WebSocket, WebSocketUpgrade},
         State as AxumState,
     },
-    http::{HeaderValue, Method},
+    http::{HeaderMap, HeaderValue, Method, StatusCode},
     response::{Html, IntoResponse, Response},
     routing::{get, post},
     Json, Router,
@@ -44,6 +44,7 @@ use libp2p::{
     swarm::{NetworkBehaviour, SwarmEvent},
     Multiaddr, PeerId, StreamProtocol,
 };
+use rand::{distributions::Alphanumeric, Rng};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet, VecDeque},
@@ -281,6 +282,21 @@ struct PrivateMeshRouteRequest {
     connected_peers: Vec<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct AdminApiKeyRequest {
+    #[serde(default)]
+    key: Option<String>,
+}
+
+fn generate_api_key() -> String {
+    let suffix: String = rand::thread_rng()
+        .sample_iter(&Alphanumeric)
+        .take(32)
+        .map(char::from)
+        .collect();
+    format!("sk-{suffix}")
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TensorDataFormat {
@@ -447,6 +463,10 @@ struct SharedState {
     private_mesh: Arc<Mutex<PrivateMeshRegistry>>,
     /// Alert manager for anomaly detection (D3).
     alert_manager: Arc<Mutex<AlertManager>>,
+    /// API keys for clients (managed by admin endpoint).
+    api_keys: Arc<Mutex<HashSet<String>>>,
+    /// Optional admin token for managing API keys.
+    admin_key: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -2361,6 +2381,39 @@ async fn private_mesh_route_handler(
     }))
 }
 
+async fn admin_api_key_handler(
+    AxumState(state): AxumState<SharedState>,
+    headers: HeaderMap,
+    Json(req): Json<AdminApiKeyRequest>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let expected = match &state.admin_key {
+        Some(key) => key,
+        None => return Err(StatusCode::NOT_IMPLEMENTED),
+    };
+    let provided = headers
+        .get("x-shard-admin")
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_string);
+    if provided.as_deref() != Some(expected) {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+
+    let mut keys = state.api_keys.lock().await;
+    let key = req
+        .key
+        .filter(|k| !k.trim().is_empty())
+        .map(|k| k.trim().to_string())
+        .unwrap_or_else(generate_api_key);
+    keys.insert(key.clone());
+    let total = keys.len();
+
+    Ok(Json(serde_json::json!({
+        "ok": true,
+        "key": key,
+        "total_keys": total,
+    })))
+}
+
 async fn scout_penalty_update_handler(
     AxumState(state): AxumState<SharedState>,
     Json(update): Json<ScoutPenaltyUpdate>,
@@ -2874,6 +2927,7 @@ fn create_router(state: SharedState) -> Router {
         )
         .route("/private-mesh/groups", get(private_mesh_groups_handler))
         .route("/private-mesh/route", post(private_mesh_route_handler))
+        .route("/admin/api-keys", post(admin_api_key_handler))
         .route("/v1/chat/completions", post(chat_completions_handler))
         .route("/ws/generate", get(ws_generate_handler))
         .route("/scout/penalty", post(scout_penalty_update_handler))
@@ -3006,6 +3060,15 @@ async fn main() -> Result<()> {
         .and_then(|v| v.parse::<u128>().ok())
         .unwrap_or(30_000);
 
+    let initial_api_keys: HashSet<String> = std::env::var("SHARD_API_KEYS")
+        .unwrap_or_default()
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .collect();
+    let admin_key = std::env::var("SHARD_ADMIN_KEY").ok();
+
     let initial_credit_nonce = loaded_ledger.head().height.saturating_add(1);
     let state = SharedState {
         topology: Arc::new(Mutex::new(TopologyState {
@@ -3082,6 +3145,8 @@ async fn main() -> Result<()> {
         pow_manager: Arc::new(Mutex::new(PowChallengeManager::with_defaults())),
         private_mesh: Arc::new(Mutex::new(PrivateMeshRegistry::new())),
         alert_manager: Arc::new(Mutex::new(AlertManager::new())),
+        api_keys: Arc::new(Mutex::new(initial_api_keys)),
+        admin_key,
     };
 
     #[cfg(target_os = "windows")]
