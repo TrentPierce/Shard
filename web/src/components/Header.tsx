@@ -1,13 +1,10 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import type { NodeMode } from "@/app/page"
+import Link from "next/link"
+import { usePathname } from "next/navigation"
+import { useAppContext, type NodeMode } from "@/lib/context"
 import { ThemeToggle } from "./ThemeToggle"
-
-interface HeaderProps {
-    mode: NodeMode
-    rustStatus: "connected" | "unreachable" | "downloading"
-}
 
 export const modeLabels: Record<NodeMode, string> = {
     loading: "Bootstrapping",
@@ -17,7 +14,15 @@ export const modeLabels: Record<NodeMode, string> = {
     leech: "Consumer",
 }
 
-export default function Header({ mode, rustStatus }: HeaderProps) {
+const navItems = [
+    { name: "Chat", href: "/", icon: "💬" },
+    { name: "Network", href: "/network", icon: "🌐" },
+    { name: "Dashboard", href: "/dashboard", icon: "📊" },
+]
+
+export default function Header() {
+    const { mode, rustStatus } = useAppContext()
+    const pathname = usePathname()
     const [isDesktop, setIsDesktop] = useState(false)
 
     useEffect(() => {
@@ -47,6 +52,22 @@ export default function Header({ mode, rustStatus }: HeaderProps) {
                 </div>
             </div>
 
+            <nav className="header-nav">
+                {navItems.map((item) => {
+                    const isActive = pathname === item.href
+                    return (
+                        <Link
+                            key={item.name}
+                            href={item.href}
+                            className={`header-nav__item ${isActive ? "header-nav__item--active" : ""}`}
+                        >
+                            <span className="header-nav__icon">{item.icon}</span>
+                            <span className="header-nav__name">{item.name}</span>
+                        </Link>
+                    )
+                })}
+            </nav>
+
             <div className="header-modern__right">
                 <div className="header-modern__status" aria-live="polite">
                     <span className={`header-modern__dot header-modern__dot--${rustStatus}`} />
@@ -62,6 +83,44 @@ export default function Header({ mode, rustStatus }: HeaderProps) {
                     </div>
                 )}
             </div>
+            <style jsx>{`
+                .header-nav {
+                    display: flex;
+                    gap: 4px;
+                    background: rgba(255, 255, 255, 0.03);
+                    padding: 4px;
+                    border-radius: var(--radius-lg);
+                    border: 1px solid var(--glass-border);
+                }
+                .header-nav__item {
+                    display: flex;
+                    align-items: center;
+                    gap: 8px;
+                    padding: 6px 14px;
+                    border-radius: var(--radius-md);
+                    text-decoration: none;
+                    color: var(--text-secondary);
+                    font-size: 13px;
+                    font-weight: 600;
+                    transition: all var(--transition-fast);
+                }
+                .header-nav__item:hover {
+                    color: var(--text-primary);
+                    background: rgba(255, 255, 255, 0.05);
+                }
+                .header-nav__item--active {
+                    color: var(--accent-cyan);
+                    background: rgba(56, 139, 180, 0.12);
+                }
+                @media (max-width: 900px) {
+                    .header-nav__name {
+                        display: none;
+                    }
+                    .header-nav__item {
+                        padding: 6px;
+                    }
+                }
+            `}</style>
         </header>
     )
 }

@@ -1,6 +1,8 @@
 "use client"
 
+import { useState } from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { AppProvider } from "@/lib/context"
 
 /**
  * React Query client provider for Shard web app.
@@ -23,7 +25,11 @@ export function Providers({ children }: { children: React.ReactNode }) {
         },
     }))
 
-    return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    return (
+        <QueryClientProvider client={queryClient}>
+            <AppProvider>
+                {children}
+            </AppProvider>
+        </QueryClientProvider>
+    )
 }
-
-import { useState } from "react"
