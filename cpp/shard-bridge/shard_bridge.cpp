@@ -12,7 +12,7 @@
 struct ShardEngineState {
     llama_model* model = nullptr;
     llama_context* ctx = nullptr;
-    int32_t n_ctx = 4096;
+    int32_t n_ctx = 32768;
     int32_t n_past = 0;
     int32_t n_layer_total = 0;
     int32_t layer_start = 0;
@@ -69,7 +69,7 @@ SHARD_API void* shard_init_ex(const shard_init_config* config) {
     }
 
     llama_context_params cparams = llama_context_default_params();
-    cparams.n_ctx = 4096;
+    cparams.n_ctx = 32768;
     cparams.n_threads = 8;
     cparams.n_threads_batch = 8;
 
