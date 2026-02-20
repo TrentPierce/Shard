@@ -87,7 +87,11 @@ The Hybrid Speculative approach fundamentally alters the latency characteristics
 | **Verification** | Shard Compute (BitNet) | Parallel verification allows checking $K$ tokens in the time of generating 1\. |
 | **Correction** | Shard Compute | Occurs only on mismatch; heavily penalized by reputation system to discourage bad drafts. |
 
-If the Scout's acceptance rate is high (e.g., \>80%), the effective throughput of the system multiplies. The Shard spends most of its time verifying correct tokens in batches, freeing up compute cycles to serve more users. This creates a "force multiplier" effect where adding more edge devices (Scouts) actually increases the total capacity of the central nodes (Shards) to verify work, solving the scalability crisis of centralized AI.7
+#### **The Long-Context TTFT Trap**
+
+It is critical to note that the speculative decoding mesh is highly optimized for short-to-medium length prompts. For prompts exceeding 1,024 tokens, the overhead of transmitting context and initiating parallel verification significantly degrades the Time-to-First-Token (TTFT) metrics. To preserve strict TTFT Service Level Agreements (SLAs), the Shard routing layer dynamically intercepts prompts > 1,024 tokens and routes them directly to centralized compute, bypassing the speculative mesh entirely.
+
+For supported prompt lengths, if the Scout's acceptance rate is high (e.g., \>80%), the effective throughput of the system multiplies. The Shard spends most of its time verifying correct tokens in batches, freeing up compute cycles to serve more users. This creates a "force multiplier" effect where adding more edge devices (Scouts) actually increases the total capacity of the central nodes (Shards) to verify work, solving the scalability crisis of centralized AI.7
 
 ## **4\. Network Topology: The P2P Fabric**
 
@@ -115,16 +119,12 @@ This visualizer is not just eye candy; it is a debugging tool for the "Pitch Mod
 
 In any decentralized resource network, the primary threat is the Sybil attack: a malicious actor creating thousands of fake identities to flood the network with bad data or claim unearned rewards. Shard counters this with a rigorous "Proof of Inference" (PoI) protocol.
 
-### **5.1 The Golden Ticket Protocol**
+### **5.1 Sybil Resistance: Proof-of-Work and Identity Gating**
 
-The "Golden Ticket" is Shard's mechanism for auditing the honesty of untrusted nodes. An Shard will periodically—and randomly—inject a "Golden Ticket" into the work queue sent to a Scout. A Golden Ticket is a prompt for which the Shard **already knows the answer** (pre-solved).1
+In early iterations (v0.4.0), Shard relied on a "Golden Ticket" auditing mechanism. However, as compute identity became free (via dynamically generated Ed25519 keypairs), a malicious actor could flood the network with headless browser instances, rendering punitive bans ineffective as new identities were instantly spun up. To counter this, Shard v3 introduces hardware-aware economic barriers to identity creation.
 
-* **The Trap:** The Scout receives the Golden Ticket indistinguishable from a normal user prompt. It processes it and returns the draft tokens.  
-* **The Audit:** The Shard compares the Scout's draft against the known correct answer.  
-* **The Consequence:**  
-  * If the draft matches the expected output (within the bounds of the model's temperature/stochasticity), the Scout is verified as "Honest."  
-  * If the draft is random noise or incorrect (indicating the Scout is faking work to save power), the Scout fails the audit.  
-* **The Penalty:** Failure of a Golden Ticket results in an immediate ban. This raises the cost of attack significantly: to pass the Golden Ticket checks, a Sybil node must actually perform the inference work (load the model, compute the tokens). Since they must do the work to avoid being banned, the economic incentive to cheat is eliminated.12
+* **Primary Defense (Hashcash PoW & Captcha):** Before a Scout's identity is accepted by the mesh, it must perform strictly calibrated Hashcash Proof-of-Work (PoW) or provide a valid Cloudflare Turnstile captcha token. This imposes a hard economic and computational cost on node creation. A Sybil flood attack is mathematically unfeasible when each new adversarial identity requires significant upfront compute expenditure or human verification.
+* **Secondary Defense (The Golden Ticket):** As a supplementary quality-control measure, the Shard periodically injects a "Golden Ticket"—a pre-solved prompt—into a Scout's task queue. If the Scout returns random noise or fails the audit, implying it is faking work to save power, its reputation is immediately slashed and it faces potential disconnections. This ensures nodes that bypass the initial identity gate still maintain high-fidelity output.12
 
 ### **5.2 Reputation and Slashing**
 
@@ -176,6 +176,10 @@ Shard represents a disruptive force in the AI market. By shifting the cost struc
 | **Privacy** | Trusted Third Party | Trustless / Localhost Routing |
 | **Latency** | Network RTT \+ Queue | Local Generation \+ Verification |
 | **Resilience** | Single Point of Failure | Mesh / Self-Healing |
+
+#### **Enterprise Privacy Routing**
+
+While the decentralized mesh provides trustless operations globally, Shard explicitly caters to stringent enterprise security requirements via constrained routing. To guarantee that sensitive internal prompts or proprietary data never touch the public mesh, clients can utilize the `X-Shard-Route: private` HTTP header constraint. When activated, all payload distribution is strictly confined to the trusted internal VPC or intranet mesh, completely isolating the workload from any external bootstrap peers. 
 
 ### **7.2 Future Roadmap**
 
