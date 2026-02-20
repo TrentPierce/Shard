@@ -65,35 +65,35 @@ const GOLDEN_TICKET_PATTERNS: Array<{
     tolerance: "exact" | "contains" | "numeric"
     type: "math" | "string" | "fact"
 }> = [
-    // Mathematical reasoning patterns
-    { pattern: /what is 2\+2/i, expected: "4", tolerance: "exact", type: "math" },
-    { pattern: /calculate 15 \* 7/i, expected: "105", tolerance: "exact", type: "math" },
-    { pattern: /square root of 144/i, expected: "12", tolerance: "exact", type: "math" },
-    { pattern: /100 divided by 4/i, expected: "25", tolerance: "exact", type: "math" },
-    { pattern: /calculate 17 \+ 28/i, expected: "45", tolerance: "exact", type: "math" },
-    { pattern: /9 squared/i, expected: "81", tolerance: "exact", type: "math" },
-    { pattern: /sum of 123 and 456/i, expected: "579", tolerance: "exact", type: "math" },
-    { pattern: /50% of 200/i, expected: "100", tolerance: "exact", type: "math" },
+        // Mathematical reasoning patterns
+        { pattern: /what is 2\+2/i, expected: "4", tolerance: "exact", type: "math" },
+        { pattern: /calculate 15 \* 7/i, expected: "105", tolerance: "exact", type: "math" },
+        { pattern: /square root of 144/i, expected: "12", tolerance: "exact", type: "math" },
+        { pattern: /100 divided by 4/i, expected: "25", tolerance: "exact", type: "math" },
+        { pattern: /calculate 17 \+ 28/i, expected: "45", tolerance: "exact", type: "math" },
+        { pattern: /9 squared/i, expected: "81", tolerance: "exact", type: "math" },
+        { pattern: /sum of 123 and 456/i, expected: "579", tolerance: "exact", type: "math" },
+        { pattern: /50% of 200/i, expected: "100", tolerance: "exact", type: "math" },
 
-    // String manipulation patterns
-    { pattern: /third word in.*the quick brown fox/i, expected: "brown", tolerance: "exact", type: "string" },
-    { pattern: /spell.*hello.*backwards/i, expected: "olleh", tolerance: "exact", type: "string" },
-    { pattern: /letters in.*javascript/i, expected: "10", tolerance: "exact", type: "string" },
-    { pattern: /letter comes after.*b.*alphabet/i, expected: "c", tolerance: "exact", type: "string" },
-    { pattern: /capitalize.*test/i, expected: "TEST", tolerance: "exact", type: "string" },
+        // String manipulation patterns
+        { pattern: /third word in.*the quick brown fox/i, expected: "brown", tolerance: "exact", type: "string" },
+        { pattern: /spell.*hello.*backwards/i, expected: "olleh", tolerance: "exact", type: "string" },
+        { pattern: /letters in.*javascript/i, expected: "10", tolerance: "exact", type: "string" },
+        { pattern: /letter comes after.*b.*alphabet/i, expected: "c", tolerance: "exact", type: "string" },
+        { pattern: /capitalize.*test/i, expected: "TEST", tolerance: "exact", type: "string" },
 
-    // Factual knowledge patterns
-    { pattern: /capital of france/i, expected: "paris", tolerance: "contains", type: "fact" },
-    { pattern: /days in a week/i, expected: "7", tolerance: "exact", type: "fact" },
-    { pattern: /red planet/i, expected: "mars", tolerance: "contains", type: "fact" },
-    { pattern: /continents.*earth/i, expected: "7", tolerance: "exact", type: "fact" },
-    { pattern: /freezing point.*water.*celsius/i, expected: "0", tolerance: "contains", type: "fact" },
-    { pattern: /sides.*triangle/i, expected: "3", tolerance: "exact", type: "fact" },
-    { pattern: /sky.*clear day/i, expected: "blue", tolerance: "contains", type: "fact" },
-    { pattern: /hours in a day/i, expected: "24", tolerance: "exact", type: "fact" },
-    { pattern: /opposite of.*hot/i, expected: "cold", tolerance: "contains", type: "fact" },
-    { pattern: /minutes in an hour/i, expected: "60", tolerance: "exact", type: "fact" },
-]
+        // Factual knowledge patterns
+        { pattern: /capital of france/i, expected: "paris", tolerance: "contains", type: "fact" },
+        { pattern: /days in a week/i, expected: "7", tolerance: "exact", type: "fact" },
+        { pattern: /red planet/i, expected: "mars", tolerance: "contains", type: "fact" },
+        { pattern: /continents.*earth/i, expected: "7", tolerance: "exact", type: "fact" },
+        { pattern: /freezing point.*water.*celsius/i, expected: "0", tolerance: "contains", type: "fact" },
+        { pattern: /sides.*triangle/i, expected: "3", tolerance: "exact", type: "fact" },
+        { pattern: /sky.*clear day/i, expected: "blue", tolerance: "contains", type: "fact" },
+        { pattern: /hours in a day/i, expected: "24", tolerance: "exact", type: "fact" },
+        { pattern: /opposite of.*hot/i, expected: "cold", tolerance: "contains", type: "fact" },
+        { pattern: /minutes in an hour/i, expected: "60", tolerance: "exact", type: "fact" },
+    ]
 
 /**
  * Check if a prompt is a Golden Ticket.
