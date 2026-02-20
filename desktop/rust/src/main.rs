@@ -41,7 +41,7 @@ use libp2p::{
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet, VecDeque},
-    net::SocketAddr,
+    net::{IpAddr, SocketAddr},
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
@@ -400,6 +400,10 @@ struct SharedState {
     event_log: Arc<Mutex<VecDeque<String>>>,
     node_public_key: String,
     heartbeat_interval_seconds: u64,
+    public_host: Option<String>,
+    tcp_port: u16,
+    webrtc_port: u16,
+    quic_port: u16,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -891,6 +895,151 @@ fn unique_addrs(addrs: Vec<String>) -> Vec<String> {
     out
 }
 
+fn normalize_public_host(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let no_scheme = trimmed
+        .strip_prefix("https://")
+        .or_else(|| trimmed.strip_prefix("http://"))
+        .unwrap_or(trimmed);
+    let host_port = no_scheme.split('/').next().unwrap_or(no_scheme);
+    let host = if host_port.starts_with('[') {
+        host_port.trim_start_matches('[').split(']').next().unwrap_or("")
+    } else {
+        host_port.split(':').next().unwrap_or(host_port)
+    };
+    let host = host.trim();
+    if host.is_empty() {
+        None
+    } else {
+        Some(host.to_string())
+    }
+}
+
+fn host_multiaddr_prefix(host: &str) -> (String, String) {
+    match host.parse::<IpAddr>() {
+        Ok(IpAddr::V4(_)) => ("ip4".to_string(), host.to_string()),
+        Ok(IpAddr::V6(_)) => ("ip6".to_string(), host.to_string()),
+        Err(_) => ("dns4".to_string(), host.to_string()),
+    }
+}
+
+fn rewrite_multiaddr_host(addr: &str, host_proto: &str, host_value: &str) -> Option<String> {
+    let mut parts: Vec<String> = addr
+        .split('/')
+        .filter(|p| !p.is_empty())
+        .map(|s| s.to_string())
+        .collect();
+    if parts.len() < 2 {
+        return None;
+    }
+    match parts[0].as_str() {
+        "ip4" | "ip6" | "dns4" | "dns6" => {}
+        _ => return None,
+    }
+    parts[0] = host_proto.to_string();
+    parts[1] = host_value.to_string();
+    Some(format!("/{}", parts.join("/")))
+}
+
+fn outward_topology_addrs(
+    topo: &TopologyState,
+    state: &SharedState,
+) -> (Option<String>, Option<String>, Option<String>, Vec<String>) {
+    let mut ws_addr = topo.ws_addr.clone();
+    let mut webrtc_addr = topo.webrtc_addr.clone();
+    let mut quic_addr = topo.quic_addr.clone();
+    let mut listen_addrs = topo.listen_addrs.clone();
+
+    if topo.is_public {
+        if let Some(host_raw) = state
+            .public_host
+            .as_deref()
+            .or(topo.public_api_addr.as_deref())
+            .and_then(normalize_public_host)
+        {
+            let (proto, host_value) = host_multiaddr_prefix(&host_raw);
+            if let Some(addr) = ws_addr
+                .as_deref()
+                .and_then(|v| rewrite_multiaddr_host(v, &proto, &host_value))
+            {
+                ws_addr = Some(addr);
+            } else {
+                ws_addr = Some(format!(
+                    "/{}/{}/tcp/{}/ws/p2p/{}",
+                    proto,
+                    host_value,
+                    state.tcp_port.saturating_add(100),
+                    topo.local_peer_id
+                ));
+            }
+            if let Some(addr) = webrtc_addr
+                .as_deref()
+                .and_then(|v| rewrite_multiaddr_host(v, &proto, &host_value))
+            {
+                webrtc_addr = Some(addr);
+            } else {
+                webrtc_addr = Some(format!(
+                    "/{}/{}/udp/{}/webrtc-direct/p2p/{}",
+                    proto, host_value, state.webrtc_port, topo.local_peer_id
+                ));
+            }
+            if let Some(addr) = quic_addr
+                .as_deref()
+                .and_then(|v| rewrite_multiaddr_host(v, &proto, &host_value))
+            {
+                quic_addr = Some(addr);
+            } else {
+                quic_addr = Some(format!(
+                    "/{}/{}/udp/{}/quic-v1/p2p/{}",
+                    proto, host_value, state.quic_port, topo.local_peer_id
+                ));
+            }
+
+            let local_peer = topo.local_peer_id.clone();
+            listen_addrs.retain(|addr| {
+                !(addr.starts_with("/ip4/127.")
+                    || addr.starts_with("/ip6/::1")
+                    || addr.starts_with("/ip4/172.")
+                    || addr.starts_with("/ip4/10.")
+                    || addr.starts_with("/ip4/192.168."))
+            });
+            if let Some(ws) = &ws_addr {
+                listen_addrs.push(
+                    ws.split("/p2p/")
+                        .next()
+                        .unwrap_or(ws.as_str())
+                        .to_string(),
+                );
+            } else {
+                listen_addrs.push(format!(
+                    "/{}/{}/tcp/{}/ws",
+                    proto,
+                    host_value,
+                    state.tcp_port.saturating_add(100)
+                ));
+            }
+            listen_addrs.push(format!(
+                "/{}/{}/tcp/{}/p2p/{}",
+                proto, host_value, state.tcp_port, local_peer
+            ));
+            if let Some(quic) = &quic_addr {
+                listen_addrs.push(
+                    quic.split("/p2p/")
+                        .next()
+                        .unwrap_or(quic.as_str())
+                        .to_string(),
+                );
+            }
+            listen_addrs = unique_addrs(listen_addrs);
+        }
+    }
+
+    (webrtc_addr, quic_addr, ws_addr, listen_addrs)
+}
+
 async fn read_bootstrap_file(path: &str) -> Vec<String> {
     let Ok(contents) = tokio::fs::read_to_string(path).await else {
         return Vec::new();
@@ -1061,6 +1210,7 @@ refresh(); setInterval(refresh, 4000);
 
 async fn topology_handler(AxumState(state): AxumState<SharedState>) -> Json<serde_json::Value> {
     let topo = state.topology.lock().await;
+    let (webrtc_addr, quic_addr, ws_addr, listen_addrs) = outward_topology_addrs(&topo, &state);
     let known = state.known_peers.lock().await;
     let capacity = state.capacity.load(Ordering::Relaxed);
     let load = state.current_load.load(Ordering::Relaxed);
@@ -1069,13 +1219,13 @@ async fn topology_handler(AxumState(state): AxumState<SharedState>) -> Json<serd
         "status": "ok",
         "source": "rust-sidecar",
         "shard_peer_id": topo.local_peer_id,
-        "shard_webrtc_multiaddr": topo.webrtc_addr,
-        "shard_quic_multiaddr": topo.quic_addr,
-        "shard_ws_multiaddr": topo.ws_addr,
-        "listen_addrs": topo.listen_addrs,
+        "shard_webrtc_multiaddr": webrtc_addr,
+        "shard_quic_multiaddr": quic_addr,
+        "shard_ws_multiaddr": ws_addr,
+        "listen_addrs": listen_addrs,
         "known_peer_count": known.len(),
         "public_api": topo.is_public,
-        "public_api_addr": topo.public_api_addr,
+        "public_api_addr": state.public_host.clone().or(topo.public_api_addr.clone()),
         "relay_server": topo.relay_server_enabled,
         "contribute": topo.contribute_enabled,
         "wallet": state.node_wallet.clone(),
@@ -2570,13 +2720,16 @@ async fn main() -> Result<()> {
     };
     let persisted_bootstrap = load_persisted_peers(&known_peers_path).await;
 
-    // Default bootstrap peers - public Shard nodes that are always online
-    // New nodes will automatically connect to the network via these
-    let default_bootstrap = vec![
-        // Public bootstrap Shard (EC2)
-        "/ip4/54.224.107.75/tcp/4001/p2p/12D3KooWLm6braaLmNsY8X2fS8quKFmeoSxokkuRPmeh8vEt77tp".to_string(),
-        "/ip4/54.224.107.75/udp/9092/quic-v1/p2p/12D3KooWLm6braaLmNsY8X2fS8quKFmeoSxokkuRPmeh8vEt77tp".to_string(),
-    ];
+    // Optional defaults from environment to avoid stale hardcoded peers.
+    let default_bootstrap = std::env::var("SHARD_DEFAULT_BOOTSTRAP")
+        .ok()
+        .map(|raw| {
+            raw.split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
 
     let bootstrap_addrs = unique_addrs(
         default_bootstrap
@@ -2671,6 +2824,10 @@ async fn main() -> Result<()> {
         event_log: Arc::new(Mutex::new(VecDeque::new())),
         node_public_key: node_wallet.clone(),
         heartbeat_interval_seconds: node_cfg.heartbeat_interval_seconds,
+        public_host: cli.public_host.clone().and_then(|h| normalize_public_host(&h)),
+        tcp_port: cli.tcp_port,
+        webrtc_port: cli.webrtc_port,
+        quic_port: cli.quic_port,
     };
 
     #[cfg(target_os = "windows")]
@@ -3783,15 +3940,17 @@ async fn main() -> Result<()> {
                         if addr_str.contains("/quic-v1") {
                             topo.quic_addr = Some(format!("{}/p2p/{}", addr_str, local_peer_id));
                         }
+                        let (webrtc_addr, quic_addr, ws_addr, listen_addrs) =
+                            outward_topology_addrs(&topo, &state);
 
                         let topo_json = serde_json::json!({
                             "shard_peer_id": topo.local_peer_id,
-                            "shard_webrtc_multiaddr": topo.webrtc_addr,
-                            "shard_quic_multiaddr": topo.quic_addr,
-                            "shard_ws_multiaddr": topo.ws_addr,
-                            "listen_addrs": topo.listen_addrs,
+                            "shard_webrtc_multiaddr": webrtc_addr,
+                            "shard_quic_multiaddr": quic_addr,
+                            "shard_ws_multiaddr": ws_addr,
+                            "listen_addrs": listen_addrs,
                             "public_api": topo.is_public,
-                            "public_api_addr": topo.public_api_addr,
+                            "public_api_addr": state.public_host.clone().or(topo.public_api_addr.clone()),
                             "relay_server": topo.relay_server_enabled,
                             "contribute": topo.contribute_enabled,
                             "capacity": topo.capacity,
