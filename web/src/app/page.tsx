@@ -6,7 +6,6 @@ import Header from "@/components/Header"
 import ChatPanel from "@/components/ChatPanel"
 import NetworkStatus from "@/components/NetworkStatus"
 import NetworkVisualizer from "@/components/NetworkVisualizer"
-import LandingPage from "@/components/LandingPage"
 import {
     fetchTopology,
     probeLocalShard,
@@ -33,7 +32,6 @@ export type NodeMode =
     | "leech"
 
 export default function HomePage() {
-    const [showLanding, setShowLanding] = useState(true)
     const [mode, setMode] = useState<NodeMode>("loading")
     const [webLLMProgress, setWebLLMProgress] = useState<ModelProgress | null>(null)
     const [webLLMError, setWebLLMError] = useState<string | null>(null)
@@ -93,13 +91,6 @@ export default function HomePage() {
         }
     }, [])
 
-    const handleEnterApp = useCallback(() => {
-        setShowLanding(false)
-        if (typeof window !== "undefined") {
-            localStorage.setItem("shard-entered", "true")
-        }
-    }, [])
-
     useEffect(() => {
         const handleRetryScoutInit = () => {
             if (stopScoutWorkerRef.current) {
@@ -132,8 +123,6 @@ export default function HomePage() {
     const rustStatus = (topology?.status === "ok" ? "connected" : "unreachable") as "connected" | "unreachable" | "downloading"
     const topologyData: Topology | null = topology ?? null
 
-    useEffect(() => {
-        if (showLanding) return // Don't boot until user enters app
         if (scoutBootedRef.current) return
 
         const boot = async () => {
@@ -227,7 +216,7 @@ export default function HomePage() {
                 stopLayerHostRef.current = null
             }
         }
-    }, [showLanding, scoutRetryNonce])
+    }, [scoutRetryNonce])
 
     // Pitch Mode keyboard shortcut (Ctrl+Shift+P)
     useEffect(() => {
@@ -247,11 +236,6 @@ export default function HomePage() {
         setToastMessage(message)
         setTimeout(() => setToastMessage(null), 4000)
     }, [])
-
-    // Show landing page for first-time visitors
-    if (showLanding) {
-        return <LandingPage onEnter={handleEnterApp} />
-    }
 
     return (
         <div className="app-shell">
