@@ -114,10 +114,9 @@ pub fn verify_matmul(
             let deviation = (expected - claimed).abs();
             max_deviation = max_deviation.max(deviation);
 
-            if deviation > config.tolerance
-                && !failed_rows.contains(&row) {
-                    failed_rows.push(row);
-                }
+            if deviation > config.tolerance && !failed_rows.contains(&row) {
+                failed_rows.push(row);
+            }
         }
     }
 

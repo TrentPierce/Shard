@@ -150,15 +150,13 @@ pub enum RaceSubmitOutcome {
     TimedOut,
 }
 
-#[derive(Debug)]
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct RaceRouter {
     pending: HashMap<RaceKey, PendingRace>,
     completed: VecDeque<CompletedRace>,
     /// Adaptive per-peer timeout tracker.
     pub adaptive_timeout: AdaptiveTimeout,
 }
-
 
 impl RaceRouter {
     /// Start a race with an explicit timeout.

@@ -175,6 +175,11 @@ pub async fn execute_centralized_fallback(
     config: &FallbackConfig,
     request: &ActiveRequestState,
 ) -> Result<String, String> {
+    tracing::info!(
+        request_id = %request.request_id,
+        tokens = request.input_token_count,
+        "triggering centralized fallback"
+    );
     let client = reqwest::Client::new();
     let prompt = build_continuation_prompt(request);
 
@@ -192,19 +197,29 @@ pub async fn execute_centralized_fallback(
         .timeout(std::time::Duration::from_secs(30))
         .send()
         .await
-        .map_err(|e| format!("fallback API request failed: {e}"))?;
+        .map_err(|e| {
+            let err = format!("fallback API request failed: {e}");
+            tracing::error!(request_id = %request.request_id, %err);
+            err
+        })?;
 
     if !response.status().is_success() {
-        return Err(format!(
-            "fallback API returned status {}",
-            response.status()
-        ));
+        let err = format!("fallback API returned status {}", response.status());
+        tracing::error!(request_id = %request.request_id, %err);
+        return Err(err);
     }
 
-    response
+    let text = response
         .text()
         .await
-        .map_err(|e| format!("failed to read fallback API response: {e}"))
+        .map_err(|e| {
+            let err = format!("failed to read fallback API response: {e}");
+            tracing::error!(request_id = %request.request_id, %err);
+            err
+        })?;
+
+    tracing::info!(request_id = %request.request_id, "centralized fallback successful");
+    Ok(text)
 }
 
 fn now_ms() -> u128 {
