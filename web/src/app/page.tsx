@@ -83,14 +83,6 @@ export default function HomePage() {
         return Array.from(new Set(filtered))
     }, [])
 
-    // Check if the user has already entered the app
-    useEffect(() => {
-        const entered = typeof window !== "undefined" && localStorage.getItem("shard-entered")
-        if (entered === "true") {
-            setShowLanding(false)
-        }
-    }, [])
-
     useEffect(() => {
         const handleRetryScoutInit = () => {
             if (stopScoutWorkerRef.current) {
@@ -123,6 +115,7 @@ export default function HomePage() {
     const rustStatus = (topology?.status === "ok" ? "connected" : "unreachable") as "connected" | "unreachable" | "downloading"
     const topologyData: Topology | null = topology ?? null
 
+    useEffect(() => {
         if (scoutBootedRef.current) return
 
         const boot = async () => {
