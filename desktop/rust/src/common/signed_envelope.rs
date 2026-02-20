@@ -92,8 +92,8 @@ impl<T: Serialize + DeserializeOwned + Clone> SignedEnvelope<T> {
         }
         let mut pubkey_arr = [0u8; 32];
         pubkey_arr.copy_from_slice(&pubkey_bytes);
-        let verifying_key =
-            VerifyingKey::from_bytes(&pubkey_arr).map_err(|_| EnvelopeRejection::InvalidSignerKey)?;
+        let verifying_key = VerifyingKey::from_bytes(&pubkey_arr)
+            .map_err(|_| EnvelopeRejection::InvalidSignerKey)?;
 
         // Verify payload hash
         let recomputed_hash = payload_hash(&self.payload);
@@ -102,8 +102,8 @@ impl<T: Serialize + DeserializeOwned + Clone> SignedEnvelope<T> {
         }
 
         // Verify signature
-        let sig_bytes = hex::decode(&self.signature_hex)
-            .map_err(|_| EnvelopeRejection::InvalidSignature)?;
+        let sig_bytes =
+            hex::decode(&self.signature_hex).map_err(|_| EnvelopeRejection::InvalidSignature)?;
         if sig_bytes.len() != 64 {
             return Err(EnvelopeRejection::InvalidSignature);
         }
@@ -190,7 +190,7 @@ impl EnvelopeVerifier {
         let window = self
             .nonce_windows
             .entry(envelope.signer_pubkey_hex.clone())
-            .or_insert_with(VecDeque::new);
+            .or_default();
 
         if window.contains(&envelope.nonce) {
             return Err(EnvelopeRejection::ReplayedNonce);

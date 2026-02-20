@@ -104,7 +104,7 @@ impl DDoSDetector {
         }
     }
 
-    fn current_rps(&self, now: u128) -> f64 {
+    fn current_rps(&self, _now: u128) -> f64 {
         let count = self.request_times.len();
         let window_secs = self.window_ms as f64 / 1000.0;
         count as f64 / window_secs
@@ -112,7 +112,7 @@ impl DDoSDetector {
 
     fn prune(&mut self, now: u128) {
         let cutoff = now.saturating_sub(self.window_ms);
-        while self.request_times.front().map_or(false, |&t| t < cutoff) {
+        while self.request_times.front().is_some_and(|&t| t < cutoff) {
             self.request_times.pop_front();
         }
     }
@@ -263,7 +263,7 @@ impl SignatureFailureDetector {
 
     fn prune(&mut self, now: u128) {
         let cutoff = now.saturating_sub(self.window_ms);
-        while self.results.front().map_or(false, |(t, _)| *t < cutoff) {
+        while self.results.front().is_some_and(|(t, _)| *t < cutoff) {
             self.results.pop_front();
         }
     }

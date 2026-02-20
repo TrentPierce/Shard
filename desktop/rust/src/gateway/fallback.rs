@@ -97,8 +97,9 @@ impl FallbackConfig {
             .and_then(|v| v.parse().ok())
             .unwrap_or(DEFAULT_LONG_CONTEXT_THRESHOLD);
 
-        let fallback_url = std::env::var("FALLBACK_API_URL")
-            .unwrap_or_else(|_| "https://api.ourcompany.com/v1/internal/scout-fallback".to_string());
+        let fallback_url = std::env::var("FALLBACK_API_URL").unwrap_or_else(|_| {
+            "https://api.ourcompany.com/v1/internal/scout-fallback".to_string()
+        });
 
         Self {
             long_context_threshold: threshold,
@@ -117,15 +118,24 @@ pub fn decide_fallback(
 ) -> (FallbackAction, FallbackReason) {
     // Rule 1: Long prompts always go centralized
     if request.input_token_count > config.long_context_threshold {
-        return (FallbackAction::CentralizedFallback, FallbackReason::LongContext);
+        return (
+            FallbackAction::CentralizedFallback,
+            FallbackReason::LongContext,
+        );
     }
 
     // Rule 2/3: Short prompts — check completion ratio
     let ratio = request.completion_ratio();
     if ratio < config.re_dispatch_threshold {
-        (FallbackAction::ReDispatchToScout, FallbackReason::EarlyFailure)
+        (
+            FallbackAction::ReDispatchToScout,
+            FallbackReason::EarlyFailure,
+        )
     } else {
-        (FallbackAction::CentralizedFallback, FallbackReason::CompletionThreshold)
+        (
+            FallbackAction::CentralizedFallback,
+            FallbackReason::CompletionThreshold,
+        )
     }
 }
 

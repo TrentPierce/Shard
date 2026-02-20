@@ -9,6 +9,12 @@
 //! Build:   cargo build --release
 //! Run:     ./shard-daemon --control-port 9091
 
+#![allow(dead_code)]
+#![allow(unused_variables)]
+#![allow(clippy::too_many_arguments)]
+#![allow(clippy::manual_range_contains)]
+#![allow(clippy::unnecessary_cast)]
+
 use anyhow::Result;
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::{

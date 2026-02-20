@@ -12,18 +12,15 @@ use std::collections::{HashMap, HashSet};
 /// Routing mode for a request, determined by the `X-Shard-Route` header.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum RouteMode {
     /// Normal public Scout mesh dispatch.
+    #[default]
     Public,
     /// Bypass public mesh; route to private nodes or centralized API only.
     Private,
 }
 
-impl Default for RouteMode {
-    fn default() -> Self {
-        Self::Public
-    }
-}
 
 /// A registered corporate peer group.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -70,7 +67,12 @@ impl PrivateMeshRegistry {
     }
 
     /// Register a node as belonging to a corporate API key's private mesh.
-    pub fn register_node(&mut self, api_key_hash: &str, node_pubkey_hex: &str, label: Option<String>) {
+    pub fn register_node(
+        &mut self,
+        api_key_hash: &str,
+        node_pubkey_hex: &str,
+        label: Option<String>,
+    ) {
         let group = self
             .groups
             .entry(api_key_hash.to_string())
@@ -175,7 +177,8 @@ mod tests {
         registry.register_node(&api_hash, "node_b", Some("NYC Office".into()));
 
         // Both nodes connected
-        let connected: HashSet<String> = ["node_a", "node_b"].iter().map(|s| s.to_string()).collect();
+        let connected: HashSet<String> =
+            ["node_a", "node_b"].iter().map(|s| s.to_string()).collect();
         match registry.route_private(&api_hash, &connected) {
             PrivateRouteDecision::DispatchToPrivateNodes(nodes) => {
                 assert!(nodes.contains(&"node_a".to_string()));

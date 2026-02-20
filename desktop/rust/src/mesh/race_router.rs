@@ -151,6 +151,7 @@ pub enum RaceSubmitOutcome {
 }
 
 #[derive(Debug)]
+#[derive(Default)]
 pub struct RaceRouter {
     pending: HashMap<RaceKey, PendingRace>,
     completed: VecDeque<CompletedRace>,
@@ -158,15 +159,6 @@ pub struct RaceRouter {
     pub adaptive_timeout: AdaptiveTimeout,
 }
 
-impl Default for RaceRouter {
-    fn default() -> Self {
-        Self {
-            pending: HashMap::new(),
-            completed: VecDeque::new(),
-            adaptive_timeout: AdaptiveTimeout::with_defaults(),
-        }
-    }
-}
 
 impl RaceRouter {
     /// Start a race with an explicit timeout.
@@ -335,11 +327,17 @@ mod tests {
         }
         // EWMA should converge toward 30ms
         let ewma = at.ewma_for_peer("fast").unwrap();
-        assert!((ewma - 30.0).abs() < 5.0, "fast peer EWMA should converge near 30ms, got {ewma}");
+        assert!(
+            (ewma - 30.0).abs() < 5.0,
+            "fast peer EWMA should converge near 30ms, got {ewma}"
+        );
 
         // Timeout should be 2x EWMA ≈ 60ms, clamped to [50, 150]
         let timeout = at.timeout_for_peer("fast");
-        assert!(timeout >= 50 && timeout <= 150, "timeout should be in [50, 150], got {timeout}");
+        assert!(
+            timeout >= 50 && timeout <= 150,
+            "timeout should be in [50, 150], got {timeout}"
+        );
     }
 
     #[test]
@@ -391,8 +389,14 @@ mod tests {
     #[test]
     fn collect_timed_out_races() {
         let mut router = RaceRouter::default();
-        let key1 = RaceKey { request_id: "r1".into(), step_id: "s1".into() };
-        let key2 = RaceKey { request_id: "r2".into(), step_id: "s2".into() };
+        let key1 = RaceKey {
+            request_id: "r1".into(),
+            step_id: "s1".into(),
+        };
+        let key2 = RaceKey {
+            request_id: "r2".into(),
+            step_id: "s2".into(),
+        };
 
         router.start_race(key1.clone(), vec![1], "fp16", vec!["p1".into()], 100);
         router.start_race(key2.clone(), vec![1], "fp16", vec!["p1".into()], 200);
