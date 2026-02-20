@@ -86,3 +86,4 @@ build_log.txt
 # ─── Deployment ───
 .vercel
 .env*.local
+override.conf

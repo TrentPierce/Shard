@@ -1,5 +1,6 @@
 "use client"
 
+import Link from "next/link"
 import { useCallback } from "react"
 
 interface LandingPageProps {
@@ -42,13 +43,18 @@ export default function LandingPage({ onEnter }: LandingPageProps) {
                     Contribute compute, scale globally, and ship with predictable latency.
                 </p>
 
-                <div className="landing-modern__actions">
-                    <button type="button" className="landing-modern__btn landing-modern__btn--primary" onClick={handleGetStarted}>
+                <div className="landing-modern__actions" style={{ position: 'relative', zIndex: 10 }}>
+                    <button
+                        type="button"
+                        className="landing-modern__btn landing-modern__btn--primary"
+                        onClick={handleGetStarted}
+                        style={{ cursor: 'pointer' }}
+                    >
                         Enter App
                     </button>
-                    <a className="landing-modern__btn landing-modern__btn--ghost" href="/network">
+                    <Link className="landing-modern__btn landing-modern__btn--ghost" href="/network" style={{ cursor: 'pointer' }}>
                         View Live Network
-                    </a>
+                    </Link>
                 </div>
             </section>
 
