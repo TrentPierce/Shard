@@ -13,6 +13,12 @@ pub struct SystemMetrics {
     task_failures_total: AtomicU64,
     signature_verification_failures_total: AtomicU64,
     node_identity_auth_failures_total: AtomicU64,
+    scout_dropoff_total: AtomicU64,
+    pow_challenges_issued_total: AtomicU64,
+    pow_challenges_failed_total: AtomicU64,
+    private_route_total: AtomicU64,
+    prompt_replay_total: AtomicU64,
+    fallback_invocations_total: AtomicU64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -23,6 +29,12 @@ pub struct SystemMetricsSnapshot {
     pub task_failures_total: u64,
     pub signature_verification_failures_total: u64,
     pub node_identity_auth_failures_total: u64,
+    pub scout_dropoff_total: u64,
+    pub pow_challenges_issued_total: u64,
+    pub pow_challenges_failed_total: u64,
+    pub private_route_total: u64,
+    pub prompt_replay_total: u64,
+    pub fallback_invocations_total: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -89,6 +101,33 @@ impl SystemMetrics {
             .fetch_add(1, Ordering::Relaxed);
     }
 
+    pub fn inc_scout_dropoff(&self) {
+        self.scout_dropoff_total.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn inc_pow_challenges_issued(&self) {
+        self.pow_challenges_issued_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn inc_pow_challenges_failed(&self) {
+        self.pow_challenges_failed_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn inc_private_route(&self) {
+        self.private_route_total.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn inc_prompt_replay(&self) {
+        self.prompt_replay_total.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn inc_fallback_invocations(&self) {
+        self.fallback_invocations_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
     pub fn render_prometheus(&self, sample: PrometheusSample) -> String {
         format!(
             concat!(
@@ -134,6 +173,24 @@ impl SystemMetrics {
                 "# HELP shard_node_uptime_seconds Node uptime in seconds.\n",
                 "# TYPE shard_node_uptime_seconds gauge\n",
                 "shard_node_uptime_seconds {}\n",
+                "# HELP shard_scout_dropoff_total Scout disconnection events.\n",
+                "# TYPE shard_scout_dropoff_total counter\n",
+                "shard_scout_dropoff_total {}\n",
+                "# HELP shard_pow_challenges_issued_total PoW challenges issued.\n",
+                "# TYPE shard_pow_challenges_issued_total counter\n",
+                "shard_pow_challenges_issued_total {}\n",
+                "# HELP shard_pow_challenges_failed_total PoW challenges failed.\n",
+                "# TYPE shard_pow_challenges_failed_total counter\n",
+                "shard_pow_challenges_failed_total {}\n",
+                "# HELP shard_private_route_total Private route requests.\n",
+                "# TYPE shard_private_route_total counter\n",
+                "shard_private_route_total {}\n",
+                "# HELP shard_prompt_replay_total Prompt replay fallback events.\n",
+                "# TYPE shard_prompt_replay_total counter\n",
+                "shard_prompt_replay_total {}\n",
+                "# HELP shard_fallback_invocations_total Centralized fallback invocations.\n",
+                "# TYPE shard_fallback_invocations_total counter\n",
+                "shard_fallback_invocations_total {}\n",
             ),
             self.tokens_processed_total.load(Ordering::Relaxed),
             self.tokens_offloaded_to_scouts_total.load(Ordering::Relaxed),
@@ -150,6 +207,12 @@ impl SystemMetrics {
             sample.e2e_latency_p95_ms,
             sample.e2e_latency_p99_ms,
             sample.node_uptime_seconds,
+            self.scout_dropoff_total.load(Ordering::Relaxed),
+            self.pow_challenges_issued_total.load(Ordering::Relaxed),
+            self.pow_challenges_failed_total.load(Ordering::Relaxed),
+            self.private_route_total.load(Ordering::Relaxed),
+            self.prompt_replay_total.load(Ordering::Relaxed),
+            self.fallback_invocations_total.load(Ordering::Relaxed),
         )
     }
 
@@ -167,6 +230,12 @@ impl SystemMetrics {
             node_identity_auth_failures_total: self
                 .node_identity_auth_failures_total
                 .load(Ordering::Relaxed),
+            scout_dropoff_total: self.scout_dropoff_total.load(Ordering::Relaxed),
+            pow_challenges_issued_total: self.pow_challenges_issued_total.load(Ordering::Relaxed),
+            pow_challenges_failed_total: self.pow_challenges_failed_total.load(Ordering::Relaxed),
+            private_route_total: self.private_route_total.load(Ordering::Relaxed),
+            prompt_replay_total: self.prompt_replay_total.load(Ordering::Relaxed),
+            fallback_invocations_total: self.fallback_invocations_total.load(Ordering::Relaxed),
         }
     }
 }
