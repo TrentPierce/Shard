@@ -97,6 +97,7 @@ html {
   font-size: 16px;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  height: 100%;
 }
 
 body {
@@ -104,9 +105,10 @@ body {
   line-height: 1.6;
   background: var(--bg-primary);
   color: var(--text-primary);
-  min-height: 100vh;
-  overflow: hidden;
-  user-select: none;
+  min-height: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+  user-select: text;
 }
 
 
@@ -141,7 +143,7 @@ body {
   display: grid;
   grid-template-rows: auto 1fr;
   grid-template-columns: 340px 1fr;
-  height: 100vh;
+  min-height: 100dvh;
   background: var(--bg-primary);
   position: relative;
 }
@@ -213,7 +215,7 @@ body {
   display: grid;
   grid-template-rows: auto 1fr;
   grid-template-columns: 320px 1fr;
-  height: 100vh;
+  min-height: 100dvh;
   gap: 0;
 }
 
@@ -558,6 +560,7 @@ body {
 .chat__messages {
   flex: 1;
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 24px 28px;
   display: flex;
   flex-direction: column;
@@ -951,6 +954,7 @@ body {
 @media (max-width: 768px) {
   .app-shell {
     grid-template-columns: 1fr;
+    min-height: 100dvh;
   }
 
   .sidebar {
