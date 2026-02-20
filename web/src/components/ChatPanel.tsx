@@ -19,6 +19,7 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
     const { health, analytics, successRate } = useProductSignals()
     const [inferenceMode, setInferenceMode] = useState<"standard" | "distributed">("distributed")
     const [opsSummary, setOpsSummary] = useState<{ active_nodes?: number; offload_percentage_estimate?: number; estimated_gpu_savings_percent?: number; p95_latency_ms?: number }>({})
+    const [modelLabel, setModelLabel] = useState("default-model")
 
     const scrollToBottom = () => {
         messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
@@ -50,6 +51,29 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
         }
         poll()
         const timer = setInterval(poll, 5000)
+        return () => {
+            cancelled = true
+            clearInterval(timer)
+        }
+    }, [])
+
+    useEffect(() => {
+        let cancelled = false
+        const pollModel = async () => {
+            try {
+                const res = await fetch(apiUrl("/v1/system/topology"), { cache: "no-store" })
+                if (!res.ok) return
+                const data = await res.json()
+                const modelId = typeof data?.model_id === "string" ? data.model_id.trim() : ""
+                if (!cancelled && modelId) {
+                    setModelLabel(modelId)
+                }
+            } catch {
+                // ignore topology polling failures
+            }
+        }
+        pollModel()
+        const timer = setInterval(pollModel, 15000)
         return () => {
             cancelled = true
             clearInterval(timer)
@@ -128,7 +152,6 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
 
     const ready = mode !== "loading"
     const assistantMessages = messages.filter((msg) => msg.role === "assistant").length
-    const modelLabel = "shard-hybrid"
     const versionLabel = health.rust_version ? `daemon ${health.rust_version}` : "daemon unknown"
     const uptimeLabel =
         typeof health.rust_uptime_ms === "number" && health.rust_uptime_ms > 0
