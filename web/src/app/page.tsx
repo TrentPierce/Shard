@@ -258,41 +258,12 @@ export default function HomePage() {
             <Header mode={mode} rustStatus={rustStatus} />
 
             {/* Toast Notification */}
-            {toastMessage && (
-                <div
-                    style={{
-                        position: "fixed",
-                        top: "80px",
-                        left: "50%",
-                        transform: "translateX(-50%)",
-                        background: "linear-gradient(135deg, #1e293b, #0f172a)",
-                        border: "1px solid rgba(100, 200, 255, 0.3)",
-                        borderRadius: "8px",
-                        padding: "12px 24px",
-                        color: "#fff",
-                        fontSize: "13px",
-                        fontFamily: "var(--font-mono, monospace)",
-                        zIndex: 1000,
-                        boxShadow: "0 4px 20px rgba(0, 0, 0, 0.5)",
-                        animation: "fadeIn 0.3s ease"
-                    }}
-                >
-                    {toastMessage}
-                </div>
-            )}
+            {toastMessage && <div className="app-toast">{toastMessage}</div>}
 
             {/* Network Visualizer - shown in pitch mode or when in local-shard mode */}
             {(pitchMode || mode === "local-shard") && (
-                <div
-                    style={{
-                        padding: "16px",
-                        borderBottom: "1px solid rgba(100, 200, 255, 0.1)"
-                    }}
-                >
-                    <NetworkVisualizer
-                        pitchMode={pitchMode}
-                        onToast={handleToast}
-                    />
+                <div className="app-visualizer-wrap">
+                    <NetworkVisualizer pitchMode={pitchMode} onToast={handleToast} />
                 </div>
             )}
 
