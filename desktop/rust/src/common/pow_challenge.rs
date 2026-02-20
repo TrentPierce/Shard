@@ -155,7 +155,7 @@ impl PowChallengeManager {
 
         // Recompute hash: SHA-256(challenge_bytes || nonce_le_bytes)
         let expected_hash = compute_pow_hash(&challenge_bytes, solution.nonce);
-        let expected_hex = hex::encode(&expected_hash);
+        let expected_hex = hex::encode(expected_hash);
 
         if expected_hex != solution.hash_hex {
             return PowVerifyResult::HashMismatch;
@@ -302,9 +302,7 @@ mod tests {
             difficulty: 4,
             ..challenge
         };
-        manager
-            .pending
-            .insert("peer_a".to_string(), test_challenge);
+        manager.pending.insert("peer_a".to_string(), test_challenge);
 
         let result = manager.verify_solution("peer_a", &solution);
         assert_eq!(result, PowVerifyResult::Accepted);

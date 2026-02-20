@@ -57,7 +57,9 @@ pub fn select_check_rows(total_rows: usize, config: &SpotCheckConfig, seed: u64)
 
     while indices.len() < n_rows {
         // Linear congruential generator step
-        rng_state = rng_state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        rng_state = rng_state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         let idx = (rng_state >> 33) as usize % total_rows;
         if selected.insert(idx) {
             indices.push(idx);
@@ -75,12 +77,12 @@ pub fn select_check_rows(total_rows: usize, config: &SpotCheckConfig, seed: u64)
 ///
 /// All matrices are in row-major f32 format.
 pub fn verify_matmul(
-    input_a: &[f32],    // M×K flattened
-    weights_b: &[f32],  // K×N flattened
-    claimed_c: &[f32],  // M×N flattened
-    m: usize,           // rows of A / rows of C
-    k: usize,           // cols of A / rows of B
-    n: usize,           // cols of B / cols of C
+    input_a: &[f32],   // M×K flattened
+    weights_b: &[f32], // K×N flattened
+    claimed_c: &[f32], // M×N flattened
+    m: usize,          // rows of A / rows of C
+    k: usize,          // cols of A / rows of B
+    n: usize,          // cols of B / cols of C
     config: &SpotCheckConfig,
     seed: u64,
 ) -> SpotCheckResult {
@@ -112,11 +114,10 @@ pub fn verify_matmul(
             let deviation = (expected - claimed).abs();
             max_deviation = max_deviation.max(deviation);
 
-            if deviation > config.tolerance {
-                if !failed_rows.contains(&row) {
+            if deviation > config.tolerance
+                && !failed_rows.contains(&row) {
                     failed_rows.push(row);
                 }
-            }
         }
     }
 
@@ -217,7 +218,10 @@ mod tests {
         // Add perturbation exceeding tolerance
         c[0] += 2e-3;
         let result2 = verify_matmul(&a, &b, &c, m, k, n, &config, 42);
-        assert!(!result2.passed, "perturbation exceeding tolerance should fail");
+        assert!(
+            !result2.passed,
+            "perturbation exceeding tolerance should fail"
+        );
     }
 
     #[test]
@@ -227,7 +231,10 @@ mod tests {
         assert_eq!(rows1, rows2, "same seed should give same rows");
 
         let rows3 = select_check_rows(100, &SpotCheckConfig::default(), 99);
-        assert_ne!(rows1, rows3, "different seeds should likely give different rows");
+        assert_ne!(
+            rows1, rows3,
+            "different seeds should likely give different rows"
+        );
     }
 
     #[test]
