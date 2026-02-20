@@ -1027,11 +1027,9 @@ body {
 /* â•â•â• Theme Toggle â•â•â• */
 
 .theme-toggle {
-  position: fixed;
-  top: 12px;
-  right: 12px;
-  width: 40px;
-  height: 40px;
+  position: relative;
+  width: 36px;
+  height: 36px;
   border-radius: 50%;
   background: var(--glass-bg);
   backdrop-filter: blur(var(--glass-blur));
@@ -1041,7 +1039,7 @@ body {
   justify-content: center;
   cursor: pointer;
   transition: all var(--transition-fast);
-  z-index: 1000;
+  z-index: 1;
 }
 
 .theme-toggle:hover {
@@ -1872,6 +1870,7 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: .75rem;
   padding: .9rem 1.2rem;
   border-bottom: 1px solid rgba(148, 163, 184, .18);
   background: rgba(6, 10, 16, .85);
@@ -1912,6 +1911,21 @@ body {
   .landing-modern__grid,
   .landing-modern__roles { grid-template-columns: 1fr; }
   .header-modern__status { display: none; }
+}
+
+@media (max-width: 768px) {
+  .header-modern {
+    padding: .7rem .8rem;
+  }
+
+  .header-modern p,
+  .header-nav {
+    display: none;
+  }
+
+  .header-modern h1 {
+    font-size: .9rem;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
