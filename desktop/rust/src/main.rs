@@ -1787,6 +1787,42 @@ async fn process_draft_submission(
     Json(serde_json::json!({ "ok": true, "detail": "draft queued" }))
 }
 
+#[derive(Debug, Deserialize)]
+struct PowChallengeQuery {
+    peer_id: String,
+    hardware_concurrency: Option<usize>,
+    is_mobile: Option<bool>,
+}
+
+async fn pow_challenge_handler(
+    AxumState(state): AxumState<SharedState>,
+    Query(query): Query<PowChallengeQuery>,
+) -> Json<serde_json::Value> {
+    let mut manager = state.pow_manager.lock().await;
+    let concurrency = query.hardware_concurrency.unwrap_or(4);
+    let is_mobile = query.is_mobile.unwrap_or(false);
+    let challenge = manager.issue_challenge(&query.peer_id, concurrency as u32, 60_000, is_mobile);
+    Json(serde_json::json!({ "ok": true, "challenge": challenge }))
+}
+
+#[derive(Debug, Deserialize)]
+struct PowVerifyRequest {
+    peer_id: String,
+    nonce: u64,
+    hash_hex: String,
+}
+
+async fn pow_verify_handler(
+    AxumState(state): AxumState<SharedState>,
+    Json(req): Json<PowVerifyRequest>,
+) -> Json<serde_json::Value> {
+    let mut manager = state.pow_manager.lock().await;
+    use crate::common::pow_challenge::{PowSolution, PowVerifyResult};
+    let result = manager.verify_solution(&req.peer_id, &PowSolution { nonce: req.nonce, hash_hex: req.hash_hex });
+    let ok = matches!(result, PowVerifyResult::Accepted);
+    Json(serde_json::json!({ "ok": ok }))
+}
+
 async fn accept_replay_nonce(
     replay_nonces: &Arc<Mutex<HashMap<String, u64>>>,
     signer_pubkey_hex: &str,
@@ -2653,7 +2689,11 @@ fn create_router(state: SharedState) -> Router {
         )
         .route("/pop-result", get(pop_result_handler))
         .route("/pop-work", get(pop_work_handler))
+        .route("/v1/scout/work", get(pop_work_handler))
         .route("/submit-draft", post(submit_draft_handler))
+        .route("/v1/scout/draft", post(submit_draft_handler))
+        .route("/v1/pow/challenge", get(pow_challenge_handler))
+        .route("/v1/pow/verify", post(pow_verify_handler))
         .route("/signed/submit-draft", post(signed_submit_draft_handler))
         .route("/signed/register-node", post(signed_register_node_handler))
         .route("/signed/heartbeat", post(signed_heartbeat_handler))

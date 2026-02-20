@@ -38,7 +38,7 @@ export function useBrowserScout({ onTokenGenerated, onStatusChange }: BrowserSco
   })
   const [engine, setEngine] = useState<any>(null)
 
-  // Initialize WebLLM engine
+  // Initialize WebLLM engine with PoW
   const initEngine = useCallback(async (config: BrowserScoutConfig = { model: DEFAULT_MODEL, maxTokens: 64, temperature: 0.7 }) => {
     if (typeof window === "undefined" || !("gpu" in navigator)) {
       setStatus(prev => ({ ...prev, error: "WebGPU not supported in this browser" }))
@@ -49,12 +49,80 @@ export function useBrowserScout({ onTokenGenerated, onStatusChange }: BrowserSco
     onStatusChange?.({ loading: true, loaded: false, progress: 0, error: null })
 
     try {
+      // 1. Double-Dip / VRAM collision prevention
+      const { probeLocalShard } = await import("./swarm")
+      const localShard = await probeLocalShard()
+      if (localShard.available) {
+        throw new Error("Local Shard native node detected. Disabling browser GPU to prevent VRAM crash.")
+      }
+
+      // 2. PoW Challenge
+      let peerId = localStorage.getItem("shard_scout_id")
+      if (!peerId) {
+        peerId = `scout_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`
+        localStorage.setItem("shard_scout_id", peerId)
+      }
+
+      const hardwareConcurrency = navigator.hardwareConcurrency || 4
+      const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
+
+      setStatus(prev => ({ ...prev, progress: 10 })) // Status: Requesting challenge
+
+      const res = await fetch(`/v1/pow/challenge?peer_id=${peerId}&hardware_concurrency=${hardwareConcurrency}&is_mobile=${isMobile}`)
+      if (!res.ok) {
+        throw new Error(`Failed to fetch PoW challenge: ${res.statusText}`)
+      }
+      const challengeData = await res.json()
+
+      setStatus(prev => ({ ...prev, progress: 20 })) // Status: Solving PoW
+
+      // Load pow worker
+      const workerUrl = new URL('./pow_solver.ts', import.meta.url)
+      const worker = new Worker(workerUrl, { type: 'module' })
+
+      const nonce = await new Promise<number>((resolve, reject) => {
+        worker.onmessage = (e) => {
+          if (e.data.success) resolve(e.data.nonce)
+          else reject(new Error(e.data.error || "PoW failed"))
+          worker.terminate()
+        }
+        worker.onerror = (e) => {
+          reject(e)
+          worker.terminate()
+        }
+        worker.postMessage({
+          challengeHex: challengeData.challenge.challenge_bytes_hex,
+          difficulty: challengeData.challenge.difficulty,
+          hardwareConcurrency,
+          isMobile
+        })
+      })
+
+      setStatus(prev => ({ ...prev, progress: 40 })) // Status: Verifying PoW
+
+      const verifyRes = await fetch(`/v1/pow/verify`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ peer_id: peerId, nonce })
+      })
+      if (!verifyRes.ok) {
+        throw new Error(`Failed to verify PoW: ${verifyRes.statusText}`)
+      }
+      const verifyData = await verifyRes.json()
+      if (!verifyData.ok) {
+        throw new Error(`PoW verification rejected`)
+      }
+
+      // 3. Load MLCEngine
+      setStatus(prev => ({ ...prev, progress: 50 }))
+
       // Dynamic import for WebLLM
       const webllm = await import("@mlc-ai/web-llm")
-      
+
       const initProgressCallback = (report: any) => {
         const progress = report.progress || 0
-        setStatus(prev => ({ ...prev, progress: Math.round(progress * 100) }))
+        // Scale 50% to 100%
+        setStatus(prev => ({ ...prev, progress: Math.min(100, Math.round(50 + (progress * 50))) }))
       }
 
       const selectedModel = config.model
@@ -90,9 +158,9 @@ export function useBrowserScout({ onTokenGenerated, onStatusChange }: BrowserSco
 
       const content = output.choices[0]?.message?.content || ""
       const tokens: string[] = content.split(/\s+/).filter(Boolean)
-      
+
       tokens.forEach((token: string) => onTokenGenerated?.(token))
-      
+
       return tokens
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : "Generation failed"
