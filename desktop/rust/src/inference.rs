@@ -43,7 +43,7 @@ pub struct ShardEngine {
 unsafe impl Send for ShardEngine {}
 
 impl ShardEngine {
-    #[allow(missing_transmute_annotations)]
+    #[allow(clippy::missing_transmute_annotations)]
     pub fn load<P: AsRef<Path>>(dll_path: P, config: &ShardInitConfig) -> Result<Self> {
         let path_str = dll_path.as_ref().to_str().unwrap_or_default();
         if path_str.is_empty() {

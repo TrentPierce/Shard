@@ -24,6 +24,40 @@ pub struct SystemMetricsSnapshot {
     pub node_identity_auth_failures_total: u64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NodeMetricReport {
+    pub node_pubkey: String,
+    pub role: String,
+    pub queue_depth: u64,
+    pub node_latency_ms: u64,
+    pub uptime_seconds: u64,
+    #[serde(default)]
+    pub timestamp_ms: Option<u128>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct PrometheusSample {
+    pub queue_depth: usize,
+    pub active_node_count: usize,
+    pub node_latency_ms: u32,
+    pub scheduler_decision_latency_ms: u64,
+    pub e2e_latency_p50_ms: u64,
+    pub e2e_latency_p95_ms: u64,
+    pub e2e_latency_p99_ms: u64,
+    pub node_uptime_seconds: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct NodeMetricSnapshot {
+    pub node_pubkey: String,
+    pub role: String,
+    pub queue_depth: u64,
+    pub node_latency_ms: u64,
+    pub uptime_seconds: u64,
+    pub last_report_ms: u128,
+    pub healthy: bool,
+}
+
 impl SystemMetrics {
     pub fn inc_tokens_processed(&self, value: u64) {
         self.tokens_processed_total
@@ -54,17 +88,7 @@ impl SystemMetrics {
             .fetch_add(1, Ordering::Relaxed);
     }
 
-    pub fn render_prometheus(
-        &self,
-        queue_depth: usize,
-        active_node_count: usize,
-        node_latency_ms: u32,
-        scheduler_decision_latency_ms: u64,
-        e2e_latency_p50_ms: u64,
-        e2e_latency_p95_ms: u64,
-        e2e_latency_p99_ms: u64,
-        node_uptime_seconds: u64,
-    ) -> String {
+    pub fn render_prometheus(&self, sample: PrometheusSample) -> String {
         format!(
             concat!(
                 "# HELP shard_tokens_processed_total Total tokens processed.\n",
@@ -114,16 +138,17 @@ impl SystemMetrics {
             self.tokens_offloaded_to_scouts_total.load(Ordering::Relaxed),
             self.verification_fallback_total.load(Ordering::Relaxed),
             self.task_failures_total.load(Ordering::Relaxed),
-            self.signature_verification_failures_total.load(Ordering::Relaxed),
+            self.signature_verification_failures_total
+                .load(Ordering::Relaxed),
             self.node_identity_auth_failures_total.load(Ordering::Relaxed),
-            queue_depth,
-            active_node_count,
-            node_latency_ms,
-            scheduler_decision_latency_ms,
-            e2e_latency_p50_ms,
-            e2e_latency_p95_ms,
-            e2e_latency_p99_ms,
-            node_uptime_seconds,
+            sample.queue_depth,
+            sample.active_node_count,
+            sample.node_latency_ms,
+            sample.scheduler_decision_latency_ms,
+            sample.e2e_latency_p50_ms,
+            sample.e2e_latency_p95_ms,
+            sample.e2e_latency_p99_ms,
+            sample.node_uptime_seconds,
         )
     }
 
@@ -143,28 +168,6 @@ impl SystemMetrics {
                 .load(Ordering::Relaxed),
         }
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct NodeMetricReport {
-    pub node_pubkey: String,
-    pub role: String,
-    pub queue_depth: u64,
-    pub node_latency_ms: u64,
-    pub uptime_seconds: u64,
-    #[serde(default)]
-    pub timestamp_ms: Option<u128>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct NodeMetricSnapshot {
-    pub node_pubkey: String,
-    pub role: String,
-    pub queue_depth: u64,
-    pub node_latency_ms: u64,
-    pub uptime_seconds: u64,
-    pub last_report_ms: u128,
-    pub healthy: bool,
 }
 
 #[cfg(test)]

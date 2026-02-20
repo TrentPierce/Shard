@@ -74,7 +74,7 @@ use ledger::sync::{hash_probe_segments, LedgerSyncRequest, LedgerSyncResponse};
 use mesh::race_router::{RaceKey, RaceRouter, RaceSubmitOutcome};
 use metrics::cost::{estimate as estimate_cost, CostEstimateInput};
 use metrics::persistence::{MetricsPersistence, PersistedNodeMetricReport};
-use metrics::{NodeMetricReport, NodeMetricSnapshot, SystemMetrics};
+use metrics::{NodeMetricReport, NodeMetricSnapshot, PrometheusSample, SystemMetrics};
 use network::layer_registry::{provider_key, LayerHostAnnouncement, LayerRoutingTable};
 use network::obfuscation::{deobfuscate_bytes, obfuscate_bytes, random_nonce};
 use network::tensor_wire::TensorWirePacket;
@@ -1991,16 +1991,16 @@ async fn metrics_handler(AxumState(state): AxumState<SharedState>) -> Response {
     let p = state.gossipsub_latency_hist.percentiles();
     let uptime_seconds = ((now_ms().saturating_sub(state.daemon_start)) / 1000) as u64;
 
-    let body = state.system_metrics.render_prometheus(
+    let body = state.system_metrics.render_prometheus(PrometheusSample {
         queue_depth,
         active_node_count,
         node_latency_ms,
-        0,
-        p.p50_ms,
-        p.p90_ms,
-        p.p99_ms,
-        uptime_seconds,
-    );
+        scheduler_decision_latency_ms: 0,
+        e2e_latency_p50_ms: p.p50_ms,
+        e2e_latency_p95_ms: p.p90_ms,
+        e2e_latency_p99_ms: p.p99_ms,
+        node_uptime_seconds: uptime_seconds,
+    });
 
     (
         [(
