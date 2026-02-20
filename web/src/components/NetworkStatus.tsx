@@ -6,8 +6,8 @@ import type { Topology } from "@/lib/swarm"
 import { heartbeatShard } from "@/lib/swarm"
 import type { ModelProgress } from "@/lib/webllm"
 import { apiUrl } from "@/lib/config"
-import { listen } from '@tauri-apps/api/event';
 import { modeLabels } from "./Header"
+import { listen } from '@tauri-apps/api/event';
 
 interface NetworkStatusProps {
     mode: NodeMode
@@ -87,7 +87,7 @@ export default function NetworkStatus({
     }
 
     return (
-        <aside className="w-[340px] shrink-0 bg-secondary border-r border-glass-border p-8 flex flex-col gap-10 h-screen overflow-y-auto select-none" role="complementary">
+        <aside className="hidden lg:flex w-[340px] shrink-0 bg-secondary border-r border-glass-border p-6 xl:p-8 flex-col gap-8 xl:gap-10 min-h-0 overflow-y-auto select-none" role="complementary">
             {/* ── Neural Core ── */}
             <div className="flex flex-col gap-5">
                 <div className="flex items-center justify-between">

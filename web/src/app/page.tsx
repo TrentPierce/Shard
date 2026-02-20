@@ -296,14 +296,16 @@ export default function HomePage() {
                 </div>
             )}
 
-            <NetworkStatus
-                mode={mode}
-                topology={topologyData}
-                rustStatus={rustStatus}
-                webLLMProgress={webLLMProgress}
-                webLLMError={webLLMError}
-            />
-            <ChatPanel mode={mode} />
+            <div className="app-main">
+                <NetworkStatus
+                    mode={mode}
+                    topology={topologyData}
+                    rustStatus={rustStatus}
+                    webLLMProgress={webLLMProgress}
+                    webLLMError={webLLMError}
+                />
+                <ChatPanel mode={mode} />
+            </div>
         </div>
     )
 }
