@@ -11,7 +11,7 @@ set -euo pipefail
 #   scripts/ec2_pipeline_testnet.sh <ec2_host> <ssh_key_path> [five]
 #
 # Example:
-#   scripts/ec2_pipeline_testnet.sh 54.224.107.75 ~/.ssh/ClawdBot.pem five
+#   scripts/ec2_pipeline_testnet.sh bootstrap.shardnetwork.live ~/.ssh/ClawdBot.pem five
 
 EC2_HOST="${1:-}"
 SSH_KEY="${2:-}"

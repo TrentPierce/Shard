@@ -16,7 +16,7 @@ export const viewport: Viewport = {
 }
 
 export const metadata: Metadata = {
-    metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL || "https://shard.vercel.app"),
+    metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL || "https://shardnetwork.live"),
     title: "Shard — Browser-Powered Distributed Inference",
     description:
         "Free, unlimited LLM access powered by a decentralized P2P inference mesh. Contribute browser compute via WebGPU, earn priority access. OpenAI-compatible API.",

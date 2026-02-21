@@ -2,10 +2,23 @@
   "buildCommand": "cd web && npm run build && cd .. && rm -rf .next && cp -R web/.next .next && cp -R web/public public && cp web/package.json package.json",
   "installCommand": "cd web && npm install",
   "framework": "nextjs",
+  "redirects": [
+    {
+      "source": "/:path*",
+      "has": [
+        {
+          "type": "host",
+          "value": "shard-7a1baw7v9-trents-projects-20e9a51a.vercel.app"
+        }
+      ],
+      "destination": "https://shardnetwork.live/:path*",
+      "permanent": true
+    }
+  ],
   "rewrites": [
     {
       "source": "/api/:path*",
-      "destination": "https://35.175.242.222.nip.io/:path*"
+      "destination": "https://api.shardnetwork.live/:path*"
     }
   ]
 }
