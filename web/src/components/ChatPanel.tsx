@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import type { NodeMode } from "@/lib/context"
+import { useAppContext, type NodeMode } from "@/lib/context"
 import { sendMessage, type ChatMessage } from "@/lib/api"
 import { useProductSignals } from "@/hooks/useProductSignals"
 import { apiUrl } from "@/lib/config"
