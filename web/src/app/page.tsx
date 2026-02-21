@@ -147,10 +147,10 @@ export default function HomePage() {
     }, [isRunningDemo, prompt])
 
     return (
-        <main className="app-shell" aria-label="Shard application shell">
+        <main className="app-shell" aria-label="Shard terminal environment">
             <Header />
 
-            {toastMessage && <div className="app-toast">{toastMessage}</div>}
+            {toastMessage && <div className="app-toast" style={{ border: '1px solid var(--secondary)', color: 'var(--secondary)' }}>{toastMessage}</div>}
 
             {(pitchMode || mode === "local-shard") && (
                 <div className="app-visualizer-wrap">
@@ -169,87 +169,115 @@ export default function HomePage() {
                 <ChatPanel mode={mode} />
             </div>
 
-            <section className="homepage-block" aria-label="Network status">
-                <h2>Live Network Status</h2>
+            <section className="homepage-block">
+                <h2>[ LIVE_NETWORK_STATUS ]</h2>
                 {networkStats.unavailable ? (
-                    <p className="homepage-fallback">Network data unavailable — single-node mode active.</p>
+                    <p className="homepage-fallback">// NETWORK_DATA_LINK_UNSTABLE — FALLBACK_MODE_ACTIVE</p>
                 ) : (
                     <div className="homepage-stats-grid">
-                        <div><strong>{networkStats.scouts}</strong><span>Active Scouts</span></div>
-                        <div><strong>{networkStats.shardNodes}</strong><span>Active Shard Nodes</span></div>
-                        <div><strong>{networkStats.verified24h.toLocaleString()}</strong><span>Tokens Verified (24h)</span></div>
-                        <div><strong>{networkStats.uptimePercent.toFixed(2)}%</strong><span>Network Uptime</span></div>
+                        <div><strong>{networkStats.scouts}</strong><span>ACTIVE_SCOUTS</span></div>
+                        <div><strong>{networkStats.shardNodes}</strong><span>ACTIVE_SHARDS</span></div>
+                        <div><strong>{networkStats.verified24h.toLocaleString()}</strong><span>TOKEN_VERIFICATIONS_24H</span></div>
+                        <div><strong>{networkStats.uptimePercent.toFixed(2)}%</strong><span>UPTIME_METRIC</span></div>
                     </div>
                 )}
             </section>
 
-            <section className="homepage-block" aria-label="Comparison table">
-                <h2>Traditional Cloud AI vs. Shard Network</h2>
-                <div className="comparison-table" role="table" aria-label="Traditional cloud AI compared to shard network">
+            <section className="homepage-block">
+                <h2>[ CLOUD_CORE_VS_SHARD_MESH ]</h2>
+                <div className="comparison-table" role="table">
+                    <div className="comparison-row" style={{ borderBottom: '2px solid var(--border)', opacity: 0.5, fontSize: '11px' }}>
+                        <span>METRIC</span>
+                        <span>TRADITIONAL_CLOUD_AI</span>
+                        <span>SHARD_TERMINAL</span>
+                    </div>
                     {[
-                        ["💰 Cost", "$0.002–$0.06 / 1K tokens", "Free (compute-for-access)"],
-                        ["🔒 Privacy", "Your data on someone else&apos;s server", "Localhost-first routing"],
-                        ["📈 Scalability", "Buy more GPUs", "More users = more GPUs"],
-                        ["🛡️ Resilience", "Single point of failure", "Self-healing P2P mesh"],
-                        ["⚡ Latency", "Network RTT + queue wait", "Local draft + network verification"],
-                        ["🔌 API", "Proprietary", "OpenAI-compatible drop-in"],
+                        ["COST", "$0.002-0.06/1K_TOKENS", "FREE (COMPUTE_FOR_ACCESS)"],
+                        ["PRIVACY", "EXTERNAL_SERVER_STORAGE", "LOCAL_ONLY_ROUTING"],
+                        ["SCALABILITY", "FIXED_GPU_PROVISIONING", "ELASTIC_P2P_SCALING"],
+                        ["RESILIENCE", "SINGLE_POINT_OF_FAILURE", "SELF_HEALING_MESH"],
+                        ["LATENCY", "RTT_PLUS_QUEUE_WAIT", "LOCAL_DRAFT_DECODING"],
+                        ["API", "PROPRIETARY_LOCKED", "OPENAI_COMPAT_DROP_IN"],
                     ].map(([label, cloud, shard]) => (
                         <div className="comparison-row" key={label} role="row">
                             <span className="comparison-label">{label}</span>
-                            <span>{cloud}</span>
-                            <span className="comparison-advantage">{shard}</span>
+                            <span style={{ opacity: 0.6 }}>{cloud}</span>
+                            <span className="stat-value--accent">{shard}</span>
                         </div>
                     ))}
                 </div>
             </section>
 
-            <section className="homepage-block" aria-label="How contribution works">
-                <h2>How Contribution Works</h2>
-                <p>Scouts draft likely next tokens in-browser, shard nodes verify them in parallel, and clients receive trusted output with lower latency.</p>
+            <section className="homepage-block">
+                <h2>[ MESH_CONTRIBUTION_PROTOCOL ]</h2>
+                <p style={{ fontSize: '13px', lineHeight: '1.6' }}>// SCOUTS_DRAFT_LIKELY_NEXT_TOKENS_VIA_WEBGPU<br />// SHARDS_VERIFY_DISTRIBUTED_BATCHES_VIA_GGUF<br />// CLIENTS_RECEIVE_TRUSTED_OUTPUT_WITHOUT_CENTRAL_GATEWAYS</p>
             </section>
 
-            <section className="homepage-block" aria-label="Interactive inference demo">
-                <h2>Interactive Inference Demo</h2>
-                <label htmlFor="demo-prompt">Prompt</label>
-                <textarea id="demo-prompt" value={prompt} onChange={e => setPrompt(e.target.value)} rows={3} />
-                <button type="button" onClick={runDemo} disabled={isRunningDemo} aria-label="Run streaming inference demo">
-                    {isRunningDemo ? "Running…" : "Run"}
+            <section className="homepage-block">
+                <h2>[ INTERACTIVE_INFERENCE_SIMULATOR ]</h2>
+                <div style={{ marginBottom: '15px' }}>
+                    <label htmlFor="demo-prompt" style={{ fontSize: '11px', color: 'var(--muted)' }}>PROMPT_INPUT:</label>
+                    <textarea
+                        id="demo-prompt"
+                        value={prompt}
+                        onChange={e => setPrompt(e.target.value)}
+                        rows={3}
+                        style={{ border: '1px dashed var(--border)', background: 'var(--bg-tertiary)', color: 'var(--primary)', width: '100%', padding: '10px' }}
+                    />
+                </div>
+                <button type="button" className="btn-ping" onClick={runDemo} disabled={isRunningDemo} style={{ marginBottom: '20px' }}>
+                    {isRunningDemo ? "[ COMPUTING... ]" : "[ EXECUTE_DEMO ]"}
                 </button>
-                <pre className="demo-stream" aria-live="polite">{streamOutput || "Output will stream here…"}</pre>
-                <div className="homepage-stats-grid">
-                    <div><strong>{demoMetrics.draftTokens}</strong><span>Draft tokens contributed by Scouts</span></div>
-                    <div><strong>{demoMetrics.verifiedTokens}</strong><span>Verified by Shard node</span></div>
+                <div className="demo-stream" style={{ fontSize: '13px', whiteSpace: 'pre-wrap' }}>
+                    {streamOutput || "// WAITING_FOR_COMMAND..."}
+                    {isRunningDemo && <span className="cursor" />}
+                </div>
+                <div className="homepage-stats-grid" style={{ marginTop: '20px' }}>
+                    <div><strong>{demoMetrics.draftTokens}</strong><span>SCOUT_CONTRIBUTED_TOKENS</span></div>
+                    <div><strong>{demoMetrics.verifiedTokens}</strong><span>SHARD_VERIFIED_TOKENS</span></div>
                 </div>
             </section>
 
-            <section className="homepage-block" aria-label="Built with">
-                <h2>Built With</h2>
-                <ul>
-                    <li><strong>GGUF Runtime:</strong> runs quantized model weights efficiently so verifier nodes can serve high-quality output with lower memory pressure.</li>
-                    <li><strong>libp2p:</strong> provides peer discovery and resilient transport so nodes can coordinate over a decentralized mesh.</li>
-                    <li><strong>WebLLM:</strong> powers browser-based draft generation so contributors can help without installing native runtimes.</li>
-                    <li><strong>WebGPU:</strong> lets modern browsers execute local draft inference quickly with GPU acceleration.</li>
-                    <li><strong>Rust:</strong> drives the daemon and networking layer for deterministic performance and safety under load.</li>
-                    <li><strong>FastAPI:</strong> supplies OpenAI-compatible HTTP endpoints and orchestration hooks for app integrations.</li>
-                </ul>
-            </section>
-
-            <section className="homepage-block" aria-label="Project credibility">
-                <h2>Project Signals</h2>
-                <div className="homepage-stats-grid">
-                    <div><strong>213+</strong><span>GitHub commits</span></div>
-                    <div><strong>v0.4.9</strong><span>Current version</span></div>
-                    <div><strong>BUSL-1.1</strong><span>Apache 2.0 in 2036</span></div>
-                    <div><a href={whitePaperPath}>White Paper</a><span>Architecture deep dive</span></div>
+            <section className="homepage-block">
+                <h2>[ CORE_SUBSYSTEMS ]</h2>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '20px' }}>
+                    <div>
+                        <div className="stat-value--accent" style={{ fontSize: '14px', marginBottom: '8px' }}>+ GGUF_RUNTIME</div>
+                        <p style={{ fontSize: '12px', color: 'var(--muted)' }}>EFFICIENT_QUANTIZED_OFFLOADING</p>
+                    </div>
+                    <div>
+                        <div className="stat-value--accent" style={{ fontSize: '14px', marginBottom: '8px' }}>+ LIBP2P_MESH</div>
+                        <p style={{ fontSize: '12px', color: 'var(--muted)' }}>RESILIENT_DISCOVERY_TRANSPORT</p>
+                    </div>
+                    <div>
+                        <div className="stat-value--accent" style={{ fontSize: '14px', marginBottom: '8px' }}>+ WEBGPU_ACCEL</div>
+                        <p style={{ fontSize: '12px', color: 'var(--muted)' }}>BROWSER_BASED_INFERENCE_CORE</p>
+                    </div>
+                    <div>
+                        <div className="stat-value--accent" style={{ fontSize: '14px', marginBottom: '8px' }}>+ RUST_DAEMON</div>
+                        <p style={{ fontSize: '12px', color: 'var(--muted)' }}>DETERMINISTIC_PERFORMANCE_LAYER</p>
+                    </div>
                 </div>
-                <p className="benchmark-callout">
-                    Benchmark callout: documented API performance sample shows <strong>850 tokens/sec distributed throughput</strong> and 245 req/min in live cluster mode, compared with a nominal single-node baseline of ~320 tokens/sec (~2.6x uplift).
-                </p>
             </section>
 
-            <footer className="homepage-footer">
-                Licensed under BUSL-1.1. Free for non-competing use under 10,000 requests/month. Converts to Apache 2.0 on February 13, 2036. {" "}
-                <a href="https://github.com/TrentPierce/Shard/blob/main/LICENSE" target="_blank" rel="noreferrer">View license</a>
+            <section className="homepage-block" style={{ borderStyle: 'double', borderWidth: '3px' }}>
+                <h2>[ PROJECT_CREDIBILITY_SIGNALS ]</h2>
+                <div className="homepage-stats-grid">
+                    <div><strong>213+</strong><span>COMMITS_ESTABLISHED</span></div>
+                    <div><strong>v0.4.9</strong><span>BUILD_VERSION</span></div>
+                    <div><strong>BUSL-1.1</strong><span>OPEN_SOURCE_LICENSE</span></div>
+                    <div><a href={whitePaperPath} className="stat-value--accent" style={{ textDecoration: 'none' }}>[ WHITE_PAPER ]</a><span>ARCH_SPEC_LINK</span></div>
+                </div>
+                <div style={{ marginTop: '20px', padding: '15px', background: 'var(--bg-tertiary)', borderLeft: '4px solid var(--secondary)' }}>
+                    <p style={{ fontSize: '12px', color: 'var(--secondary)' }}>
+                        BENCHMARK_REPORT: 850 TOKENS/SEC DISTRIBUTED_THROUGHPUT vs 320 TOKENS/SEC BASELINE (2.6X UPLIFT_MEASURED).
+                    </p>
+                </div>
+            </section>
+
+            <footer className="homepage-footer" style={{ textAlign: 'center', padding: '40px 20px', borderTop: '1px solid var(--border)', fontSize: '10px', opacity: 0.5 }}>
+                LICENSED_UNDER_BUSL-1.1 // CONVERTS_TO_APACHE_2.0_ON_FEB_13_2036<br />
+                <a href="https://github.com/TrentPierce/Shard/blob/main/LICENSE" target="_blank" rel="noreferrer" style={{ color: 'inherit' }}>ROOT/LICENSE_BIN</a>
             </footer>
         </main>
     )

@@ -43,103 +43,50 @@ export default function Header() {
     }
 
     return (
-        <header className="header-modern" data-tauri-drag-region>
-            <div className="header-modern__brand">
-                <div className="header-modern__logo" aria-hidden="true">S</div>
+        <header className="header" data-tauri-drag-region>
+            <div className="header__brand">
+                <div className="header__logo" aria-hidden="true">[S]</div>
                 <div>
-                    <h1>Shard</h1>
-                    <p>Neural Mesh</p>
+                    <h1 className="header__title">SHARD_TERMINAL</h1>
+                    <p className="header__subtitle">v0.4.9 // NEURAL_MESH_ESTABLISHED</p>
                 </div>
             </div>
 
-            <nav className="header-nav">
+            <nav className="header-nav" style={{ display: 'flex', gap: '20px' }}>
                 {navItems.map((item) => {
                     const isActive = pathname === item.href
                     return (
                         <Link
                             key={item.name}
                             href={item.href}
-                            className={`header-nav__item ${isActive ? "header-nav__item--active" : ""}`}
+                            style={{
+                                color: isActive ? 'var(--primary)' : 'var(--muted)',
+                                textDecoration: 'none',
+                                textTransform: 'uppercase',
+                                fontSize: '12px',
+                                letterSpacing: '2px',
+                                borderBottom: isActive ? '2px solid var(--primary)' : 'none'
+                            }}
                         >
-                            <span className="header-nav__icon">{item.icon}</span>
-                            <span className="header-nav__name">{item.name}</span>
+                            {isActive ? '> ' : ''}{item.name}
                         </Link>
                     )
                 })}
             </nav>
 
-            <div className="header-modern__right">
-                <div className="header-modern__status" aria-live="polite">
-                    <span className={`header-modern__dot header-modern__dot--${rustStatus}`} />
-                    <span>{rustStatus}</span>
-                    <span className="header-modern__divider" />
-                    <strong>{modeLabels[mode]}</strong>
+            <div className="header-modern__right" style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
+                <div className="header__mode" aria-live="polite">
+                    STATUS: <span className={`stat-value--${rustStatus === 'connected' ? 'accent' : 'error'}`}>{rustStatus}</span>
+                    <span style={{ margin: '0 10px', opacity: 0.3 }}>|</span>
+                    MODE: <strong>{modeLabels[mode]}</strong>
                 </div>
-                <ThemeToggle />
                 {isDesktop && (
-                    <div className="header-modern__window-actions">
-                        <button type="button" onClick={handleMinimize} aria-label="Minimize window">—</button>
-                        <button type="button" onClick={handleClose} aria-label="Close window">×</button>
+                    <div className="header-modern__window-actions" style={{ display: 'flex', gap: '5px' }}>
+                        <button type="button" className="btn-ping" style={{ padding: '2px 8px' }} onClick={handleMinimize} aria-label="Minimize window">_</button>
+                        <button type="button" className="btn-ping" style={{ padding: '2px 8px', borderColor: 'var(--error)', color: 'var(--error)' }} onClick={handleClose} aria-label="Close window">X</button>
                     </div>
                 )}
             </div>
-            <style jsx>{`
-                .header-nav {
-                    display: flex;
-                    gap: 4px;
-                    background: rgba(255, 255, 255, 0.03);
-                    padding: 4px;
-                    border-radius: var(--radius-lg);
-                    border: 1px solid var(--glass-border);
-                }
-                :global([data-theme="light"]) .header-nav {
-                    background: rgba(255, 255, 255, 0.88);
-                    border-color: rgba(15, 23, 42, 0.14);
-                }
-                .header-nav__item {
-                    display: flex;
-                    align-items: center;
-                    gap: 8px;
-                    padding: 6px 14px;
-                    border-radius: var(--radius-md);
-                    text-decoration: none;
-                    color: var(--text-secondary);
-                    font-size: 13px;
-                    font-weight: 600;
-                    transition: all var(--transition-fast);
-                }
-                .header-nav__item:hover {
-                    color: var(--text-primary);
-                    background: rgba(255, 255, 255, 0.05);
-                }
-                .header-nav__item:focus-visible {
-                    outline: 2px solid var(--accent-blue);
-                    outline-offset: 2px;
-                }
-                :global([data-theme="light"]) .header-nav__item {
-                    color: #334155;
-                }
-                :global([data-theme="light"]) .header-nav__item:hover {
-                    color: #0f172a;
-                    background: rgba(37, 99, 235, 0.1);
-                }
-                .header-nav__item--active {
-                    color: var(--accent-cyan);
-                    background: rgba(56, 139, 180, 0.12);
-                }
-                :global([data-theme="light"]) .header-nav__item--active {
-                    color: #1d4ed8;
-                    background: rgba(37, 99, 235, 0.14);
-                }
-                @media (max-width: 900px) {
-                    .header-nav__name {
-                        display: none;
-                    }
-                    .header-nav__item {
-                        padding: 6px;
-                    }
-                }
-            `}</style>
         </header>
     )
 }
