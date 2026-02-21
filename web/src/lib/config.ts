@@ -48,7 +48,8 @@ export const PREFER_LOCAL_SHARD = process.env.NEXT_PUBLIC_PREFER_LOCAL_SHARD ===
 /**
  * Get the API URL for the Shard API.
  * 
- * On Vercel: returns "https://35.175.242.222.nip.io/health", etc.
+ * On Vercel: returns "/api/health", "/api/v1/system/peers", etc.
+ *            This hits the Next.js API route proxy which forwards to EC2.
  * Locally:   returns "http://127.0.0.1:9091/health", etc.
  */
 export function apiUrl(path: string = "/v1"): string {
@@ -60,13 +61,12 @@ export function apiUrl(path: string = "/v1"): string {
     return `${base}${cleanPath}`
   }
 
-  // 2. On deployed environments (Vercel), force the reliable nip.io backend
+  // 2. On deployed environments (Vercel), use the Next.js proxy
   if (typeof window !== "undefined" && isDeployed()) {
-    return `https://35.175.242.222.nip.io${cleanPath}`
+    return `/api${cleanPath}`
   }
 
   // 3. Local development: hit the local Rust daemon directly
-  // Use port 9091 which is the control plane port
   return `http://127.0.0.1:9091${cleanPath}`
 }
 
