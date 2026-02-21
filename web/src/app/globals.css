@@ -239,6 +239,10 @@ body {
   .app-main {
     grid-template-columns: 1fr;
   }
+
+  .sidebar {
+    display: none;
+  }
 }
 
 /* â•â•â• Header â•â•â• */
