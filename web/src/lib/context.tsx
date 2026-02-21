@@ -109,34 +109,41 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         const boot = async () => {
             scoutBootedRef.current = true
             
-            // Ensure we have fresh topology data immediately
-            await refetchTopologyData()
-
-            if (PREFER_LOCAL_SHARD) {
-                const probe = await probeLocalShard()
-                if (probe.available) {
-                    setMode("local-shard")
-                    return
-                }
-            }
-            setMode("scout-initializing")
             try {
+                // Ensure we have fresh topology data immediately
+                await refetchTopologyData()
+
+                if (PREFER_LOCAL_SHARD) {
+                    const probe = await probeLocalShard()
+                    if (probe.available) {
+                        setMode("local-shard")
+                        return
+                    }
+                }
+                
+                setMode("scout-initializing")
                 const gpuStatus = await checkWebGPUSupport()
+                
                 if (!gpuStatus.supported) {
+                    console.warn(`[Shard] WebGPU unavailable (${gpuStatus.reason}), defaulting to Consumer mode`)
                     setWebLLMError(`WebGPU not available: ${gpuStatus.reason}`)
                     setMode("leech")
                     return
                 }
+
                 await initWebLLM((progress) => setWebLLMProgress(progress))
                 setWebLLMProgress(null)
                 setWebLLMError(null)
                 setMode("scout")
+                
                 try {
                     stopScoutWorkerRef.current = await startScoutWorker()
                 } catch (e) { console.error(e) }
+                
                 try {
                     stopLayerHostRef.current = await startBrowserLayerHost({ modelId: "default-model", layerStart: 0, layerEnd: 1 })
                 } catch (e) { console.warn(e) }
+                
                 try {
                     const liveTopology = await fetchTopology()
                     const bootstrapPeers = getBootstrapPeersFromTopology(liveTopology)
@@ -144,10 +151,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                     subscribeToWork((work) => console.log("Work:", work.request_id))
                     subscribeToResults((result) => { publishResult(result) })
                 } catch (e) { console.error(e) }
+
             } catch (error: any) {
+                console.error("[Shard] Boot failed:", error)
                 setWebLLMError(error?.message ?? "Failed to initialize Scout")
                 setMode("leech")
-                scoutBootedRef.current = false
             }
         }
         boot()
@@ -155,7 +163,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             stopScoutWorkerRef.current?.()
             stopLayerHostRef.current?.()
         }
-    }, [scoutRetryNonce, getBootstrapPeersFromTopology])
+    }, [scoutRetryNonce, getBootstrapPeersFromTopology, refetchTopologyData])
 
     return (
         <AppContext.Provider value={{
