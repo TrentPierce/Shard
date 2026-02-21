@@ -1,0 +1,19 @@
+<svg width="1200" height="630" viewBox="0 0 1200 630" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1200" y2="630" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#070A12"/>
+      <stop offset="1" stop-color="#0D1830"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="220" y1="130" x2="950" y2="490" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#3E8BFF"/>
+      <stop offset="1" stop-color="#00EAFF"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="630" fill="url(#bg)"/>
+  <circle cx="190" cy="120" r="180" fill="#3E8BFF" fill-opacity="0.16"/>
+  <circle cx="1030" cy="500" r="220" fill="#00EAFF" fill-opacity="0.14"/>
+  <rect x="120" y="90" width="960" height="450" rx="28" fill="#0F172A" fill-opacity="0.75" stroke="url(#accent)" stroke-width="2"/>
+  <text x="180" y="250" fill="#E2E8F0" font-family="Inter, Arial, sans-serif" font-weight="700" font-size="68">Shard Network</text>
+  <text x="180" y="332" fill="#7DD3FC" font-family="Inter, Arial, sans-serif" font-weight="600" font-size="40">Browser-powered distributed inference</text>
+  <text x="180" y="400" fill="#CBD5E1" font-family="Inter, Arial, sans-serif" font-size="30">Contribute WebGPU compute. Get resilient AI responses.</text>
+</svg>

@@ -32,7 +32,7 @@ export default function HomePage() {
     }, [])
 
     return (
-        <div className="app-shell">
+        <main className="app-shell" aria-label="Shard application shell">
             <Header />
 
             {/* Toast Notification */}
@@ -55,6 +55,6 @@ export default function HomePage() {
                 />
                 <ChatPanel mode={mode} />
             </div>
-        </div>
+        </main>
     )
 }

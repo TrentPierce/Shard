@@ -1,5 +1,3 @@
-﻿@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=Inter:wght@300;400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap');
-
 :root {
   /* -- Palette -- Deep Space & Radiant Neon -- */
   --bg-primary: #050608;
@@ -43,9 +41,9 @@
   --shadow-glow-cyan: 0 0 30px rgba(0, 234, 255, 0.1);
   --shadow-glow-emerald: 0 0 30px rgba(0, 255, 157, 0.1);
 
-  --font-sans: 'Inter', system-ui, sans-serif;
-  --font-display: 'Outfit', sans-serif;
-  --font-mono: 'IBM Plex Mono', monospace;
+  --font-sans: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  --font-display: system-ui, -apple-system, Segoe UI, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
 
   --transition-smooth: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   --transition-fast: 160ms ease;
@@ -548,6 +546,12 @@ body {
   padding: 4px 8px;
 }
 
+.chat__signal-chip--select {
+  cursor: pointer;
+  outline: none;
+  background: var(--bg-tertiary);
+}
+
 .chat__status-group {
   display: flex;
   gap: 8px;
@@ -656,6 +660,13 @@ body {
   background: rgba(30, 41, 59, 0.5);
 }
 
+.chat__quick-btn:focus-visible,
+.chat__send-btn:focus-visible,
+.chat__signal-chip--select:focus-visible {
+  outline: 2px solid var(--accent-blue);
+  outline-offset: 2px;
+}
+
 
 :root[data-theme="light"] .chat__quick-btn {
   border-color: rgba(15, 23, 42, 0.22);
@@ -718,6 +729,18 @@ body {
 
 :root[data-theme="light"] .theme-toggle {
   background: rgba(255, 255, 255, 0.88);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 :focus-visible {
@@ -1922,7 +1945,19 @@ body {
 .landing-modern__lead { max-width: 64ch; color: #cbd5e1; }
 .landing-modern__actions { display: flex; gap: .8rem; margin-top: 1.2rem; flex-wrap: wrap; }
 .landing-modern__btn { border-radius: 999px; padding: .72rem 1.15rem; font-weight: 600; text-decoration: none; transition: transform .2s ease, box-shadow .2s ease; }
-.landing-modern__btn:focus-visible { outline: 2px solid #7dd3fc; outline-offset: 2px; }
+.landing-modern__btn.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+:focus-visible { outline: 2px solid #7dd3fc; outline-offset: 2px; }
 .landing-modern__btn:hover { transform: translateY(-1px); }
 .landing-modern__btn--primary { border: none; background: linear-gradient(135deg, #38bdf8, #6366f1); color: #fff; box-shadow: 0 10px 24px rgba(56, 189, 248, .25); }
 .landing-modern__btn--ghost { border: 1px solid rgba(148, 163, 184, .4); color: #e2e8f0; }

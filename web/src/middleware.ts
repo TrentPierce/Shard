@@ -1,15 +1,35 @@
-import { NextResponse } from 'next/server'
-import type { NextRequest } from 'next/server'
+import { NextResponse } from "next/server"
+import type { NextRequest } from "next/server"
+
+const DEFAULT_CONNECT_SOURCES = [
+  "'self'",
+  "https:",
+  "wss:",
+  "http://127.0.0.1:*",
+  "http://localhost:*",
+  "ws://127.0.0.1:*",
+  "ws://localhost:*",
+]
+
+const buildConnectSources = () => {
+  const extraOrigins = (process.env.NEXT_PUBLIC_CONNECT_SRC_ALLOWLIST ?? "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean)
+
+  return [...DEFAULT_CONNECT_SOURCES, ...extraOrigins].join(" ")
+}
 
 export function middleware(request: NextRequest) {
-    const nonce = Buffer.from(crypto.randomUUID()).toString('base64')
+  const nonce = crypto.randomUUID().replace(/-/g, "")
+  const isDev = process.env.NODE_ENV !== "production"
 
-    const cspHeader = `
+  const cspHeader = `
     default-src 'self';
-    script-src 'self' 'unsafe-inline' 'unsafe-eval' blob: https:;
-    style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
-    font-src 'self' https://fonts.gstatic.com data:;
-    connect-src 'self' http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:* https: wss: *;
+    script-src 'self' 'nonce-${nonce}' ${isDev ? "'unsafe-eval'" : ""} blob:;
+    style-src 'self' 'unsafe-inline';
+    font-src 'self' data:;
+    connect-src ${buildConnectSources()};
     img-src 'self' data: blob: https:;
     worker-src 'self' blob:;
     child-src 'self' blob:;
@@ -17,31 +37,33 @@ export function middleware(request: NextRequest) {
     base-uri 'self';
     form-action 'self';
     frame-ancestors 'none';
-  `.replace(/\s{2,}/g, ' ').trim()
+    upgrade-insecure-requests;
+  `
+    .replace(/\s{2,}/g, " ")
+    .trim()
 
-    const requestHeaders = new Headers(request.headers)
-    requestHeaders.set('x-nonce', nonce)
-    requestHeaders.set('Content-Security-Policy', cspHeader)
+  const requestHeaders = new Headers(request.headers)
+  requestHeaders.set("x-nonce", nonce)
 
-    const response = NextResponse.next({
-        request: {
-            headers: requestHeaders,
-        },
-    })
+  const response = NextResponse.next({
+    request: {
+      headers: requestHeaders,
+    },
+  })
 
-    response.headers.set('Content-Security-Policy', cspHeader)
+  response.headers.set("Content-Security-Policy", cspHeader)
 
-    return response
+  return response
 }
 
 export const config = {
-    matcher: [
-        {
-            source: '/((?!api|_next/static|_next/image|favicon.ico).*)',
-            missing: [
-                { type: 'header', key: 'next-router-prefetch' },
-                { type: 'header', key: 'purpose', value: 'prefetch' },
-            ],
-        },
-    ],
+  matcher: [
+    {
+      source: "/((?!api|_next/static|_next/image|favicon.ico).*)",
+      missing: [
+        { type: "header", key: "next-router-prefetch" },
+        { type: "header", key: "purpose", value: "prefetch" },
+      ],
+    },
+  ],
 }
