@@ -7,14 +7,26 @@ export const viewport: Viewport = {
     width: "device-width",
     initialScale: 1,
     maximumScale: 5,
-    themeColor: "#06060e",
+    colorScheme: "dark light",
+    themeColor: [
+        { media: "(prefers-color-scheme: dark)", color: "#06060e" },
+        { media: "(prefers-color-scheme: light)", color: "#f8fafc" },
+    ],
 }
 
 export const metadata: Metadata = {
+    metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL || "https://shard.vercel.app"),
     title: "Shard — Browser-Powered Distributed Inference",
     description:
         "Free, unlimited LLM access powered by a decentralized P2P inference mesh. Contribute browser compute via WebGPU, earn priority access. OpenAI-compatible API.",
     keywords: ["AI", "LLM", "distributed inference", "P2P", "WebGPU", "decentralized", "BitNet", "open source"],
+    alternates: {
+        canonical: "/",
+    },
+    robots: {
+        index: true,
+        follow: true,
+    },
     manifest: "/manifest.json",
     openGraph: {
         title: "Shard — Browser-Powered Distributed Inference",
@@ -23,6 +35,7 @@ export const metadata: Metadata = {
         type: "website",
         siteName: "Shard Network",
         locale: "en_US",
+        url: "/",
     },
     twitter: {
         card: "summary_large_image",
