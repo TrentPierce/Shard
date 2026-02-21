@@ -1,32 +1,42 @@
 "use client"
 
-import { useEffect } from "react"
+import { useEffect, useState } from "react"
+
+type Theme = "dark" | "light"
 
 export function ThemeToggle() {
+    const [theme, setTheme] = useState<Theme>("dark")
+
     useEffect(() => {
-        // Load theme from localStorage or use system preference
         const savedTheme = localStorage.getItem("shard-theme")
         const systemDark = window.matchMedia("(prefers-color-scheme: dark)").matches
-        const theme = savedTheme || (systemDark ? "dark" : "light")
-        document.documentElement.setAttribute("data-theme", theme)
+        const initialTheme: Theme = savedTheme === "light" || savedTheme === "dark"
+            ? savedTheme
+            : (systemDark ? "dark" : "light")
+
+        setTheme(initialTheme)
+        document.documentElement.setAttribute("data-theme", initialTheme)
     }, [])
 
     const toggleTheme = () => {
-        const currentTheme = document.documentElement.getAttribute("data-theme") || "dark"
-        const newTheme = currentTheme === "dark" ? "light" : "dark"
+        const newTheme: Theme = theme === "dark" ? "light" : "dark"
+        setTheme(newTheme)
         document.documentElement.setAttribute("data-theme", newTheme)
         localStorage.setItem("shard-theme", newTheme)
     }
+
+    const isLightTheme = theme === "light"
 
     return (
         <button
             onClick={toggleTheme}
             className="theme-toggle"
-            aria-label="Toggle theme"
+            aria-label={isLightTheme ? "Switch to dark theme" : "Switch to light theme"}
+            aria-pressed={isLightTheme}
             type="button"
         >
             <span className="theme-toggle__icon" aria-hidden="true">
-                🌙
+                {isLightTheme ? "☀️" : "🌙"}
             </span>
         </button>
     )

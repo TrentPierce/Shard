@@ -92,6 +92,10 @@ export default function Header() {
                     border-radius: var(--radius-lg);
                     border: 1px solid var(--glass-border);
                 }
+                :global([data-theme="light"]) .header-nav {
+                    background: rgba(255, 255, 255, 0.88);
+                    border-color: rgba(15, 23, 42, 0.14);
+                }
                 .header-nav__item {
                     display: flex;
                     align-items: center;
@@ -108,9 +112,24 @@ export default function Header() {
                     color: var(--text-primary);
                     background: rgba(255, 255, 255, 0.05);
                 }
+                .header-nav__item:focus-visible {
+                    outline: 2px solid var(--accent-blue);
+                    outline-offset: 2px;
+                }
+                :global([data-theme="light"]) .header-nav__item {
+                    color: #334155;
+                }
+                :global([data-theme="light"]) .header-nav__item:hover {
+                    color: #0f172a;
+                    background: rgba(37, 99, 235, 0.1);
+                }
                 .header-nav__item--active {
                     color: var(--accent-cyan);
                     background: rgba(56, 139, 180, 0.12);
+                }
+                :global([data-theme="light"]) .header-nav__item--active {
+                    color: #1d4ed8;
+                    background: rgba(37, 99, 235, 0.14);
                 }
                 @media (max-width: 900px) {
                     .header-nav__name {
