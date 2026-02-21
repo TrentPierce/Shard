@@ -17,7 +17,7 @@
 
   <br/>
 
-  [**Live Demo**](https://shard-trents-projects-20e9a51a.vercel.app) · [**White Paper**](docs/Shard-White-Paper-Feb-2026.md) · [**API Docs**](docs/API.md) · [**Get Started**](#quick-start)
+  [**Live Demo**](https://shardnetwork.live) · [**White Paper**](docs/Shard-White-Paper-Feb-2026.md) · [**API Docs**](docs/API.md) · [**Get Started**](#quick-start)
 </div>
 
 ---
@@ -111,7 +111,7 @@ If you want a quick explanation of roles, contribution, and why distributed mode
 
 - [`docs/join-network.md`](docs/join-network.md)
 - [`docs/deployment-guide.md`](docs/deployment-guide.md)
-- [`/network` leaderboard page](https://shard-trents-projects-20e9a51a.vercel.app/network)
+- [`/network` leaderboard page](https://shardnetwork.live/network)
 
 ---
 ## Quick Start
@@ -369,7 +369,7 @@ cargo run --release --bin shard-load-test -- --base-url http://127.0.0.1:9091 --
 Bootstrap peer:
 
 ```text
-/ip4/54.224.107.75/tcp/4001/p2p/12D3KooWPTDTQBH5JTCxhiaZuL9sr695UAEndMDRj9SJ9pi3agEq
+/dns4/bootstrap.shardnetwork.live/tcp/4001/p2p/12D3KooWPTDTQBH5JTCxhiaZuL9sr695UAEndMDRj9SJ9pi3agEq
 ```
 
 ```bash
@@ -378,7 +378,7 @@ Bootstrap peer:
   --tcp-port 4001 \
   --webrtc-port 9090 \
   --quic-port 9092 \
-  --bootstrap /ip4/54.224.107.75/tcp/4001/p2p/12D3KooWPTDTQBH5JTCxhiaZuL9sr695UAEndMDRj9SJ9pi3agEq
+  --bootstrap /dns4/bootstrap.shardnetwork.live/tcp/4001/p2p/12D3KooWPTDTQBH5JTCxhiaZuL9sr695UAEndMDRj9SJ9pi3agEq
 ```
 
 </details>
@@ -448,11 +448,11 @@ curl http://localhost:9091/v1/chat/completions \
 
 ### Key Technologies
 
-- **[BitNet b1.58](https://arxiv.org/abs/2402.17764)** — 1.58-bit ternary quantization (6–8x VRAM reduction)
-- **[libp2p](https://libp2p.io/)** — Transport-agnostic P2P networking (TCP, WebSocket, WebRTC, QUIC)
-- **[WebLLM](https://webllm.mlc.ai/)** — In-browser LLM inference via WebGPU
-- **Hybrid Speculative Decoding** — Scout drafts + Shard verification in one parallel pass
-- **Golden Ticket Protocol** — Sybil attack prevention via random audit injections
+- **[BitNet b1.58](https://arxiv.org/abs/2402.17764)** — chosen for 1.58-bit ternary quantization so verifier nodes can run large-model quality with much lower VRAM pressure.
+- **[libp2p](https://libp2p.io/)** — powers Shard peer discovery and transport negotiation across TCP, WebSocket, WebRTC, and QUIC in one mesh stack.
+- **[WebLLM](https://webllm.mlc.ai/)** — lets browser Scouts produce speculative draft tokens directly in-tab using WebGPU acceleration.
+- **Hybrid Speculative Decoding** — combines fast scout drafts with shard-side verification to improve throughput without sacrificing output quality.
+- **Golden Ticket Protocol** — injects randomized audits to raise Sybil attack costs and protect mesh integrity.
 
 > 📐 Detailed architecture: [**docs/ARCHITECTURE.md**](docs/ARCHITECTURE.md)
 
@@ -477,7 +477,10 @@ SHARD_PROMPT_FORMAT=plain
 
 ## Python SDK
 
-> ⚠️ **Experimental** — The Python SDK is currently in scaffolding stage.
+<details>
+<summary><strong>🧪 Python SDK (Experimental — Not Ready for Use)</strong></summary>
+
+> ⚠️ **This SDK is scaffolding only. Imports will fail. Do not use in production. Track progress in [issue #X].**
 
 ```bash
 cd python-sdk
@@ -485,6 +488,8 @@ pip install -e .
 ```
 
 See [`python-sdk/README.md`](python-sdk/README.md) for transport assumptions and limitations.
+
+</details>
 
 ---
 
