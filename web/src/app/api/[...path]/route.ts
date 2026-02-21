@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server"
 
-const BACKEND_ORIGIN = "https://35.175.242.222.nip.io:9091"
+// Use HTTP to avoid SSL certificate issues with nip.io self-signed cert
+const BACKEND_URL = "http://35.175.242.222"
 
 async function proxy(req: NextRequest, { params }: { params: { path: string[] } }) {
   const path = params.path?.join("/") ?? ""
   const search = req.nextUrl.search
-  const targetUrl = `${BACKEND_ORIGIN}/${path}${search}`
+  const targetUrl = `${BACKEND_URL}:9091/${path}${search}`
 
   try {
     const headers = new Headers(req.headers)
@@ -26,6 +27,9 @@ async function proxy(req: NextRequest, { params }: { params: { path: string[] } 
 
     const responseHeaders = new Headers(response.headers)
     responseHeaders.delete("content-encoding")
+    responseHeaders.set("Access-Control-Allow-Origin", "*")
+    responseHeaders.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+    responseHeaders.set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Shard-Inference-Mode")
 
     return new NextResponse(response.body, {
       status: response.status,
@@ -58,6 +62,9 @@ export async function OPTIONS() {
     status: 204,
     headers: {
       Allow: "GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS",
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Shard-Inference-Mode",
     },
   })
 }
