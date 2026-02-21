@@ -30,6 +30,14 @@ const nextConfig = {
           },
         ]
       },
+      async rewrites() {
+        return [
+          {
+            source: "/api/:path*",
+            destination: "https://35.175.242.222.nip.io/:path*",
+          },
+        ]
+      },
     }),
   webpack: (config, { isServer }) => {
     if (!isServer) {
