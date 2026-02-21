@@ -75,7 +75,7 @@ use common::node_config::{NodeRole, NodeRuntimeConfig};
 use common::pow_challenge::PowChallengeManager;
 use common::signed_envelope::{EnvelopeVerifier, SignedEnvelope};
 use crypto::wallet_backup::{export_wallet, import_wallet, verify_backup};
-use gateway::fallback::{ActiveRequestState, execute_centralized_fallback, FallbackConfig};
+use gateway::fallback::{execute_centralized_fallback, ActiveRequestState, FallbackConfig};
 use gateway::validate_work_request;
 use identity::NodeIdentity;
 use ledger::state::{ComputeCreditTx, LedgerState};
@@ -1724,9 +1724,12 @@ async fn process_work_request(state: &SharedState, req: WorkRequest) -> Json<ser
     let token_count = {
         let mut engine_guard = state.engine.lock().await;
         if let Some(engine) = engine_guard.as_mut() {
-            engine.tokenize(&req.prompt_context, 8192).map(|t| t.len()).unwrap_or(0)
+            engine
+                .tokenize(&req.prompt_context, 8192)
+                .map(|t| t.len())
+                .unwrap_or(0)
         } else {
-            // If engine is not available, we can't count tokens precisely. 
+            // If engine is not available, we can't count tokens precisely.
             // Fallback to character length approximation if needed, but here we'll just assume 0.
             // In a production app, we'd have a lightweight tokenizer.
             0
@@ -1746,13 +1749,19 @@ async fn process_work_request(state: &SharedState, req: WorkRequest) -> Json<ser
             scout_peer_id: None,
         };
         match execute_centralized_fallback(&state.fallback_config, &active_state).await {
-            Ok(res) => return Json(serde_json::json!({ 
-                "ok": true, 
-                "result": res, 
-                "fallback": true,
-                "reason": "LongContext"
-            })),
-            Err(e) => return Json(serde_json::json!({ "ok": false, "detail": format!("fallback failed: {e}") })),
+            Ok(res) => {
+                return Json(serde_json::json!({
+                    "ok": true,
+                    "result": res,
+                    "fallback": true,
+                    "reason": "LongContext"
+                }))
+            }
+            Err(e) => {
+                return Json(
+                    serde_json::json!({ "ok": false, "detail": format!("fallback failed: {e}") }),
+                )
+            }
         }
     }
 
