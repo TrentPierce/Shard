@@ -50,9 +50,9 @@ SHARD_API_KEYS=prod-key SHARD_RATE_LIMIT_PER_MINUTE=120 python run.py --rust-url
 
 This repository is currently deployed with:
 
-- Vercel frontend: `https://shard-981bwxsha-trents-projects-20e9a51a.vercel.app`
-- EC2 API + websocket TLS endpoint: `https://54.224.107.75.nip.io`
-- Scout websocket transport: `wss://54.224.107.75.nip.io`
+- Vercel frontend: `https://shardnetwork.live`
+- EC2 API + websocket TLS endpoint: `https://api.shardnetwork.live`
+- Scout websocket transport: `wss://api.shardnetwork.live`
 
 EC2 services are managed by `systemd`:
 
@@ -65,7 +65,7 @@ Critical environment for production API:
 ```bash
 SHARD_REQUIRE_API_KEY=true
 SHARD_API_KEYS=<strong-random-key-list>
-SHARD_CORS_ORIGINS=https://shard-981bwxsha-trents-projects-20e9a51a.vercel.app
+SHARD_CORS_ORIGINS=https://shardnetwork.live
 SHARD_TESTING=0
 BITNET_LIB=/home/ubuntu/Shard/cpp/shard-bridge/build/libshard_engine.so
 BITNET_MODEL=/home/ubuntu/models/<model>.gguf
@@ -77,7 +77,17 @@ For Vercel, set:
 ```bash
 NEXT_PUBLIC_SHARD_API_KEY=<matching api key>
 NEXT_PUBLIC_API_URL=/api
+NEXT_PUBLIC_SITE_URL=https://shardnetwork.live
 ```
+
+### Custom Domain Setup (Vercel)
+
+1. Open your Vercel project → **Settings → Domains**.
+2. Add `shardnetwork.live` (and optionally `www.shardnetwork.live`) as production domains.
+3. In DNS, create the records Vercel shows (typically `A` or `CNAME`).
+4. Wait for verification and then confirm `NEXT_PUBLIC_SITE_URL=https://shardnetwork.live` in project environment variables.
+
+> Bootstrap operations note: always use `/dns4/bootstrap.shardnetwork.live/tcp/4001/p2p/12D3KooWPTDTQBH5JTCxhiaZuL9sr695UAEndMDRj9SJ9pi3agEq` instead of raw IPs, so peer rotation does not require doc updates.
 
 ---
 

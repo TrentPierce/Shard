@@ -144,7 +144,7 @@ test_output.txt
 ## 3. 🌐 Web Presence & Discoverability
 
 ### 3.1 Custom Domain
-**Current:** `https://shard-trents-projects-20e9a51a.vercel.app`
+**Current:** `https://shardnetwork.live`
 **Problem:** This URL is unmemorable, unprofessional, and unshareable.
 
 **Recommendation:** Register `shard.network` or `shardai.dev` and point it to Vercel. This is a **single-digit dollar investment** that 10x's credibility.
@@ -206,7 +206,7 @@ Several documents reference URLs and patterns that are inconsistent:
 - `pyproject.toml` uses `ShardNetwork/Shard` as the GitHub org
 - README uses `TrentPierce/Shard`
 - API.md references `api.shard.network` (domain doesn't exist yet)
-- `vercel.json` hardcodes IP `54.224.107.75` for API rewrites
+- `vercel.json` hardcodes IP `bootstrap.shardnetwork.live` for API rewrites
 
 **Align all references** to a single canonical source.
 

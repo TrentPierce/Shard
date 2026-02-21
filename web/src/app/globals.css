@@ -2040,3 +2040,22 @@ body {
   .landing-modern__btn,
   .landing-modern__btn:hover { transition: none; transform: none; }
 }
+
+.homepage-block { margin: 1rem auto; max-width: 1100px; padding: 1rem; border: 1px solid rgba(148,163,184,.35); border-radius: 12px; background: rgba(15,23,42,.55); }
+.homepage-block h2 { margin-bottom: .6rem; }
+.homepage-stats-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(180px,1fr)); gap: .7rem; }
+.homepage-stats-grid div { padding: .75rem; border-radius: 10px; background: rgba(30,41,59,.7); display:flex; flex-direction:column; gap:.2rem; }
+.homepage-stats-grid strong { font-size: 1.2rem; }
+.homepage-fallback { color: #fbbf24; }
+.comparison-table { display:flex; flex-direction:column; gap:.5rem; }
+.comparison-row { display:grid; grid-template-columns: 1.1fr 1fr 1fr; gap:.6rem; padding:.55rem; border-radius:8px; background:rgba(30,41,59,.6); }
+.comparison-label { font-weight: 600; }
+.comparison-advantage { color: #4ade80; font-weight: 600; }
+.homepage-block textarea { width:100%; background: rgba(2,6,23,.7); border:1px solid #334155; border-radius:8px; padding:.65rem; margin:.4rem 0; }
+.homepage-block button { border:1px solid #22d3ee; background:#0e7490; color:white; padding:.45rem .9rem; border-radius:8px; }
+.homepage-block button:disabled { opacity: .7; }
+.demo-stream { min-height:90px; white-space:pre-wrap; background:rgba(2,6,23,.7); border:1px solid #334155; border-radius:8px; padding:.75rem; margin:.6rem 0; }
+.benchmark-callout { margin-top: .75rem; }
+.homepage-footer { max-width:1100px; margin: 0 auto 1.5rem; color:#cbd5e1; font-size:.9rem; }
+.homepage-footer a { color:#67e8f9; }
+@media (max-width: 860px) { .comparison-row { grid-template-columns: 1fr; } }
