@@ -2,6 +2,13 @@ import { NextRequest, NextResponse } from "next/server"
 
 const EC2_URL = "http://35.175.242.222:9091"
 
+export async function GET() {
+  return NextResponse.json({ 
+    message: "Use POST to send chat messages",
+    format: "{ model: string, messages: { role: string, content: string }[] }"
+  })
+}
+
 export async function POST(request: NextRequest) {
   const url = `${EC2_URL}/v1/chat/completions`
   
@@ -66,7 +73,7 @@ export async function OPTIONS() {
     status: 204,
     headers: {
       "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Methods": "POST, OPTIONS",
+      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
       "Access-Control-Allow-Headers": "Content-Type, Authorization",
     },
   })

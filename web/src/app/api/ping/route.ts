@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server"
+import { NextRequest, NextResponse } from "next/server"
 
 export async function GET() {
   // Test EC2 connectivity
@@ -19,4 +19,9 @@ export async function GET() {
       error: String(error),
     }, { status: 200 })
   }
+}
+
+export async function POST() {
+  // Same as GET - test EC2 connectivity
+  return GET()
 }
