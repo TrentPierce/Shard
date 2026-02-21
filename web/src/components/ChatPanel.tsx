@@ -140,56 +140,60 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
     ]
 
     return (
-        <main className="chat" aria-label="Shard chat panel">
-            <div className="chat__header">
+        <main className="chat" aria-label="Shard terminal gateway">
+            <div className="chat__header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div>
-                    <h2 className="chat__title">Neural Gateway</h2>
-                    <div className="chat__signal-row">
-                        <span className="chat__signal-chip">{modelLabel}</span>
-                        <span className="chat__signal-chip">{versionLabel}</span>
-                        <label className="sr-only" htmlFor="inference-mode-select">
-                            Inference mode
-                        </label>
+                    <h2 className="chat__title" style={{ fontSize: '18px', letterSpacing: '2px' }}>[ NEURAL_GATEWAY_V1.4 ]</h2>
+                    <div style={{ display: 'flex', gap: '10px', marginTop: '4px', fontSize: '10px', opacity: 0.6 }}>
+                        <span>MODEL: {modelLabel.toUpperCase()}</span>
+                        <span>CORE: {versionLabel.toUpperCase()}</span>
                         <select
                             id="inference-mode-select"
-                            aria-label="Inference mode"
                             value={inferenceMode}
                             onChange={(e) => setInferenceMode(e.target.value as "standard" | "distributed")}
-                            className="chat__signal-chip chat__signal-chip--select"
+                            style={{ background: 'transparent', color: 'inherit', border: 'none', borderBottom: '1px solid var(--border)', fontSize: 'inherit', cursor: 'pointer' }}
                         >
-                            <option value="standard">Standard Mode</option>
-                            <option value="distributed">Distributed Mode</option>
+                            <option value="standard">MODE: SINGLE_NODE</option>
+                            <option value="distributed">MODE: DIST_MESH</option>
                         </select>
                     </div>
                 </div>
-                <div className="chat__status-group">
-                    <div className={`chat__status ${ready ? "chat__status--ok" : "chat__status--pending"}`}>
-                        {ready ? "NETWORK ONLINE" : "SYNCING MESH"}
+                <div style={{ textAlign: 'right' }}>
+                    <div className={`stat-value--${ready ? "accent" : "error"}`} style={{ fontSize: '12px', fontWeight: 'bold' }}>
+                        {ready ? "STATUS: ONLINE" : "STATUS: SYNCING"}
                     </div>
-                    <div className="chat__status chat__status--neutral">
-                        {opsSummary.active_nodes ?? 0} NODES · {successRate}% RELIABILITY
+                    <div style={{ fontSize: '10px', opacity: 0.6 }}>
+                        {opsSummary.active_nodes ?? 0} NODES // {successRate}% RELIABILITY
                     </div>
                 </div>
             </div>
 
-            <div className="chat__messages" aria-live="polite" aria-relevant="additions text">
+            <div className="chat__messages" style={{ fontFamily: 'var(--font-mono)' }}>
                 {messages.length === 0 ? (
-                    <div className="chat__empty">
-                        <div className="chat__empty-icon">S</div>
-                        <h3 className="chat__empty-title">Secure Distributed Inference</h3>
-                        <p className="chat__empty-hint">
-                            Your requests are processed across a trustless P2P mesh.
-                            Select a prompt below or start a conversation.
+                    <div className="chat__empty" style={{ opacity: 0.8 }}>
+                        <pre style={{ color: 'var(--primary)', marginBottom: '20px', fontSize: '12px', lineHeight: '1.2' }}>{`
+   _____ _    _          _____  _____  
+  / ____| |  | |   /\   |  __ \\|  __ \\ 
+ | (___ | |__| |  /  \\  | |__) | |  | |
+  \\___ \\|  __  | / /\\ \\ |  _  /| |  | |
+  ____) | |  | |/ ____ \\| | \\ \\| |__| |
+ |_____/|_|  |_/_/    \\_\\_|  \\_\\_____/ 
+                                       
+        `}</pre>
+                        <h3 className="chat__empty-title" style={{ color: 'var(--primary)', fontSize: '14px' }}>ESTABLISHING_TRUSTLESS_MESH_LINK...</h3>
+                        <p className="chat__empty-hint" style={{ fontSize: '12px', color: 'var(--muted)' }}>
+                            // ALL COMPUTE IS DECENTRALIZED AND ENCRYPTED
                         </p>
-                        <div className="chat__quick-prompts">
+                        <div className="chat__quick-prompts" style={{ marginTop: '20px', borderTop: '1px dashed var(--border)', paddingTop: '20px' }}>
                             {quickPrompts.map((prompt) => (
                                 <button
                                     key={prompt}
                                     type="button"
                                     className="chat__quick-btn"
+                                    style={{ border: '1px solid var(--border)', background: 'transparent', color: 'var(--muted)', padding: '6px 12px', margin: '4px', cursor: 'pointer', fontSize: '12px' }}
                                     onClick={() => setInput(prompt)}
                                 >
-                                    {prompt}
+                                    {"> "} {prompt}
                                 </button>
                             ))}
                         </div>
@@ -199,22 +203,29 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
                         <div
                             key={i}
                             className={`message ${msg.role === "user" ? "message--user" : "message--assistant"}`}
+                            style={{ marginBottom: '16px', maxWidth: '100%' }}
                         >
-                            <div className="message__avatar">{msg.role === "user" ? "USR" : "SHD"}</div>
-                            <div className="message__content">
-                                <div className="message__bubble">
-                                    {msg.content || (
-                                        <div className="typing" aria-label="Assistant is typing">
-                                            <div className="typing__dot" />
-                                            <div className="typing__dot" />
-                                            <div className="typing__dot" />
-                                        </div>
-                                    )}
-                                </div>
-                                <div className="message__meta">
-                                    {msg.role === "assistant" ? "shard-hybrid" : "local-node"} ·{" "}
-                                    {new Date(msg.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                                </div>
+                            <div className="message__avatar" style={{ fontSize: '11px', marginBottom: '4px', display: 'flex', gap: '8px' }}>
+                                <span style={{ color: msg.role === 'user' ? 'var(--secondary)' : 'var(--primary)', fontWeight: 'bold' }}>
+                                    {msg.role === "user" ? "GUEST@SHARD-NET:~$" : "SYSTEM@SHARD-CORE:~#"}
+                                </span>
+                                <span style={{ opacity: 0.3 }}>|</span>
+                                <span style={{ opacity: 0.5 }}>{new Date(msg.timestamp).toLocaleTimeString()}</span>
+                            </div>
+                            <div className="message__bubble" style={{
+                                background: 'transparent',
+                                border: 'none',
+                                padding: '0 10px',
+                                borderLeft: `2px solid ${msg.role === 'user' ? 'var(--secondary)' : 'var(--primary)'}`,
+                                color: msg.role === 'user' ? 'var(--secondary)' : 'var(--primary)',
+                                fontSize: '13px'
+                            }}>
+                                {msg.content || (
+                                    <span className="cursor" />
+                                )}
+                                {streaming && i === messages.length - 1 && msg.role === 'assistant' && (
+                                    <span className="cursor" />
+                                )}
                             </div>
                         </div>
                     ))
@@ -223,15 +234,14 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
             </div>
 
             <div className="chat__input-area">
-                <div className="chat__input-wrapper">
-                    <label className="sr-only" htmlFor="chat-prompt-input">
-                        Type your message here
-                    </label>
+                <div className="chat__input-wrapper" style={{ position: 'relative' }}>
+                    <span style={{ position: 'absolute', left: '10px', top: '10px', color: 'var(--primary)' }}>&gt;</span>
                     <textarea
                         id="chat-prompt-input"
                         ref={textareaRef}
                         className="chat__input"
-                        placeholder={mode === "loading" ? "Establishing connection..." : "Message the Shard network..."}
+                        style={{ paddingLeft: '25px', width: '100%', minHeight: '40px' }}
+                        placeholder={mode === "loading" ? "INITIALIZING..." : "COMMAND:"}
                         value={input}
                         onChange={(e) => setInput(e.target.value)}
                         onKeyDown={handleKeyDown}
@@ -242,13 +252,12 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
                         className="chat__send-btn"
                         onClick={handleSend}
                         disabled={!input.trim() || streaming || mode === "loading"}
-                        aria-label="Dispatch"
                     >
-                        ➤
+                        {streaming ? "..." : "[ SEND ]"}
                     </button>
                 </div>
-                <div className="chat__input-hint">
-                    {streaming ? "Network is responding..." : "Press Enter to send, Shift+Enter for new line"}
+                <div style={{ fontSize: '9px', color: 'var(--muted)', marginTop: '8px', textTransform: 'uppercase', letterSpacing: '1px' }}>
+                    {streaming ? "WAITING_FOR_SWARM_RESPONSE..." : "READY_FOR_INPUT // SHIFT+ENTER_NEWLINE"}
                 </div>
             </div>
         </main>

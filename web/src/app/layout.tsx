@@ -81,6 +81,7 @@ export default function RootLayout({
         <html lang="en">
             <body>
                 <Providers>
+                    <div className="terminal-crt-overlay" />
                     <ErrorBoundary>{children}</ErrorBoundary>
                 </Providers>
                 <ServiceWorkerManager />
