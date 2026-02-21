@@ -56,14 +56,14 @@ export function apiUrl(path: string = "/v1"): string {
   const cleanPath = path.startsWith("/") ? path : `/${path}`
 
   // If an explicit env var is set, use it directly
-  if (API_BASE) {
+  if (API_BASE && API_BASE !== "/api") {
     const base = API_BASE.replace(/\/$/, "")
     return `${base}${cleanPath}`
   }
 
-  // On deployed environments, use the /api rewrite prefix
+  // On deployed environments, fallback to the direct EC2 backend if the env var is missing or defaulted to /api
   if (typeof window !== "undefined" && isDeployed()) {
-    return `/api${cleanPath}`
+    return `https://35.175.242.222.nip.io${cleanPath}`
   }
 
   // Local development: hit the Rust daemon directly
