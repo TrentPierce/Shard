@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 
+export const dynamic = "force-dynamic"
+
 const EC2_URL = "http://35.175.242.222:9091"
 
 export async function POST(request: NextRequest) {

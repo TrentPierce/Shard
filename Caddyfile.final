@@ -1,0 +1,20 @@
+35.175.242.222.nip.io {
+  encode gzip
+
+  header {
+    Access-Control-Allow-Origin *
+    Access-Control-Allow-Methods "GET, POST, OPTIONS"
+    Access-Control-Allow-Headers "Content-Type, Authorization, X-Shard-Inference-Mode"
+    defer
+  }
+
+  @telemetry path /telemetry/ws*
+  reverse_proxy @telemetry 127.0.0.1:9093
+
+  handle /healthz {
+    rewrite * /health
+    reverse_proxy 127.0.0.1:9091
+  }
+
+  reverse_proxy 127.0.0.1:9091
+}
