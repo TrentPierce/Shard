@@ -36,6 +36,7 @@ export type LocalShardProbe = {
 export type Topology = {
     status: string
     source?: string
+    model_id?: string
     shard_peer_id?: string
     shard_webrtc_multiaddr?: string | null
     shard_quic_multiaddr?: string | null

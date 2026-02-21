@@ -11,6 +11,7 @@ interface ChatPanelProps {
 }
 
 export default function ChatPanel({ mode }: ChatPanelProps) {
+    const { topology } = useAppContext()
     const [messages, setMessages] = useState<ChatMessage[]>([])
     const [input, setInput] = useState("")
     const [streaming, setStreaming] = useState(false)
@@ -19,7 +20,8 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
     const { health, successRate } = useProductSignals()
     const [inferenceMode, setInferenceMode] = useState<"standard" | "distributed">("distributed")
     const [opsSummary, setOpsSummary] = useState<{ active_nodes?: number }>({})
-    const [modelLabel, setModelLabel] = useState("default-model")
+
+    const modelLabel = topology?.model_id ?? "default-model"
 
     const scrollToBottom = () => {
         messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
@@ -41,7 +43,7 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
         let cancelled = false
         const poll = async () => {
             try {
-                const res = await fetch(apiUrl("/metrics/summary"), { cache: "no-store" })
+                const res = await fetch(apiUrl("/v1/metrics/summary"), { cache: "no-store" })
                 if (!res.ok) return
                 const data = await res.json()
                 if (!cancelled) setOpsSummary(data ?? {})
@@ -52,30 +54,6 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
 
         poll()
         const timer = setInterval(poll, 5000)
-        return () => {
-            cancelled = true
-            clearInterval(timer)
-        }
-    }, [])
-
-    useEffect(() => {
-        let cancelled = false
-        const pollModel = async () => {
-            try {
-                const res = await fetch(apiUrl("/v1/system/topology"), { cache: "no-store" })
-                if (!res.ok) return
-                const data = await res.json()
-                const modelId = typeof data?.model_id === "string" ? data.model_id.trim() : ""
-                if (!cancelled && modelId) {
-                    setModelLabel(modelId)
-                }
-            } catch {
-                // ignore topology polling failures
-            }
-        }
-
-        pollModel()
-        const timer = setInterval(pollModel, 15000)
         return () => {
             cancelled = true
             clearInterval(timer)

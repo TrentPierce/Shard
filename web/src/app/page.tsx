@@ -52,33 +52,21 @@ export default function HomePage() {
     }, [])
 
     const fetchNetworkStats = useCallback(async () => {
-        const candidates = ["/topology", "/v1/system/topology"]
-        const metricCandidates = ["/metrics/summary", "/v1/metrics/summary"]
-        const statusCandidates = ["/node/status", "/v1/node/status"]
-
-        const fetchFirst = async (paths: string[]) => {
-            for (const path of paths) {
-                const res = await fetch(apiUrl(path), { cache: "no-store" })
-                if (res.ok) return res.json()
-            }
-            throw new Error("no endpoint available")
-        }
-
         try {
-            const [topologyData, metricsData, statusData] = await Promise.all([
-                fetchFirst(candidates),
-                fetchFirst(metricCandidates),
-                fetchFirst(statusCandidates),
+            const [topologyData, metricsData, healthData] = await Promise.all([
+                fetch(apiUrl("/v1/system/topology"), { cache: "no-store" }).then(res => res.ok ? res.json() : null),
+                fetch(apiUrl("/v1/metrics/summary"), { cache: "no-store" }).then(res => res.ok ? res.json() : null),
+                fetch(apiUrl("/health"), { cache: "no-store" }).then(res => res.ok ? res.json() : null),
             ])
 
-            const scouts = Number(topologyData?.scout_count ?? topologyData?.active_scouts ?? topologyData?.scouts ?? 0)
-            const shardNodes = Number(topologyData?.shard_count ?? topologyData?.active_shards ?? topologyData?.shards ?? 1)
-            const verified24h = Number(
-                metricsData?.tokens_verified_24h ?? metricsData?.verified_tokens_24h ?? metricsData?.tokens_verified ?? 0,
-            )
-            const uptimePercent = Number(
-                statusData?.uptime_percent ?? metricsData?.uptime_percent ?? statusData?.uptimePct ?? 99.9,
-            )
+            if (!topologyData && !metricsData && !healthData) {
+                throw new Error("All endpoints unreachable")
+            }
+
+            const scouts = Number(topologyData?.scout_count ?? healthData?.active_scouts ?? 0)
+            const shardNodes = Number(topologyData?.shard_count ?? healthData?.connected_peers ?? 1)
+            const verified24h = Number(metricsData?.tokens_verified_24h ?? 0)
+            const uptimePercent = Number(healthData?.rust_uptime_ms ? 99.99 : 99.9)
 
             setNetworkStats({
                 scouts,
@@ -111,6 +99,7 @@ export default function HomePage() {
         setDemoMetrics({ draftTokens: 0, verifiedTokens: 0 })
 
         let nextText = fallbackStream
+        let isSimulated = false
         try {
             const res = await fetch(apiUrl("/v1/chat/completions"), {
                 method: "POST",
@@ -125,9 +114,16 @@ export default function HomePage() {
             if (res.ok) {
                 const json = await res.json()
                 nextText = json?.choices?.[0]?.message?.content || fallbackStream
+                isSimulated = !json?.choices?.[0]?.message?.content
+            } else {
+                isSimulated = true
             }
         } catch {
-            // fall back to simulated stream below
+            isSimulated = true
+        }
+
+        if (isSimulated) {
+            setStreamOutput("[Simulated] ")
         }
 
         const chars = Array.from(nextText)
