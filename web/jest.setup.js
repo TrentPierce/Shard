@@ -35,3 +35,8 @@ jest.mock("@tauri-apps/api/window", () => ({
     close: jest.fn(async () => {}),
   })),
 }))
+
+jest.mock("@/lib/webllm", () => ({
+  initWebLLM: jest.fn(async () => undefined),
+  checkWebGPUSupport: jest.fn(async () => ({ supported: false, reason: "mocked in tests" })),
+}))

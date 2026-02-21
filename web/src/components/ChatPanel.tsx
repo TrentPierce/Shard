@@ -16,9 +16,9 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
     const [streaming, setStreaming] = useState(false)
     const messagesEndRef = useRef<HTMLDivElement>(null)
     const textareaRef = useRef<HTMLTextAreaElement>(null)
-    const { health, analytics, successRate } = useProductSignals()
+    const { health, successRate } = useProductSignals()
     const [inferenceMode, setInferenceMode] = useState<"standard" | "distributed">("distributed")
-    const [opsSummary, setOpsSummary] = useState<{ active_nodes?: number; offload_percentage_estimate?: number; estimated_gpu_savings_percent?: number; p95_latency_ms?: number }>({})
+    const [opsSummary, setOpsSummary] = useState<{ active_nodes?: number }>({})
     const [modelLabel, setModelLabel] = useState("default-model")
 
     const scrollToBottom = () => {
@@ -33,7 +33,7 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
         const el = textareaRef.current
         if (el) {
             el.style.height = "24px"
-            el.style.height = Math.min(el.scrollHeight, 120) + "px"
+            el.style.height = `${Math.min(el.scrollHeight, 120)}px`
         }
     }, [input])
 
@@ -49,6 +49,7 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
                 // ignore telemetry polling failures
             }
         }
+
         poll()
         const timer = setInterval(poll, 5000)
         return () => {
@@ -72,6 +73,7 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
                 // ignore topology polling failures
             }
         }
+
         pollModel()
         const timer = setInterval(pollModel, 15000)
         return () => {
@@ -160,18 +162,22 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
     ]
 
     return (
-        <div className="chat">
+        <main className="chat" aria-label="Shard chat panel">
             <div className="chat__header">
                 <div>
                     <h2 className="chat__title">Neural Gateway</h2>
                     <div className="chat__signal-row">
                         <span className="chat__signal-chip">{modelLabel}</span>
                         <span className="chat__signal-chip">{versionLabel}</span>
+                        <label className="sr-only" htmlFor="inference-mode-select">
+                            Inference mode
+                        </label>
                         <select
+                            id="inference-mode-select"
+                            aria-label="Inference mode"
                             value={inferenceMode}
                             onChange={(e) => setInferenceMode(e.target.value as "standard" | "distributed")}
-                            className="chat__signal-chip"
-                            style={{ background: 'var(--bg-tertiary)', cursor: 'pointer', outline: 'none' }}
+                            className="chat__signal-chip chat__signal-chip--select"
                         >
                             <option value="standard">Standard Mode</option>
                             <option value="distributed">Distributed Mode</option>
@@ -188,13 +194,13 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
                 </div>
             </div>
 
-            <div className="chat__messages">
+            <div className="chat__messages" aria-live="polite" aria-relevant="additions text">
                 {messages.length === 0 ? (
                     <div className="chat__empty">
                         <div className="chat__empty-icon">S</div>
                         <h3 className="chat__empty-title">Secure Distributed Inference</h3>
                         <p className="chat__empty-hint">
-                            Your requests are processed across a trustless P2P mesh. 
+                            Your requests are processed across a trustless P2P mesh.
                             Select a prompt below or start a conversation.
                         </p>
                         <div className="chat__quick-prompts">
@@ -216,13 +222,11 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
                             key={i}
                             className={`message ${msg.role === "user" ? "message--user" : "message--assistant"}`}
                         >
-                            <div className="message__avatar">
-                                {msg.role === "user" ? "USR" : "SHD"}
-                            </div>
+                            <div className="message__avatar">{msg.role === "user" ? "USR" : "SHD"}</div>
                             <div className="message__content">
                                 <div className="message__bubble">
                                     {msg.content || (
-                                        <div className="typing">
+                                        <div className="typing" aria-label="Assistant is typing">
                                             <div className="typing__dot" />
                                             <div className="typing__dot" />
                                             <div className="typing__dot" />
@@ -230,7 +234,8 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
                                     )}
                                 </div>
                                 <div className="message__meta">
-                                    {msg.role === "assistant" ? "shard-hybrid" : "local-node"} · {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                    {msg.role === "assistant" ? "shard-hybrid" : "local-node"} ·{" "}
+                                    {new Date(msg.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                                 </div>
                             </div>
                         </div>
@@ -241,10 +246,14 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
 
             <div className="chat__input-area">
                 <div className="chat__input-wrapper">
+                    <label className="sr-only" htmlFor="chat-prompt-input">
+                        Type your message here
+                    </label>
                     <textarea
+                        id="chat-prompt-input"
                         ref={textareaRef}
                         className="chat__input"
-                        placeholder={mode === "loading" ? "Establishing connection..." : "Ask Shard anything..."}
+                        placeholder={mode === "loading" ? "Establishing connection..." : "Message the Shard network..."}
                         value={input}
                         onChange={(e) => setInput(e.target.value)}
                         onKeyDown={handleKeyDown}
@@ -255,7 +264,7 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
                         className="chat__send-btn"
                         onClick={handleSend}
                         disabled={!input.trim() || streaming || mode === "loading"}
-                        aria-label="Send"
+                        aria-label="Dispatch"
                     >
                         ➤
                     </button>
@@ -264,6 +273,6 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
                     {streaming ? "Network is responding..." : "Press Enter to send, Shift+Enter for new line"}
                 </div>
             </div>
-        </div>
+        </main>
     )
 }

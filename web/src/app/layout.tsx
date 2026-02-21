@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next"
 import "./globals.css"
 import ErrorBoundary from "@/components/ErrorBoundary"
 import { Providers } from "@/components/Providers"
+import ServiceWorkerManager from "@/components/ServiceWorkerManager"
 
 export const viewport: Viewport = {
     width: "device-width",
@@ -36,12 +37,21 @@ export const metadata: Metadata = {
         siteName: "Shard Network",
         locale: "en_US",
         url: "/",
+        images: [
+            {
+                url: "/og-image.svg",
+                width: 1200,
+                height: 630,
+                alt: "Shard distributed inference mesh",
+            },
+        ],
     },
     twitter: {
         card: "summary_large_image",
         title: "Shard — Browser-Powered Distributed Inference",
         description:
             "Free LLM access through decentralized P2P compute. Contribute from your browser, earn priority.",
+        images: ["/og-image.svg"],
     },
     appleWebApp: {
         capable: true,
@@ -67,52 +77,13 @@ export default function RootLayout({
 }: {
     children: React.ReactNode
 }) {
-    const enableServiceWorker = process.env.NEXT_PUBLIC_ENABLE_SW === "true"
-
     return (
         <html lang="en">
-            <head>
-                <link rel="preconnect" href="https://fonts.googleapis.com" />
-                <link
-                    rel="preconnect"
-                    href="https://fonts.gstatic.com"
-                    crossOrigin="anonymous"
-                />
-                <link
-                    href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap"
-                    rel="stylesheet"
-                />
-            </head>
             <body>
                 <Providers>
                     <ErrorBoundary>{children}</ErrorBoundary>
                 </Providers>
-                {enableServiceWorker && (
-                    <script
-                        dangerouslySetInnerHTML={{
-                            __html: `
-                                if ('serviceWorker' in navigator) {
-                                    navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' }).catch((err) => {
-                                        console.error('[SW] Service Worker registration failed:', err);
-                                    });
-                                }
-                            `
-                        }}
-                    />
-                )}
-                {!enableServiceWorker && (
-                    <script
-                        dangerouslySetInnerHTML={{
-                            __html: `
-                                if ('serviceWorker' in navigator) {
-                                    navigator.serviceWorker.getRegistrations().then((registrations) => {
-                                        registrations.forEach((registration) => registration.unregister());
-                                    }).catch(() => {});
-                                }
-                            `
-                        }}
-                    />
-                )}
+                <ServiceWorkerManager />
             </body>
         </html>
     )
