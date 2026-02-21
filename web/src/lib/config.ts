@@ -48,25 +48,25 @@ export const PREFER_LOCAL_SHARD = process.env.NEXT_PUBLIC_PREFER_LOCAL_SHARD ===
 /**
  * Get the API URL for the Shard API.
  * 
- * On Vercel: returns "/api/health", "/api/v1/system/peers", etc.
- *            These are rewritten by vercel.json to the EC2 backend.
- * Locally:   returns "http://127.0.0.1:8000/health", etc.
+ * On Vercel: returns "https://35.175.242.222.nip.io/health", etc.
+ * Locally:   returns "http://127.0.0.1:9091/health", etc.
  */
 export function apiUrl(path: string = "/v1"): string {
   const cleanPath = path.startsWith("/") ? path : `/${path}`
 
-  // If an explicit env var is set, use it directly
+  // 1. If an explicit env var is set (and not just the relative "/api"), use it
   if (API_BASE && API_BASE !== "/api") {
     const base = API_BASE.replace(/\/$/, "")
     return `${base}${cleanPath}`
   }
 
-  // On deployed environments, fallback to the direct EC2 backend if the env var is missing or defaulted to /api
+  // 2. On deployed environments (Vercel), force the reliable nip.io backend
   if (typeof window !== "undefined" && isDeployed()) {
     return `https://35.175.242.222.nip.io${cleanPath}`
   }
 
-  // Local development: hit the Rust daemon directly
+  // 3. Local development: hit the local Rust daemon directly
+  // Use port 9091 which is the control plane port
   return `http://127.0.0.1:9091${cleanPath}`
 }
 

@@ -47,7 +47,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const stopScoutWorkerRef = useRef<(() => void) | null>(null)
     const stopLayerHostRef = useRef<(() => void) | null>(null)
 
-    const { data: topology } = useQuery({
+    const { data: topology, refetch: refetchTopologyData } = useQuery({
         queryKey: ["topology"],
         queryFn: fetchTopology,
         refetchInterval: 10000,
@@ -108,6 +108,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         if (scoutBootedRef.current) return
         const boot = async () => {
             scoutBootedRef.current = true
+            
+            // Ensure we have fresh topology data immediately
+            await refetchTopologyData()
+
             if (PREFER_LOCAL_SHARD) {
                 const probe = await probeLocalShard()
                 if (probe.available) {
