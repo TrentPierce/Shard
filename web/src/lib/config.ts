@@ -55,18 +55,13 @@ export const PREFER_LOCAL_SHARD = process.env.NEXT_PUBLIC_PREFER_LOCAL_SHARD ===
 export function apiUrl(path: string = "/v1"): string {
   const cleanPath = path.startsWith("/") ? path : `/${path}`
 
-  // 1. If an explicit env var is set (and not just the relative "/api"), use it
-  if (API_BASE && API_BASE !== "/api") {
-    const base = API_BASE.replace(/\/$/, "")
-    return `${base}${cleanPath}`
-  }
-
-  // 2. On deployed environments (Vercel), use the Next.js proxy
+  // 1. On deployed environments (Vercel), use the Next.js proxy
+  // This is the ONLY path for production/preview to ensure mobile support
   if (typeof window !== "undefined" && isDeployed()) {
     return `/api${cleanPath}`
   }
 
-  // 3. Local development: hit the local Rust daemon directly
+  // 2. Local development: hit the local Rust daemon directly
   return `http://127.0.0.1:9091${cleanPath}`
 }
 
