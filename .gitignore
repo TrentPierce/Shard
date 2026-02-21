@@ -59,7 +59,6 @@ cpp/shard-bridge/build/
 *.spec
 build/
 dist/
-!dist/README.md
 
 # ─── Shard Specific ───
 /tmp/shard-*.json
@@ -87,3 +86,6 @@ build_log.txt
 .vercel
 .env*.local
 override.conf
+
+# Internal planning artifacts
+docs/internal/

@@ -8,7 +8,7 @@ Current known-good deployment shape:
 - `shard-daemon.service` on EC2
 - `shard-api.service` on EC2
 - `caddy.service` for TLS + reverse proxy
-- Public endpoint example: `wss://54.224.107.75.nip.io`
+- Public endpoint example: `wss://api.shardnetwork.live`
 
 ## 1) Build and copy the Rust binary
 
@@ -51,8 +51,8 @@ sudo systemctl status shard-daemon --no-pager
 
 If you do not own a domain yet, use a DNS wildcard service as a temporary host:
 
-- `54.224.107.75.nip.io` for IP `54.224.107.75`
-- Then advertise `--public-host 54.224.107.75.nip.io`
+- `api.shardnetwork.live` for IP `bootstrap.shardnetwork.live`
+- Then advertise `--public-host api.shardnetwork.live`
 
 Quick check:
 
