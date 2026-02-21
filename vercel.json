@@ -14,11 +14,5 @@
       "destination": "https://shardnetwork.live/:path*",
       "permanent": true
     }
-  ],
-  "rewrites": [
-    {
-      "source": "/api/:path*",
-      "destination": "https://api.shardnetwork.live/:path*"
-    }
   ]
 }
