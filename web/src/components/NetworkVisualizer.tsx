@@ -1,7 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
-import { useRouter } from "next/navigation"
+import { apiUrl } from "@/lib/config"
 
 interface PeerNode {
   id: string
@@ -84,7 +83,7 @@ export default function NetworkVisualizer({ pitchMode = false, onToast }: Networ
   useEffect(() => {
     const fetchPeers = async () => {
       try {
-        const res = await fetch("/v1/system/peers")
+        const res = await fetch(apiUrl("/v1/system/peers"))
         if (res.ok) {
           const data = await res.json()
           const peers = data.peers || []
@@ -125,7 +124,7 @@ export default function NetworkVisualizer({ pitchMode = false, onToast }: Networ
     // Fetch stats as well
     const fetchStats = async () => {
       try {
-        const res = await fetch("/health")
+        const res = await fetch(apiUrl("/health"))
         if (res.ok) {
           const data = await res.json()
           setTps(data.capacity || 0)
