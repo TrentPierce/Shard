@@ -7,7 +7,6 @@ import { heartbeatShard } from "@/lib/swarm"
 import type { ModelProgress } from "@/lib/webllm"
 import { apiUrl } from "@/lib/config"
 import { modeLabels } from "./Header"
-import { listen } from "@tauri-apps/api/event"
 
 interface NetworkStatusProps {
     mode: NodeMode
@@ -36,17 +35,42 @@ export default function NetworkStatus({
     const [downloadProgress, setDownloadProgress] = useState<number | null>(null)
 
     useEffect(() => {
-        const unlistenProgress = listen<number>("download-progress", (event) => {
-            setDownloadProgress(event.payload)
-        })
+        if (typeof window === "undefined" || !(window as any).__TAURI_INTERNALS__) {
+            return
+        }
 
-        const unlistenComplete = listen<boolean>("download-complete", () => {
-            setDownloadProgress(null)
+        let unlistenProgress: (() => void) | null = null
+        let unlistenComplete: (() => void) | null = null
+        let disposed = false
+
+        const registerDownloadListeners = async () => {
+            const { listen } = await import("@tauri-apps/api/event")
+
+            const progressUnlisten = await listen<number>("download-progress", (event) => {
+                setDownloadProgress(event.payload)
+            })
+            const completeUnlisten = await listen<boolean>("download-complete", () => {
+                setDownloadProgress(null)
+            })
+
+            if (disposed) {
+                progressUnlisten()
+                completeUnlisten()
+                return
+            }
+
+            unlistenProgress = progressUnlisten
+            unlistenComplete = completeUnlisten
+        }
+
+        registerDownloadListeners().catch((error) => {
+            console.warn("Failed to attach Tauri download listeners", error)
         })
 
         return () => {
-            unlistenProgress.then((f) => f())
-            unlistenComplete.then((f) => f())
+            disposed = true
+            unlistenProgress?.()
+            unlistenComplete?.()
         }
     }, [])
 
