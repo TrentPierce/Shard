@@ -209,14 +209,11 @@ pub async fn execute_centralized_fallback(
         return Err(err);
     }
 
-    let text = response
-        .text()
-        .await
-        .map_err(|e| {
-            let err = format!("failed to read fallback API response: {e}");
-            tracing::error!(request_id = %request.request_id, %err);
-            err
-        })?;
+    let text = response.text().await.map_err(|e| {
+        let err = format!("failed to read fallback API response: {e}");
+        tracing::error!(request_id = %request.request_id, %err);
+        err
+    })?;
 
     tracing::info!(request_id = %request.request_id, "centralized fallback successful");
     Ok(text)
