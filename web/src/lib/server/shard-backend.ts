@@ -1,6 +1,6 @@
 import { headers } from "next/headers"
 
-const DEFAULT_BACKEND = "http://127.0.0.1:9091"
+const DEFAULT_BACKEND = "http://35.175.242.222:9091"
 
 export function getShardBackendBaseUrl(): string {
   return (

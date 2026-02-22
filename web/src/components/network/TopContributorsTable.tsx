@@ -12,10 +12,10 @@ const formatTokens = (tokens: number) =>
 
 export default function TopContributorsTable({ contributors }: TopContributorsTableProps) {
   return (
-    <div className="network-card">
-      <div className="network-card__header">
-        <h2>Top Contributors</h2>
-        <span>live contribution ranking</span>
+    <div className="card" style={{ gridColumn: '1 / -1' }}>
+      <div className="mb-md">
+        <h2 className="text-mono">Top Contributors</h2>
+        <span className="text-secondary">live contribution ranking</span>
       </div>
       <div className="leaderboard">
         {contributors.map((contributor, index) => (
