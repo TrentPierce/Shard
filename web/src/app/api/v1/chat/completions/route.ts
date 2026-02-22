@@ -1,70 +1,51 @@
 import { NextRequest, NextResponse } from "next/server"
+import { forwardRequestHeaders, shardBackendUrl } from "@/lib/server/shard-backend"
 
-const EC2_URL = "http://35.175.242.222:9091"
+export const dynamic = "force-dynamic"
 
 export async function GET() {
-  return NextResponse.json({ 
+  return NextResponse.json({
     message: "Use POST to send chat messages",
-    format: "{ model: string, messages: { role: string, content: string }[] }"
+    format: "{ model: string, messages: { role: string, content: string }[] }",
   })
 }
 
 export async function POST(request: NextRequest) {
-  const url = `${EC2_URL}/v1/chat/completions`
-  
+  const url = shardBackendUrl("/v1/chat/completions")
+
   try {
     const body = await request.text()
-    
     const response = await fetch(url, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
+      headers: forwardRequestHeaders(),
       body,
-      signal: AbortSignal.timeout(60000),
+      signal: AbortSignal.timeout(120000),
+      cache: "no-store",
     })
 
-    // Handle streaming response
     if (response.body) {
-      const reader = response.body.getReader()
-      const encoder = new TextDecoder()
-
-      const stream = new ReadableStream({
-        async start(controller) {
-          try {
-            while (true) {
-              const { done, value } = await reader.read()
-              if (done) break
-              controller.enqueue(value)
-            }
-          } catch (e) {
-            controller.error(e)
-          } finally {
-            reader.releaseLock()
-          }
-        },
-      })
-
-      return new NextResponse(stream, {
+      return new NextResponse(response.body, {
         status: response.status,
         headers: {
-          "Content-Type": "text/event-stream",
+          "Content-Type": response.headers.get("content-type") || "text/event-stream",
           "Cache-Control": "no-cache",
+          Connection: "keep-alive",
           "Access-Control-Allow-Origin": "*",
         },
       })
     }
 
-    // Non-streaming response
     const data = await response.json()
-    return NextResponse.json(data, {
-      status: response.status,
-    })
+    return NextResponse.json(data, { status: response.status })
   } catch (error) {
-    return NextResponse.json({
-      error: "Chat completion failed",
-      details: String(error),
-    }, { status: 502 })
+    return NextResponse.json(
+      {
+        error: "Chat completion failed",
+        backend: url,
+        details: String(error),
+      },
+      { status: 502 }
+    )
   }
 }
 
@@ -74,7 +55,7 @@ export async function OPTIONS() {
     headers: {
       "Access-Control-Allow-Origin": "*",
       "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type, Authorization",
+      "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Shard-Inference-Mode, X-Shard-Wallet",
     },
   })
 }

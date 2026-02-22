@@ -12,7 +12,7 @@ import {
     publishResult,
     type Topology,
 } from "@/lib/swarm"
-import { PREFER_LOCAL_SHARD } from "@/lib/config"
+import { PREFER_LOCAL_SHARD, apiUrl } from "@/lib/config"
 import {
     initWebLLM,
     checkWebGPUSupport,
@@ -29,10 +29,12 @@ export type NodeMode =
 
 export type ThemeMode = "terminal" | "enterprise"
 
+type RustStatus = "connected" | "degraded" | "unreachable" | "downloading"
+
 interface AppContextType {
     mode: NodeMode
     topology: Topology | null
-    rustStatus: "connected" | "unreachable" | "downloading"
+    rustStatus: RustStatus
     webLLMProgress: ModelProgress | null
     webLLMError: string | null
     retryScout: () => void
@@ -48,6 +50,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const [webLLMProgress, setWebLLMProgress] = useState<ModelProgress | null>(null)
     const [webLLMError, setWebLLMError] = useState<string | null>(null)
     const [scoutRetryNonce, setScoutRetryNonce] = useState(0)
+    const [healthStatus, setHealthStatus] = useState<"ok" | "degraded" | "unreachable">("degraded")
     const scoutBootedRef = useRef(false)
     const stopScoutWorkerRef = useRef<(() => void) | null>(null)
     const stopLayerHostRef = useRef<(() => void) | null>(null)
@@ -59,24 +62,39 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         staleTime: 5000,
     })
 
+    useEffect(() => {
+        const pollHealth = async () => {
+            try {
+                const res = await fetch(apiUrl("/health"), { cache: "no-store" })
+                if (!res.ok) {
+                    setHealthStatus("unreachable")
+                    return
+                }
+                const payload = await res.json()
+                setHealthStatus(payload?.status === "ok" ? "ok" : "degraded")
+            } catch {
+                setHealthStatus("unreachable")
+            }
+        }
+
+        pollHealth()
+        const interval = setInterval(pollHealth, 10000)
+        return () => clearInterval(interval)
+    }, [])
+
     const toggleTheme = useCallback(() => {
         const newTheme = theme === "terminal" ? "enterprise" : "terminal"
         setTheme(newTheme)
         localStorage.setItem("shard-ui-theme", newTheme)
     }, [theme])
 
-    // Load initial theme
     useEffect(() => {
         const saved = localStorage.getItem("shard-ui-theme") as ThemeMode
         if (saved === "terminal" || saved === "enterprise") {
             setTheme(saved)
-        } else {
-            // Default to enterprise for first-time general users if they aren't on a dev port?
-            // For now, keep terminal as default for existing hacker-early-adopters.
         }
     }, [])
 
-    // Apply theme class to document
     useEffect(() => {
         const root = document.documentElement
         root.classList.remove("theme-terminal", "theme-enterprise")
@@ -84,14 +102,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }, [theme])
 
     const retryScout = useCallback(() => {
-        if (stopScoutWorkerRef.current) {
-            stopScoutWorkerRef.current()
-            stopScoutWorkerRef.current = null
-        }
-        if (stopLayerHostRef.current) {
-            stopLayerHostRef.current()
-            stopLayerHostRef.current = null
-        }
+        stopScoutWorkerRef.current?.()
+        stopLayerHostRef.current?.()
+        stopScoutWorkerRef.current = null
+        stopLayerHostRef.current = null
         scoutBootedRef.current = false
         setWebLLMError(null)
         setWebLLMProgress(null)
@@ -103,41 +117,34 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         const candidates: string[] = []
         const peerId = topo.shard_peer_id ?? ""
         const addWithPeerId = (addr: string | null | undefined) => {
-            if (!addr) return
-            const trimmed = addr.trim()
-            if (!trimmed) return
-            if (trimmed.includes("/p2p/")) {
-                candidates.push(trimmed)
+            if (!addr?.trim()) return
+            if (addr.includes("/p2p/")) {
+                candidates.push(addr)
                 return
             }
-            if (peerId) {
-                candidates.push(`${trimmed}/p2p/${peerId}`)
-            } else {
-                candidates.push(trimmed)
-            }
+            candidates.push(peerId ? `${addr}/p2p/${peerId}` : addr)
         }
+
         addWithPeerId(topo.shard_webrtc_multiaddr)
         addWithPeerId(topo.shard_ws_multiaddr)
         addWithPeerId(topo.shard_quic_multiaddr ?? null)
-        for (const listenAddr of topo.listen_addrs ?? []) {
-            addWithPeerId(listenAddr)
-        }
+        for (const listenAddr of topo.listen_addrs ?? []) addWithPeerId(listenAddr)
+
         const isHttps = typeof window !== "undefined" && window.location.protocol === "https:"
         return candidates.filter((addr) => {
             if (!isHttps) return true
             const insecureWs = addr.startsWith("ws://") || addr.includes("/ws/") || addr.endsWith("/ws")
-            if (!insecureWs) return true
-            return addr.startsWith("wss://") || addr.includes("/wss/")
+            return !insecureWs || addr.startsWith("wss://") || addr.includes("/wss/")
         })
     }, [])
 
     useEffect(() => {
         if (scoutBootedRef.current) return
+
         const boot = async () => {
             scoutBootedRef.current = true
 
             try {
-                // Ensure we have fresh topology data immediately
                 await refetchTopologyData()
 
                 if (PREFER_LOCAL_SHARD) {
@@ -152,7 +159,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                 const gpuStatus = await checkWebGPUSupport()
 
                 if (!gpuStatus.supported) {
-                    console.warn(`[Shard] WebGPU unavailable (${gpuStatus.reason}), defaulting to Consumer mode`)
                     setWebLLMError(`WebGPU not available: ${gpuStatus.reason}`)
                     setMode("leech")
                     return
@@ -165,26 +171,33 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
                 try {
                     stopScoutWorkerRef.current = await startScoutWorker()
-                } catch (e) { console.error(e) }
+                } catch (e) {
+                    console.error(e)
+                }
 
                 try {
                     stopLayerHostRef.current = await startBrowserLayerHost({ modelId: "default-model", layerStart: 0, layerEnd: 1 })
-                } catch (e) { console.warn(e) }
+                } catch (e) {
+                    console.warn(e)
+                }
 
                 try {
                     const liveTopology = await fetchTopology()
                     const bootstrapPeers = getBootstrapPeersFromTopology(liveTopology)
                     await initP2P({ emitSelf: false, bootstrapPeers: bootstrapPeers.length > 0 ? bootstrapPeers : undefined })
                     subscribeToWork((work) => console.log("Work:", work.request_id))
-                    subscribeToResults((result) => { publishResult(result) })
-                } catch (e) { console.error(e) }
-
+                    subscribeToResults((result) => {
+                        publishResult(result)
+                    })
+                } catch (e) {
+                    console.error(e)
+                }
             } catch (error: any) {
-                console.error("[Shard] Boot failed:", error)
                 setWebLLMError(error?.message ?? "Failed to initialize Scout")
                 setMode("leech")
             }
         }
+
         boot()
         return () => {
             stopScoutWorkerRef.current?.()
@@ -192,19 +205,26 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         }
     }, [scoutRetryNonce, getBootstrapPeersFromTopology, refetchTopologyData])
 
-    const rustStatus = (topology?.status === "ok" ? "connected" : "unreachable") as "connected" | "unreachable" | "downloading"
+    const rustStatus: RustStatus =
+        healthStatus === "ok" && topology?.status === "ok"
+            ? "connected"
+            : healthStatus === "unreachable"
+                ? "unreachable"
+                : "degraded"
 
     return (
-        <AppContext.Provider value={{
-            mode,
-            topology: topology ?? null,
-            rustStatus,
-            webLLMProgress,
-            webLLMError,
-            retryScout,
-            theme,
-            toggleTheme
-        }}>
+        <AppContext.Provider
+            value={{
+                mode,
+                topology: topology ?? null,
+                rustStatus,
+                webLLMProgress,
+                webLLMError,
+                retryScout,
+                theme,
+                toggleTheme,
+            }}
+        >
             {children}
         </AppContext.Provider>
     )

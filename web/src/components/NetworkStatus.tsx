@@ -11,7 +11,7 @@ import { modeLabels } from "./Header"
 interface NetworkStatusProps {
     mode: NodeMode
     topology: Topology | null
-    rustStatus: "connected" | "unreachable" | "downloading"
+    rustStatus: "connected" | "degraded" | "unreachable" | "downloading"
     webLLMProgress: ModelProgress | null
     webLLMError: string | null
 }
@@ -117,7 +117,7 @@ export default function NetworkStatus({
                 </div>
                 <div className="stat-row">
                     <span className="stat-label">PROTOCOL</span>
-                    <span className={`stat-value ${rustStatus === "connected" ? "stat-value--accent" : rustStatus === "downloading" ? "stat-value--warn" : "stat-value--error"}`}>
+                    <span className={`stat-value ${rustStatus === "connected" ? "stat-value--accent" : rustStatus === "downloading" || rustStatus === "degraded" ? "stat-value--warn" : "stat-value--error"}`}>
                         {rustStatus.toUpperCase()}
                     </span>
                 </div>
