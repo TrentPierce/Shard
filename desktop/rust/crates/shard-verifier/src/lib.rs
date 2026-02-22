@@ -1,2 +1,2 @@
-pub mod verification;
 pub mod inference;
+pub mod verification;

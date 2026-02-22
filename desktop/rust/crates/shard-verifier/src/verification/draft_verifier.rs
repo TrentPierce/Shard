@@ -1,6 +1,6 @@
+use serde_json;
 use shard_common::common::signed_envelope::{EnvelopeVerifier, SignedEnvelope};
 use shard_common::types::WorkResponse;
-use serde_json;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
