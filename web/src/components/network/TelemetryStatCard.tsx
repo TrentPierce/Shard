@@ -12,10 +12,10 @@ export default function TelemetryStatCard({
   accent = "cyan",
 }: TelemetryStatCardProps) {
   return (
-    <div className={`network-card network-card--${accent}`}>
-      <p className="network-card__label">{label}</p>
-      <p className="network-card__value">{value}</p>
-      <p className="network-card__hint">{hint}</p>
+    <div className="card text-center" style={{ borderTop: `2px solid var(--accent-${accent})` }}>
+      <p className="text-secondary text-mono mb-sm">{label}</p>
+      <h2 className="mb-sm text-primary">{value}</h2>
+      <p className="text-muted text-sm">{hint}</p>
     </div>
   )
 }

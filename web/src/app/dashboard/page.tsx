@@ -153,28 +153,27 @@ export default function DashboardPage() {
     }, [fetchTelemetry])
 
     return (
-        <div className="app-shell">
+        <div className="container section">
             <Header />
-            <main className="network-page">
-                <div className="network-page__noise" aria-hidden />
-                <div className="app-container">
-                    <section className="network-page__hero">
-                        <p className="network-page__kicker">Node Performance</p>
-                        <h1>Network Dashboard</h1>
-                        <div className="network-page__hero-meta" style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                            <span className={`network-page__badge ${connected ? 'status-dot--live' : 'status-dot--dead'}`}>
+            <main>
+                <div>
+                    <section className="mb-0 text-center">
+                        <p className="text-secondary text-mono mb-0">Node Performance</p>
+                        <h1 className="mb-0">Network Dashboard</h1>
+                        <div className="flex justify-center gap-md mt-auto mb-0" style={{ flexWrap: 'wrap' }}>
+                            <span className={`badge ${connected ? 'badge-primary' : 'badge-secondary'}`}>
                                 {connected ? 'CONNECTED' : 'OFFLINE'}
                             </span>
-                            <span className="network-page__badge">Uptime: {data ? Math.floor(data.metrics.uptime / 3600) : 0}h</span>
-                            <span className="network-page__badge">Peers: {data?.metrics.peerCount || 0}</span>
-                            <span className="network-page__badge">Failure Rate: {data?.metrics.sigFailureRate || 0}%</span>
+                            <span className="badge badge-secondary">Uptime: {data ? Math.floor(data.metrics.uptime / 3600) : 0}h</span>
+                            <span className="badge badge-secondary">Peers: {data?.metrics.peerCount || 0}</span>
+                            <span className="badge badge-secondary">Failure Rate: {data?.metrics.sigFailureRate || 0}%</span>
                         </div>
                     </section>
 
-                    <div className="network-grid network-grid--main">
-                        <div className="network-card">
-                            <div className="network-card__header">
-                                <h2>Mesh Health</h2>
+                    <div className="grid grid-2 mt-auto">
+                        <div className="card">
+                            <div className="mb-0">
+                                <h3 className="text-mono">Mesh Health</h3>
                             </div>
                             <MeshHealthGauge
                                 peerCount={data?.metrics.peerCount || 0}
@@ -183,9 +182,9 @@ export default function DashboardPage() {
                             />
                         </div>
 
-                        <div className="network-card">
-                            <div className="network-card__header">
-                                <h2>Key Metrics</h2>
+                        <div className="card">
+                            <div className="mb-0">
+                                <h3 className="text-mono">Key Metrics</h3>
                             </div>
                             <div className="leaderboard">
                                 <div className="leaderboard__row">
@@ -209,23 +208,23 @@ export default function DashboardPage() {
                             </div>
                         </div>
 
-                        <div className="network-card network-card--wide">
-                            <div className="network-card__header">
-                                <h2>Token Throughput</h2>
+                        <div className="card" style={{ gridColumn: '1 / -1' }}>
+                            <div className="mb-0">
+                                <h3 className="text-mono">Token Throughput</h3>
                             </div>
                             <TPSChart data={data?.tpsHistory || []} />
                         </div>
 
-                        <div className="network-card">
-                            <div className="network-card__header">
-                                <h2>Scout Dropoffs</h2>
+                        <div className="card">
+                            <div className="mb-0">
+                                <h3 className="text-mono">Scout Dropoffs</h3>
                             </div>
                             <DropoffChart data={data?.dropoffHistory || []} />
                         </div>
 
-                        <div className="network-card network-card--wide">
-                            <div className="network-card__header">
-                                <h2>Network Topology</h2>
+                        <div className="card" style={{ gridColumn: '1 / -1' }}>
+                            <div className="mb-0">
+                                <h3 className="text-mono">Network Topology</h3>
                             </div>
                             <div style={{ height: '400px' }}>
                                 <TopologyGraph
@@ -235,9 +234,9 @@ export default function DashboardPage() {
                             </div>
                         </div>
 
-                        <div className="network-card">
-                            <div className="network-card__header">
-                                <h2>Alert Feed</h2>
+                        <div className="card" style={{ gridColumn: '1 / -1' }}>
+                            <div className="mb-0">
+                                <h3 className="text-mono">Alert Feed</h3>
                             </div>
                             <AlertFeed alerts={data?.alerts || []} />
                         </div>
