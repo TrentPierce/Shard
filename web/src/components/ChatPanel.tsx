@@ -10,8 +10,10 @@ interface ChatPanelProps {
     mode: NodeMode
 }
 
+import { Terminal, Activity, Cpu, Send, MessageSquare, Sparkles, AlertCircle } from "lucide-react"
+
 export default function ChatPanel({ mode }: ChatPanelProps) {
-    const { topology } = useAppContext()
+    const { topology, theme } = useAppContext()
     const [messages, setMessages] = useState<ChatMessage[]>([])
     const [input, setInput] = useState("")
     const [streaming, setStreaming] = useState(false)
@@ -21,6 +23,7 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
     const [inferenceMode, setInferenceMode] = useState<"standard" | "distributed">("distributed")
     const [opsSummary, setOpsSummary] = useState<{ active_nodes?: number }>({})
 
+    const isEnterprise = theme === "enterprise"
     const modelLabel = topology?.model_id ?? "default-model"
 
     const scrollToBottom = () => {
@@ -140,38 +143,48 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
     ]
 
     return (
-        <main className="chat" aria-label="Shard terminal gateway">
-            <div className="chat__header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div>
-                    <h2 className="chat__title" style={{ fontSize: '18px', letterSpacing: '2px' }}>[ NEURAL_GATEWAY_V1.4 ]</h2>
-                    <div style={{ display: 'flex', gap: '10px', marginTop: '4px', fontSize: '10px', opacity: 0.6 }}>
-                        <span>MODEL: {modelLabel.toUpperCase()}</span>
-                        <span>CORE: {versionLabel.toUpperCase()}</span>
-                        <select
-                            id="inference-mode-select"
-                            value={inferenceMode}
-                            onChange={(e) => setInferenceMode(e.target.value as "standard" | "distributed")}
-                            style={{ background: 'transparent', color: 'inherit', border: 'none', borderBottom: '1px solid var(--border)', fontSize: 'inherit', cursor: 'pointer' }}
-                        >
-                            <option value="standard">MODE: SINGLE_NODE</option>
-                            <option value="distributed">MODE: DIST_MESH</option>
-                        </select>
+        <main className={`chat ${isEnterprise ? 'theme-enterprise' : ''}`} aria-label="Shard gateway">
+            <div className={`chat__header ${isEnterprise ? 'glass-card border-none' : ''}`} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 24px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                    {isEnterprise ? (
+                        <div className="w-10 h-10 rounded-full bg-secondary/10 flex items-center justify-center text-secondary">
+                            <Sparkles size={20} />
+                        </div>
+                    ) : null}
+                    <div>
+                        <h2 className="chat__title" style={{ fontSize: isEnterprise ? '16px' : '18px', letterSpacing: isEnterprise ? 'noral' : '2px', fontWeight: isEnterprise ? '600' : 'bold' }}>
+                            {isEnterprise ? "Neural Assistant" : "[ NEURAL_GATEWAY_V1.4 ]"}
+                        </h2>
+                        <div style={{ display: 'flex', gap: '12px', marginTop: '4px', fontSize: '11px', opacity: 0.7 }}>
+                            <span className="flex items-center gap-1"><Cpu size={12} /> {modelLabel.toUpperCase()}</span>
+                            <span className="flex items-center gap-1"><Activity size={12} /> {versionLabel.toUpperCase()}</span>
+                            <select
+                                id="inference-mode-select"
+                                value={inferenceMode}
+                                onChange={(e) => setInferenceMode(e.target.value as "standard" | "distributed")}
+                                style={{ background: 'transparent', color: 'inherit', border: 'none', borderBottom: isEnterprise ? 'none' : '1px solid var(--border)', fontSize: 'inherit', cursor: 'pointer', fontWeight: '500' }}
+                            >
+                                <option value="standard">{isEnterprise ? "Standard Mode" : "MODE: SINGLE_NODE"}</option>
+                                <option value="distributed">{isEnterprise ? "Distributed Mesh" : "MODE: DIST_MESH"}</option>
+                            </select>
+                        </div>
                     </div>
                 </div>
                 <div style={{ textAlign: 'right' }}>
-                    <div className={`stat-value--${ready ? "accent" : "error"}`} style={{ fontSize: '12px', fontWeight: 'bold' }}>
-                        {ready ? "STATUS: ONLINE" : "STATUS: SYNCING"}
+                    <div className={ready ? "text-accent-emerald" : "text-error"} style={{ fontSize: '12px', fontWeight: '700' }}>
+                        {ready ? (isEnterprise ? "CONNECTED" : "STATUS: ONLINE") : (isEnterprise ? "SYNCING..." : "STATUS: SYNCING")}
                     </div>
-                    <div style={{ fontSize: '10px', opacity: 0.6 }}>
-                        {opsSummary.active_nodes ?? 0} NODES // {successRate}% RELIABILITY
+                    <div style={{ fontSize: '10px', opacity: 0.6, marginTop: '2px' }}>
+                        {opsSummary.active_nodes ?? 0} NODES • {successRate}% RELIABILITY
                     </div>
                 </div>
             </div>
 
-            <div className="chat__messages" style={{ fontFamily: 'var(--font-mono)' }}>
+            <div className="chat__messages" style={{ fontFamily: isEnterprise ? 'var(--font-sans)' : 'var(--font-mono)', padding: '24px' }}>
                 {messages.length === 0 ? (
-                    <div className="chat__empty" style={{ opacity: 0.8 }}>
-                        <pre style={{ color: 'var(--primary)', marginBottom: '20px', fontSize: '12px', lineHeight: '1.2' }}>{`
+                    <div className="chat__empty" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', textAlign: 'center' }}>
+                        {!isEnterprise ? (
+                            <pre style={{ color: 'var(--primary)', marginBottom: '20px', fontSize: '12px', lineHeight: '1.2' }}>{`
    _____ _    _          _____  _____  
   / ____| |  | |   /\   |  __ \\|  __ \\ 
  | (___ | |__| |  /  \\  | |__) | |  | |
@@ -180,20 +193,29 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
  |_____/|_|  |_/_/    \\_\\_|  \\_\\_____/ 
                                        
         `}</pre>
-                        <h3 className="chat__empty-title" style={{ color: 'var(--primary)', fontSize: '14px' }}>ESTABLISHING_TRUSTLESS_MESH_LINK...</h3>
-                        <p className="chat__empty-hint" style={{ fontSize: '12px', color: 'var(--muted)' }}>
-                            // ALL COMPUTE IS DECENTRALIZED AND ENCRYPTED
+                        ) : (
+                            <div className="w-16 h-16 rounded-2xl bg-secondary/10 flex items-center justify-center text-secondary mb-6">
+                                <MessageSquare size={32} />
+                            </div>
+                        )}
+                        <h3 className="chat__empty-title" style={{ color: 'var(--text-primary)', fontSize: isEnterprise ? '24px' : '14px', fontWeight: '700' }}>
+                            {isEnterprise ? "What can I help you build?" : "ESTABLISHING_TRUSTLESS_MESH_LINK..."}
+                        </h3>
+                        <p className="chat__empty-hint" style={{ fontSize: '14px', color: 'var(--text-muted)', marginTop: '8px', maxWidth: '400px' }}>
+                            {isEnterprise
+                                ? "Ask anything. All compute is distributed across the Shard decentralized network for private, local-first inference."
+                                : "// ALL COMPUTE IS DECENTRALIZED AND ENCRYPTED"}
                         </p>
-                        <div className="chat__quick-prompts" style={{ marginTop: '20px', borderTop: '1px dashed var(--border)', paddingTop: '20px' }}>
+                        <div className="chat__quick-prompts" style={{ marginTop: '32px', display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: '8px' }}>
                             {quickPrompts.map((prompt) => (
                                 <button
                                     key={prompt}
                                     type="button"
-                                    className="chat__quick-btn"
-                                    style={{ border: '1px solid var(--border)', background: 'transparent', color: 'var(--muted)', padding: '6px 12px', margin: '4px', cursor: 'pointer', fontSize: '12px' }}
+                                    className={isEnterprise ? "glass-card hover:bg-white/5 transition-all px-4 py-2 border-none rounded-full normal-case text-sm" : ""}
+                                    style={!isEnterprise ? { border: '1px solid var(--border)', background: 'transparent', color: 'var(--muted)', padding: '6px 12px', margin: '4px', cursor: 'pointer', fontSize: '12px' } : {}}
                                     onClick={() => setInput(prompt)}
                                 >
-                                    {"> "} {prompt}
+                                    {!isEnterprise ? "> " : ""}{prompt}
                                 </button>
                             ))}
                         </div>
@@ -203,28 +225,34 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
                         <div
                             key={i}
                             className={`message ${msg.role === "user" ? "message--user" : "message--assistant"}`}
-                            style={{ marginBottom: '16px', maxWidth: '100%' }}
+                            style={{ marginBottom: '24px', maxWidth: isEnterprise ? '85%' : '100%' }}
                         >
-                            <div className="message__avatar" style={{ fontSize: '11px', marginBottom: '4px', display: 'flex', gap: '8px' }}>
-                                <span style={{ color: msg.role === 'user' ? 'var(--secondary)' : 'var(--primary)', fontWeight: 'bold' }}>
-                                    {msg.role === "user" ? "GUEST@SHARD-NET:~$" : "SYSTEM@SHARD-CORE:~#"}
+                            <div className="message__avatar" style={{ fontSize: '11px', marginBottom: '6px', display: 'flex', gap: '8px', alignItems: 'center' }}>
+                                <span style={{ color: msg.role === 'user' ? 'var(--secondary)' : 'var(--primary)', fontWeight: '700' }}>
+                                    {isEnterprise
+                                        ? (msg.role === "user" ? "YOU" : "SHARD AI")
+                                        : (msg.role === "user" ? "GUEST@SHARD-NET:~$" : "SYSTEM@SHARD-CORE:~#")}
                                 </span>
-                                <span style={{ opacity: 0.3 }}>|</span>
-                                <span style={{ opacity: 0.5 }}>{new Date(msg.timestamp).toLocaleTimeString()}</span>
+                                <span style={{ opacity: 0.2 }}>•</span>
+                                <span style={{ opacity: 0.5 }}>{new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                             </div>
-                            <div className="message__bubble" style={{
-                                background: 'transparent',
-                                border: 'none',
-                                padding: '0 10px',
-                                borderLeft: `2px solid ${msg.role === 'user' ? 'var(--secondary)' : 'var(--primary)'}`,
-                                color: msg.role === 'user' ? 'var(--secondary)' : 'var(--primary)',
-                                fontSize: '13px'
+                            <div className={`message__bubble ${isEnterprise ? 'glass-card' : ''}`} style={{
+                                background: isEnterprise ? (msg.role === 'user' ? 'rgba(0,112,243,0.1)' : 'var(--glass-bg)') : 'transparent',
+                                border: isEnterprise ? 'var(--border-width) solid var(--glass-border)' : 'none',
+                                padding: isEnterprise ? '12px 16px' : '0 10px',
+                                borderLeft: !isEnterprise ? `2px solid ${msg.role === 'user' ? 'var(--secondary)' : 'var(--primary)'}` : 'var(--border-width) solid var(--glass-border)',
+                                color: isEnterprise ? 'var(--text-primary)' : (msg.role === 'user' ? 'var(--secondary)' : 'var(--primary)'),
+                                fontSize: '15px',
+                                lineHeight: '1.6',
+                                borderRadius: isEnterprise ? '12px' : '0'
                             }}>
                                 {msg.content || (
-                                    <span className="cursor" />
+                                    <span className="animate-pulse">●</span>
                                 )}
                                 {streaming && i === messages.length - 1 && msg.role === 'assistant' && (
-                                    <span className="cursor" />
+                                    <span className={isEnterprise ? "animate-pulse ml-1" : "cursor"}>
+                                        {isEnterprise ? '●' : ''}
+                                    </span>
                                 )}
                             </div>
                         </div>
@@ -233,15 +261,15 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
                 <div ref={messagesEndRef} />
             </div>
 
-            <div className="chat__input-area">
-                <div className="chat__input-wrapper" style={{ position: 'relative' }}>
-                    <span style={{ position: 'absolute', left: '10px', top: '10px', color: 'var(--primary)' }}>&gt;</span>
+            <div className={`chat__input-area ${isEnterprise ? 'bg-transparent' : ''}`}>
+                <div className={`chat__input-wrapper ${isEnterprise ? 'glass-card border-none rounded-2xl p-2' : ''}`} style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                    {!isEnterprise && <span style={{ position: 'absolute', left: '10px', color: 'var(--primary)' }}>&gt;</span>}
                     <textarea
                         id="chat-prompt-input"
                         ref={textareaRef}
                         className="chat__input"
-                        style={{ paddingLeft: '25px', width: '100%', minHeight: '40px' }}
-                        placeholder={mode === "loading" ? "INITIALIZING..." : "COMMAND:"}
+                        style={{ paddingLeft: isEnterprise ? '12px' : '25px', width: '100%', minHeight: '44px', maxHeight: '200px', flex: 1, resize: 'none', alignSelf: 'center' }}
+                        placeholder={mode === "loading" ? "Initializing..." : (isEnterprise ? "Ask anything..." : "COMMAND:")}
                         value={input}
                         onChange={(e) => setInput(e.target.value)}
                         onKeyDown={handleKeyDown}
@@ -249,15 +277,16 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
                         rows={1}
                     />
                     <button
-                        className="chat__send-btn"
+                        className={`flex items-center justify-center transition-all ${isEnterprise ? 'bg-secondary text-white w-10 h-10 rounded-xl border-none' : 'chat__send-btn'}`}
                         onClick={handleSend}
                         disabled={!input.trim() || streaming || mode === "loading"}
+                        style={isEnterprise ? { padding: 0 } : {}}
                     >
-                        {streaming ? "..." : "[ SEND ]"}
+                        {streaming ? <div className="animate-spin h-4 w-4 border-2 border-white/20 border-t-white rounded-full" /> : (isEnterprise ? <Send size={18} /> : "[ SEND ]")}
                     </button>
                 </div>
-                <div style={{ fontSize: '9px', color: 'var(--muted)', marginTop: '8px', textTransform: 'uppercase', letterSpacing: '1px' }}>
-                    {streaming ? "WAITING_FOR_SWARM_RESPONSE..." : "READY_FOR_INPUT // SHIFT+ENTER_NEWLINE"}
+                <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '12px', textTransform: 'uppercase', letterSpacing: '1px', textAlign: 'center' }}>
+                    {streaming ? (isEnterprise ? "Assistant is thinking..." : "WAITING_FOR_SWARM_RESPONSE...") : (isEnterprise ? "Private & Decentralized" : "READY_FOR_INPUT // SHIFT+ENTER_NEWLINE")}
                 </div>
             </div>
         </main>
