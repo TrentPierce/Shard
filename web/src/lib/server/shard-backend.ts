@@ -6,7 +6,6 @@ export function getShardBackendBaseUrl(): string {
   return (
     process.env.SHARD_BACKEND_URL?.trim() ||
     process.env.NEXT_PUBLIC_SHARD_BACKEND_URL?.trim() ||
-    process.env.NEXT_PUBLIC_API_URL?.trim() ||
     DEFAULT_BACKEND
   ).replace(/\/$/, "")
 }
