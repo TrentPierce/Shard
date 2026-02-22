@@ -87,7 +87,7 @@ export default function Header() {
 
                 <div className="header-modern__right" style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
                     <div className="header__mode text-[10px] font-mono opacity-80" aria-live="polite">
-                        STATUS: <span className={rustStatus === 'connected' ? 'text-[#33ff00]' : 'text-error'}>{rustStatus.toUpperCase()}</span>
+                        STATUS: <span className={rustStatus === 'connected' ? 'text-[#33ff00]' : rustStatus === 'degraded' ? 'text-yellow-400' : 'text-error'}>{rustStatus.toUpperCase()}</span>
                         <span style={{ margin: '0 10px', opacity: 0.3 }}>|</span>
                         MODE: <strong className="text-primary">{modeLabels[mode].toUpperCase()}</strong>
                     </div>

@@ -1,27 +1,33 @@
-import { NextRequest, NextResponse } from "next/server"
+import { NextResponse } from "next/server"
+import { shardBackendUrl } from "@/lib/server/shard-backend"
+
+export const dynamic = "force-dynamic"
 
 export async function GET() {
-  // Test EC2 connectivity
+  const url = shardBackendUrl("/health")
+
   try {
-    const response = await fetch("http://35.175.242.222:9091/health", {
+    const response = await fetch(url, {
       signal: AbortSignal.timeout(5000),
+      cache: "no-store",
     })
     const data = await response.json()
     return NextResponse.json({
       status: "ok",
-      ec2_status: data.status,
-      ec2_version: data.version,
-      ec2_peer_id: data.peer_id,
+      backend: url,
+      backend_status: data.status,
+      version: data.version,
+      peer_id: data.peer_id,
     })
   } catch (error) {
     return NextResponse.json({
       status: "error",
+      backend: url,
       error: String(error),
-    }, { status: 200 })
+    })
   }
 }
 
 export async function POST() {
-  // Same as GET - test EC2 connectivity
   return GET()
 }
