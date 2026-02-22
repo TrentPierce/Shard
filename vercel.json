@@ -1,19 +1,6 @@
 {
   "buildCommand": "cd web && npm run build",
   "installCommand": "cd web && npm install",
-  "outputDirectory": "web/.next",
-  "framework": "nextjs",
-  "redirects": [
-    {
-      "source": "/:path*",
-      "has": [
-        {
-          "type": "host",
-          "value": "shard-7a1baw7v9-trents-projects-20e9a51a.vercel.app"
-        }
-      ],
-      "destination": "https://shardnetwork.live/:path*",
-      "permanent": true
-    }
-  ]
+  "outputDirectory": ".next",
+  "framework": "nextjs"
 }
