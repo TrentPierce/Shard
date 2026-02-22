@@ -74,7 +74,7 @@ export default function DashboardPage() {
         try {
             const [statusRes, metricsRes] = await Promise.all([
                 fetch('/api/v1/system/topology'),
-                fetch('/api/health'),
+                fetch('/api/metrics'),
             ])
 
             if (!statusRes.ok || !metricsRes.ok) {
