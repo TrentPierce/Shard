@@ -73,8 +73,8 @@ export default function DashboardPage() {
     const fetchTelemetry = useCallback(async () => {
         try {
             const [statusRes, metricsRes] = await Promise.all([
-                fetch('http://localhost:8080/status'),
-                fetch('http://localhost:8080/metrics'),
+                fetch('/api/v1/system/topology'),
+                fetch('/api/health'),
             ])
 
             if (!statusRes.ok || !metricsRes.ok) {
