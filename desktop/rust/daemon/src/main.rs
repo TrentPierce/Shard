@@ -122,7 +122,7 @@ struct Cli {
 
     /// Bootstrap peer multiaddr (can be repeated)
     #[arg(long)]
-    bootstrap: Vec<String>,
+    bootstrap_node: Vec<String>,
 
     /// Path to newline-delimited bootstrap multiaddrs
     #[arg(long)]
@@ -146,7 +146,7 @@ struct Cli {
 
     /// Run as circuit relay server (help other peers behind NAT)
     #[arg(long, default_value = "false")]
-    relay_server: bool,
+    relay_mode: bool,
 
     /// Contribute compute to the network (run as Shard node)
     #[arg(long, default_value = "true")]
@@ -881,8 +881,9 @@ struct ShardBehaviour {
     verify: request_response::cbor::Behaviour<DraftSubmission, String>,
     control_work: request_response::cbor::Behaviour<WorkRequest, String>,
     ledger_sync: request_response::cbor::Behaviour<LedgerSyncRequest, LedgerSyncResponse>,
-    relay_server: relay::Behaviour,
-    dcutr: dcutr::Behaviour,
+    relay_server: libp2p::swarm::behaviour::toggle::Toggle<relay::Behaviour>,
+    relay_client: libp2p::swarm::behaviour::toggle::Toggle<relay::client::Behaviour>,
+    dcutr: libp2p::swarm::behaviour::toggle::Toggle<dcutr::Behaviour>,
     autonat: autonat::v1::Behaviour,
     identify: identify::Behaviour,
     ping: ping::Behaviour,
@@ -900,6 +901,16 @@ fn data_dir() -> std::path::PathBuf {
     dirs::data_local_dir()
         .unwrap_or_else(|| std::path::PathBuf::from("."))
         .join("shard")
+}
+
+fn extract_peer_id_from_multiaddr(addr: &Multiaddr) -> Option<PeerId> {
+    use libp2p::multiaddr::Protocol;
+    for protocol in addr.iter() {
+        if let Protocol::P2p(peer_id) = protocol {
+            return Some(peer_id);
+        }
+    }
+    None
 }
 
 fn resolve_metrics_persistence(data: &Path) -> MetricsPersistence {
@@ -1206,7 +1217,7 @@ async fn health_handler(AxumState(state): AxumState<SharedState>) -> Json<serde_
         "listen_addrs": topo.listen_addrs,
         "public_api": topo.is_public,
         "public_api_addr": topo.public_api_addr,
-        "relay_server": topo.relay_server_enabled,
+        "relay_mode": topo.relay_server_enabled,
         "contribute": topo.contribute_enabled,
         "wallet": state.node_wallet.clone(),
         "model_id": state.model_id.clone(),
@@ -1314,7 +1325,7 @@ async fn topology_handler(AxumState(state): AxumState<SharedState>) -> Json<serd
         "known_peer_count": known.len(),
         "public_api": topo.is_public,
         "public_api_addr": state.public_host.clone().or(topo.public_api_addr.clone()),
-        "relay_server": topo.relay_server_enabled,
+        "relay_mode": topo.relay_server_enabled,
         "contribute": topo.contribute_enabled,
         "wallet": state.node_wallet.clone(),
         "model_id": state.model_id.clone(),
@@ -3059,7 +3070,9 @@ async fn main() -> Result<()> {
     } else {
         Vec::new()
     };
-    let persisted_bootstrap = load_persisted_peers(&known_peers_path).await;
+    let persisted = load_persisted_peers(&known_peers_path).await;
+    let mut bootstrap_addrs = persisted;
+    bootstrap_addrs.extend(cli.bootstrap_node.clone());
 
     // Optional defaults from environment to avoid stale hardcoded peers.
     let default_bootstrap = std::env::var("SHARD_DEFAULT_BOOTSTRAP")
@@ -3075,9 +3088,9 @@ async fn main() -> Result<()> {
     let bootstrap_addrs = unique_addrs(
         default_bootstrap
             .into_iter()
-            .chain(cli.bootstrap.iter().cloned())
+            .chain(cli.bootstrap_node.iter().cloned())
             .chain(file_bootstrap)
-            .chain(persisted_bootstrap)
+            .chain(bootstrap_addrs)
             .collect(),
     );
 
@@ -3121,7 +3134,7 @@ async fn main() -> Result<()> {
             ws_addr: None,
             public_api_addr: cli.public_host.clone(),
             is_public: cli.public_api,
-            relay_server_enabled: cli.relay_server,
+            relay_server_enabled: cli.relay_mode,
             contribute_enabled: cli.contribute,
             capacity: 100, // Default: 100 tokens/sec
             load: 0,
@@ -3247,6 +3260,8 @@ async fn main() -> Result<()> {
 
     // ── build swarm ──
     // ── build transport ──
+    let (relay_transport, relay_client_behaviour) = relay::client::new(local_peer_id);
+
     let tcp_config = libp2p::tcp::Config::default().nodelay(true);
     let dns_tcp = libp2p::dns::tokio::Transport::system(libp2p::tcp::tokio::Transport::new(
         tcp_config.clone(),
@@ -3256,8 +3271,9 @@ async fn main() -> Result<()> {
     )?);
 
     let tcp_ws = libp2p::core::transport::OrTransport::new(dns_tcp, ws_dns_tcp);
+    let tcp_ws_relay = libp2p::core::transport::OrTransport::new(tcp_ws, relay_transport);
 
-    let authenticated_transport = tcp_ws
+    let authenticated_transport = tcp_ws_relay
         .upgrade(libp2p::core::upgrade::Version::V1)
         .authenticate(libp2p::noise::Config::new(&id_keys).expect("Noise config failed"))
         .multiplex(libp2p::yamux::Config::default());
@@ -3321,8 +3337,21 @@ async fn main() -> Result<()> {
             )],
             request_response::Config::default(),
         );
-        let relay_server = relay::Behaviour::new(local_peer_id, Default::default());
-        let dcutr = dcutr::Behaviour::new(local_peer_id);
+        let relay_server = if cli.relay_mode {
+            libp2p::swarm::behaviour::toggle::Toggle::from(Some(relay::Behaviour::new(local_peer_id, Default::default())))
+        } else {
+            libp2p::swarm::behaviour::toggle::Toggle::from(None)
+        };
+        let relay_client = if !cli.relay_mode {
+            libp2p::swarm::behaviour::toggle::Toggle::from(Some(relay_client_behaviour))
+        } else {
+            libp2p::swarm::behaviour::toggle::Toggle::from(None)
+        };
+        let dcutr = if !cli.relay_mode && cli.nat_traversal {
+            libp2p::swarm::behaviour::toggle::Toggle::from(Some(dcutr::Behaviour::new(local_peer_id)))
+        } else {
+            libp2p::swarm::behaviour::toggle::Toggle::from(None)
+        };
         let autonat = autonat::v1::Behaviour::new(local_peer_id, autonat::v1::Config::default());
         let identify = identify::Behaviour::new(identify::Config::new(
             "/shard/1.0.0".to_string(),
@@ -3337,6 +3366,7 @@ async fn main() -> Result<()> {
             control_work,
             ledger_sync,
             relay_server,
+            relay_client,
             dcutr,
             autonat,
             identify,
@@ -3390,7 +3420,16 @@ async fn main() -> Result<()> {
     for addr_str in &bootstrap_addrs {
         if let Ok(addr) = addr_str.parse::<Multiaddr>() {
             tracing::info!(%addr, "dialing bootstrap peer");
-            let _ = swarm.dial(addr);
+            let _ = swarm.dial(addr.clone());
+            if let Some(peer_id) = extract_peer_id_from_multiaddr(&addr) {
+                swarm.behaviour_mut().kad.add_address(&peer_id, addr);
+            }
+        }
+    }
+
+    if !bootstrap_addrs.is_empty() {
+        if let Err(e) = swarm.behaviour_mut().kad.bootstrap() {
+            tracing::warn!(%e, "failed to bootstrap Kademlia DHT");
         }
     }
 
@@ -3605,7 +3644,7 @@ async fn main() -> Result<()> {
     );
     println!(
         "  ║  Relay Server : {}                              ║",
-        if cli.relay_server {
+        if cli.relay_mode {
             "enabled"
         } else {
             "disabled"
