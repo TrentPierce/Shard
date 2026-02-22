@@ -64,21 +64,29 @@ pub mod telemetry_ws;
 use shard_common::common::node_config::{NodeRole, NodeRuntimeConfig};
 use shard_common::common::pow_challenge::PowChallengeManager;
 use shard_common::common::signed_envelope::{EnvelopeVerifier, SignedEnvelope};
+use shard_common::mesh::race_router::{RaceKey, RaceRouter, RaceSubmitOutcome};
 use shard_crypto::crypto::wallet_backup::{export_wallet, import_wallet, verify_backup};
-use shard_gateway::gateway::fallback::{execute_centralized_fallback, ActiveRequestState, FallbackConfig};
-use shard_gateway::gateway::validate_work_request;
 use shard_crypto::identity::NodeIdentity;
+use shard_gateway::gateway::fallback::{
+    execute_centralized_fallback, ActiveRequestState, FallbackConfig,
+};
+use shard_gateway::gateway::validate_work_request;
 use shard_ledger::ledger::state::{ComputeCreditTx, LedgerState};
 use shard_ledger::ledger::store::LedgerStore;
 use shard_ledger::ledger::sync::{hash_probe_segments, LedgerSyncRequest, LedgerSyncResponse};
-use shard_common::mesh::race_router::{RaceKey, RaceRouter, RaceSubmitOutcome};
 use shard_metrics::metrics::alerts::{Alert, AlertManager};
 use shard_metrics::metrics::cost::{estimate as estimate_cost, CostEstimateInput};
 use shard_metrics::metrics::persistence::{MetricsPersistence, PersistedNodeMetricReport};
-use shard_metrics::metrics::{NodeMetricReport, NodeMetricSnapshot, PrometheusSample, SystemMetrics};
-use shard_network::network::layer_registry::{provider_key, LayerHostAnnouncement, LayerRoutingTable};
+use shard_metrics::metrics::{
+    NodeMetricReport, NodeMetricSnapshot, PrometheusSample, SystemMetrics,
+};
+use shard_network::network::layer_registry::{
+    provider_key, LayerHostAnnouncement, LayerRoutingTable,
+};
 use shard_network::network::obfuscation::{deobfuscate_bytes, obfuscate_bytes, random_nonce};
-use shard_network::network::private_mesh::{hash_api_key, PrivateMeshRegistry, PrivateRouteDecision};
+use shard_network::network::private_mesh::{
+    hash_api_key, PrivateMeshRegistry, PrivateRouteDecision,
+};
 use shard_network::network::tensor_wire::TensorWirePacket;
 use shard_scheduler::scheduler::{
     load_reputation, save_reputation, weighted_select, NodeReputation, NodeSchedulerInput,
@@ -240,7 +248,6 @@ struct DraftSubmission {
     seq_start: u32,
     draft_tokens: Vec<u32>,
 }
-
 
 #[derive(Debug, Deserialize)]
 struct PrivateMeshRegisterRequest {
@@ -3404,7 +3411,10 @@ async fn main() -> Result<()> {
                 match client.get(&url).send().await {
                     Ok(resp) => {
                         if let Ok(new_servers) = resp.json::<Vec<String>>().await {
-                            tracing::info!(count = new_servers.len(), "refreshed ICE servers from provider");
+                            tracing::info!(
+                                count = new_servers.len(),
+                                "refreshed ICE servers from provider"
+                            );
                             *refresh_state.ice_servers.lock().await = new_servers;
                         }
                     }
