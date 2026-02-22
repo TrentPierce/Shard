@@ -1,0 +1,33 @@
+﻿cargo :     Checking shard-daemon v0.4.9 
+(D:\Dev\Projects\Shard\Shard\desktop\rust\daemon)
+At line:1 char:1
++ cargo check --manifest-path desktop/rust/Cargo.toml > 
+desktop/rust/ch ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (    Checking sh 
+   ...op\rust\daemon):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+warning: type `SharedState` is more private than the item 
+`spawn_telemetry_ws_server`
+   --> daemon\src\telemetry_ws.rs:24:1
+    |
+ 24 | pub fn spawn_telemetry_ws_server(state: SharedState, 
+port: u16) {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^ function `spawn_telemetry_ws_server` is reachable 
+at visibility `pub`
+    |
+note: but type `SharedState` is only usable at visibility 
+`pub(crate)`
+   --> daemon\src\main.rs:393:1
+    |
+393 | struct SharedState {
+    | ^^^^^^^^^^^^^^^^^^
+    = note: `#[warn(private_interfaces)]` on by default
+
+warning: `shard-daemon` (bin "shard-daemon") generated 1 
+warning
+    Finished `dev` profile [unoptimized + debuginfo] 
+target(s) in 6.54s
