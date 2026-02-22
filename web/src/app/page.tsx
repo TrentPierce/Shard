@@ -5,9 +5,9 @@ import Link from "next/link"
 import Header from "@/components/Header"
 import Footer from "@/components/Footer"
 import { apiUrl } from "@/lib/config"
-import { 
-    Zap, Shield, Globe, Cpu, 
-    ArrowRight, CheckCircle, Code, 
+import {
+    Zap, Shield, Globe, Cpu,
+    ArrowRight, CheckCircle, Code,
     Terminal, Users, Building, GraduationCap,
     Play, Copy, Check
 } from "lucide-react"
@@ -175,7 +175,7 @@ for chunk in response:
     return (
         <>
             <Header />
-            
+
             <main id="main-content">
                 {/* Hero Section */}
                 <section className="hero bg-grid">
@@ -183,7 +183,7 @@ for chunk in response:
                         <div className="gradient-orb gradient-orb--primary" style={{ width: 600, height: 600, top: -200, right: -200 }} />
                         <div className="gradient-orb gradient-orb--secondary" style={{ width: 400, height: 400, bottom: -100, left: -100 }} />
                     </div>
-                    
+
                     <div className="container">
                         <div className="hero-content animate-fade-in-up">
                             <span className="hero-eyebrow">
@@ -197,7 +197,7 @@ for chunk in response:
                                 Shard bypasses centralized GPU constraints through WebGPU speculative decoding across a decentralized P2P mesh. Your browser becomes an AI compute node.
                             </p>
                             <div className="hero-actions">
-                                <Link href="/docs/deployment-guide" className="btn btn-primary btn-lg">
+                                <Link href="/dashboard" className="btn btn-primary btn-lg">
                                     Get Started
                                     <ArrowRight size={18} />
                                 </Link>
@@ -205,7 +205,7 @@ for chunk in response:
                                     See How It Works
                                 </Link>
                             </div>
-                            
+
                             <div className="hero-stats">
                                 <div className="hero-stat">
                                     <div className="hero-stat-value">{statsLoading ? "..." : networkStats.scouts.toLocaleString()}</div>
@@ -233,7 +233,7 @@ for chunk in response:
                                 Shard combines browser Scouts with verifier Shards to deliver server-grade AI quality at zero runtime cost.
                             </p>
                         </div>
-                        
+
                         <div className="steps stagger-children">
                             {howItWorksSteps.map((step, index) => (
                                 <div key={step.title} className="step">
@@ -257,7 +257,7 @@ for chunk in response:
                                 The next generation of AI infrastructure. Built for developers who want control without the cost.
                             </p>
                         </div>
-                        
+
                         <div className="features-grid stagger-children">
                             {features.map((feature) => (
                                 <article key={feature.title} className="feature-card">
@@ -278,7 +278,7 @@ for chunk in response:
                         <div className="text-center" style={{ marginBottom: 'var(--space-2xl)' }}>
                             <h2>Shard vs Traditional Cloud AI</h2>
                         </div>
-                        
+
                         <div style={{ overflowX: 'auto' }}>
                             <table className="comparison-table">
                                 <thead>
@@ -313,7 +313,7 @@ for chunk in response:
                                 Real-time metrics from the Shard distributed inference network.
                             </p>
                         </div>
-                        
+
                         <div className="stats-grid stagger-children">
                             <div className="stat-card">
                                 <div className="stat-value">{statsLoading ? "..." : networkStats.scouts.toLocaleString()}</div>
@@ -344,7 +344,7 @@ for chunk in response:
                                 Shard adapts to your infrastructure needs, from community apps to enterprise deployments.
                             </p>
                         </div>
-                        
+
                         <div className="use-cases-grid stagger-children">
                             {useCases.map((useCase) => (
                                 <article key={useCase.title} className="use-case-card">
@@ -368,23 +368,23 @@ for chunk in response:
                                 <p style={{ marginTop: 'var(--space-md)' }}>
                                     Existing applications work with Shard without any code changes. Simply point your API client to our endpoint.
                                 </p>
-                                
+
                                 <div style={{ marginTop: 'var(--space-xl)' }}>
                                     <div className="api-tabs">
-                                        <button 
+                                        <button
                                             className={`api-tab ${activeApiTab === 'python' ? 'active' : ''}`}
                                             onClick={() => setActiveApiTab('python')}
                                         >
                                             Python
                                         </button>
-                                        <button 
+                                        <button
                                             className={`api-tab ${activeApiTab === 'curl' ? 'active' : ''}`}
                                             onClick={() => setActiveApiTab('curl')}
                                         >
                                             cURL
                                         </button>
                                     </div>
-                                    
+
                                     <div className="code-block">
                                         <button
                                             className="btn btn-ghost btn-sm"
@@ -421,10 +421,10 @@ for chunk in response:
                                     </div>
                                 </div>
                             </div>
-                            
+
                             <div className="quick-start-steps">
                                 <h3>Quick Start</h3>
-                                
+
                                 <div className="quick-start-step">
                                     <div className="quick-start-step-num">1</div>
                                     <div className="quick-start-step-content">
@@ -435,7 +435,7 @@ for chunk in response:
                                         </code>
                                     </div>
                                 </div>
-                                
+
                                 <div className="quick-start-step">
                                     <div className="quick-start-step-num">2</div>
                                     <div className="quick-start-step-content">
@@ -443,7 +443,7 @@ for chunk in response:
                                         <p>Open the web app and enable WebGPU to contribute compute.</p>
                                     </div>
                                 </div>
-                                
+
                                 <div className="quick-start-step">
                                     <div className="quick-start-step-num">3</div>
                                     <div className="quick-start-step-content">
@@ -465,7 +465,7 @@ for chunk in response:
                                 Join thousands of developers building the future of distributed AI. Zero setup required for Scouts.
                             </p>
                             <div className="cta-actions">
-                                <Link href="/docs/deployment-guide" className="btn btn-primary btn-lg">
+                                <Link href="/dashboard" className="btn btn-primary btn-lg">
                                     <Play size={18} />
                                     Start Building
                                 </Link>
