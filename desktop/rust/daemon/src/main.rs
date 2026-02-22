@@ -3338,7 +3338,10 @@ async fn main() -> Result<()> {
             request_response::Config::default(),
         );
         let relay_server = if cli.relay_mode {
-            libp2p::swarm::behaviour::toggle::Toggle::from(Some(relay::Behaviour::new(local_peer_id, Default::default())))
+            libp2p::swarm::behaviour::toggle::Toggle::from(Some(relay::Behaviour::new(
+                local_peer_id,
+                Default::default(),
+            )))
         } else {
             libp2p::swarm::behaviour::toggle::Toggle::from(None)
         };
@@ -3348,7 +3351,9 @@ async fn main() -> Result<()> {
             libp2p::swarm::behaviour::toggle::Toggle::from(None)
         };
         let dcutr = if !cli.relay_mode && cli.nat_traversal {
-            libp2p::swarm::behaviour::toggle::Toggle::from(Some(dcutr::Behaviour::new(local_peer_id)))
+            libp2p::swarm::behaviour::toggle::Toggle::from(Some(dcutr::Behaviour::new(
+                local_peer_id,
+            )))
         } else {
             libp2p::swarm::behaviour::toggle::Toggle::from(None)
         };
