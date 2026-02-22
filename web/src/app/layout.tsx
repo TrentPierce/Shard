@@ -8,25 +8,43 @@ export const viewport: Viewport = {
     width: "device-width",
     initialScale: 1,
     maximumScale: 5,
-    colorScheme: "dark light",
-    themeColor: [
-        { media: "(prefers-color-scheme: dark)", color: "#06060e" },
-        { media: "(prefers-color-scheme: light)", color: "#f8fafc" },
-    ],
+    colorScheme: "dark",
+    themeColor: "#030307",
 }
 
 export const metadata: Metadata = {
     metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL || "https://shardnetwork.live"),
-    title: "Shard — Browser-Powered Distributed Inference",
+    title: {
+        default: "Shard — Browser-Powered Distributed Inference",
+        template: "%s | Shard Network",
+    },
     description:
-        "Free, unlimited LLM access powered by a decentralized P2P inference mesh. Contribute browser compute via WebGPU, earn priority access. OpenAI-compatible API.",
-    keywords: ["AI", "LLM", "distributed inference", "P2P", "WebGPU", "decentralized", "BitNet", "open source"],
+        "Free, unlimited LLM access through a decentralized P2P mesh. Contribute compute from your browser via WebGPU, earn priority access. OpenAI-compatible API.",
+    keywords: ["AI", "LLM", "distributed inference", "P2P", "WebGPU", "decentralized", "BitNet", "speculative decoding", "open source", "free AI"],
+    authors: [{ name: "Shard Network" }],
+    creator: "Shard Network",
+    publisher: "Shard Network",
+    formatDetection: {
+        email: false,
+        address: false,
+        telephone: false,
+    },
     alternates: {
         canonical: "/",
+        languages: {
+            en: "/",
+        },
     },
     robots: {
         index: true,
         follow: true,
+        googleBot: {
+            index: true,
+            follow: true,
+            "max-video-preview": -1,
+            "max-image-preview": "large",
+            "max-snippet": -1,
+        },
     },
     manifest: "/manifest.json",
     openGraph: {
@@ -50,8 +68,9 @@ export const metadata: Metadata = {
         card: "summary_large_image",
         title: "Shard — Browser-Powered Distributed Inference",
         description:
-            "Free LLM access through decentralized P2P compute. Contribute from your browser, earn priority.",
+            "Free LLM access through decentralized P2P compute. Contribute from your browser, earn priority access.",
         images: ["/og-image.svg"],
+        creator: "@shardnetwork",
     },
     appleWebApp: {
         capable: true,
@@ -80,8 +99,10 @@ export default function RootLayout({
     return (
         <html lang="en">
             <body>
+                <a href="#main-content" className="skip-link">
+                    Skip to content
+                </a>
                 <Providers>
-                    <div className="terminal-crt-overlay" />
                     <ErrorBoundary>{children}</ErrorBoundary>
                 </Providers>
                 <ServiceWorkerManager />
