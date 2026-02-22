@@ -167,6 +167,14 @@ struct Cli {
     /// Race timeout in milliseconds.
     #[arg(long, default_value = "3000")]
     race_timeout_ms: u64,
+
+    /// Comma-separated list of STUN/TURN server URIs
+    #[arg(long, value_delimiter = ',')]
+    ice_servers: Vec<String>,
+
+    /// URL to fetch ICE/TURN servers dynamically (e.g. from Twilio or custom service)
+    #[arg(long)]
+    ice_provider_url: Option<String>,
 }
 
 #[derive(Subcommand, Debug, Clone)]
@@ -439,6 +447,8 @@ struct SharedState {
     api_keys: Arc<Mutex<HashSet<String>>>,
     /// Optional admin token for managing API keys.
     admin_key: Option<String>,
+    /// WebRTC ICE servers (STUN/TURN)
+    ice_servers: Arc<Mutex<Vec<String>>>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -1308,6 +1318,7 @@ async fn topology_handler(AxumState(state): AxumState<SharedState>) -> Json<serd
         "capacity": capacity,
         "load": load,
         "latency_ms": latency_ms,
+        "ice_servers": state.ice_servers.lock().await.clone(),
     }))
 }
 
@@ -3167,10 +3178,14 @@ async fn main() -> Result<()> {
         fallback_config: Arc::new(FallbackConfig::from_env()),
         envelope_verifier: Arc::new(Mutex::new(EnvelopeVerifier::with_defaults())),
         pow_manager: Arc::new(Mutex::new(PowChallengeManager::with_defaults())),
-        private_mesh: Arc::new(Mutex::new(PrivateMeshRegistry::new())),
         alert_manager: Arc::new(Mutex::new(AlertManager::new())),
         api_keys: Arc::new(Mutex::new(initial_api_keys)),
         admin_key,
+        ice_servers: Arc::new(Mutex::new(if cli.ice_servers.is_empty() {
+            node_cfg.ice_servers
+        } else {
+            cli.ice_servers
+        })),
     };
 
     #[cfg(target_os = "windows")]
@@ -3378,6 +3393,28 @@ async fn main() -> Result<()> {
     }
 
     telemetry_ws::spawn_telemetry_ws_server(state.clone(), cli.telemetry_ws_port);
+
+    // ── spawn ICE server refresh loop ──
+    if let Some(url) = cli.ice_provider_url {
+        let refresh_state = state.clone();
+        tokio::spawn(async move {
+            let client = reqwest::Client::new();
+            loop {
+                match client.get(&url).send().await {
+                    Ok(resp) => {
+                        if let Ok(new_servers) = resp.json::<Vec<String>>().await {
+                            tracing::info!(count = new_servers.len(), "refreshed ICE servers from provider");
+                            *refresh_state.ice_servers.lock().await = new_servers;
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!(%e, "failed to refresh ICE servers from provider");
+                    }
+                }
+                tokio::time::sleep(Duration::from_secs(3600)).await; // Refresh every hour
+            }
+        });
+    }
 
     // ── spawn HTTP control-plane server ──
     let http_state = state.clone();

@@ -18,6 +18,7 @@ pub struct NodeRuntimeConfig {
     pub idle_only: bool,
     pub load_threshold_cutoff: f32,
     pub heartbeat_interval_seconds: u64,
+    pub ice_servers: Vec<String>,
 }
 
 impl Default for NodeRuntimeConfig {
@@ -29,6 +30,7 @@ impl Default for NodeRuntimeConfig {
             idle_only: false,
             load_threshold_cutoff: 0.85,
             heartbeat_interval_seconds: 10,
+            ice_servers: Vec::new(),
         }
     }
 }
@@ -69,6 +71,13 @@ impl NodeRuntimeConfig {
             if let Ok(parsed) = value.parse::<u64>() {
                 config.heartbeat_interval_seconds = parsed.clamp(2, 300);
             }
+        }
+        if let Ok(value) = std::env::var("SHARD_ICE_SERVERS") {
+            config.ice_servers = value
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
         }
 
         config
