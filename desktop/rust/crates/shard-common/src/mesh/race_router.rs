@@ -333,7 +333,7 @@ mod tests {
         // Timeout should be 2x EWMA ≈ 60ms, clamped to [50, 150]
         let timeout = at.timeout_for_peer("fast");
         assert!(
-            timeout >= 50 && timeout <= 150,
+            (50..=150).contains(&timeout),
             "timeout should be in [50, 150], got {timeout}"
         );
     }
