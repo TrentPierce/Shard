@@ -3178,6 +3178,7 @@ async fn main() -> Result<()> {
         fallback_config: Arc::new(FallbackConfig::from_env()),
         envelope_verifier: Arc::new(Mutex::new(EnvelopeVerifier::with_defaults())),
         pow_manager: Arc::new(Mutex::new(PowChallengeManager::with_defaults())),
+        private_mesh: Arc::new(Mutex::new(PrivateMeshRegistry::new())),
         alert_manager: Arc::new(Mutex::new(AlertManager::new())),
         api_keys: Arc::new(Mutex::new(initial_api_keys)),
         admin_key,
