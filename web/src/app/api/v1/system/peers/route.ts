@@ -4,7 +4,7 @@ import { shardBackendUrl } from "@/lib/server/shard-backend"
 export const dynamic = "force-dynamic"
 
 export async function GET() {
-  const url = shardBackendUrl("/v1/system/topology")
+  const url = shardBackendUrl("/v1/system/peers")
 
   try {
     const response = await fetch(url, {
@@ -14,14 +14,6 @@ export async function GET() {
     const data = await response.json()
     return NextResponse.json(data, { status: response.status })
   } catch (error) {
-    return NextResponse.json(
-      {
-        status: "degraded",
-        error: "Failed to get topology",
-        backend: url,
-        details: String(error),
-      },
-      { status: 502 }
-    )
+    return NextResponse.json({ peers: [], status: "degraded", backend: url, error: String(error) }, { status: 502 })
   }
 }
