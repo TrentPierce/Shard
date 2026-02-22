@@ -1,6 +1,6 @@
 pub mod fallback;
 
-use crate::WorkRequest;
+use shard_common::types::WorkRequest;
 
 pub fn validate_work_request(req: &WorkRequest) -> Result<(), String> {
     if req.request_id.trim().is_empty() {

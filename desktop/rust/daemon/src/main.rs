@@ -46,6 +46,7 @@ use libp2p::{
 };
 use rand::{distributions::Alphanumeric, Rng};
 use serde::{Deserialize, Serialize};
+use shard_common::types::{WorkRequest, WorkResponse};
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     net::{IpAddr, SocketAddr},
@@ -59,38 +60,27 @@ use std::{
 use tokio::sync::{mpsc, Mutex};
 use tower_http::cors::{Any, CorsLayer};
 
-mod common;
-mod crypto;
-mod gateway;
-mod identity;
-pub mod inference;
-mod ledger;
-mod mesh;
-mod metrics;
-mod network;
-mod scheduler;
-mod telemetry_ws;
-mod verification;
-use common::node_config::{NodeRole, NodeRuntimeConfig};
-use common::pow_challenge::PowChallengeManager;
-use common::signed_envelope::{EnvelopeVerifier, SignedEnvelope};
-use crypto::wallet_backup::{export_wallet, import_wallet, verify_backup};
-use gateway::fallback::{execute_centralized_fallback, ActiveRequestState, FallbackConfig};
-use gateway::validate_work_request;
-use identity::NodeIdentity;
-use ledger::state::{ComputeCreditTx, LedgerState};
-use ledger::store::LedgerStore;
-use ledger::sync::{hash_probe_segments, LedgerSyncRequest, LedgerSyncResponse};
-use mesh::race_router::{RaceKey, RaceRouter, RaceSubmitOutcome};
-use metrics::alerts::{Alert, AlertManager};
-use metrics::cost::{estimate as estimate_cost, CostEstimateInput};
-use metrics::persistence::{MetricsPersistence, PersistedNodeMetricReport};
-use metrics::{NodeMetricReport, NodeMetricSnapshot, PrometheusSample, SystemMetrics};
-use network::layer_registry::{provider_key, LayerHostAnnouncement, LayerRoutingTable};
-use network::obfuscation::{deobfuscate_bytes, obfuscate_bytes, random_nonce};
-use network::private_mesh::{hash_api_key, PrivateMeshRegistry, PrivateRouteDecision};
-use network::tensor_wire::TensorWirePacket;
-use scheduler::{
+pub mod telemetry_ws;
+use shard_common::common::node_config::{NodeRole, NodeRuntimeConfig};
+use shard_common::common::pow_challenge::PowChallengeManager;
+use shard_common::common::signed_envelope::{EnvelopeVerifier, SignedEnvelope};
+use shard_crypto::crypto::wallet_backup::{export_wallet, import_wallet, verify_backup};
+use shard_gateway::gateway::fallback::{execute_centralized_fallback, ActiveRequestState, FallbackConfig};
+use shard_gateway::gateway::validate_work_request;
+use shard_crypto::identity::NodeIdentity;
+use shard_ledger::ledger::state::{ComputeCreditTx, LedgerState};
+use shard_ledger::ledger::store::LedgerStore;
+use shard_ledger::ledger::sync::{hash_probe_segments, LedgerSyncRequest, LedgerSyncResponse};
+use shard_common::mesh::race_router::{RaceKey, RaceRouter, RaceSubmitOutcome};
+use shard_metrics::metrics::alerts::{Alert, AlertManager};
+use shard_metrics::metrics::cost::{estimate as estimate_cost, CostEstimateInput};
+use shard_metrics::metrics::persistence::{MetricsPersistence, PersistedNodeMetricReport};
+use shard_metrics::metrics::{NodeMetricReport, NodeMetricSnapshot, PrometheusSample, SystemMetrics};
+use shard_network::network::layer_registry::{provider_key, LayerHostAnnouncement, LayerRoutingTable};
+use shard_network::network::obfuscation::{deobfuscate_bytes, obfuscate_bytes, random_nonce};
+use shard_network::network::private_mesh::{hash_api_key, PrivateMeshRegistry, PrivateRouteDecision};
+use shard_network::network::tensor_wire::TensorWirePacket;
+use shard_scheduler::scheduler::{
     load_reputation, save_reputation, weighted_select, NodeReputation, NodeSchedulerInput,
 };
 
@@ -243,24 +233,6 @@ struct DraftSubmission {
     draft_tokens: Vec<u32>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WorkRequest {
-    pub request_id: String,
-    pub prompt_context: String,
-    pub min_tokens: i32,
-    #[serde(default)]
-    pub created_at_ms: Option<u128>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WorkResponse {
-    pub request_id: String,
-    pub peer_id: String,
-    pub draft_tokens: Vec<String>,
-    pub latency_ms: f32,
-    #[serde(default)]
-    pub created_at_ms: Option<u128>,
-}
 
 #[derive(Debug, Deserialize)]
 struct PrivateMeshRegisterRequest {
@@ -432,7 +404,7 @@ struct SharedState {
     layer_end: u32,
     race_pool_size: usize,
     race_timeout_ms: u64,
-    engine: Arc<Mutex<Option<crate::inference::ShardEngine>>>,
+    engine: Arc<Mutex<Option<shard_verifier::inference::ShardEngine>>>,
     replay_nonces: Arc<Mutex<HashMap<String, u64>>>,
     system_metrics: Arc<SystemMetrics>,
     node_metric_reports: Arc<Mutex<HashMap<String, NodeMetricSnapshot>>>,
@@ -1952,7 +1924,7 @@ async fn pow_verify_handler(
     Json(req): Json<PowVerifyRequest>,
 ) -> Json<serde_json::Value> {
     let mut manager = state.pow_manager.lock().await;
-    use crate::common::pow_challenge::{PowSolution, PowVerifyResult};
+    use shard_common::common::pow_challenge::{PowSolution, PowVerifyResult};
     let result = manager.verify_solution(
         &req.peer_id,
         &PowSolution {
@@ -3225,7 +3197,7 @@ async fn main() -> Result<()> {
     if let (Ok(lib_path), Ok(model_path)) = (lib_path_opt, std::env::var("BITNET_MODEL")) {
         let model_c = std::ffi::CString::new(model_path).unwrap();
         let model_id_c = std::ffi::CString::new(cli.model_id.clone()).unwrap();
-        let config = crate::inference::ShardInitConfig {
+        let config = shard_verifier::inference::ShardInitConfig {
             model_path: model_c.as_ptr(),
             layer_start: cli.layer_start as std::ffi::c_int,
             layer_end: if cli.layer_end == 0 {
@@ -3236,7 +3208,7 @@ async fn main() -> Result<()> {
             model_id: model_id_c.as_ptr(),
             pipeline_mode: 0,
         };
-        match crate::inference::ShardEngine::load(&lib_path, &config) {
+        match shard_verifier::inference::ShardEngine::load(&lib_path, &config) {
             Ok(engine) => {
                 tracing::info!("Loaded ShardEngine from {}", lib_path);
                 *state.engine.lock().await = Some(engine);
@@ -3772,7 +3744,7 @@ async fn main() -> Result<()> {
 
                         if let Some(req) = request_state {
                             state_clone.system_metrics.inc_fallback_invocations();
-                            match gateway::fallback::execute_centralized_fallback(&state_clone.fallback_config, &req).await {
+                            match execute_centralized_fallback(&state_clone.fallback_config, &req).await {
                                 Ok(response_text) => {
                                     tracing::info!(request_id = %packet_clone.request_id, "Centralized fallback returned response");
                                     let mut results = state_clone.results.lock().await;
@@ -3842,7 +3814,7 @@ async fn main() -> Result<()> {
                     // ── gossipsub ──
                     SwarmEvent::Behaviour(ShardBehaviourEvent::Gossipsub(gossipsub::Event::Message { message, .. })) => {
                         if message.topic == result_topic.hash() {
-                            if let Ok(result) = serde_json::from_slice::<WorkResponse>(&message.data) {
+                            if let Ok(result) = shard_verifier::verification::draft_verifier::verify_draft_submission(&message.data, state.envelope_verifier.clone()).await {
                                 let peer_is_blackholed = {
                                     let mut penalties = state.scout_penalties.lock().await;
                                     penalties.is_blackholed(&result.peer_id)
