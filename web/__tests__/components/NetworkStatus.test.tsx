@@ -25,16 +25,14 @@ describe("NetworkStatus", () => {
     )
   })
 
-  it("renders core system sections", () => {
-    render(<NetworkStatus {...defaultProps} />)
-    expect(screen.getByText(/Neural Core/i)).toBeInTheDocument()
-    expect(screen.getByText(/Active Swarm/i)).toBeInTheDocument()
-    expect(screen.getByText(/Intel Layer/i)).toBeInTheDocument()
+  it("renders mode label based on node mode", () => {
+    render(<NetworkStatus {...defaultProps} mode="scout" />)
+    expect(screen.getByText(/Scout/i)).toBeInTheDocument()
   })
 
-  it("shows current node mode label", () => {
-    render(<NetworkStatus {...defaultProps} />)
-    expect(screen.getByText(/^Scout$/i)).toBeInTheDocument()
+  it("renders rust status", () => {
+    render(<NetworkStatus {...defaultProps} rustStatus="unreachable" />)
+    expect(screen.getByText(/unreachable/i)).toBeInTheDocument()
   })
 
   it("renders download progress when rust status is downloading", () => {
@@ -53,7 +51,7 @@ describe("NetworkStatus", () => {
         }}
       />,
     )
-    expect(screen.getByText(/Scout Initializing/i)).toBeInTheDocument()
+    expect(screen.getByText(/Loading model/i)).toBeInTheDocument()
     expect(screen.getByText(/50%/i)).toBeInTheDocument()
   })
 
