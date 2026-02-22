@@ -157,87 +157,90 @@ export default function DashboardPage() {
             <Header />
             <main className="network-page">
                 <div className="network-page__noise" aria-hidden />
-                <section className="network-page__hero">
-                    <p className="network-page__kicker">Node Performance</p>
-                    <h1>Network Dashboard</h1>
-                    <div className="network-page__hero-meta">
-                        <span className={`network-page__badge ${connected ? 'status-dot--live' : 'status-dot--dead'}`}>
-                            {connected ? 'CONNECTED' : 'OFFLINE'}
-                        </span>
-                        <span className="network-page__badge">Uptime: {data ? Math.floor(data.metrics.uptime / 3600) : 0}h</span>
-                        <span className="network-page__badge">Peers: {data?.metrics.peerCount || 0}</span>
-                    </div>
-                </section>
-
-                <div className="network-grid network-grid--main">
-                    <div className="network-card">
-                        <div className="network-card__header">
-                            <h2>Mesh Health</h2>
+                <div className="app-container">
+                    <section className="network-page__hero">
+                        <p className="network-page__kicker">Node Performance</p>
+                        <h1>Network Dashboard</h1>
+                        <div className="network-page__hero-meta" style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                            <span className={`network-page__badge ${connected ? 'status-dot--live' : 'status-dot--dead'}`}>
+                                {connected ? 'CONNECTED' : 'OFFLINE'}
+                            </span>
+                            <span className="network-page__badge">Uptime: {data ? Math.floor(data.metrics.uptime / 3600) : 0}h</span>
+                            <span className="network-page__badge">Peers: {data?.metrics.peerCount || 0}</span>
+                            <span className="network-page__badge">Failure Rate: {data?.metrics.sigFailureRate || 0}%</span>
                         </div>
-                        <MeshHealthGauge
-                            peerCount={data?.metrics.peerCount || 0}
-                            avgLatency={data?.metrics.avgLatencyMs || 0}
-                            sigFailureRate={data?.metrics.sigFailureRate || 0}
-                        />
-                    </div>
+                    </section>
 
-                    <div className="network-card">
-                        <div className="network-card__header">
-                            <h2>Key Metrics</h2>
-                        </div>
-                        <div className="leaderboard">
-                            <div className="leaderboard__row">
-                                <div className="leaderboard__identity">
-                                    <strong>{data?.metrics.totalTps.toLocaleString() || '0'}</strong>
-                                    <small>Total Tokens</small>
-                                </div>
+                    <div className="network-grid network-grid--main">
+                        <div className="network-card">
+                            <div className="network-card__header">
+                                <h2>Mesh Health</h2>
                             </div>
-                            <div className="leaderboard__row">
-                                <div className="leaderboard__identity">
-                                    <strong>{data?.metrics.scoutDropoffs || 0}</strong>
-                                    <small>Scout Dropoffs</small>
-                                </div>
-                            </div>
-                            <div className="leaderboard__row">
-                                <div className="leaderboard__identity">
-                                    <strong>{data?.metrics.powChallengesIssued || 0}</strong>
-                                    <small>PoW Challenges</small>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div className="network-card network-card--wide">
-                        <div className="network-card__header">
-                            <h2>Token Throughput</h2>
-                        </div>
-                        <TPSChart data={data?.tpsHistory || []} />
-                    </div>
-
-                    <div className="network-card">
-                        <div className="network-card__header">
-                            <h2>Scout Dropoffs</h2>
-                        </div>
-                        <DropoffChart data={data?.dropoffHistory || []} />
-                    </div>
-
-                    <div className="network-card network-card--wide">
-                        <div className="network-card__header">
-                            <h2>Network Topology</h2>
-                        </div>
-                        <div style={{ height: '400px' }}>
-                            <TopologyGraph
-                                peers={data ? Object.values(data.peers) : []}
-                                edges={data?.topology || []}
+                            <MeshHealthGauge
+                                peerCount={data?.metrics.peerCount || 0}
+                                avgLatency={data?.metrics.avgLatencyMs || 0}
+                                sigFailureRate={data?.metrics.sigFailureRate || 0}
                             />
                         </div>
-                    </div>
 
-                    <div className="network-card">
-                        <div className="network-card__header">
-                            <h2>Alert Feed</h2>
+                        <div className="network-card">
+                            <div className="network-card__header">
+                                <h2>Key Metrics</h2>
+                            </div>
+                            <div className="leaderboard">
+                                <div className="leaderboard__row">
+                                    <div className="leaderboard__identity">
+                                        <strong>{data?.metrics.totalTps.toLocaleString() || '0'}</strong>
+                                        <small>Total Tokens</small>
+                                    </div>
+                                </div>
+                                <div className="leaderboard__row">
+                                    <div className="leaderboard__identity">
+                                        <strong>{data?.metrics.scoutDropoffs || 0}</strong>
+                                        <small>Scout Dropoffs</small>
+                                    </div>
+                                </div>
+                                <div className="leaderboard__row">
+                                    <div className="leaderboard__identity">
+                                        <strong>{data?.metrics.powChallengesIssued || 0}</strong>
+                                        <small>PoW Challenges</small>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
-                        <AlertFeed alerts={data?.alerts || []} />
+
+                        <div className="network-card network-card--wide">
+                            <div className="network-card__header">
+                                <h2>Token Throughput</h2>
+                            </div>
+                            <TPSChart data={data?.tpsHistory || []} />
+                        </div>
+
+                        <div className="network-card">
+                            <div className="network-card__header">
+                                <h2>Scout Dropoffs</h2>
+                            </div>
+                            <DropoffChart data={data?.dropoffHistory || []} />
+                        </div>
+
+                        <div className="network-card network-card--wide">
+                            <div className="network-card__header">
+                                <h2>Network Topology</h2>
+                            </div>
+                            <div style={{ height: '400px' }}>
+                                <TopologyGraph
+                                    peers={data ? Object.values(data.peers) : []}
+                                    edges={data?.topology || []}
+                                />
+                            </div>
+                        </div>
+
+                        <div className="network-card">
+                            <div className="network-card__header">
+                                <h2>Alert Feed</h2>
+                            </div>
+                            <AlertFeed alerts={data?.alerts || []} />
+                        </div>
                     </div>
                 </div>
             </main>

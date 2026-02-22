@@ -3,17 +3,19 @@
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 
+import { MessageSquare, Globe, LayoutDashboard } from "lucide-react"
+
 const navItems = [
-    { name: "Chat", href: "/", icon: "💬" },
-    { name: "Network", href: "/network", icon: "🌐" },
-    { name: "Dashboard", href: "/dashboard", icon: "📊" },
+    { name: "Chat", href: "/", icon: <MessageSquare size={18} /> },
+    { name: "Network", href: "/network", icon: <Globe size={18} /> },
+    { name: "Dashboard", href: "/dashboard", icon: <LayoutDashboard size={18} /> },
 ]
 
 export default function Navigation() {
     const pathname = usePathname()
 
     return (
-        <nav className="main-nav">
+        <nav className="main-nav glass-card">
             <div className="main-nav__list">
                 {navItems.map((item) => {
                     const isActive = pathname === item.href
@@ -31,47 +33,57 @@ export default function Navigation() {
             </div>
             <style jsx>{`
                 .main-nav {
-                    padding: 12px;
-                    border-bottom: 1px solid var(--glass-border);
+                    padding: 8px;
+                    border: none;
+                    border-bottom: var(--border-width) solid var(--glass-border);
                     background: var(--glass-bg);
-                    backdrop-filter: blur(var(--glass-blur));
+                    backdrop-filter: blur(12px);
+                    border-radius: 0;
                 }
                 .main-nav__list {
                     display: flex;
-                    gap: 8px;
+                    gap: 4px;
                     justify-content: center;
                 }
                 .main-nav__item {
                     display: flex;
                     align-items: center;
-                    gap: 8px;
+                    gap: 10px;
                     padding: 8px 16px;
-                    border-radius: var(--radius-md);
+                    border-radius: var(--radius-inner);
                     text-decoration: none;
                     color: var(--text-secondary);
-                    font-size: 14px;
-                    font-weight: 600;
-                    transition: all var(--transition-fast);
-                    border: 1px solid transparent;
+                    font-size: 13px;
+                    font-weight: 500;
+                    transition: all var(--transition);
+                    border: var(--border-width) solid transparent;
                 }
                 .main-nav__item:hover {
-                    background: rgba(255, 255, 255, 0.05);
+                    background: var(--glass-bg);
                     color: var(--text-primary);
+                    border-color: var(--glass-border);
                 }
                 .main-nav__item--active {
-                    background: rgba(56, 139, 180, 0.1);
-                    color: var(--accent-cyan);
-                    border-color: rgba(56, 139, 180, 0.2);
+                    background: rgba(var(--primary), 0.1);
+                    color: var(--primary);
+                    border-color: var(--primary);
+                    font-weight: 600;
+                }
+                .theme-enterprise .main-nav__item--active {
+                    background: rgba(0, 112, 243, 0.1);
+                    color: #0070f3;
+                    border-color: rgba(0, 112, 243, 0.2);
                 }
                 .main-nav__icon {
-                    font-size: 18px;
+                    display: flex;
+                    align-items: center;
                 }
                 @media (max-width: 768px) {
                     .main-nav__name {
                         display: none;
                     }
                     .main-nav__item {
-                        padding: 8px;
+                        padding: 10px;
                     }
                 }
             `}</style>
