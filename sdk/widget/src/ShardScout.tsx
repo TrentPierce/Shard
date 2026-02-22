@@ -100,8 +100,22 @@ export function ShardScout({
                     if (mounted) updateStatus({ state: 'error', error: 'Invalid API key' })
                     return
                 }
-            } catch {
+            } catch (err) {
                 // Fail open for development
+            }
+
+            // Fetch topology for ICE servers
+            try {
+                const topoRes = await fetch(`${apiBaseUrl}/topology`)
+                if (topoRes.ok) {
+                    const topo = await topoRes.json()
+                    if (topo.ice_servers) {
+                        console.log('[Shard] Discovered ICE servers:', topo.ice_servers)
+                        // In a real implementation, we would pass these to the WebRTC connection pool
+                    }
+                }
+            } catch (err) {
+                console.warn('[Shard] Failed to fetch topology:', err)
             }
 
             // Create worker with CSP-safe inline blob
