@@ -26,9 +26,9 @@ export function middleware(request: NextRequest) {
 
   const cspHeader = `
     default-src 'self';
-    script-src 'self' 'nonce-${nonce}' ${isDev ? "'unsafe-eval'" : ""} blob:;
-    style-src 'self' 'unsafe-inline';
-    font-src 'self' data:;
+    script-src 'self' 'nonce-${nonce}' ${isDev ? "'unsafe-eval'" : ""} 'unsafe-inline' blob:;
+    style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
+    font-src 'self' data: https://fonts.gstatic.com;
     connect-src ${buildConnectSources()};
     img-src 'self' data: blob: https:;
     worker-src 'self' blob:;
