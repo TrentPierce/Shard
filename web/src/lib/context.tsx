@@ -27,6 +27,8 @@ export type NodeMode =
     | "scout"
     | "leech"
 
+export type ThemeMode = "terminal" | "enterprise"
+
 interface AppContextType {
     mode: NodeMode
     topology: Topology | null
@@ -34,12 +36,15 @@ interface AppContextType {
     webLLMProgress: ModelProgress | null
     webLLMError: string | null
     retryScout: () => void
+    theme: ThemeMode
+    toggleTheme: () => void
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined)
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
     const [mode, setMode] = useState<NodeMode>("loading")
+    const [theme, setTheme] = useState<ThemeMode>("terminal")
     const [webLLMProgress, setWebLLMProgress] = useState<ModelProgress | null>(null)
     const [webLLMError, setWebLLMError] = useState<string | null>(null)
     const [scoutRetryNonce, setScoutRetryNonce] = useState(0)
@@ -54,7 +59,29 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         staleTime: 5000,
     })
 
-    const rustStatus = (topology?.status === "ok" ? "connected" : "unreachable") as "connected" | "unreachable" | "downloading"
+    const toggleTheme = useCallback(() => {
+        const newTheme = theme === "terminal" ? "enterprise" : "terminal"
+        setTheme(newTheme)
+        localStorage.setItem("shard-ui-theme", newTheme)
+    }, [theme])
+
+    // Load initial theme
+    useEffect(() => {
+        const saved = localStorage.getItem("shard-ui-theme") as ThemeMode
+        if (saved === "terminal" || saved === "enterprise") {
+            setTheme(saved)
+        } else {
+            // Default to enterprise for first-time general users if they aren't on a dev port?
+            // For now, keep terminal as default for existing hacker-early-adopters.
+        }
+    }, [])
+
+    // Apply theme class to document
+    useEffect(() => {
+        const root = document.documentElement
+        root.classList.remove("theme-terminal", "theme-enterprise")
+        root.classList.add(`theme-${theme}`)
+    }, [theme])
 
     const retryScout = useCallback(() => {
         if (stopScoutWorkerRef.current) {
@@ -108,7 +135,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         if (scoutBootedRef.current) return
         const boot = async () => {
             scoutBootedRef.current = true
-            
+
             try {
                 // Ensure we have fresh topology data immediately
                 await refetchTopologyData()
@@ -120,10 +147,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                         return
                     }
                 }
-                
+
                 setMode("scout-initializing")
                 const gpuStatus = await checkWebGPUSupport()
-                
+
                 if (!gpuStatus.supported) {
                     console.warn(`[Shard] WebGPU unavailable (${gpuStatus.reason}), defaulting to Consumer mode`)
                     setWebLLMError(`WebGPU not available: ${gpuStatus.reason}`)
@@ -135,15 +162,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                 setWebLLMProgress(null)
                 setWebLLMError(null)
                 setMode("scout")
-                
+
                 try {
                     stopScoutWorkerRef.current = await startScoutWorker()
                 } catch (e) { console.error(e) }
-                
+
                 try {
                     stopLayerHostRef.current = await startBrowserLayerHost({ modelId: "default-model", layerStart: 0, layerEnd: 1 })
                 } catch (e) { console.warn(e) }
-                
+
                 try {
                     const liveTopology = await fetchTopology()
                     const bootstrapPeers = getBootstrapPeersFromTopology(liveTopology)
@@ -165,6 +192,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         }
     }, [scoutRetryNonce, getBootstrapPeersFromTopology, refetchTopologyData])
 
+    const rustStatus = (topology?.status === "ok" ? "connected" : "unreachable") as "connected" | "unreachable" | "downloading"
+
     return (
         <AppContext.Provider value={{
             mode,
@@ -172,7 +201,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             rustStatus,
             webLLMProgress,
             webLLMError,
-            retryScout
+            retryScout,
+            theme,
+            toggleTheme
         }}>
             {children}
         </AppContext.Provider>

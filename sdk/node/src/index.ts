@@ -18,9 +18,11 @@
  * })
  *
  * // Streaming
- * for await (const chunk of client.chat.completions.createStream({
+ * const stream = await client.chat.completions.create({
  *   messages: [{ role: 'user', content: 'Tell me a story' }],
- * })) {
+ *   stream: true,
+ * })
+ * for await (const chunk of stream) {
  *   process.stdout.write(chunk.choices[0]?.delta?.content ?? '')
  * }
  *

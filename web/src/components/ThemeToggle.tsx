@@ -1,42 +1,33 @@
 "use client"
 
-import { useEffect, useState } from "react"
-
-type Theme = "dark" | "light"
+import { useAppContext } from "@/lib/context"
+import { Terminal, Briefcase } from "lucide-react"
 
 export function ThemeToggle() {
-    const [theme, setTheme] = useState<Theme>("dark")
+    const { theme, toggleTheme } = useAppContext()
 
-    useEffect(() => {
-        const savedTheme = localStorage.getItem("shard-theme")
-        const systemDark = window.matchMedia("(prefers-color-scheme: dark)").matches
-        const initialTheme: Theme = savedTheme === "light" || savedTheme === "dark"
-            ? savedTheme
-            : (systemDark ? "dark" : "light")
-
-        setTheme(initialTheme)
-        document.documentElement.setAttribute("data-theme", initialTheme)
-    }, [])
-
-    const toggleTheme = () => {
-        const newTheme: Theme = theme === "dark" ? "light" : "dark"
-        setTheme(newTheme)
-        document.documentElement.setAttribute("data-theme", newTheme)
-        localStorage.setItem("shard-theme", newTheme)
-    }
-
-    const isLightTheme = theme === "light"
+    const isEnterprise = theme === "enterprise"
 
     return (
         <button
             onClick={toggleTheme}
-            className="theme-toggle"
-            aria-label={isLightTheme ? "Switch to dark theme" : "Switch to light theme"}
-            aria-pressed={isLightTheme}
+            className="group flex items-center gap-2 px-3 py-1.5 glass-card hover:bg-white/5 transition-all"
+            aria-label={isEnterprise ? "Switch to Developer Mode" : "Switch to Enterprise Mode"}
+            title={isEnterprise ? "Switch to Developer Mode" : "Switch to Enterprise Mode"}
             type="button"
         >
-            <span className="theme-toggle__icon" aria-hidden="true">
-                {isLightTheme ? "☀️" : "🌙"}
+            <div className="relative w-5 h-5">
+                <Terminal
+                    className={`absolute inset-0 transition-opacity duration-300 ${isEnterprise ? 'opacity-0' : 'opacity-100'}`}
+                    size={20}
+                />
+                <Briefcase
+                    className={`absolute inset-0 transition-opacity duration-300 ${isEnterprise ? 'opacity-100' : 'opacity-0'}`}
+                    size={20}
+                />
+            </div>
+            <span className="text-xs font-medium uppercase tracking-wider hidden md:inline">
+                {isEnterprise ? "Enterprise" : "Terminal"}
             </span>
         </button>
     )

@@ -31,15 +31,17 @@ export class ShardClient {
     private readonly maxRetries: number
 
     /** Namespaced API for OpenAI compatibility: `client.chat.completions.create(...)` */
-    public readonly chat: {
+    public readonly chat = {
         completions: {
-            create: (
-                params: Omit<ChatCompletionRequest, 'stream'> & { stream?: false },
-            ) => Promise<ChatCompletionResponse>
-            createStream: (
-                params: Omit<ChatCompletionRequest, 'stream'>,
-            ) => AsyncGenerator<StreamChunk, void, unknown>
-        }
+            create: <P extends ChatCompletionRequest>(
+                params: P,
+            ): Promise<P['stream'] extends true ? AsyncGenerator<StreamChunk, void, unknown> : ChatCompletionResponse> => {
+                if (params.stream) {
+                    return this._streamingChat(params) as any
+                }
+                return this._nonStreamingChat(params) as any
+            },
+        },
     }
 
     constructor(options: ShardClientOptions = {}) {
@@ -47,14 +49,6 @@ export class ShardClient {
         this.baseUrl = (options.baseUrl ?? DEFAULT_BASE_URL).replace(/\/$/, '')
         this.timeout = options.timeout ?? DEFAULT_TIMEOUT
         this.maxRetries = options.maxRetries ?? DEFAULT_MAX_RETRIES
-
-        // Bind namespaced API
-        this.chat = {
-            completions: {
-                create: (params) => this._nonStreamingChat(params),
-                createStream: (params) => this._streamingChat(params),
-            },
-        }
     }
 
     /**
@@ -75,15 +69,15 @@ export class ShardClient {
     // ─── Internal ─────────────────────────────────────────────────────
 
     private async _nonStreamingChat(
-        params: Omit<ChatCompletionRequest, 'stream'>,
+        params: ChatCompletionRequest,
     ): Promise<ChatCompletionResponse> {
         const body: ChatCompletionRequest = {
-            model: params.model ?? 'default',
-            messages: params.messages,
+            model: 'default',
+            temperature: 0.7,
+            sensitive: false,
+            top_p: 1.0,
+            ...params,
             stream: false,
-            temperature: params.temperature ?? 0.7,
-            max_tokens: params.max_tokens,
-            sensitive: params.sensitive ?? false,
         }
 
         for (let attempt = 0; attempt < this.maxRetries; attempt++) {
@@ -126,15 +120,15 @@ export class ShardClient {
     }
 
     private async *_streamingChat(
-        params: Omit<ChatCompletionRequest, 'stream'>,
+        params: ChatCompletionRequest,
     ): AsyncGenerator<StreamChunk, void, unknown> {
         const body: ChatCompletionRequest = {
-            model: params.model ?? 'default',
-            messages: params.messages,
+            model: 'default',
+            temperature: 0.7,
+            sensitive: false,
+            top_p: 1.0,
+            ...params,
             stream: true,
-            temperature: params.temperature ?? 0.7,
-            max_tokens: params.max_tokens,
-            sensitive: params.sensitive ?? false,
         }
 
         const response = await this._fetch('/v1/chat/completions', {
