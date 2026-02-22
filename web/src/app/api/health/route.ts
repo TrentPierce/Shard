@@ -1,20 +1,29 @@
-import { NextRequest, NextResponse } from "next/server"
+import { NextResponse } from "next/server"
+import { shardBackendUrl } from "@/lib/server/shard-backend"
 
-const EC2_URL = "http://35.175.242.222:9091"
+export const dynamic = "force-dynamic"
 
-export async function GET(request: NextRequest) {
-  const url = `${EC2_URL}/health`
-  
+export async function GET() {
+  const url = shardBackendUrl("/health")
+
   try {
+    const started = performance.now()
     const response = await fetch(url, {
       signal: AbortSignal.timeout(8000),
+      cache: "no-store",
     })
+    const latencyMs = Math.round(performance.now() - started)
     const data = await response.json()
-    return NextResponse.json(data)
+    return NextResponse.json({ ...data, backend: url, latency_ms: latencyMs }, { status: response.status })
   } catch (error) {
-    return NextResponse.json({
-      error: "Failed to connect to backend",
-      details: String(error),
-    }, { status: 502 })
+    return NextResponse.json(
+      {
+        status: "unreachable",
+        error: "Failed to connect to backend",
+        backend: url,
+        details: String(error),
+      },
+      { status: 502 }
+    )
   }
 }
