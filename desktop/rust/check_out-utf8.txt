@@ -1,0 +1,22 @@
+﻿cargo : error: failed to load manifest for workspace member 
+`D:\Dev\Projects\Shard\Shard\desktop\rust\daemon`
+At line:1 char:1
++ cargo test > check_out.txt 2>&1; python -c "import codecs; 
+codecs.ope ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (error: failed t...op\ 
+   rust\daemon`:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+referenced by workspace at 
+`D:\Dev\Projects\Shard\Shard\desktop\rust\Cargo.toml`
+
+Caused by:
+  failed to load manifest for dependency `shard-common`
+
+Caused by:
+  failed to parse manifest at `D:\Dev\Projects\Shard\Shard\desktop\
+rust\crates\shard-common\Cargo.toml`
+
+Caused by:
+  manifest is missing either a `[package]` or a `[workspace]`

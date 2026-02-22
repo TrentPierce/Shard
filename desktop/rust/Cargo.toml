@@ -1,19 +1,13 @@
-[package]
-name = "shard-daemon"
-version = "0.4.9"
-edition = "2021"
-description = "P2P networking sidecar for the Shard distributed inference network"
+[workspace]
+resolver = "2"
+members = ["daemon", "crates/*"]
 
-[[bin]]
-name = "shard-daemon"
-path = "src/main.rs"
-
-[dependencies]
+[workspace.dependencies]
 anyhow = "1"
 argon2 = "0.5"
 async-stream = "0.3.6"
 async-trait = "0.1"
-axum = { version = "0.7", features = ["json", "ws"] }
+axum = { version = "0.7", features = ["json", "ws", "macros"] }
 chacha20poly1305 = { version = "0.10", features = ["std"] }
 clap = { version = "4", features = ["derive"] }
 dirs = "5"
@@ -21,11 +15,7 @@ ed25519-dalek = "2"
 futures = "0.3"
 hex = "0.4"
 libloading = "0.9.0"
-libp2p = { version = "0.56.0", features = [
-    "tokio", "kad", "gossipsub", "request-response",
-    "noise", "yamux", "tcp", "websocket", "dns", "macros", "cbor",
-    "relay", "dcutr", "autonat", "identify", "ping", "mdns", "quic",
-] }
+libp2p = { version = "0.56.0", features = ["tokio", "kad", "gossipsub", "request-response", "noise", "yamux", "tcp", "websocket", "dns", "macros", "cbor", "relay", "dcutr", "autonat", "identify", "ping", "mdns", "quic"] }
 libp2p-webrtc = { version = "0.9.0-alpha.1", features = ["tokio"] }
 rand = "0.8"
 serde = { version = "1", features = ["derive"] }
@@ -43,12 +33,20 @@ opentelemetry_sdk = { version = "0.21", features = ["rt-tokio"] }
 opentelemetry-otlp = "0.14"
 uuid = { version = "1", features = ["v4"] }
 rusqlite = { version = "0.31", features = ["bundled"] }
+tempfile = '3.10'
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+
+shard-common = { path = "crates/shard-common" }
+shard-crypto = { path = "crates/shard-crypto" }
+shard-ledger = { path = "crates/shard-ledger" }
+shard-metrics = { path = "crates/shard-metrics" }
+shard-network = { path = "crates/shard-network" }
+shard-scheduler = { path = "crates/shard-scheduler" }
+shard-verifier = { path = "crates/shard-verifier" }
+shard-gateway = { path = "crates/shard-gateway" }
+
 
 [profile.release]
 opt-level = 3
 lto = true
 strip = true
-
-[dev-dependencies]
-tempfile = "3"
