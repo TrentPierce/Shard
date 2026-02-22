@@ -33,11 +33,18 @@ class AsyncShardClient:
 
     Usage:
         async with AsyncShardClient(api_key="sk_...") as client:
-            response = await client.chat("Hello!")
+            response = await client.chat.completions.create(
+                messages=[{"role": "user", "content": "Hello!"}],
+                model="default"
+            )
             print(response.choices[0].message.content)
 
             # Streaming
-            async for chunk in await client.chat("Tell me a story", stream=True):
+            stream = await client.chat.completions.create(
+                messages="Tell me a story", 
+                stream=True
+            )
+            async for chunk in stream:
                 print(chunk.choices[0].delta.content, end="")
     """
 
@@ -63,6 +70,9 @@ class AsyncShardClient:
             headers=headers,
             timeout=timeout,
         )
+        
+        # Resources
+        self.chat = AsyncChat(self)
 
     async def close(self) -> None:
         """Close the underlying HTTP client."""
@@ -74,15 +84,27 @@ class AsyncShardClient:
     async def __aexit__(self, *args: object) -> None:
         await self.close()
 
-    async def chat(
+
+class AsyncChat:
+    def __init__(self, client: AsyncShardClient):
+        self.completions = AsyncCompletions(client)
+
+
+class AsyncCompletions:
+    def __init__(self, client: AsyncShardClient):
+        self._client = client
+
+    async def create(
         self,
-        messages: str | list[dict[str, str]] | list[ChatMessage],
         *,
+        messages: str | list[dict[str, str]] | list[ChatMessage],
         model: str = "default",
         stream: bool = False,
         temperature: float = 0.7,
         max_tokens: int | None = None,
+        top_p: float = 1.0,
         sensitive: bool = False,
+        **kwargs: object,
     ) -> ChatCompletionResponse | AsyncGenerator[StreamChunk, None]:
         """Send an async chat completion request.
 
@@ -92,7 +114,9 @@ class AsyncShardClient:
             stream: If True, returns an async generator of StreamChunk objects.
             temperature: Sampling temperature.
             max_tokens: Maximum tokens to generate.
+            top_p: Nucleus sampling parameter.
             sensitive: If True, routes via private mesh.
+            **kwargs: Additional parameters (ignored).
 
         Returns:
             ChatCompletionResponse (non-streaming) or AsyncGenerator[StreamChunk].
@@ -110,13 +134,14 @@ class AsyncShardClient:
             stream=stream,
             temperature=temperature,
             max_tokens=max_tokens,
+            top_p=top_p,
             sensitive=sensitive,
         )
 
         if stream:
-            return self._stream_chat(request)
+            return self._client._stream_chat(request)
         else:
-            return await self._sync_chat(request)
+            return await self._client._sync_chat(request)
 
     async def _sync_chat(
         self, request: ChatCompletionRequest

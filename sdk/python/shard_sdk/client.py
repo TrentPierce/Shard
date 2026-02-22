@@ -35,7 +35,10 @@ class ShardClient:
 
     Usage:
         client = ShardClient(api_key="sk_...")
-        response = client.chat("Hello, world!")
+        response = client.chat.completions.create(
+            messages=[{"role": "user", "content": "Hello!"}],
+            model="default"
+        )
         print(response.choices[0].message.content)
     """
 
@@ -61,6 +64,9 @@ class ShardClient:
             headers=headers,
             timeout=timeout,
         )
+        
+        # Resources
+        self.chat = Chat(self)
 
     def close(self) -> None:
         """Close the underlying HTTP client."""
@@ -72,17 +78,27 @@ class ShardClient:
     def __exit__(self, *args: object) -> None:
         self.close()
 
-    # ─── Chat Completions API ────────────────────────────────────────
 
-    def chat(
+class Chat:
+    def __init__(self, client: ShardClient):
+        self.completions = Completions(client)
+
+
+class Completions:
+    def __init__(self, client: ShardClient):
+        self._client = client
+
+    def create(
         self,
-        messages: str | list[dict[str, str]] | list[ChatMessage],
         *,
+        messages: str | list[dict[str, str]] | list[ChatMessage],
         model: str = "default",
         stream: bool = False,
         temperature: float = 0.7,
         max_tokens: int | None = None,
+        top_p: float = 1.0,
         sensitive: bool = False,
+        **kwargs: object,
     ) -> ChatCompletionResponse | Generator[StreamChunk, None, None]:
         """Send a chat completion request.
 
@@ -93,7 +109,9 @@ class ShardClient:
             stream: If True, returns a generator yielding StreamChunk objects.
             temperature: Sampling temperature.
             max_tokens: Maximum tokens to generate.
+            top_p: Nucleus sampling parameter.
             sensitive: If True, routes via private mesh (X-Shard-Route: private).
+            **kwargs: Additional parameters (currently ignored, for compatibility).
 
         Returns:
             ChatCompletionResponse (non-streaming) or Generator[StreamChunk] (streaming).
@@ -112,13 +130,14 @@ class ShardClient:
             stream=stream,
             temperature=temperature,
             max_tokens=max_tokens,
+            top_p=top_p,
             sensitive=sensitive,
         )
 
         if stream:
-            return self._stream_chat(request)
+            return self._client._stream_chat(request)
         else:
-            return self._sync_chat(request)
+            return self._client._sync_chat(request)
 
     def _sync_chat(self, request: ChatCompletionRequest) -> ChatCompletionResponse:
         """Non-streaming chat completion with retry."""
