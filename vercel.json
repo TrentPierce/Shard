@@ -1,8 +1,6 @@
 {
-  "buildCommand": "cd web && npm run build && cd .. && rm -rf .next && cp -R web/.next .next && cp -R web/public public && cp web/package.json package.json",
-  "installCommand": "cd web && npm install",
   "framework": "nextjs",
-  "rewrites": [],
+  "rootDirectory": "web",
   "redirects": [
     {
       "source": "/:path*",
