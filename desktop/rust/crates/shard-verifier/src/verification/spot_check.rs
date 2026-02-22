@@ -76,6 +76,7 @@ pub fn select_check_rows(total_rows: usize, config: &SpotCheckConfig, seed: u64)
 /// verify random rows of C by recomputing `C[row] = A[row] × B`.
 ///
 /// All matrices are in row-major f32 format.
+#[allow(clippy::too_many_arguments)]
 pub fn verify_matmul(
     input_a: &[f32],   // M×K flattened
     weights_b: &[f32], // K×N flattened
