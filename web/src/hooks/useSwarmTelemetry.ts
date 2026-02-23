@@ -31,38 +31,44 @@ async function fetchRealTelemetry(): Promise<SwarmTelemetrySnapshot> {
     fetch("/api/v1/system/topology", { cache: "no-store" }),
   ])
 
-  // Parse each response, defaulting gracefully on failure
-  const health =
-    healthRes.status === "fulfilled" && healthRes.value.ok
-      ? await healthRes.value.json().catch(() => null)
-      : null
+  // Helper to extract JSON from fulfilled results
+  const getJson = async (result: PromiseSettledResult<Response>) => {
+    if (result.status === 'fulfilled' && result.value.ok) {
+      try {
+        return await result.value.json()
+      } catch {
+        return null
+      }
+    }
+    return null
+  }
 
-  const peersData =
-    peersRes.status === "fulfilled" && peersRes.value.ok
-      ? await peersRes.value.json().catch(() => null)
-      : null
-
-  const topo =
-    topoRes.status === "fulfilled" && topoRes.value.ok
-      ? await topoRes.value.json().catch(() => null)
-      : null
+  const [health, peersData, topo] = await Promise.all([
+    getJson(healthRes),
+    getJson(peersRes),
+    getJson(topoRes),
+  ])
 
   // If none of the endpoints responded, we're truly offline
   if (!health && !peersData && !topo) {
     throw new Error("All API endpoints unreachable")
   }
 
-  const peerCountFromPeersEndpoint = Number(
-    peersData?.peers?.length ?? peersData?.count ?? 0
-  ) || 0
+  // Get peer count - handle both {peers: [...]} and {count: N} formats
+  const peersList = peersData?.peers ?? []
+  const peerCountFromPeersEndpoint = Array.isArray(peersList) 
+    ? peersList.length 
+    : Number(peersData?.count ?? 0)
+  const connectedPeers = peerCountFromPeersEndpoint || 0
+  
   const activeScoutsFromHealth = Number(health?.active_scouts ?? 0) || 0
-  const connectedPeers = peerCountFromPeersEndpoint
   const capacity = health?.capacity ?? topo?.capacity ?? 100
   const load = health?.load ?? topo?.load ?? 0
   const rustConnected = health?.rust_sidecar === "connected"
   const bitnetLoaded = health?.bitnet_loaded === true
 
   // Count the main Shard plus connected daemon peers as Shard nodes.
+  // If health API is working, we count the local node plus peers
   const localShardOnline = rustConnected || topo?.status === "ok"
   const shardCount = localShardOnline ? 1 + Math.max(0, connectedPeers) : Math.max(0, connectedPeers)
 

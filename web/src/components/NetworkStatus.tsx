@@ -81,7 +81,9 @@ export default function NetworkStatus({
                 const res = await fetch("/api/v1/system/peers")
                 if (res.ok) {
                     const data = await res.json()
-                    setPeers(data.peers ?? [])
+                    // Handle both {peers: [...]} and {count: N, peers: [...]} formats
+                    const peersList = Array.isArray(data.peers) ? data.peers : []
+                    setPeers(peersList)
                 }
             } catch {
                 /* sidecar unreachable */
