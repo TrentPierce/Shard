@@ -63,6 +63,7 @@ use tower_http::cors::{Any, CorsLayer};
 pub mod telemetry_ws;
 pub mod api;
 pub mod scheduler;
+pub mod bootstrap_discovery;
 use api::*;
 use scheduler::*;
 use shard_common::common::node_config::{NodeRole, NodeRuntimeConfig};
@@ -132,6 +133,18 @@ struct Cli {
     /// Path to newline-delimited bootstrap multiaddrs
     #[arg(long)]
     bootstrap_file: Option<String>,
+
+    /// URL to fetch bootstrap peers from (returns JSON array of {peer_id, multiaddr})
+    #[arg(long)]
+    bootstrap_url: Option<String>,
+
+    /// URL to register as a bootstrap peer (POST with peer info when stable)
+    #[arg(long)]
+    bootstrap_advertise_url: Option<String>,
+
+    /// Minimum hours of uptime before advertising as a bootstrap peer
+    #[arg(long, default_value = "1")]
+    stability_threshold_hours: u64,
 
     /// Seconds between reconnect attempts to known peers
     #[arg(long, default_value = "20")]
@@ -392,6 +405,12 @@ struct PeerInfo {
     addrs: Vec<String>,
     verified: bool,
     handshake_failures: u32,
+    /// First time this peer was seen (for stability tracking)
+    first_seen_at: u128,
+    /// Number of successful handshakes
+    successful_handshakes: u32,
+    /// Average latency in ms
+    avg_latency_ms: f32,
 }
 
 #[derive(Clone)]
@@ -1541,6 +1560,22 @@ async fn main() -> Result<()> {
     let hardcoded_bootstrap = vec![
         "/ip4/35.175.242.222/tcp/4001/p2p/12D3KooWConhJakwyGN72uZ1Jtxi3LFecN3cYKxEX3aNLDAo48by".to_string(),
     ];
+
+    // Fetch bootstrap peers from discovery URL if configured
+    let url_bootstrap = if let Some(url) = &cli.bootstrap_url {
+        match bootstrap_discovery::fetch_bootstrap_peers(url).await {
+            Ok(peers) => {
+                tracing::info!(count = peers.len(), "Fetched bootstrap peers from discovery URL");
+                peers.into_iter().map(|p| p.multiaddr).collect()
+            }
+            Err(e) => {
+                tracing::warn!({});
+                Vec::new()
+            }
+        }
+    } else {
+        Vec::new()
+    };
 
     let bootstrap_addrs = unique_addrs(
         default_bootstrap
