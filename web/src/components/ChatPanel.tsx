@@ -11,6 +11,8 @@ interface ChatPanelProps {
 
 import { Activity, Cpu, Send, MessageSquare, Sparkles, User, Bot } from "lucide-react"
 
+import { apiUrl } from "@/lib/config"
+
 export default function ChatPanel({ mode }: ChatPanelProps) {
     const { topology } = useAppContext()
     const [messages, setMessages] = useState<ChatMessage[]>([])
@@ -44,7 +46,7 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
         let cancelled = false
         const poll = async () => {
             try {
-                const res = await fetch("/api/v1/metrics/summary", { cache: "no-store" })
+                const res = await fetch(apiUrl("/v1/metrics/summary"), { cache: "no-store" })
                 if (!res.ok) return
                 const data = await res.json()
                 if (!cancelled) setOpsSummary(data ?? {})
@@ -185,6 +187,16 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
                             Experience decentralized inference powered by the Shard Network. 
                             Your compute, your network, your AI.
                         </p>
+                        
+                        {!ready && (
+                            <div className="mt-4 p-4 card card-glass flex flex-col items-center">
+                                <p className="text-xs text-muted mb-2">Node connection required for distributed inference.</p>
+                                <a href="https://github.com/TrentPierce/Shard/releases" target="_blank" className="btn btn-secondary btn-sm">
+                                    Download Verifier App
+                                </a>
+                            </div>
+                        )}
+
                         <div className="quick-prompts-grid mt-8">
                             {quickPrompts.map(p => (
                                 <button key={p} onClick={() => setInput(p)} className="quick-prompt-card">

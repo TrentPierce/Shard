@@ -7,6 +7,7 @@ import { MeshHealthGauge } from '@/components/dashboard/MeshHealthGauge'
 import { TPSChart } from '@/components/dashboard/TPSChart'
 import { DropoffChart } from '@/components/dashboard/DropoffChart'
 import { AlertFeed } from '@/components/dashboard/AlertFeed'
+import { apiUrl } from "@/lib/config"
 
 interface TelemetryData {
     peers: Record<string, PeerNode>
@@ -73,8 +74,8 @@ export default function DashboardPage() {
     const fetchTelemetry = useCallback(async () => {
         try {
             const [statusRes, metricsRes] = await Promise.all([
-                fetch('/api/v1/system/topology'),
-                fetch('/api/metrics'),
+                fetch(apiUrl('/v1/system/topology')),
+                fetch(apiUrl('/metrics')),
             ])
 
             if (!statusRes.ok || !metricsRes.ok) {
