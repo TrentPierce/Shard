@@ -11,7 +11,6 @@ setup(
         RustBin(
             "shard-daemon",
             path=cargo_path,
-            binding=Binding.Exec,
         )
     ],
 )
