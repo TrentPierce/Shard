@@ -1,11 +1,13 @@
-﻿name: CI
+name: CI
 
 on:
   push:
+    branches: [main]
   pull_request:
+    branches: [main]
 
 jobs:
-  web-build:
+  web-checks:
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -20,7 +22,7 @@ jobs:
       - name: Install dependencies
         run: npm ci --ignore-scripts
       - name: Lint
-        run: npm run lint 2>/dev/null || true
+        run: npm run lint
       - name: Build
         run: npm run build
       - name: Test
@@ -33,7 +35,8 @@ jobs:
         working-directory: desktop/rust
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
       - name: Check formatting
@@ -42,3 +45,29 @@ jobs:
         run: cargo clippy --all-targets -- -D warnings
       - name: Cargo tests
         run: cargo test --all-targets
+
+  python-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y cmake
+      - name: Install SDK
+        run: |
+          pip install ./sdk/python[dev]
+          pip install pytest pytest-asyncio httpx pytest-cov
+      - name: Run Python tests
+        run: |
+          python -m pytest tests/ -v --cov=shard --cov-report=xml
+      - name: Upload coverage
+        if: success()
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./coverage.xml
+          flags: unittests
