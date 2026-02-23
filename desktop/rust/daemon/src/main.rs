@@ -455,7 +455,13 @@ struct SharedState {
     /// Optional admin token for managing API keys.
     admin_key: Option<String>,
     /// WebRTC ICE servers (STUN/TURN)
+    /// WebRTC ICE servers (STUN/TURN)
     ice_servers: Arc<Mutex<Vec<String>>>,
+    /// Channel for receiving scout draft submissions
+    scout_draft_tx: mpsc::Sender<ScoutDraft>,
+    scout_draft_rx: Arc<Mutex<Option<mpsc::Receiver<ScoutDraft>>>>,
+    /// Timeout tracker for speculative decoding
+    scout_timeout_tracker: Arc<Mutex<ScoutTimeoutTracker>>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -464,6 +470,89 @@ struct ResourcePolicy {
     max_gpu_usage: f32,
     idle_only_mode: bool,
     load_threshold_cutoff: f32,
+}
+
+// ─── Speculative Decoding Types ────────────────────────────────────────────
+
+/// Configuration for speculative decoding (Scout draft verification).
+#[derive(Clone, Debug)]
+struct SpeculativeConfig {
+    /// Timeout in ms to wait for scout draft (default: 800ms).
+    scout_timeout_ms: u64,
+    /// Cooldown in ms after 3 consecutive timeouts (default: 60000ms).
+    scout_cooldown_ms: u64,
+    /// Number of consecutive timeouts before cooldown.
+    max_consecutive_timeouts: u32,
+    /// Number of draft tokens to request from scout.
+    draft_token_count: usize,
+}
+
+impl Default for SpeculativeConfig {
+    fn default() -> Self {
+        Self {
+            scout_timeout_ms: std::env::var("SHARD_SCOUT_TIMEOUT_MS")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(800),
+            scout_cooldown_ms: 60000,
+            max_consecutive_timeouts: 3,
+            draft_token_count: 4,
+        }
+    }
+}
+
+/// Tracks consecutive scout timeouts for cooldown management.
+#[derive(Clone, Debug)]
+struct ScoutTimeoutTracker {
+    consecutive_timeouts: u32,
+    cooldown_until_ms: u128,
+}
+
+impl ScoutTimeoutTracker {
+    fn new() -> Self {
+        Self {
+            consecutive_timeouts: 0,
+            cooldown_until_ms: 0,
+        }
+    }
+
+    fn record_timeout(&mut self, config: &SpeculativeConfig) {
+        self.consecutive_timeouts += 1;
+        if self.consecutive_timeouts >= config.max_consecutive_timeouts {
+            self.cooldown_until_ms = now_ms() + (config.scout_cooldown_ms as u128);
+            tracing::warn!(
+                "scout cooldown triggered: {} consecutive timeouts",
+                self.consecutive_timeouts
+            );
+        }
+    }
+
+    fn record_success(&mut self) {
+        self.consecutive_timeouts = 0;
+    }
+
+    fn is_in_cooldown(&self) -> bool {
+        now_ms() < self.cooldown_until_ms
+    }
+}
+
+/// A draft submission from a Scout browser node.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct ScoutDraft {
+    work_id: String,
+    scout_id: String,
+    draft_tokens: Vec<i32>,
+    draft_text: String,
+    timestamp_ms: u128,
+}
+
+/// Result of verifying draft tokens against the verifier model.
+#[derive(Clone, Debug)]
+struct DraftVerificationResult {
+    accepted_tokens: Vec<i32>,
+    accepted_text: String,
+    first_rejection_idx: Option<usize>,
+    resample_token: Option<i32>,
 }
 
 async fn capture_alert<F>(state: &SharedState, f: F)
@@ -1228,6 +1317,40 @@ async fn health_handler(AxumState(state): AxumState<SharedState>) -> Json<serde_
         "capacity": capacity,
         "load": load,
         "latency_ms": latency_ms,
+    }))
+}
+
+async fn connectivity_handler(AxumState(state): AxumState<SharedState>) -> Json<serde_json::Value> {
+    let topo = state.topology.lock().await;
+    
+    // Determine NAT type based on topology state
+    let nat_type = if topo.is_public {
+        "none"
+    } else if topo.relay_server_enabled {
+        "full_cone"
+    } else {
+        "symmetric"
+    };
+    
+    let relay_mode = topo.relay_server_enabled;
+    let reachable_from_public = topo.is_public;
+    
+    // Generate recommended action based on connectivity
+    let recommended_action = if reachable_from_public {
+        "P2P direct connections available"
+    } else if relay_mode {
+        "Operating in relay mode - performance may be reduced"
+    } else {
+        "Consider enabling relay mode for better connectivity"
+    };
+    
+    Json(serde_json::json!({
+        "nat_type": nat_type,
+        "relay_mode": relay_mode,
+        "reachable_from_public": reachable_from_public,
+        "recommended_action": recommended_action,
+        "listen_addrs": topo.listen_addrs,
+        "public_api_addr": topo.public_api_addr,
     }))
 }
 
@@ -2172,13 +2295,153 @@ struct ChatRequest {
     max_new_tokens: Option<u32>,
 }
 
-#[tracing::instrument(skip(state, req))]
+// ─── Speculative Decoding Functions ────────────────────────────────────────
+
+/// Wait for a scout draft submission with timeout.
+async fn wait_for_scout_draft(
+    state: &SharedState,
+    work_id: &str,
+    timeout_ms: u64,
+) -> Option<ScoutDraft> {
+    let start = now_ms();
+    let timeout_deadline = start + timeout_ms as u128;
+    
+    loop {
+        if now_ms() >= timeout_deadline {
+            tracing::debug!("scout draft timeout for work_id: {}", work_id);
+            return None;
+        }
+        
+        // Check if there's a draft available
+        let draft = {
+            let mut rx_guard = state.scout_draft_rx.lock().await;
+            if let Some(rx) = rx_guard.as_mut() {
+                match tokio::time::timeout(
+                    tokio::time::Duration::from_millis(100),
+                    rx.recv()
+                ).await {
+                    Ok(Some(draft)) if draft.work_id == work_id => Some(draft),
+                    _ => None,
+                }
+            } else {
+                None
+            }
+        };
+        
+        if draft.is_some() {
+            return draft;
+        }
+        
+        // Small yield to prevent busy loop
+        tokio::task::yield_now().await;
+    }
+}
+
+/// Verify draft tokens against the verifier model.
+/// Returns accepted tokens, text, and optionally a token to resample.
+async fn verify_draft_tokens(
+    engine: &mut shard_verifier::inference::ShardEngine,
+    prompt_tokens: &[i32],
+    draft_tokens: &[i32],
+) -> DraftVerificationResult {
+    // Run forward pass on prompt + draft tokens
+    let mut all_tokens = prompt_tokens.to_vec();
+    all_tokens.extend_from_slice(draft_tokens);
+    
+    if engine.eval(&all_tokens).is_err() {
+        return DraftVerificationResult {
+            accepted_tokens: Vec::new(),
+            accepted_text: String::new(),
+            first_rejection_idx: None,
+            resample_token: None,
+        };
+    }
+    
+    // Check each token position
+    let mut accepted_tokens = Vec::new();
+    let mut accepted_text = String::new();
+    let mut first_rejection_idx = None;
+    let vocab_size = 128256;
+    
+    for (idx, &draft_token) in draft_tokens.iter().enumerate() {
+        if let Ok(logits) = engine.get_logits(vocab_size) {
+            // Find the argmax
+            let mut best_idx = 0;
+            let mut best_val = -f32::INFINITY;
+            for (i, &val) in logits.iter().enumerate() {
+                if val > best_val {
+                    best_val = val;
+                    best_idx = i;
+                }
+            }
+            
+            // Accept if token matches or is within threshold
+            if best_idx == draft_token as usize || best_val - logits.get(draft_token as usize).copied().unwrap_or(-f32::INFINITY) < 1.0 {
+                // Token accepted
+                if let Ok(piece) = engine.token_to_piece(draft_token) {
+                    accepted_text.push_str(&piece);
+                }
+                accepted_tokens.push(draft_token);
+                
+                // Evaluate for next token
+                if engine.eval(&[draft_token]).is_err() {
+                    break;
+                }
+            } else {
+                // First rejection
+                first_rejection_idx = Some(idx);
+                break;
+            }
+        } else {
+            break;
+        }
+    }
+    
+    DraftVerificationResult {
+        accepted_tokens,
+        accepted_text,
+        first_rejection_idx,
+        resample_token: None, // Will be set if needed
+    }
+}
+
+/// Handle scout timeout - record in tracker and return whether in cooldown.
+async fn handle_scout_timeout(
+    state: &SharedState,
+    config: &SpeculativeConfig,
+) -> bool {
+    let mut tracker = state.scout_timeout_tracker.lock().await;
+    tracker.record_timeout(config);
+    let in_cooldown = tracker.is_in_cooldown();
+    
+    if in_cooldown {
+        tracing::warn!("scout in cooldown period, falling back to local generation");
+    }
+    
+    in_cooldown
+}
+
+#[tracing::instrument(skip(state, req, headers))]
 async fn chat_completions_handler(
     AxumState(state): AxumState<SharedState>,
+    headers: HeaderMap,
     Json(req): Json<ChatRequest>,
 ) -> impl IntoResponse {
     let stream_mode = req.stream.unwrap_or(false);
     let max_tokens = req.max_tokens.or(req.max_new_tokens).unwrap_or(256);
+    
+    // Check for speculative decoding mode
+    let use_speculative = headers
+        .get("x-shard-inference-mode")
+        .and_then(|v| v.to_str().ok())
+        .map(|v| v.eq_ignore_ascii_case("speculative"))
+        .unwrap_or(false);
+    
+    let speculative_config = if use_speculative {
+        Some(SpeculativeConfig::default())
+    } else {
+        None
+    };
 
     let mut prompt = String::new();
     prompt.push_str("<|begin_of_text|>");
@@ -2200,6 +2463,46 @@ async fn chat_completions_handler(
                     if !tokens.is_empty() && tokens[0] == 128000 {
                         tokens.remove(0);
                     }
+                    
+                    // Speculative decoding: try to get scout draft
+                    let mut accepted_text = String::new();
+                    let prompt_tokens = tokens.clone();
+                    
+                    if use_speculative {
+                        if let Some(ref config) = speculative_config {
+                            // Wait for scout draft with timeout
+                            let draft = wait_for_scout_draft(&state, &request_id, config.scout_timeout_ms).await;
+                            
+                            if let Some(draft) = draft {
+                                // Verify the draft against our model
+                                let result = verify_draft_tokens(engine, &prompt_tokens, &draft.draft_tokens).await;
+                                
+                                // Emit accepted tokens
+                                if !result.accepted_text.is_empty() {
+                                    let chunk = serde_json::json!({
+                                        "id": request_id,
+                                        "object": "chat.completion.chunk",
+                                        "created": now_ms() / 1000,
+                                        "model": req.model.as_deref().unwrap_or("shard-hybrid"),
+                                        "choices": [{"index": 0, "delta": {"content": result.accepted_text}, "finish_reason": serde_json::Value::Null}],
+                                    });
+                                    yield Ok::<_, std::convert::Infallible>(Event::default().data(chunk.to_string()));
+                                    accepted_text.push_str(&result.accepted_text);
+                                }
+                                
+                                // Record success
+                                let mut tracker = state.scout_timeout_tracker.lock().await;
+                                tracker.record_success();
+                            } else {
+                                // Handle timeout
+                                let in_cooldown = handle_scout_timeout(&state, config).await;
+                                if in_cooldown {
+                                    tracing::info!("scout in cooldown, using local generation");
+                                }
+                            }
+                        }
+                    }
+                    
                     if engine.eval(&tokens).is_ok() {
                         let mut emitted = 0;
                         while emitted < max_tokens {
@@ -2267,6 +2570,37 @@ async fn chat_completions_handler(
                     if !tokens.is_empty() && tokens[0] == 128000 {
                         tokens.remove(0);
                     }
+                    
+                    // Speculative decoding: try to get scout draft
+                    let prompt_tokens = tokens.clone();
+                    
+                    if use_speculative {
+                        if let Some(ref config) = speculative_config {
+                            // Wait for scout draft with timeout
+                            let draft = wait_for_scout_draft(&state, &request_id, config.scout_timeout_ms).await;
+                            
+                            if let Some(draft) = draft {
+                                // Verify the draft against our model
+                                let result = verify_draft_tokens(engine, &prompt_tokens, &draft.draft_tokens).await;
+                                
+                                // Add accepted tokens to output
+                                if !result.accepted_text.is_empty() {
+                                    full_text.push_str(&result.accepted_text);
+                                }
+                                
+                                // Record success
+                                let mut tracker = state.scout_timeout_tracker.lock().await;
+                                tracker.record_success();
+                            } else {
+                                // Handle timeout
+                                let in_cooldown = handle_scout_timeout(&state, config).await;
+                                if in_cooldown {
+                                    tracing::info!("scout in cooldown, using local generation");
+                                }
+                            }
+                        }
+                    }
+                    
                     if engine.eval(&tokens).is_ok() {
                         let mut emitted = 0;
                         while emitted < max_tokens {
@@ -2917,6 +3251,8 @@ fn create_router(state: SharedState) -> Router {
     Router::new()
         .route("/health", get(health_handler))
         .route("/v1/system/health", get(health_handler))
+        .route("/connectivity", get(connectivity_handler))
+        .route("/v1/system/connectivity", get(connectivity_handler))
         .route("/topology", get(topology_handler))
         .route("/v1/system/topology", get(topology_handler))
         .route("/wallet/address", get(wallet_address_handler))
@@ -3098,6 +3434,7 @@ async fn main() -> Result<()> {
     let (work_tx, mut work_rx) = mpsc::channel::<WorkRequest>(256);
     let (pipeline_tx, mut pipeline_rx) = mpsc::channel::<PipelineDispatch>(256);
     let (browser_result_tx, mut browser_result_rx) = mpsc::channel::<ForwardPassActivation>(256);
+    let (scout_draft_tx, scout_draft_rx) = mpsc::channel::<ScoutDraft>(64);
 
     let node_identity = NodeIdentity::load_or_create(&identity_path)?;
     let node_wallet = node_identity.wallet_address();
@@ -3207,6 +3544,9 @@ async fn main() -> Result<()> {
         } else {
             cli.ice_servers
         })),
+        scout_draft_tx,
+        scout_draft_rx: Arc::new(Mutex::new(Some(scout_draft_rx))),
+        scout_timeout_tracker: Arc::new(Mutex::new(ScoutTimeoutTracker::new())),
     };
 
     #[cfg(target_os = "windows")]

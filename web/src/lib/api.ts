@@ -6,6 +6,8 @@
  */
 
 import { apiUrl } from "./config"
+import { generateDraftTokens, isWebLLMReady } from "./webllm"
+import { submitDraft } from "./scout-draft"
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -29,6 +31,53 @@ function authHeaders(): Record<string, string> {
     return API_KEY ? { "Authorization": `Bearer ${API_KEY}` } : {}
 }
 
+// Generate a unique work ID for scout draft tracking
+function generateWorkId(): string {
+    return `work-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`
+}
+
+/**
+ * Try to generate and submit draft tokens to the verifier.
+ * Falls back gracefully if WebLLM is not available.
+ */
+async function trySubmitDraft(prompt: string, workId: string): Promise<boolean> {
+    // Check if WebLLM is ready
+    if (!isWebLLMReady()) {
+        console.debug("[Scout] WebLLM not ready, skipping draft submission")
+        return false
+    }
+
+    try {
+        // Generate draft tokens using WebLLM
+        const draftResult = await generateDraftTokens(prompt, {
+            maxTokens: 4, // K=4 draft tokens for speculative decoding
+            temperature: 0.8,
+            topP: 0.9,
+        })
+
+        if (!draftResult.success || !draftResult.text) {
+            console.debug("[Scout] Draft generation failed, skipping submission")
+            return false
+        }
+
+        // Submit to verifier
+        const submitResult = await submitDraft(workId, draftResult.text, {
+            timeoutMs: 800, // Match server's SHARD_SCOUT_TIMEOUT_MS
+        })
+
+        if (submitResult.ok) {
+            console.debug("[Scout] Draft submitted successfully")
+            return true
+        } else {
+            console.debug("[Scout] Draft submission rejected:", submitResult.detail)
+            return false
+        }
+    } catch (error) {
+        console.debug("[Scout] Draft submission error:", error)
+        return false
+    }
+}
+
 // ─── Streaming Chat ─────────────────────────────────────────────────────────
 
 /**
@@ -47,6 +96,30 @@ export async function sendMessage(
     const startedAt = performance.now()
     // Use direct API URL instead of discovery for reliability
     const apiEndpoint = apiUrl("")
+
+    // Build the prompt in the same format the server expects
+    let prompt = "<|begin_of_text|>"
+    for (const msg of history) {
+        prompt += `<|start_header_id|>${msg.role}<|end_header_id|>\n\n${msg.content}<|eot_id|>`
+    }
+    prompt += "<|start_header_id|>assistant<|end_header_id|>\n\n"
+
+    // Generate and submit draft in parallel with the chat request for distributed mode
+    const workId = generateWorkId()
+
+    if (inferenceMode === "distributed") {
+        // Fire and forget - submit draft but don't wait
+        trySubmitDraft(prompt, workId)
+            .then((success) => {
+                if (success) {
+                    console.log("[Scout] Draft token submission initiated for work", workId)
+                }
+            })
+            .catch(() => {
+                // Ignore errors - fallback to server-side generation
+            })
+    }
+
     const body: ChatCompletionRequest = {
         model: "shard-hybrid",
         messages: history.map((m) => ({ role: m.role, content: m.content })),

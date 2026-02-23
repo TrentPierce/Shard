@@ -22,7 +22,7 @@ from shard_sdk.models import (
 )
 
 
-_DEFAULT_BASE_URL = "http://localhost:8080"
+_DEFAULT_BASE_URL = "http://localhost:9091"
 _DEFAULT_TIMEOUT = 30.0
 _MAX_RETRIES = 3
 _RETRY_BACKOFF_BASE = 0.5
