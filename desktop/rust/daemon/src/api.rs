@@ -734,13 +734,10 @@ pub(crate) async fn process_draft_submission(
         .unwrap_or_else(now_ms);
 
     let response = WorkResponse {
-        request_id: submission.work_id,
-        peer_id: submission.scout_id,
-        draft_tokens: submission
-            .draft_text
-            .split_whitespace()
-            .map(ToOwned::to_owned)
-            .collect(),
+        request_id: submission.work_id.clone(),
+        peer_id: submission.scout_id.clone(),
+        draft_tokens: submission.draft_tokens.clone(),
+        draft_text: submission.draft_text.clone(),
         latency_ms: 0.0,
         created_at_ms: Some(created_at_ms),
     };
@@ -773,11 +770,7 @@ pub(crate) async fn process_draft_submission(
     let draft_for_channel = ScoutDraft {
         work_id: response.request_id.clone(),
         scout_id: response.peer_id.clone(),
-        draft_tokens: response
-            .draft_tokens
-            .iter()
-            .filter_map(|t| t.parse::<i32>().ok())
-            .collect(),
+        draft_tokens: response.draft_tokens.clone(),
         draft_text: submission.draft_text.clone(),
         timestamp_ms: response.created_at_ms.unwrap_or_else(now_ms),
         latency_ms: response.latency_ms as u64,

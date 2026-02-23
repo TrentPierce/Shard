@@ -47,11 +47,8 @@ pub(crate) async fn verify_draft_tokens(
     prompt_tokens: &[i32],
     draft_tokens: &[i32],
 ) -> DraftVerificationResult {
-    // Run forward pass on prompt + draft tokens
-    let mut all_tokens = prompt_tokens.to_vec();
-    all_tokens.extend_from_slice(draft_tokens);
-
-    if engine.eval(&all_tokens).is_err() {
+    // 1. Evaluate the prompt context first to build KV cache
+    if engine.eval(prompt_tokens).is_err() {
         return DraftVerificationResult {
             accepted_tokens: Vec::new(),
             accepted_text: String::new(),
@@ -60,15 +57,15 @@ pub(crate) async fn verify_draft_tokens(
         };
     }
 
-    // Check each token position
     let mut accepted_tokens = Vec::new();
     let mut accepted_text = String::new();
     let mut first_rejection_idx = None;
     let vocab_size = 128256;
 
+    // 2. Step through each draft token and check if the model would have predicted it
     for (idx, &draft_token) in draft_tokens.iter().enumerate() {
         if let Ok(logits) = engine.get_logits(vocab_size) {
-            // Find the argmax
+            // Find the argmax (greedy acceptance)
             let mut best_idx = 0;
             let mut best_val = -f32::INFINITY;
             for (i, &val) in logits.iter().enumerate() {
@@ -78,29 +75,33 @@ pub(crate) async fn verify_draft_tokens(
                 }
             }
 
-            // Accept if token matches or is within threshold
-            if best_idx == draft_token as usize
-                || best_val
-                    - logits
-                        .get(draft_token as usize)
-                        .copied()
-                        .unwrap_or(-f32::INFINITY)
-                    < 1.0
-            {
+            // Probability bound check:
+            // Either greedy match OR the draft token is within 1.0 log-probability of the best
+            let draft_logit = logits.get(draft_token as usize).copied().unwrap_or(-f32::INFINITY);
+            let is_accepted = best_idx == draft_token as usize || (best_val - draft_logit) < 1.0;
+
+            if is_accepted {
                 // Token accepted
                 if let Ok(piece) = engine.token_to_piece(draft_token) {
                     accepted_text.push_str(&piece);
                 }
                 accepted_tokens.push(draft_token);
 
-                // Evaluate for next token
+                // Advance engine with the accepted token to get logits for the next position
                 if engine.eval(&[draft_token]).is_err() {
                     break;
                 }
             } else {
                 // First rejection
                 first_rejection_idx = Some(idx);
-                break;
+                // The correct token to replace the rejected draft
+                let resample_token = Some(best_idx as i32);
+                return DraftVerificationResult {
+                    accepted_tokens,
+                    accepted_text,
+                    first_rejection_idx,
+                    resample_token,
+                };
             }
         } else {
             break;
@@ -111,7 +112,7 @@ pub(crate) async fn verify_draft_tokens(
         accepted_tokens,
         accepted_text,
         first_rejection_idx,
-        resample_token: None, // Will be set if needed
+        resample_token: None,
     }
 }
 
@@ -212,13 +213,17 @@ pub(crate) async fn chat_completions_handler(
                                 {
                                     let p95 = state.gossipsub_latency_hist.percentiles().p95_ms;
                                     let mut penalties = state.scout_penalties.lock().await;
-                                    penalties.apply_update(ScoutPenaltyUpdate {
+                                    let status = penalties.apply_update(ScoutPenaltyUpdate {
                                         peer_id: draft.scout_id.clone(),
                                         accepted: result.first_rejection_idx.is_none(),
                                         probability_bound: 0.0,
                                         latency_ms: Some(draft.latency_ms),
                                         reason: result.first_rejection_idx.map(|idx| format!("Rejected at token {}", idx)),
                                     }, p95);
+                                    
+                                    if status.blackholed {
+                                        let _ = state.ban_tx.try_send((draft.scout_id.clone(), status.last_reason.unwrap_or_else(|| "Repeated verification failure".to_string())));
+                                    }
                                 }
 
                                 // Emit accepted tokens
@@ -340,7 +345,7 @@ pub(crate) async fn chat_completions_handler(
                                 {
                                     let p95 = state.gossipsub_latency_hist.percentiles().p95_ms;
                                     let mut penalties = state.scout_penalties.lock().await;
-                                    penalties.apply_update(
+                                    let status = penalties.apply_update(
                                         ScoutPenaltyUpdate {
                                             peer_id: draft.scout_id.clone(),
                                             accepted: result.first_rejection_idx.is_none(),
@@ -352,6 +357,10 @@ pub(crate) async fn chat_completions_handler(
                                         },
                                         p95,
                                     );
+
+                                    if status.blackholed {
+                                        let _ = state.ban_tx.try_send((draft.scout_id.clone(), status.last_reason.unwrap_or_else(|| "Repeated verification failure".to_string())));
+                                    }
                                 }
 
                                 // Add accepted tokens to output
