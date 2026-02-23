@@ -33,7 +33,7 @@ This guide covers deploying Shard nodes in various environments, from local deve
 ```bash
 cd desktop/rust
 cargo build --release
-./target/release/shard-daemon --control-port 9091 --tcp-port 4001 --bootstrap /ip4/<seed>/tcp/4001
+./target/release/shard-daemon --control-port 9091 --tcp-port 4001 --bootstrap-node /ip4/<seed>/tcp/4001
 ```
 
 2. **Start the Python API:**
@@ -87,7 +87,15 @@ NEXT_PUBLIC_SITE_URL=https://shardnetwork.live
 3. In DNS, create the records Vercel shows (typically `A` or `CNAME`).
 4. Wait for verification and then confirm `NEXT_PUBLIC_SITE_URL=https://shardnetwork.live` in project environment variables.
 
-> Bootstrap operations note: always use `/dns4/bootstrap.shardnetwork.live/tcp/4001/p2p/12D3KooWPTDTQBH5JTCxhiaZuL9sr695UAEndMDRj9SJ9pi3agEq` instead of raw IPs, so peer rotation does not require doc updates.
+> Bootstrap operations note: for the **public Shard mesh**, a currently valid
+> bootstrap is:
+>
+> `/ip4/35.175.242.222/tcp/4001/p2p/12D3KooWConhJakwyGN72uZ1Jtxi3LFecN3cYKxEX3aNLDAo48by`
+>
+> You can pass this explicitly with `--bootstrap-node` or via the
+> `SHARD_DEFAULT_BOOTSTRAP` environment variable. This address may change over
+> time as infrastructure is rotated; always consult the latest `ENVIRONMENT.md`
+> or `https://shardnetwork.live` for up-to-date bootstrap information.
 
 ---
 
@@ -311,7 +319,7 @@ WorkingDirectory=/opt/shard/rust
 ExecStart=/opt/shard/rust/target/release/shard-daemon \
   --control-port 9091 \
   --tcp-port 4001 \
-  --bootstrap /ip4/192.168.1.10/tcp/4001 \
+  --bootstrap-node /ip4/192.168.1.10/tcp/4001 \
   --reconnect-seconds 20 \
   --log-level info
 Restart=on-failure

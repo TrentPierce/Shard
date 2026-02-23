@@ -1,8 +1,10 @@
 README.md
 pyproject.toml
+setup.py
 shard/__init__.py
 shard/async_client.py
 shard/client.py
+shard/daemon.py
 shard/exceptions.py
 shard/models.py
 shard_inference.egg-info/PKG-INFO

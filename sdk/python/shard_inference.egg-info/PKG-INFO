@@ -1,6 +1,6 @@
-Metadata-Version: 2.4
+Metadata-Version: 2.1
 Name: shard-inference
-Version: 0.5.0
+Version: 0.5.1
 Summary: Python SDK for the Shard distributed inference network
 Author-email: Shard Team <sdk@shard.ai>
 License: MIT

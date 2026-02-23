@@ -3547,9 +3547,18 @@ async fn main() -> Result<()> {
         })
         .unwrap_or_default();
 
-    let mut hardcoded_bootstrap = vec![
-        "/dns4/bootstrap1.shard.network/tcp/4001/p2p/12D3KooWStAA8FVj7W2E1E68kP2qQG9Yy99Yy99Yy99Yy99Yy99".to_string(),
-        "/dns4/bootstrap2.shard.network/tcp/4001/p2p/12D3KooWStAA8FVj7W2E1E68kP2qQG9Yy99Yy99Yy99Yy99Yy99".to_string(),
+    // Fallback public bootstrap peer for the production Shard mesh.
+    //
+    // NOTE: This address is a convenience default so that a freshly
+    // installed daemon can join the public network without any flags.
+    // Operators can always override it via:
+    //   - CLI:  --bootstrap-node ...
+    //   - Env:  SHARD_DEFAULT_BOOTSTRAP=/ip4/.../tcp/.../p2p/...
+    //
+    // If the production bootstrap peer changes in the future, update
+    // this multiaddr and the corresponding docs in docs/ENVIRONMENT.md.
+    let hardcoded_bootstrap = vec![
+        "/ip4/35.175.242.222/tcp/4001/p2p/12D3KooWConhJakwyGN72uZ1Jtxi3LFecN3cYKxEX3aNLDAo48by".to_string(),
     ];
 
     let bootstrap_addrs = unique_addrs(

@@ -71,7 +71,7 @@ shard-daemon \
   --tcp-port 4001 \
   --webrtc-port 9090 \
   --quic-port 9092 \
-  --bootstrap /dns4/bootstrap.shardnetwork.live/tcp/4001/p2p/12D3KooW...
+  --bootstrap-node /ip4/35.175.242.222/tcp/4001/p2p/12D3KooWConhJakwyGN72uZ1Jtxi3LFecN3cYKxEX3aNLDAo48by
 ```
 
 | Flag | Default | Description |

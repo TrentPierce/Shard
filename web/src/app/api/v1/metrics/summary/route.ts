@@ -4,7 +4,9 @@ import { shardBackendUrl } from "@/lib/server/shard-backend"
 export const dynamic = "force-dynamic"
 
 export async function GET() {
-  const url = shardBackendUrl("/v1/metrics/summary")
+  // The Rust daemon exposes metrics at `/metrics/summary` (no `/v1` prefix).
+  // We proxy that here for the web app and dashboards.
+  const url = shardBackendUrl("/metrics/summary")
 
   try {
     const response = await fetch(url, {
