@@ -96,10 +96,12 @@ use shard_network::network::private_mesh::{
 use shard_network::network::tensor_wire::TensorWirePacket;
 use shard_scheduler::scheduler::{
     load_reputation, save_reputation, weighted_select, NodeReputation, NodeSchedulerInput,
-use crate::bootstrap_discovery;
 };
 
 // ─── CLI ────────────────────────────────────────────────────────────────────
+
+// Maximum consecutive connection failures before removing a bootstrap peer
+const MAX_BOOTSTRAP_FAILURES: u32 = 3;
 
 #[derive(Parser, Debug, Clone)]
 #[command(name = "shard-daemon", version, about = "Shard P2P Daemon")]
@@ -412,6 +414,8 @@ struct PeerInfo {
     successful_handshakes: u32,
     /// Average latency in ms
     avg_latency_ms: f32,
+    /// Number of consecutive connection failures (for bootstrap removal)
+    pub connection_failures: u32,
 }
 
 #[derive(Clone)]
@@ -493,6 +497,9 @@ pub(crate) struct SharedState {
     ban_tx: mpsc::Sender<(String, String)>,
     /// Timeout tracker for speculative decoding
     scout_timeout_tracker: Arc<Mutex<ScoutTimeoutTracker>>,
+    /// Bootstrap peer failure tracking (peer_id -> consecutive failures)
+    /// Used to remove unreachable bootstraps after MAX_BOOTSTRAP_FAILURES
+    bootstrap_failures: Arc<Mutex<HashMap<String, u32>>>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -1711,6 +1718,7 @@ async fn main() -> Result<()> {
         scout_draft_rx: Arc::new(Mutex::new(Some(scout_draft_rx))),
         ban_tx,
         scout_timeout_tracker: Arc::new(Mutex::new(ScoutTimeoutTracker::new())),
+        bootstrap_failures: Arc::new(Mutex::new(HashMap::new())),
     };
 
     #[cfg(target_os = "windows")]
@@ -1997,10 +2005,12 @@ async fn main() -> Result<()> {
                 tokio::time::sleep(Duration::from_secs(300)).await; // Check every 5 minutes
                 
                 let now = now_ms();
+                let now = now_ms();
                 let uptime_hours = (now - advertise_state.daemon_start) / (1000 * 60 * 60);
+                let uptime_hours_u64 = uptime_hours as u64;
                 
                 // Only advertise if stable enough
-                if uptime_hours < stability_threshold {
+                if uptime_hours_u64 < stability_threshold {
                     continue;
                 }
                 
@@ -2014,7 +2024,7 @@ async fn main() -> Result<()> {
                         peer_id: local_peer_id.clone(),
                         multiaddr: multiaddr.clone(),
                         stability_score: 100, // TODO: calculate dynamically
-                        uptime_hours,
+                        uptime_hours: uptime_hours_u64,
                         version: env!("CARGO_PKG_VERSION").to_string(),
                     };
                     
@@ -3183,6 +3193,10 @@ async fn main() -> Result<()> {
                                     addrs: vec![remote_addr.clone()],
                                     verified: false,
                                     handshake_failures: 0,
+                                    first_seen_at: now_ms(),
+                                    successful_handshakes: 0,
+                                    avg_latency_ms: 0.0,
+                                    connection_failures: 0,
                                 },
                             );
                         }
@@ -3207,6 +3221,39 @@ async fn main() -> Result<()> {
 
                     SwarmEvent::OutgoingConnectionError { peer_id, error, .. } => {
                         tracing::warn!(?peer_id, %error, "outgoing connection error");
+                        
+                        // Track bootstrap peer failures
+                        if let Some(peer_id) = peer_id {
+                            let peer_id_str = peer_id.to_string();
+                            let mut known = state.known_peers.lock().await;
+                            let is_bootstrap = known.iter().any(|addr| {
+                                if let Ok(multiaddr) = addr.parse::<libp2p::Multiaddr>() {
+                                    extract_peer_id_from_multiaddr(&multiaddr) == Some(peer_id)
+                                } else {
+                                    false
+                                }
+                            });
+                            
+                            if is_bootstrap {
+                                let mut failures = state.bootstrap_failures.lock().await;
+                                let count = failures.entry(peer_id_str.clone()).or_insert(0);
+                                *count += 1;
+                                tracing::warn!(%peer_id, failures = *count, "bootstrap peer connection failure");
+                                
+                                if *count >= MAX_BOOTSTRAP_FAILURES {
+                                    // Remove this bootstrap peer from known_peers
+                                    known.retain(|addr| {
+                                        if let Ok(multiaddr) = addr.parse::<libp2p::Multiaddr>() {
+                                            extract_peer_id_from_multiaddr(&multiaddr) != Some(peer_id)
+                                        } else {
+                                            true
+                                        }
+                                    });
+                                    failures.remove(&peer_id_str);
+                                    tracing::warn!(%peer_id, "bootstrap peer removed due to too many failures");
+                                }
+                            }
+                        }
                     }
 
                     _ => {}
