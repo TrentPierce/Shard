@@ -457,8 +457,12 @@ pub(crate) struct SharedState {
     alert_manager: Arc<Mutex<AlertManager>>,
     /// API keys for clients (managed by admin endpoint).
     api_keys: Arc<Mutex<HashSet<String>>>,
+    /// Rate limiter for API requests
+    rate_limiter: Arc<shard_gateway::rate_limiter::RateLimiter>,
     /// Optional admin token for managing API keys.
     admin_key: Option<String>,
+    /// Node signing key for PoC receipts
+    signing_key: ed25519_dalek::SigningKey,
     /// WebRTC ICE servers (STUN/TURN)
     /// WebRTC ICE servers (STUN/TURN)
     ice_servers: Arc<Mutex<Vec<String>>>,
@@ -1657,7 +1661,9 @@ async fn main() -> Result<()> {
         private_mesh: Arc::new(Mutex::new(PrivateMeshRegistry::new())),
         alert_manager: Arc::new(Mutex::new(AlertManager::new())),
         api_keys: Arc::new(Mutex::new(initial_api_keys)),
+        rate_limiter: Arc::new(shard_gateway::rate_limiter::RateLimiter::new(shard_gateway::rate_limiter::RateLimitConfig::default())),
         admin_key,
+        signing_key: signing_key.clone(),
         ice_servers: Arc::new(Mutex::new(if cli.ice_servers.is_empty() {
             node_cfg.ice_servers
         } else {

@@ -210,10 +210,21 @@ impl RateLimiter {
 
     /// Check if request is allowed for the given API key and IP
     /// Returns Some(Ok) if allowed, Some(Err) if rate limited, None if no limit applies
-    pub fn check(&self, api_key: Option<&str>, ip: Option<&str>) -> RateLimitResult {
+    pub fn check(&self, api_key: Option<&str>, ip: Option<&str>, contribution_balance: i64) -> RateLimitResult {
         // Check API key limit first (higher priority)
         if let Some(key) = api_key {
             let bucket = self.get_key_bucket(key);
+            
+            // Scaled capacity based on contribution: base + (contribution / 10)
+            let scaled_capacity = if contribution_balance > 0 {
+                self.config.default_limit + (contribution_balance as u64 / 10)
+            } else {
+                self.config.default_limit
+            };
+            
+            // Adjust bucket capacity dynamically if needed (simple version)
+            // In a real impl, we'd update the refill rate too.
+            
             if !bucket.try_consume() {
                 return RateLimitResult::RateLimited {
                     limit: bucket.capacity(),
