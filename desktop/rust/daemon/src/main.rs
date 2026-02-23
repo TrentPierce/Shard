@@ -71,6 +71,7 @@ use shard_gateway::gateway::fallback::{
     execute_centralized_fallback, ActiveRequestState, FallbackConfig,
 };
 use shard_gateway::gateway::validate_work_request;
+use shard_gateway::rate_limiter::{RateLimitConfig, RateLimiter, RateLimitStatus};
 use shard_ledger::ledger::state::{ComputeCreditTx, LedgerState};
 use shard_ledger::ledger::store::LedgerStore;
 use shard_ledger::ledger::sync::{hash_probe_segments, LedgerSyncRequest, LedgerSyncResponse};
@@ -603,6 +604,8 @@ struct DraftResultSubmission {
     draft_text: String,
     #[serde(default)]
     timestamp: Option<f64>,
+    #[serde(default)]
+    scout_mode: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -2043,6 +2046,19 @@ async fn process_draft_submission(
 
     mark_node_success(state, response.peer_id.as_str(), response.latency_ms as f64).await;
 
+    // Forward to channel for synchronous waiting handlers (e.g. chat_completions_handler)
+    let draft_for_channel = ScoutDraft {
+        work_id: response.request_id.clone(),
+        scout_id: response.peer_id.clone(),
+        draft_tokens: response.draft_tokens.iter().map(|&t| t as i32).collect(),
+        draft_text: submission.draft_text.clone(),
+        timestamp_ms: response.created_at_ms.unwrap_or_else(now_ms),
+    };
+
+    if let Err(e) = state.scout_draft_tx.send(draft_for_channel).await {
+        tracing::warn!("failed to send scout draft to channel: {}", e);
+    }
+
     Json(serde_json::json!({ "ok": true, "detail": "draft queued" }))
 }
 
@@ -2470,6 +2486,28 @@ async fn chat_completions_handler(
                     
                     if use_speculative {
                         if let Some(ref config) = speculative_config {
+                            // Dispatch work to scouts
+                            let work = WorkRequest {
+                                request_id: request_id.clone(),
+                                prompt_context: prompt.clone(),
+                                min_tokens: config.draft_token_count as u32,
+                                created_at_ms: Some(now_ms()),
+                            };
+                            
+                            {
+                                let mut queue = state.scout_work.lock().await;
+                                queue.push_back(work.clone());
+                                // Keep queue size in check
+                                while queue.len() > 1024 {
+                                    queue.pop_front();
+                                }
+                            }
+                            
+                            // Signal work availability (gossipsub)
+                            if let Err(e) = state.work_tx.send(work).await {
+                                tracing::warn!("failed to broadcast work: {}", e);
+                            }
+
                             // Wait for scout draft with timeout
                             let draft = wait_for_scout_draft(&state, &request_id, config.scout_timeout_ms).await;
                             

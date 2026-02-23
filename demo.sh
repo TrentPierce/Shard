@@ -3,9 +3,9 @@
 # Shard Local Demo
 # 
 # Starts a local Shard network with:
-# - Rust daemon (verifier)
+# - Rust daemon (verifier) + C++ engine
 # - Next.js web app (Scout UI)
-# - Opens browser to start the demo
+# - Downloaded GGUF model
 #
 # Usage: ./demo.sh
 
@@ -28,90 +28,59 @@ check_prereq() {
         echo -e "${RED}Error: Docker is not installed${NC}"
         exit 1
     fi
-    
-    if ! command -v docker-compose &> /dev/null && ! docker compose version &> /dev/null; then
-        echo -e "${RED}Error: Docker Compose is not installed${NC}"
-        exit 1
-    fi
-    
-    if ! command -v npm &> /dev/null; then
-        echo -e "${RED}Error: npm is not installed${NC}"
-        exit 1
-    fi
 }
 
-# Check if model files exist
+# Download model if missing
 check_models() {
-    MODEL_DIR="${HOME}/.cache/shard/models"
-    if [ ! -d "$MODEL_DIR" ]; then
-        echo -e "${YELLOW}Note: No models found in $MODEL_DIR${NC}"
-        echo -e "${YELLOW}The daemon will download models on first run.${NC}"
+    MODEL_DIR="models"
+    MODEL_NAME="tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf"
+    MODEL_PATH="$MODEL_DIR/$MODEL_NAME"
+    
+    mkdir -p "$MODEL_DIR"
+    
+    if [ ! -f "$MODEL_PATH" ]; then
+        echo -e "${YELLOW}Downloading model for local demo (TinyLlama-1.1B)...${NC}"
+        URL="https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/resolve/main/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf"
+        
+        if command -v wget &> /dev/null; then
+            wget -O "$MODEL_PATH" "$URL"
+        elif command -v curl &> /dev/null; then
+            curl -L -o "$MODEL_PATH" "$URL"
+        else
+            echo -e "${RED}Error: Neither wget nor curl found. Please download model manually to $MODEL_PATH${NC}"
+            exit 1
+        fi
+        echo -e "${GREEN}Model downloaded.${NC}"
+    else
+        echo -e "${GREEN}Model found: $MODEL_NAME${NC}"
     fi
 }
 
-# Start the daemon
-start_daemon() {
-    echo -e "\n${GREEN}[1/3] Starting Shard daemon...${NC}"
+# Start services
+start_services() {
+    echo -e "\n${GREEN}[1/2] Starting services via Docker Compose...${NC}"
     
-    # Check if already running
-    if docker ps --format '{{.Names}}' | grep -q "shard-daemon"; then
-        echo -e "${YELLOW}Daemon already running. Stopping existing instance...${NC}"
-        docker stop shard-daemon 2>/dev/null || true
-    fi
-    
-    # Start daemon with docker-compose (without monitoring profile)
-    docker-compose up -d shard-daemon
+    docker-compose up -d --build --remove-orphans
     
     # Wait for health check
     echo -e "Waiting for daemon to be healthy..."
-    for i in {1..30}; do
-        if curl -s http://localhost:9091/health > /dev/null 2>&1; then
+    for i in {1..60}; do
+        if docker-compose exec -T shard-daemon wget -q --spider http://localhost:9091/health; then
             echo -e "${GREEN}✓ Daemon is healthy!${NC}"
             return 0
         fi
+        echo -n "."
         sleep 2
     done
     
-    echo -e "${RED}✗ Daemon failed to become healthy${NC}"
+    echo -e "\n${RED}✗ Daemon failed to become healthy${NC}"
     docker-compose logs shard-daemon
-    exit 1
-}
-
-# Start the web app
-start_web() {
-    echo -e "\n${GREEN}[2/3] Starting web app...${NC}"
-    
-    cd web
-    
-    # Check if node_modules exists
-    if [ ! -d "node_modules" ]; then
-        echo "Installing dependencies..."
-        npm install
-    fi
-    
-    # Start Next.js in background
-    npm run dev &
-    WEB_PID=$!
-    
-    # Wait for web to be ready
-    echo "Waiting for web app to start..."
-    for i in {1..30}; do
-        if curl -s http://localhost:3000 > /dev/null 2>&1; then
-            echo -e "${GREEN}✓ Web app is running!${NC}"
-            cd ..
-            return 0
-        fi
-        sleep 2
-    done
-    
-    echo -e "${RED}✗ Web app failed to start${NC}"
-    cd ..
     exit 1
 }
 
 # Open browser
 open_browser() {
-    echo -e "\n${GREEN}[3/3] Opening demo in browser...${NC}"
+    echo -e "\n${GREEN}[2/2] Opening demo in browser...${NC}"
     
     if command -v xdg-open &> /dev/null; then
         xdg-open http://localhost:3000
@@ -143,37 +112,23 @@ print_info() {
     echo ""
     echo -e "${YELLOW}To stop:${NC}"
     echo -e "  ${GREEN}docker-compose down${NC}"
-    echo -e "  (Web app will stop when you close this terminal)"
     echo ""
     echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}"
 }
 
 # Cleanup on exit
 cleanup() {
-    echo -e "\n${YELLOW}Shutting down demo...${NC}"
-    cd ..
-    docker-compose down
-    kill %1 2>/dev/null || true
-    echo -e "${GREEN}Demo stopped.${NC}"
+    # Don't shut down docker automatically, keep it running for the user
+    echo -e "${GREEN}Demo is running in background. Use 'docker-compose down' to stop.${NC}"
 }
 
 # Main execution
 main() {
     check_prereq
     check_models
-    
-    # Trap cleanup
-    trap cleanup EXIT
-    
-    start_daemon
-    start_web
+    start_services
     open_browser
     print_info
-    
-    echo -e "${GREEN}🎉 Demo is running! Press Ctrl+C to stop.${NC}"
-    
-    # Wait indefinitely (Ctrl+C triggers cleanup)
-    wait
 }
 
 main "$@"

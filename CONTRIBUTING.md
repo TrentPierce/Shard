@@ -645,3 +645,49 @@ By contributing to Shard, you agree that your contributions will be licensed und
 ---
 
 **Happy contributing! 🚀**
+
+---
+
+## Good First Issues
+
+We label issues with `good first issue` for contributors who are new to the project. These issues are:
+
+- **Well-scoped** — Clear requirements and expected outcomes
+- **Low risk** — Minimal chance of breaking existing functionality
+- **Testable** — Can be verified with existing test infrastructure
+
+### How to Find Good First Issues
+
+1. Visit the [issues page](https://github.com/TrentPierce/Shard/issues)
+2. Filter by label: `good first issue`
+3. Look for issues with the `help wanted` label as well
+
+### Example Good First Issues for This Project
+
+1. **Documentation improvements** — Fix typos, add examples, improve README clarity
+   - Difficulty: Easy
+   - Start in: `docs/`, `README.md`
+
+2. **Test coverage expansion** — Add unit tests for uncovered functions
+   - Difficulty: Easy-Medium
+   - Start in: `tests/`, `sdk/python/test_*.py`
+
+3. **UI component enhancements** — Improve existing React components
+   - Difficulty: Medium
+   - Start in: `web/src/components/`
+
+---
+
+## What We Do NOT Accept
+
+Before submitting a PR, please note that we generally do NOT accept:
+
+1. **Changes to the credit/ledger system** — The internal credit/ledger system is complex and sensitive. Any changes require discussion with the core team first. Open an issue before working on this.
+
+2. **New external token integrations** — Shard is NOT affiliated with any cryptocurrency or blockchain project. We will not merge integrations with external token systems.
+
+3. **New draft model types without compatibility testing** — If you want to add support for a new draft model (e.g., a new GGUF model), you MUST include a model-pair compatibility test in `benchmarks/model-pair-test.py` proving the verifier can validate drafts from the new model.
+
+4. **Breaking API changes** — The OpenAI-compatible API surface must remain stable. Any breaking changes require major version bump and discussion.
+
+If you're unsure whether your contribution falls into these categories, please open an issue first to discuss.

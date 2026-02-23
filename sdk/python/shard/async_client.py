@@ -8,13 +8,13 @@ from typing import AsyncGenerator
 
 import httpx
 
-from shard_sdk.exceptions import (
+from shard.exceptions import (
     ShardAPIError,
     ShardAuthError,
     ShardConnectionError,
     ShardTimeoutError,
 )
-from shard_sdk.models import (
+from shard.models import (
     ChatCompletionRequest,
     ChatCompletionResponse,
     ChatMessage,

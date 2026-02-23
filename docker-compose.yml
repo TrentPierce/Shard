@@ -11,6 +11,10 @@ services:
       - "4101:4101"
       - "9090:9090/udp"
       - "9092:9092/udp"
+    volumes:
+      - ./models:/root/.cache/shard/models
+    environment:
+      - BITNET_MODEL=/root/.cache/shard/models/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:9091/health"]
       interval: 15s
@@ -21,7 +25,22 @@ services:
       - shard-net
     restart: unless-stopped
 
-
+  web:
+    build:
+      context: web
+      dockerfile: Dockerfile
+    container_name: shard-web
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: "http://localhost:9091"
+      NEXT_PUBLIC_RUST_URL: "http://localhost:9091"
+    networks:
+      - shard-net
+    depends_on:
+      shard-daemon:
+        condition: service_healthy
+    restart: unless-stopped
 
   prometheus:
     image: prom/prometheus:v2.55.1

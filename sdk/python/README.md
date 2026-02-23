@@ -5,7 +5,7 @@ Python client for the Shard distributed inference network.
 ## Installation
 
 ```bash
-pip install shard-sdk
+pip install shard-inference
 ```
 
 Or install from source:
@@ -18,10 +18,10 @@ pip install -e .
 ## Quick Start
 
 ```python
-from shard_sdk import ShardClient
+from shard import Shard
 
 # Connect to local daemon (default: http://localhost:9091)
-client = ShardClient()
+client = Shard()
 
 # Non-streaming request
 response = client.chat.completions.create(
@@ -53,8 +53,8 @@ from openai import OpenAI
 client = OpenAI(base_url="http://localhost:9091/v1", api_key="...")
 
 # You can use:
-from shard_sdk import ShardClient
-client = ShardClient()  # Defaults to http://localhost:9091
+from shard import Shard
+client = Shard()  # Defaults to http://localhost:9091
 ```
 
 All standard OpenAI parameters are supported:
@@ -69,10 +69,10 @@ All standard OpenAI parameters are supported:
 
 ```python
 import asyncio
-from shard_sdk import AsyncShardClient
+from shard import AsyncShard
 
 async def main():
-    async with AsyncShardClient() as client:
+    async with AsyncShard() as client:
         response = await client.chat.completions.create(
             model="shard-hybrid",
             messages=[{"role": "user", "content": "Hello!"}]
@@ -86,10 +86,10 @@ asyncio.run(main())
 
 ```python
 # With API key
-client = ShardClient(api_key="sk-your-key-here")
+client = Shard(api_key="sk-your-key-here")
 
 # Connect to remote server
-client = ShardClient(base_url="https://your-shard-server.com", api_key="sk-...")
+client = Shard(base_url="https://your-shard-server.com", api_key="sk-...")
 ```
 
 ## Private Mesh Routing
@@ -107,7 +107,7 @@ response = client.chat.completions.create(
 ## Configuration
 
 ```python
-client = ShardClient(
+client = Shard(
     api_key="sk-...",           # API key (optional)
     base_url="http://localhost:9091",  # Daemon URL
     timeout=30.0,               # Request timeout (seconds)
@@ -126,10 +126,10 @@ The SDK provides typed exceptions:
 - `ShardConnectionError` - Connection failures
 
 ```python
-from shard_sdk import ShardClient, ShardAPIError
+from shard import Shard, ShardAPIError
 
 try:
-    client = ShardClient()
+    client = Shard()
     response = client.chat.completions.create(messages=[...])
 except ShardAPIError as e:
     print(f"API Error: {e.status_code} - {e.response_body}")

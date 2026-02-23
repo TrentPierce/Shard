@@ -1,8 +1,10 @@
 """Shard SDK — Python client for distributed inference."""
 
-from shard_sdk.client import ShardClient
-from shard_sdk.async_client import AsyncShardClient
-from shard_sdk.models import (
+from .client import ShardClient
+from .client import ShardClient as Shard
+from .async_client import AsyncShardClient
+from .async_client import AsyncShardClient as AsyncShard
+from .models import (
     ChatMessage,
     ChatCompletionRequest,
     ChatCompletionResponse,
@@ -10,7 +12,7 @@ from shard_sdk.models import (
     StreamDelta,
     Usage,
 )
-from shard_sdk.exceptions import (
+from .exceptions import (
     ShardError,
     ShardAPIError,
     ShardTimeoutError,
@@ -20,6 +22,7 @@ from shard_sdk.exceptions import (
 
 __version__ = "0.1.0"
 __all__ = [
+    "Shard",
     "ShardClient",
     "AsyncShardClient",
     "ChatMessage",
