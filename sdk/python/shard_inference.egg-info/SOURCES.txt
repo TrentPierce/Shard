@@ -1,0 +1,12 @@
+README.md
+pyproject.toml
+shard/__init__.py
+shard/async_client.py
+shard/client.py
+shard/exceptions.py
+shard/models.py
+shard_inference.egg-info/PKG-INFO
+shard_inference.egg-info/SOURCES.txt
+shard_inference.egg-info/dependency_links.txt
+shard_inference.egg-info/requires.txt
+shard_inference.egg-info/top_level.txt

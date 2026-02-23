@@ -5,7 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.5.0] - 2026-02-23
+
+### Added
+- **Automated P95 Latency Rejection**: Peers with latency exceeding P95 * 1.5 are now automatically blackholed to maintain network stability.
+- **Python SDK (PyPI)**: Initial release of `shard-inference` package on PyPI.
+- **Distribution Automation**: Integrated code-signing (`sign_release.py`) and notarization into the build pipeline.
+- **Latency Tracking**: Real-time latency measurement for all verifier drafts.
+
+### Changed
+- **Global Version Sync**: Unified versioning (0.5.0) across all packages (Rust daemon, Python SDK, Node SDK, Web client, Widget, Tauri).
+- **Default Timeout**: Reduced default scout timeout from 800ms to 400ms for improved responsiveness.
+
+### Fixed
+- Resolved verifier logic gaps identified in the roadmap audit.
+- Fixed `ScoutDraft` initialization and type mismatches in the Rust daemon.
+
+## [0.4.9] - 2026-02-22  (Internal/Hotfix)
+- Logic fixes for P95 rejection.
 
 ## [0.4.8] - 2026-02-17
 
