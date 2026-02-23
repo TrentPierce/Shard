@@ -97,11 +97,14 @@ pub fn run() {
                 }
 
                 // Launch the daemon with explicit ports matching the dev environment
+                // Default bootstrap peer for the Shard network
+                let bootstrap_node = "/ip4/35.175.242.222/tcp/4001/p2p/12D3KooWConhJakwyGN72uZ1Jtxi3LFecN3cYKxEX3aNLDAo48by";
+                
                 let sidecar_command = app_handle
                     .shell()
                     .sidecar("shard-daemon")
                     .expect("failed to create sidecar command")
-                    .args(["--control-port", "9091", "--tcp-port", "4001"])
+                    .args(["--control-port", "9091", "--tcp-port", "4001", "--bootstrap-node", bootstrap_node])
                     .env("BITNET_LIB", bitnet_lib.to_string_lossy().to_string())
                     .env("BITNET_MODEL", bitnet_model.to_string_lossy().to_string())
                     .env("RUST_LOG", "info");
