@@ -2167,13 +2167,21 @@ async fn main() -> Result<()> {
                 let connected: HashSet<String> = state.peers.lock().await.keys().cloned().collect();
                 for addr_str in known {
                     if let Ok(addr) = addr_str.parse::<Multiaddr>() {
+                        let peer_id_opt = extract_peer_id_from_multiaddr(&addr);
                         let is_self = addr.to_string().contains(&local_peer_id.to_string());
-                        if !is_self {
-                            // Attempt periodic redial for resilience.
+                        
+                        // Only dial if it's not us and not already connected
+                        let already_connected = if let Some(pid) = peer_id_opt {
+                            connected.contains(&pid.to_string())
+                        } else {
+                            false
+                        };
+
+                        if !is_self && !already_connected {
                             if let Err(err) = swarm.dial(addr.clone()) {
                                 tracing::debug!(%addr, %err, "reconnect dial skipped/failed");
                             } else {
-                                tracing::debug!(%addr, connected = connected.len(), "reconnect dial attempted");
+                                tracing::info!(%addr, "reconnect dial attempted for disconnected peer");
                             }
                         }
                     }
