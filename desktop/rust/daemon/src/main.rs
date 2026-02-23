@@ -494,7 +494,7 @@ impl Default for SpeculativeConfig {
             scout_timeout_ms: std::env::var("SHARD_SCOUT_TIMEOUT_MS")
                 .ok()
                 .and_then(|v| v.parse().ok())
-                .unwrap_or(800),
+                .unwrap_or(400),
             scout_cooldown_ms: 60000,
             max_consecutive_timeouts: 3,
             draft_token_count: 4,
@@ -544,6 +544,7 @@ struct ScoutDraft {
     scout_id: String,
     draft_tokens: Vec<i32>,
     draft_text: String,
+    latency_ms: u64,
     timestamp_ms: u128,
 }
 
@@ -593,6 +594,7 @@ struct ScoutPenaltyUpdate {
     peer_id: String,
     accepted: bool,
     probability_bound: f64,
+    latency_ms: Option<u64>,
     #[serde(default)]
     reason: Option<String>,
 }
@@ -766,6 +768,7 @@ struct ScoutPenaltyStatus {
     accepted: u32,
     blackholed: bool,
     success_rate: f32,
+    p95_latency_ms: u64,
     last_reason: Option<String>,
 }
 
@@ -774,6 +777,7 @@ struct ScoutReputationEntry {
     recent: VecDeque<bool>,
     failure_count: u32,
     accepted_count: u32,
+    latency_ms: u64,
     banned_until_ms: Option<u128>,
     last_reason: Option<String>,
 }
@@ -797,9 +801,17 @@ impl ScoutPenaltyBook {
         success / (entry.recent.len() as f32)
     }
 
-    fn apply_update(&mut self, update: ScoutPenaltyUpdate) -> ScoutPenaltyStatus {
+    fn apply_update(&mut self, update: ScoutPenaltyUpdate, global_p95: u64) -> ScoutPenaltyStatus {
         let now = now_ms();
         let entry = self.entries.entry(update.peer_id.clone()).or_default();
+        if let Some(lat) = update.latency_ms {
+            entry.latency_ms = lat;
+        }
+
+        let blackholed = entry
+            .banned_until_ms
+            .map(|until| until > now)
+            .unwrap_or(false);
 
         if entry.recent.len() >= Self::WINDOW_SIZE {
             entry.recent.pop_front();
@@ -822,10 +834,17 @@ impl ScoutPenaltyBook {
             entry.banned_until_ms = Some(now + Self::BAN_COOLDOWN_MS);
         }
 
+        if !blackholed && global_p95 > 0 && entry.latency_ms > (global_p95 as f64 * 1.5) as u64 {
+            entry.banned_until_ms = Some(now + Self::BAN_COOLDOWN_MS);
+            entry.last_reason = Some(format!("High latency: {}ms (P95: {}ms)", entry.latency_ms, global_p95));
+        }
+
+        // Re-calculate blackholed after potentially banning
         let blackholed = entry
             .banned_until_ms
             .map(|until| until > now)
             .unwrap_or(false);
+
 
         if !blackholed {
             entry.banned_until_ms = None;
@@ -838,6 +857,7 @@ impl ScoutPenaltyBook {
             accepted: entry.accepted_count,
             blackholed,
             success_rate,
+            p95_latency_ms: entry.latency_ms,
             last_reason: entry.last_reason.clone(),
         }
     }
@@ -868,6 +888,7 @@ impl ScoutPenaltyBook {
                     .map(|until| until > now_ms())
                     .unwrap_or(false),
                 success_rate: Self::success_rate(entry),
+                p95_latency_ms: entry.latency_ms,
                 last_reason: entry.last_reason.clone(),
             })
             .collect()
@@ -883,6 +904,7 @@ fn should_reject_peer_connection(penalties: &mut ScoutPenaltyBook, peer_id: &str
 struct LatencyPercentiles {
     p50_ms: u64,
     p90_ms: u64,
+    p95_ms: u64,
     p99_ms: u64,
     samples: u64,
 }
@@ -924,6 +946,7 @@ impl LatencyHistogram {
             return LatencyPercentiles {
                 p50_ms: 0,
                 p90_ms: 0,
+                p95_ms: 0,
                 p99_ms: 0,
                 samples: 0,
             };
@@ -931,11 +954,13 @@ impl LatencyHistogram {
 
         let p50_target = ((total as f64) * 0.50).ceil() as u64;
         let p90_target = ((total as f64) * 0.90).ceil() as u64;
+        let p95_target = ((total as f64) * 0.95).ceil() as u64;
         let p99_target = ((total as f64) * 0.99).ceil() as u64;
 
         let mut running = 0u64;
         let mut p50 = 0u64;
         let mut p90 = 0u64;
+        let mut p95 = 0u64;
         let mut p99 = 0u64;
 
         for (idx, count) in counts.iter().enumerate() {
@@ -948,6 +973,9 @@ impl LatencyHistogram {
             if p90 == 0 && running >= p90_target {
                 p90 = bucket_upper;
             }
+            if p95 == 0 && running >= p95_target {
+                p95 = bucket_upper;
+            }
             if p99 == 0 && running >= p99_target {
                 p99 = bucket_upper;
                 break;
@@ -957,6 +985,7 @@ impl LatencyHistogram {
         LatencyPercentiles {
             p50_ms: p50,
             p90_ms: p90,
+            p95_ms: p95,
             p99_ms: p99,
             samples: total,
         }
@@ -2059,6 +2088,7 @@ async fn process_draft_submission(
         draft_tokens: response.draft_tokens.iter().filter_map(|t| t.parse::<i32>().ok()).collect(),
         draft_text: submission.draft_text.clone(),
         timestamp_ms: response.created_at_ms.unwrap_or_else(now_ms),
+        latency_ms: response.latency_ms as u64,
     };
 
     if let Err(e) = state.scout_draft_tx.send(draft_for_channel).await {
@@ -2515,11 +2545,26 @@ async fn chat_completions_handler(
                             }
 
                             // Wait for scout draft with timeout
+                            let draft_start = now_ms();
                             let draft = wait_for_scout_draft(&state, &request_id, config.scout_timeout_ms).await;
-                            
-                            if let Some(draft) = draft {
+                            let draft_latency = (now_ms() - draft_start) as u64;
+                            if let Some(mut draft) = draft {
+                                // Record the measured latency
+                                draft.latency_ms = draft_latency;
                                 // Verify the draft against our model
                                 let result = verify_draft_tokens(engine, &prompt_tokens, &draft.draft_tokens).await;
+
+                                {
+                                    let p95 = state.gossipsub_latency_hist.percentiles().p95_ms;
+                                    let mut penalties = state.scout_penalties.lock().await;
+                                    penalties.apply_update(ScoutPenaltyUpdate {
+                                        peer_id: draft.scout_id.clone(),
+                                        accepted: result.first_rejection_idx.is_none(),
+                                        probability_bound: 0.0,
+                                        latency_ms: Some(draft.latency_ms),
+                                        reason: result.first_rejection_idx.map(|idx| format!("Rejected at token {}", idx)),
+                                    }, p95);
+                                }
                                 
                                 // Emit accepted tokens
                                 if !result.accepted_text.is_empty() {
@@ -2621,11 +2666,26 @@ async fn chat_completions_handler(
                     if use_speculative {
                         if let Some(ref config) = speculative_config {
                             // Wait for scout draft with timeout
+                            let draft_start = now_ms();
                             let draft = wait_for_scout_draft(&state, &request_id, config.scout_timeout_ms).await;
-                            
-                            if let Some(draft) = draft {
+                            let draft_latency = (now_ms() - draft_start) as u64;
+                            if let Some(mut draft) = draft {
+                                // Record the measured latency
+                                draft.latency_ms = draft_latency;
                                 // Verify the draft against our model
                                 let result = verify_draft_tokens(engine, &prompt_tokens, &draft.draft_tokens).await;
+
+                                {
+                                    let p95 = state.gossipsub_latency_hist.percentiles().p95_ms;
+                                    let mut penalties = state.scout_penalties.lock().await;
+                                    penalties.apply_update(ScoutPenaltyUpdate {
+                                        peer_id: draft.scout_id.clone(),
+                                        accepted: result.first_rejection_idx.is_none(),
+                                        probability_bound: 0.0,
+                                        latency_ms: Some(draft.latency_ms),
+                                        reason: result.first_rejection_idx.map(|idx| format!("Rejected at token {}", idx)),
+                                    }, p95);
+                                }
                                 
                                 // Add accepted tokens to output
                                 if !result.accepted_text.is_empty() {
@@ -2848,10 +2908,11 @@ async fn admin_api_key_handler(
 async fn scout_penalty_update_handler(
     AxumState(state): AxumState<SharedState>,
     Json(update): Json<ScoutPenaltyUpdate>,
-) -> Json<serde_json::Value> {
+) -> impl IntoResponse {
     let mut penalties = state.scout_penalties.lock().await;
-    let status = penalties.apply_update(update);
-    Json(serde_json::json!({"ok": true, "status": status}))
+    let p95 = state.gossipsub_latency_hist.percentiles().p95_ms;
+    let status = penalties.apply_update(update, p95);
+    Json(status)
 }
 
 async fn scout_penalty_status_handler(
@@ -4992,16 +5053,18 @@ mod tests {
             peer_id: peer_id.clone(),
             accepted: true,
             probability_bound: 1.0e-16,
+            latency_ms: None,
             reason: None,
-        });
+        }, 0);
 
         for _ in 0..9 {
             status = penalties.apply_update(ScoutPenaltyUpdate {
                 peer_id: peer_id.clone(),
                 accepted: true,
                 probability_bound: 1.0e-16,
+                latency_ms: None,
                 reason: None,
-            });
+            }, 0);
         }
 
         assert_eq!(status.accepted, 10);
@@ -5019,8 +5082,9 @@ mod tests {
             peer_id: peer_id.clone(),
             accepted: true,
             probability_bound: 1.0e-16,
+            latency_ms: None,
             reason: None,
-        });
+        }, 0);
 
         // Mixed quality scout; keep recent sliding success ratio above ban threshold.
         for accepted in [true, false, true, false, true, true, false, true, false] {
@@ -5028,12 +5092,13 @@ mod tests {
                 peer_id: peer_id.clone(),
                 accepted,
                 probability_bound: if accepted { 1.0e-16 } else { 1.0e-6 },
+                latency_ms: None,
                 reason: if accepted {
                     None
                 } else {
                     Some("invalid draft".to_string())
                 },
-            });
+            }, 0);
         }
 
         assert!(status.score >= 55);
@@ -5049,15 +5114,17 @@ mod tests {
             peer_id: peer_id.clone(),
             accepted: true,
             probability_bound: 1.0e-16,
+            latency_ms: None,
             reason: None,
-        });
+        }, 0);
         for _ in 0..5 {
             penalties.apply_update(ScoutPenaltyUpdate {
                 peer_id: peer_id.clone(),
                 accepted: false,
                 probability_bound: 1.0e-12,
+                latency_ms: None,
                 reason: Some("poisoned".to_string()),
-            });
+            }, 0);
         }
 
         assert!(should_reject_peer_connection(&mut penalties, &peer_id));

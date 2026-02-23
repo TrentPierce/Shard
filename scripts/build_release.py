@@ -159,7 +159,14 @@ def main() -> None:
 
     frozen = freeze_python(daemon_bin, engine_lib, web_out)
     write_manifest(frozen, daemon_bin, engine_lib)
-    print(f"release bundle created at {frozen}")
+    
+    # New Signing Step (Roadmap Phase 4)
+    print("\n--- Phase 4: Code Signing ---")
+    sign_script = ROOT / "scripts" / "sign_release.py"
+    if frozen.exists():
+        subprocess.run([sys.executable, str(sign_script), str(frozen)], check=True)
+    
+    print(f"\nSuccessfully built and signed release in {frozen}")
 
 
 if __name__ == "__main__":
