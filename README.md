@@ -7,7 +7,7 @@
 
   [![CI](https://github.com/TrentPierce/Shard/actions/workflows/ci.yml/badge.svg)](https://github.com/TrentPierce/Shard/actions/workflows/ci.yml)
   [![License: BUSL-1.1](https://img.shields.io/badge/license-BUSL--1.1-blue.svg)](LICENSE)
-   [![Version](https://img.shields.io/badge/version-0.6.0-00d4ff.svg)](https://github.com/TrentPierce/Shard/releases/tag/v0.6.0)
+   [![Version](https://img.shields.io/badge/version-0.6.1-00d4ff.svg)](https://github.com/TrentPierce/Shard/releases/tag/v0.6.0)
   [![Demo Video](https://img.shields.io/badge/Demo-Video-red?style=for-the-badge&logo=youtube)](#)
 
 </div>
