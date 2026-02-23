@@ -24,11 +24,11 @@ type SwarmTelemetrySnapshot = {
 }
 
 async function fetchRealTelemetry(): Promise<SwarmTelemetrySnapshot> {
-  // Fetch all three endpoints in parallel for speed
+  // Fetch from the Next.js API proxy routes for global stats
   const [healthRes, peersRes, topoRes] = await Promise.allSettled([
-    fetch(apiUrl("/health"), { cache: "no-store" }),
-    fetch(apiUrl("/v1/system/peers"), { cache: "no-store" }),
-    fetch(apiUrl("/v1/system/topology"), { cache: "no-store" }),
+    fetch("/api/health", { cache: "no-store" }),
+    fetch("/api/v1/system/peers", { cache: "no-store" }),
+    fetch("/api/v1/system/topology", { cache: "no-store" }),
   ])
 
   // Parse each response, defaulting gracefully on failure

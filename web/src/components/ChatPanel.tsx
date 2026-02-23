@@ -143,26 +143,26 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
     ]
 
     return (
-        <main className={`chat ${isEnterprise ? 'theme-enterprise' : ''}`} aria-label="Shard gateway">
-            <div className={`chat__header ${isEnterprise ? 'glass-card border-none' : ''}`} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 24px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-                    {isEnterprise ? (
-                        <div className="w-10 h-10 rounded-full bg-secondary/10 flex items-center justify-center text-secondary">
+        <main className={`chat ${isEnterprise ? 'chat--enterprise' : 'chat--terminal'}`} aria-label="Shard gateway">
+            <div className="chat__header glass-card">
+                <div className="flex items-center gap-md">
+                    {isEnterprise && (
+                        <div className="w-10 h-10 rounded-full bg-primary-glow flex items-center justify-center text-primary">
                             <Sparkles size={20} />
                         </div>
-                    ) : null}
+                    )}
                     <div>
-                        <h2 className="chat__title" style={{ fontSize: isEnterprise ? '16px' : '18px', letterSpacing: isEnterprise ? 'noral' : '2px', fontWeight: isEnterprise ? '600' : 'bold' }}>
+                        <h2 className="chat__title">
                             {isEnterprise ? "Neural Assistant" : "[ NEURAL_GATEWAY_V1.4 ]"}
                         </h2>
-                        <div style={{ display: 'flex', gap: '12px', marginTop: '4px', fontSize: '11px', opacity: 0.7 }}>
+                        <div className="chat__meta">
                             <span className="flex items-center gap-1"><Cpu size={12} /> {modelLabel.toUpperCase()}</span>
                             <span className="flex items-center gap-1"><Activity size={12} /> {versionLabel.toUpperCase()}</span>
                             <select
                                 id="inference-mode-select"
                                 value={inferenceMode}
                                 onChange={(e) => setInferenceMode(e.target.value as "standard" | "distributed")}
-                                style={{ background: 'transparent', color: 'inherit', border: 'none', borderBottom: isEnterprise ? 'none' : '1px solid var(--border)', fontSize: 'inherit', cursor: 'pointer', fontWeight: '500' }}
+                                className="chat__mode-select"
                             >
                                 <option value="standard">{isEnterprise ? "Standard Mode" : "MODE: SINGLE_NODE"}</option>
                                 <option value="distributed">{isEnterprise ? "Distributed Mesh" : "MODE: DIST_MESH"}</option>
@@ -170,21 +170,21 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
                         </div>
                     </div>
                 </div>
-                <div style={{ textAlign: 'right' }}>
-                    <div className={ready ? "text-accent-emerald" : "text-error"} style={{ fontSize: '12px', fontWeight: '700' }}>
+                <div className="text-right">
+                    <div className={`chat__status ${ready ? "text-primary" : "text-error"}`}>
                         {ready ? (isEnterprise ? "CONNECTED" : "STATUS: ONLINE") : (isEnterprise ? "SYNCING..." : "STATUS: SYNCING")}
                     </div>
-                    <div style={{ fontSize: '10px', opacity: 0.6, marginTop: '2px' }}>
+                    <div className="chat__stats">
                         {opsSummary.active_nodes ?? 0} NODES • {successRate}% RELIABILITY
                     </div>
                 </div>
             </div>
 
-            <div className="chat__messages" style={{ fontFamily: isEnterprise ? 'var(--font-sans)' : 'var(--font-mono)', padding: '24px' }}>
+            <div className="chat__messages">
                 {messages.length === 0 ? (
-                    <div className="chat__empty" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', textAlign: 'center' }}>
+                    <div className="chat__empty">
                         {!isEnterprise ? (
-                            <pre style={{ color: 'var(--primary)', marginBottom: '20px', fontSize: '12px', lineHeight: '1.2' }}>{`
+                            <pre className="chat__ascii">{`
    _____ _    _          _____  _____  
   / ____| |  | |   /\   |  __ \\|  __ \\ 
  | (___ | |__| |  /  \\  | |__) | |  | |
@@ -194,25 +194,24 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
                                        
         `}</pre>
                         ) : (
-                            <div className="w-16 h-16 rounded-2xl bg-secondary/10 flex items-center justify-center text-secondary mb-6">
+                            <div className="w-16 h-16 rounded-2xl bg-primary-glow flex items-center justify-center text-primary mb-6">
                                 <MessageSquare size={32} />
                             </div>
                         )}
-                        <h3 className="chat__empty-title" style={{ color: 'var(--text-primary)', fontSize: isEnterprise ? '24px' : '14px', fontWeight: '700' }}>
+                        <h3 className="chat__empty-title">
                             {isEnterprise ? "What can I help you build?" : "ESTABLISHING_TRUSTLESS_MESH_LINK..."}
                         </h3>
-                        <p className="chat__empty-hint" style={{ fontSize: '14px', color: 'var(--text-muted)', marginTop: '8px', maxWidth: '400px' }}>
+                        <p className="chat__empty-hint">
                             {isEnterprise
                                 ? "Ask anything. All compute is distributed across the Shard decentralized network for private, local-first inference."
                                 : "// ALL COMPUTE IS DECENTRALIZED AND ENCRYPTED"}
                         </p>
-                        <div className="chat__quick-prompts" style={{ marginTop: '32px', display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: '8px' }}>
+                        <div className="chat__quick-prompts">
                             {quickPrompts.map((prompt) => (
                                 <button
                                     key={prompt}
                                     type="button"
-                                    className={isEnterprise ? "glass-card hover:bg-white/5 transition-all px-4 py-2 border-none rounded-full normal-case text-sm" : ""}
-                                    style={!isEnterprise ? { border: '1px solid var(--border)', background: 'transparent', color: 'var(--muted)', padding: '6px 12px', margin: '4px', cursor: 'pointer', fontSize: '12px' } : {}}
+                                    className="chat__quick-prompt-btn"
                                     onClick={() => setInput(prompt)}
                                 >
                                     {!isEnterprise ? "> " : ""}{prompt}
@@ -225,34 +224,22 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
                         <div
                             key={i}
                             className={`message ${msg.role === "user" ? "message--user" : "message--assistant"}`}
-                            style={{ marginBottom: '24px', maxWidth: isEnterprise ? '85%' : '100%' }}
                         >
-                            <div className="message__avatar" style={{ fontSize: '11px', marginBottom: '6px', display: 'flex', gap: '8px', alignItems: 'center' }}>
-                                <span style={{ color: msg.role === 'user' ? 'var(--secondary)' : 'var(--primary)', fontWeight: '700' }}>
+                            <div className="message__avatar">
+                                <span className="message__role">
                                     {isEnterprise
                                         ? (msg.role === "user" ? "YOU" : "SHARD AI")
                                         : (msg.role === "user" ? "GUEST@SHARD-NET:~$" : "SYSTEM@SHARD-CORE:~#")}
                                 </span>
-                                <span style={{ opacity: 0.2 }}>•</span>
-                                <span style={{ opacity: 0.5 }}>{new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                                <span className="message__separator">•</span>
+                                <span className="message__time">{new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                             </div>
-                            <div className={`message__bubble ${isEnterprise ? 'glass-card' : ''}`} style={{
-                                background: isEnterprise ? (msg.role === 'user' ? 'rgba(0,112,243,0.1)' : 'var(--glass-bg)') : 'transparent',
-                                border: isEnterprise ? 'var(--border-width) solid var(--glass-border)' : 'none',
-                                padding: isEnterprise ? '12px 16px' : '0 10px',
-                                borderLeft: !isEnterprise ? `2px solid ${msg.role === 'user' ? 'var(--secondary)' : 'var(--primary)'}` : 'var(--border-width) solid var(--glass-border)',
-                                color: isEnterprise ? 'var(--text-primary)' : (msg.role === 'user' ? 'var(--secondary)' : 'var(--primary)'),
-                                fontSize: '15px',
-                                lineHeight: '1.6',
-                                borderRadius: isEnterprise ? '12px' : '0'
-                            }}>
+                            <div className="message__bubble">
                                 {msg.content || (
                                     <span className="animate-pulse">●</span>
                                 )}
                                 {streaming && i === messages.length - 1 && msg.role === 'assistant' && (
-                                    <span className={isEnterprise ? "animate-pulse ml-1" : "cursor"}>
-                                        {isEnterprise ? '●' : ''}
-                                    </span>
+                                    <span className="message__cursor">●</span>
                                 )}
                             </div>
                         </div>
@@ -261,14 +248,13 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
                 <div ref={messagesEndRef} />
             </div>
 
-            <div className={`chat__input-area ${isEnterprise ? 'bg-transparent' : ''}`}>
-                <div className={`chat__input-wrapper ${isEnterprise ? 'glass-card border-none rounded-2xl p-2' : ''}`} style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
-                    {!isEnterprise && <span style={{ position: 'absolute', left: '10px', color: 'var(--primary)' }}>&gt;</span>}
+            <div className="chat__input-area">
+                <div className="chat__input-wrapper">
+                    {!isEnterprise && <span className="chat__prompt-char">&gt;</span>}
                     <textarea
                         id="chat-prompt-input"
                         ref={textareaRef}
                         className="chat__input"
-                        style={{ paddingLeft: isEnterprise ? '12px' : '25px', width: '100%', minHeight: '44px', maxHeight: '200px', flex: 1, resize: 'none', alignSelf: 'center' }}
                         placeholder={mode === "loading" ? "Initializing..." : (isEnterprise ? "Ask anything..." : "COMMAND:")}
                         value={input}
                         onChange={(e) => setInput(e.target.value)}
@@ -277,18 +263,292 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
                         rows={1}
                     />
                     <button
-                        className={`flex items-center justify-center transition-all ${isEnterprise ? 'bg-secondary text-white w-10 h-10 rounded-xl border-none' : 'chat__send-btn'}`}
+                        className="chat__send-btn"
                         onClick={handleSend}
                         disabled={!input.trim() || streaming || mode === "loading"}
-                        style={isEnterprise ? { padding: 0 } : {}}
                     >
                         {streaming ? <div className="animate-spin h-4 w-4 border-2 border-white/20 border-t-white rounded-full" /> : (isEnterprise ? <Send size={18} /> : "[ SEND ]")}
                     </button>
                 </div>
-                <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '12px', textTransform: 'uppercase', letterSpacing: '1px', textAlign: 'center' }}>
+                <div className="chat__footer-hint">
                     {streaming ? (isEnterprise ? "Assistant is thinking..." : "WAITING_FOR_SWARM_RESPONSE...") : (isEnterprise ? "Private & Decentralized" : "READY_FOR_INPUT // SHIFT+ENTER_NEWLINE")}
                 </div>
             </div>
+
+            <style jsx>{`
+                .chat {
+                    display: flex;
+                    flex-direction: column;
+                    height: 100%;
+                    background: var(--bg-primary);
+                    color: var(--text-primary);
+                    position: relative;
+                }
+                .chat__header {
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    padding: var(--space-md) var(--space-lg);
+                    border-bottom: 1px solid var(--border);
+                    background: var(--bg-secondary);
+                }
+                .chat__title {
+                    font-size: 1.125rem;
+                    font-weight: 700;
+                    letter-spacing: 0.05em;
+                }
+                .chat--terminal .chat__title {
+                    font-family: var(--font-mono);
+                    letter-spacing: 2px;
+                }
+                .chat__meta {
+                    display: flex;
+                    gap: var(--space-md);
+                    margin-top: var(--space-xs);
+                    font-size: 0.6875rem;
+                    opacity: 0.7;
+                    font-family: var(--font-mono);
+                }
+                .chat__mode-select {
+                    background: transparent;
+                    color: inherit;
+                    border: none;
+                    border-bottom: 1px solid var(--border);
+                    padding: 0;
+                    font-size: inherit;
+                    cursor: pointer;
+                    width: auto;
+                    border-radius: 0;
+                }
+                .chat__status {
+                    font-size: 0.75rem;
+                    font-weight: 800;
+                    font-family: var(--font-mono);
+                }
+                .chat__stats {
+                    font-size: 0.625rem;
+                    opacity: 0.6;
+                    margin-top: 2px;
+                    font-family: var(--font-mono);
+                }
+                .chat__messages {
+                    flex: 1;
+                    overflow-y: auto;
+                    padding: var(--space-xl);
+                    display: flex;
+                    flex-direction: column;
+                }
+                .chat--terminal .chat__messages {
+                    font-family: var(--font-mono);
+                }
+                .chat__empty {
+                    display: flex;
+                    flex-direction: column;
+                    align-items: center;
+                    justify-content: center;
+                    height: 100%;
+                    text-align: center;
+                }
+                .chat__ascii {
+                    color: var(--primary);
+                    margin-bottom: var(--space-lg);
+                    font-size: 0.75rem;
+                    line-height: 1.2;
+                }
+                .chat__empty-title {
+                    font-size: 1.5rem;
+                    font-weight: 700;
+                    margin-bottom: var(--space-sm);
+                }
+                .chat--terminal .chat__empty-title {
+                    font-size: 0.875rem;
+                    font-family: var(--font-mono);
+                }
+                .chat__empty-hint {
+                    font-size: 0.875rem;
+                    color: var(--text-muted);
+                    max-width: 400px;
+                }
+                .chat__quick-prompts {
+                    margin-top: var(--space-2xl);
+                    display: flex;
+                    flex-wrap: wrap;
+                    justify-content: center;
+                    gap: var(--space-sm);
+                }
+                .chat__quick-prompt-btn {
+                    background: var(--bg-tertiary);
+                    border: 1px solid var(--border);
+                    color: var(--text-secondary);
+                    padding: var(--space-sm) var(--space-md);
+                    border-radius: var(--radius-md);
+                    cursor: pointer;
+                    font-size: 0.75rem;
+                    transition: all var(--transition-fast);
+                }
+                .chat__quick-prompt-btn:hover {
+                    border-color: var(--primary);
+                    color: var(--text-primary);
+                    background: var(--bg-elevated);
+                }
+                .chat--enterprise .chat__quick-prompt-btn {
+                    border-radius: var(--radius-full);
+                    background: var(--glass-bg);
+                }
+                .message {
+                    margin-bottom: var(--space-xl);
+                    max-width: 85%;
+                }
+                .chat--terminal .message {
+                    max-width: 100%;
+                }
+                .message--user {
+                    align-self: flex-end;
+                }
+                .message--assistant {
+                    align-self: flex-start;
+                }
+                .message__avatar {
+                    font-size: 0.6875rem;
+                    margin-bottom: var(--space-xs);
+                    display: flex;
+                    gap: var(--space-sm);
+                    align-items: center;
+                    font-family: var(--font-mono);
+                }
+                .message--user .message__avatar {
+                    flex-direction: row-reverse;
+                }
+                .message__role {
+                    font-weight: 700;
+                }
+                .message--user .message__role { color: var(--secondary); }
+                .message--assistant .message__role { color: var(--primary); }
+                
+                .message__bubble {
+                    padding: var(--space-md) var(--space-lg);
+                    border-radius: var(--radius-lg);
+                    font-size: 0.9375rem;
+                    line-height: 1.6;
+                    position: relative;
+                }
+                .message--user .message__bubble {
+                    background: var(--bg-tertiary);
+                    color: var(--text-primary);
+                    border: 1px solid var(--border);
+                    border-bottom-right-radius: var(--radius-xs);
+                }
+                .message--assistant .message__bubble {
+                    background: var(--bg-secondary);
+                    color: var(--text-primary);
+                    border: 1px solid var(--border);
+                    border-bottom-left-radius: var(--radius-xs);
+                }
+                .chat--enterprise .message--user .message__bubble {
+                    background: var(--primary-glow);
+                    border-color: var(--primary);
+                }
+                .chat--terminal .message__bubble {
+                    border-radius: 0;
+                    border: none;
+                    padding: 0 var(--space-sm);
+                    background: transparent !important;
+                }
+                .chat--terminal .message--user .message__bubble {
+                    border-left: 2px solid var(--secondary);
+                }
+                .chat--terminal .message--assistant .message__bubble {
+                    border-left: 2px solid var(--primary);
+                }
+                .message__cursor {
+                    display: inline-block;
+                    width: 8px;
+                    height: 15px;
+                    background: var(--primary);
+                    margin-left: 4px;
+                    animation: pulse 1s infinite;
+                    vertical-align: middle;
+                }
+                .chat__input-area {
+                    padding: var(--space-lg);
+                    border-top: 1px solid var(--border);
+                    background: var(--bg-secondary);
+                }
+                .chat__input-wrapper {
+                    display: flex;
+                    align-items: center;
+                    background: var(--bg-tertiary);
+                    border: 1px solid var(--border);
+                    border-radius: var(--radius-lg);
+                    padding: var(--space-xs) var(--space-sm);
+                    position: relative;
+                }
+                .chat--enterprise .chat__input-wrapper {
+                    border-radius: var(--radius-xl);
+                }
+                .chat--terminal .chat__input-wrapper {
+                    border-radius: 0;
+                    background: transparent;
+                }
+                .chat__prompt-char {
+                    color: var(--primary);
+                    font-family: var(--font-mono);
+                    margin-left: var(--space-sm);
+                    font-weight: 700;
+                }
+                .chat__input {
+                    background: transparent;
+                    border: none;
+                    box-shadow: none;
+                    padding: var(--space-sm) var(--space-md);
+                    font-size: 0.9375rem;
+                    min-height: 44px;
+                }
+                .chat__input:focus {
+                    box-shadow: none;
+                }
+                .chat__send-btn {
+                    background: var(--primary);
+                    color: var(--text-inverse);
+                    border: none;
+                    border-radius: var(--radius-md);
+                    padding: var(--space-sm) var(--space-lg);
+                    font-weight: 700;
+                    cursor: pointer;
+                    transition: all var(--transition-fast);
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                }
+                .chat__send-btn:hover:not(:disabled) {
+                    background: var(--primary-hover);
+                    transform: translateY(-1px);
+                }
+                .chat__send-btn:disabled {
+                    opacity: 0.5;
+                    cursor: not-allowed;
+                    background: var(--text-muted);
+                }
+                .chat--terminal .chat__send-btn {
+                    background: transparent;
+                    color: var(--primary);
+                    font-family: var(--font-mono);
+                    border: 1px solid var(--primary);
+                }
+                .chat--terminal .chat__send-btn:hover:not(:disabled) {
+                    background: var(--primary-glow);
+                }
+                .chat__footer-hint {
+                    font-size: 0.625rem;
+                    color: var(--text-muted);
+                    margin-top: var(--space-sm);
+                    text-transform: uppercase;
+                    letter-spacing: 1px;
+                    text-align: center;
+                    font-family: var(--font-mono);
+                }
+            `}</style>
         </main>
     )
+
 }
