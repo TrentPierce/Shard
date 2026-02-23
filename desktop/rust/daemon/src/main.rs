@@ -62,7 +62,9 @@ use tower_http::cors::{Any, CorsLayer};
 
 pub mod telemetry_ws;
 pub mod api;
+pub mod scheduler;
 use api::*;
+use scheduler::*;
 use shard_common::common::node_config::{NodeRole, NodeRuntimeConfig};
 use shard_common::common::pow_challenge::PowChallengeManager;
 use shard_common::common::signed_envelope::{EnvelopeVerifier, SignedEnvelope};
