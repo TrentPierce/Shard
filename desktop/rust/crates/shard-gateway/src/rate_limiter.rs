@@ -6,6 +6,7 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
@@ -72,12 +73,14 @@ impl TokenBucket {
     /// Try to consume a token, returns true if successful
     pub fn try_consume(&self) -> bool {
         self.refill();
-        let current = self.tokens.load(Ordering::Relaxed);
-        if current > 0 {
-            self.tokens.store(current - 1, Ordering::Relaxed);
-            true
-        } else {
-            false
+        loop {
+            let current = self.tokens.load(Ordering::SeqCst);
+            if current == 0 {
+                return false;
+            }
+            if self.tokens.compare_exchange(current, current - 1, Ordering::SeqCst, Ordering::SeqCst).is_ok() {
+                return true;
+            }
         }
     }
 
@@ -133,9 +136,9 @@ impl TokenBucket {
 #[derive(Debug)]
 pub struct RateLimiter {
     /// Per-API-key buckets
-    key_buckets: std::sync::Mutex<HashMap<String, TokenBucket>>,
+    key_buckets: std::sync::Mutex<HashMap<String, Arc<TokenBucket>>>,
     /// Per-IP buckets
-    ip_buckets: std::sync::Mutex<HashMap<String, TokenBucket>>,
+    ip_buckets: std::sync::Mutex<HashMap<String, Arc<TokenBucket>>>,
     /// API key tier storage (key -> is_enterprise)
     key_tiers: std::sync::Mutex<HashMap<String, bool>>,
     /// Configuration
@@ -154,8 +157,12 @@ impl RateLimiter {
     }
 
     /// Get or create a bucket for an API key
-    fn get_key_bucket(&self, api_key: &str) -> TokenBucket {
+    fn get_key_bucket(&self, api_key: &str) -> Arc<TokenBucket> {
         let mut buckets = self.key_buckets.lock().unwrap();
+
+        if let Some(bucket) = buckets.get(api_key) {
+            return bucket.clone();
+        }
 
         // Check if key exists and get its tier
         let is_enterprise = self
@@ -178,21 +185,23 @@ impl RateLimiter {
             )
         };
 
-        buckets
-            .entry(api_key.to_string())
-            .or_insert_with(|| TokenBucket::new(capacity, rate))
-            .clone()
+        let bucket = Arc::new(TokenBucket::new(capacity, rate));
+        buckets.insert(api_key.to_string(), bucket.clone());
+        bucket
     }
 
     /// Get or create a bucket for an IP address
-    fn get_ip_bucket(&self, ip: &str) -> TokenBucket {
+    fn get_ip_bucket(&self, ip: &str) -> Arc<TokenBucket> {
         let mut buckets = self.ip_buckets.lock().unwrap();
-        let rate = self.config.ip_limit as f64 / 60.0;
+        
+        if let Some(bucket) = buckets.get(ip) {
+            return bucket.clone();
+        }
 
-        buckets
-            .entry(ip.to_string())
-            .or_insert_with(|| TokenBucket::new(self.config.ip_limit, rate))
-            .clone()
+        let rate = self.config.ip_limit as f64 / 60.0;
+        let bucket = Arc::new(TokenBucket::new(self.config.ip_limit, rate));
+        buckets.insert(ip.to_string(), bucket.clone());
+        bucket
     }
 
     /// Check if request is allowed for the given API key and IP
@@ -210,7 +219,7 @@ impl RateLimiter {
             }
             return RateLimitResult::Allowed {
                 limit: bucket.capacity(),
-                remaining: bucket.available() - 1,
+                remaining: bucket.available(),
             };
         }
 
@@ -226,7 +235,7 @@ impl RateLimiter {
             }
             return RateLimitResult::Allowed {
                 limit: bucket.capacity(),
-                remaining: bucket.available() - 1,
+                remaining: bucket.available(),
             };
         }
 

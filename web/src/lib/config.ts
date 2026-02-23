@@ -2,9 +2,9 @@
  * Shard Configuration
  */
 
-export const API_BASE = process.env.NEXT_PUBLIC_API_URL || "/api"
-export const RUST_BASE = process.env.NEXT_PUBLIC_RUST_URL || "http://127.0.0.1:9091"
-export const SHARD_BACKEND_BASE = process.env.NEXT_PUBLIC_SHARD_BACKEND_URL || "http://35.175.242.222:9091"
+export const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:9091"
+export const RUST_BASE = process.env.NEXT_PUBLIC_RUST_URL || "http://localhost:9091"
+export const SHARD_BACKEND_BASE = process.env.NEXT_PUBLIC_SHARD_BACKEND_URL || "http://localhost:9091"
 
 /**
  * Whether the browser should prefer local shard mode when a localhost daemon is detected.

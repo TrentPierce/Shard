@@ -1,0 +1,10 @@
+prefix=C:/Program Files (x86)/shard_engine
+exec_prefix=C:/Program Files (x86)/shard_engine
+libdir=C:/Program Files (x86)/shard_engine/lib
+includedir=C:/Program Files (x86)/shard_engine/include
+
+Name: llama
+Description: Port of Facebook's LLaMA model in C/C++
+Version: 0.0.274
+Libs: -L${libdir} -lggml -lggml-base -lllama
+Cflags: -I${includedir}

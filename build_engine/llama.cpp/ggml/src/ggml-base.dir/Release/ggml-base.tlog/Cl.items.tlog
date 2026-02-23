@@ -1,0 +1,8 @@
+D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\ggml\src\ggml.c;D:\Dev\Projects\Shard\Shard\build_engine\llama.cpp\ggml\src\ggml-base.dir\Release\ggml.c.obj
+D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\ggml\src\ggml.cpp;D:\Dev\Projects\Shard\Shard\build_engine\llama.cpp\ggml\src\ggml-base.dir\Release\ggml.cpp.obj
+D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\ggml\src\ggml-alloc.c;D:\Dev\Projects\Shard\Shard\build_engine\llama.cpp\ggml\src\ggml-base.dir\Release\ggml-alloc.obj
+D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\ggml\src\ggml-backend.cpp;D:\Dev\Projects\Shard\Shard\build_engine\llama.cpp\ggml\src\ggml-base.dir\Release\ggml-backend.obj
+D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\ggml\src\ggml-opt.cpp;D:\Dev\Projects\Shard\Shard\build_engine\llama.cpp\ggml\src\ggml-base.dir\Release\ggml-opt.obj
+D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\ggml\src\ggml-threading.cpp;D:\Dev\Projects\Shard\Shard\build_engine\llama.cpp\ggml\src\ggml-base.dir\Release\ggml-threading.obj
+D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\ggml\src\ggml-quants.c;D:\Dev\Projects\Shard\Shard\build_engine\llama.cpp\ggml\src\ggml-base.dir\Release\ggml-quants.obj
+D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\ggml\src\gguf.cpp;D:\Dev\Projects\Shard\Shard\build_engine\llama.cpp\ggml\src\ggml-base.dir\Release\gguf.obj

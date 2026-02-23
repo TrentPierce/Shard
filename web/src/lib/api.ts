@@ -94,8 +94,7 @@ export async function sendMessage(
     inferenceMode: "standard" | "distributed" = "distributed"
 ): Promise<void> {
     const startedAt = performance.now()
-    // Use direct API URL instead of discovery for reliability
-    const apiEndpoint = apiUrl("")
+    const endpoint = apiUrl("/v1/chat/completions")
 
     // Build the prompt in the same format the server expects
     let prompt = "<|begin_of_text|>"
@@ -127,7 +126,7 @@ export async function sendMessage(
         max_tokens: 256,
     }
 
-    const res = await fetch(`${apiEndpoint}/v1/chat/completions`, {
+    const res = await fetch(endpoint, {
         method: "POST",
         headers: { 
             "Content-Type": "application/json",

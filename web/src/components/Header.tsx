@@ -13,10 +13,12 @@ export const modeLabels: Record<string, string> = {
 }
 
 const navLinks = [
-    { name: "How It Works", href: "#how-it-works" },
-    { name: "Features", href: "#features" },
-    { name: "Use Cases", href: "#use-cases" },
-    { name: "API", href: "#api" },
+    { name: "Chat", href: "/chat" },
+    { name: "Dashboard", href: "/dashboard" },
+    { name: "How It Works", href: "/#how-it-works" },
+    { name: "Features", href: "/#features" },
+    { name: "Use Cases", href: "/#use-cases" },
+    { name: "API", href: "/#api" },
     { name: "Docs", href: "/docs", external: true },
 ]
 

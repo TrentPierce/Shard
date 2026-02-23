@@ -197,12 +197,12 @@ for chunk in response:
                                 Shard bypasses centralized GPU constraints through WebGPU speculative decoding across a decentralized P2P mesh. Your browser becomes an AI compute node.
                             </p>
                             <div className="hero-actions">
-                                <Link href="/dashboard" className="btn btn-primary btn-lg">
-                                    Get Started
+                                <Link href="/chat" className="btn btn-primary btn-lg">
+                                    Try the Chat
                                     <ArrowRight size={18} />
                                 </Link>
-                                <Link href="#how-it-works" className="btn btn-secondary btn-lg">
-                                    See How It Works
+                                <Link href="/dashboard" className="btn btn-secondary btn-lg">
+                                    Network Dashboard
                                 </Link>
                             </div>
 

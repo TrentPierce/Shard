@@ -1295,6 +1295,10 @@ async fn health_handler(AxumState(state): AxumState<SharedState>) -> Json<serde_
     let load = state.current_load.load(Ordering::Relaxed);
     let latency_ms = state.avg_latency_ms.load(Ordering::Relaxed);
     let scout_count = browser_sessions.len();
+    let engine_guard = state.engine.lock().await;
+    let engine_loaded = engine_guard.is_some();
+    drop(engine_guard);
+
     Json(serde_json::json!({
         "status": "ok",
         "rust_sidecar": "connected",
@@ -1320,6 +1324,8 @@ async fn health_handler(AxumState(state): AxumState<SharedState>) -> Json<serde_
         "capacity": capacity,
         "load": load,
         "latency_ms": latency_ms,
+        "engine_loaded": engine_loaded,
+        "bitnet_model": std::env::var("BITNET_MODEL").unwrap_or_default(),
     }))
 }
 
@@ -2050,7 +2056,7 @@ async fn process_draft_submission(
     let draft_for_channel = ScoutDraft {
         work_id: response.request_id.clone(),
         scout_id: response.peer_id.clone(),
-        draft_tokens: response.draft_tokens.iter().map(|&t| t as i32).collect(),
+        draft_tokens: response.draft_tokens.iter().filter_map(|t| t.parse::<i32>().ok()).collect(),
         draft_text: submission.draft_text.clone(),
         timestamp_ms: response.created_at_ms.unwrap_or_else(now_ms),
     };
@@ -2490,7 +2496,7 @@ async fn chat_completions_handler(
                             let work = WorkRequest {
                                 request_id: request_id.clone(),
                                 prompt_context: prompt.clone(),
-                                min_tokens: config.draft_token_count as u32,
+                                min_tokens: config.draft_token_count as i32,
                                 created_at_ms: Some(now_ms()),
                             };
                             

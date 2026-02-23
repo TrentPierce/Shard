@@ -1,0 +1,13 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="17.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <CustomBuild Include="D:\Dev\Projects\Shard\Shard\build_engine\CMakeFiles\aaa4644998bcfe299e91799e3e14a712\INSTALL_force.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="CMake Rules">
+      <UniqueIdentifier>{2ED93016-0AFD-34E7-9396-DF51EB975063}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>

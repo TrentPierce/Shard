@@ -1,0 +1,542 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" ToolsVersion="17.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <PreferredToolArchitecture>x64</PreferredToolArchitecture>
+  </PropertyGroup>
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="MinSizeRel|x64">
+      <Configuration>MinSizeRel</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="RelWithDebInfo|x64">
+      <Configuration>RelWithDebInfo</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{04B64456-B718-3320-9011-EDE101DB7BD8}</ProjectGuid>
+    <Keyword>Win32Proj</Keyword>
+    <WindowsTargetPlatformVersion>10.0.26100.0</WindowsTargetPlatformVersion>
+    <Platform>x64</Platform>
+    <ProjectName>llama</ProjectName>
+    <VCProjectUpgraderObjectName>NoUpgrade</VCProjectUpgraderObjectName>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <CharacterSet>MultiByte</CharacterSet>
+    <PlatformToolset>v143</PlatformToolset>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <CharacterSet>MultiByte</CharacterSet>
+    <PlatformToolset>v143</PlatformToolset>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'" Label="Configuration">
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <CharacterSet>MultiByte</CharacterSet>
+    <PlatformToolset>v143</PlatformToolset>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'" Label="Configuration">
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <CharacterSet>MultiByte</CharacterSet>
+    <PlatformToolset>v143</PlatformToolset>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings">
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup>
+    <_ProjectFileVersion>10.0.20506.1</_ProjectFileVersion>
+    <OutDir Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">D:\Dev\Projects\Shard\Shard\build_engine\bin\Debug\</OutDir>
+    <IntDir Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">llama.dir\Debug\</IntDir>
+    <TargetName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">llama</TargetName>
+    <TargetExt Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">.dll</TargetExt>
+    <LinkIncremental Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</LinkIncremental>
+    <GenerateManifest Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</GenerateManifest>
+    <OutDir Condition="'$(Configuration)|$(Platform)'=='Release|x64'">D:\Dev\Projects\Shard\Shard\build_engine\bin\Release\</OutDir>
+    <IntDir Condition="'$(Configuration)|$(Platform)'=='Release|x64'">llama.dir\Release\</IntDir>
+    <TargetName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">llama</TargetName>
+    <TargetExt Condition="'$(Configuration)|$(Platform)'=='Release|x64'">.dll</TargetExt>
+    <LinkIncremental Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</LinkIncremental>
+    <GenerateManifest Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</GenerateManifest>
+    <OutDir Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">D:\Dev\Projects\Shard\Shard\build_engine\bin\MinSizeRel\</OutDir>
+    <IntDir Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">llama.dir\MinSizeRel\</IntDir>
+    <TargetName Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">llama</TargetName>
+    <TargetExt Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">.dll</TargetExt>
+    <LinkIncremental Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">false</LinkIncremental>
+    <GenerateManifest Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">true</GenerateManifest>
+    <OutDir Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">D:\Dev\Projects\Shard\Shard\build_engine\bin\RelWithDebInfo\</OutDir>
+    <IntDir Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">llama.dir\RelWithDebInfo\</IntDir>
+    <TargetName Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">llama</TargetName>
+    <TargetExt Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">.dll</TargetExt>
+    <LinkIncremental Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">true</LinkIncremental>
+    <GenerateManifest Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">true</GenerateManifest>
+  </PropertyGroup>
+  <PropertyGroup />
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <ClCompile>
+      <AdditionalIncludeDirectories>D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\.;D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\..\include;D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\ggml\src\..\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalOptions>%(AdditionalOptions) /utf-8 /bigobj</AdditionalOptions>
+      <AssemblerListingLocation>$(IntDir)</AssemblerListingLocation>
+      <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
+      <BufferSecurityCheck></BufferSecurityCheck>
+      <CallingConvention></CallingConvention>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <ExceptionHandling>Sync</ExceptionHandling>
+      <FloatingPointModel></FloatingPointModel>
+      <ForceConformanceInForLoopScope></ForceConformanceInForLoopScope>
+      <InlineFunctionExpansion>Disabled</InlineFunctionExpansion>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <MinimalRebuild></MinimalRebuild>
+      <Optimization>Disabled</Optimization>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <RemoveUnreferencedCodeData></RemoveUnreferencedCodeData>
+      <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
+      <RuntimeTypeInfo>true</RuntimeTypeInfo>
+      <SupportJustMyCode></SupportJustMyCode>
+      <TreatWChar_tAsBuiltInType></TreatWChar_tAsBuiltInType>
+      <UseFullPaths>false</UseFullPaths>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;LLAMA_BUILD;LLAMA_SHARED;_CRT_SECURE_NO_WARNINGS;GGML_USE_CPU;GGML_SHARED;GGML_BACKEND_SHARED;CMAKE_INTDIR="Debug";llama_EXPORTS</PreprocessorDefinitions>
+      <ObjectFileName>$(IntDir)</ObjectFileName>
+      <ScanSourceForModuleDependencies>false</ScanSourceForModuleDependencies>
+    </ClCompile>
+    <ResourceCompile>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_DEBUG;_WINDOWS;LLAMA_BUILD;LLAMA_SHARED;_CRT_SECURE_NO_WARNINGS;GGML_USE_CPU;GGML_SHARED;GGML_BACKEND_SHARED;CMAKE_INTDIR=\"Debug\";llama_EXPORTS</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\.;D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\..\include;D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\ggml\src\..\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ResourceCompile>
+    <Midl>
+      <AdditionalIncludeDirectories>D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\.;D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\..\include;D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\ggml\src\..\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
+      <HeaderFileName>%(Filename).h</HeaderFileName>
+      <TypeLibraryName>%(Filename).tlb</TypeLibraryName>
+      <InterfaceIdentifierFileName>%(Filename)_i.c</InterfaceIdentifierFileName>
+      <ProxyFileName>%(Filename)_p.c</ProxyFileName>
+    </Midl>
+    <Link>
+      <AdditionalDependencies>..\ggml\src\Debug\ggml.lib;..\ggml\src\Debug\ggml-cpu.lib;..\ggml\src\Debug\ggml-base.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;comdlg32.lib;advapi32.lib</AdditionalDependencies>
+      <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalOptions>%(AdditionalOptions) /machine:x64</AdditionalOptions>
+      <DataExecutionPrevention></DataExecutionPrevention>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <IgnoreSpecificDefaultLibraries>%(IgnoreSpecificDefaultLibraries)</IgnoreSpecificDefaultLibraries>
+      <ImageHasSafeExceptionHandlers></ImageHasSafeExceptionHandlers>
+      <ImportLibrary>D:/Dev/Projects/Shard/Shard/build_engine/llama.cpp/src/Debug/llama.lib</ImportLibrary>
+      <LinkErrorReporting></LinkErrorReporting>
+      <ProgramDataBaseFile>D:/Dev/Projects/Shard/Shard/build_engine/bin/Debug/llama.pdb</ProgramDataBaseFile>
+      <RandomizedBaseAddress></RandomizedBaseAddress>
+      <SubSystem>Console</SubSystem>
+    </Link>
+    <ProjectReference>
+      <LinkLibraryDependencies>false</LinkLibraryDependencies>
+    </ProjectReference>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <ClCompile>
+      <AdditionalIncludeDirectories>D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\.;D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\..\include;D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\ggml\src\..\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalOptions>%(AdditionalOptions) /utf-8 /bigobj</AdditionalOptions>
+      <AssemblerListingLocation>$(IntDir)</AssemblerListingLocation>
+      <BasicRuntimeChecks>Default</BasicRuntimeChecks>
+      <BufferSecurityCheck></BufferSecurityCheck>
+      <CallingConvention></CallingConvention>
+      <ExceptionHandling>Sync</ExceptionHandling>
+      <FloatingPointModel></FloatingPointModel>
+      <ForceConformanceInForLoopScope></ForceConformanceInForLoopScope>
+      <InlineFunctionExpansion>AnySuitable</InlineFunctionExpansion>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <MinimalRebuild></MinimalRebuild>
+      <Optimization>MaxSpeed</Optimization>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <RemoveUnreferencedCodeData></RemoveUnreferencedCodeData>
+      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+      <RuntimeTypeInfo>true</RuntimeTypeInfo>
+      <SupportJustMyCode></SupportJustMyCode>
+      <TreatWChar_tAsBuiltInType></TreatWChar_tAsBuiltInType>
+      <UseFullPaths>false</UseFullPaths>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;LLAMA_BUILD;LLAMA_SHARED;_CRT_SECURE_NO_WARNINGS;GGML_USE_CPU;GGML_SHARED;GGML_BACKEND_SHARED;CMAKE_INTDIR="Release";llama_EXPORTS</PreprocessorDefinitions>
+      <ObjectFileName>$(IntDir)</ObjectFileName>
+      <DebugInformationFormat>
+      </DebugInformationFormat>
+      <ScanSourceForModuleDependencies>false</ScanSourceForModuleDependencies>
+    </ClCompile>
+    <ResourceCompile>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;LLAMA_BUILD;LLAMA_SHARED;_CRT_SECURE_NO_WARNINGS;GGML_USE_CPU;GGML_SHARED;GGML_BACKEND_SHARED;CMAKE_INTDIR=\"Release\";llama_EXPORTS</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\.;D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\..\include;D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\ggml\src\..\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ResourceCompile>
+    <Midl>
+      <AdditionalIncludeDirectories>D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\.;D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\..\include;D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\ggml\src\..\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
+      <HeaderFileName>%(Filename).h</HeaderFileName>
+      <TypeLibraryName>%(Filename).tlb</TypeLibraryName>
+      <InterfaceIdentifierFileName>%(Filename)_i.c</InterfaceIdentifierFileName>
+      <ProxyFileName>%(Filename)_p.c</ProxyFileName>
+    </Midl>
+    <Link>
+      <AdditionalDependencies>..\ggml\src\Release\ggml.lib;..\ggml\src\Release\ggml-cpu.lib;..\ggml\src\Release\ggml-base.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;comdlg32.lib;advapi32.lib</AdditionalDependencies>
+      <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalOptions>%(AdditionalOptions) /machine:x64</AdditionalOptions>
+      <DataExecutionPrevention></DataExecutionPrevention>
+      <GenerateDebugInformation>false</GenerateDebugInformation>
+      <IgnoreSpecificDefaultLibraries>%(IgnoreSpecificDefaultLibraries)</IgnoreSpecificDefaultLibraries>
+      <ImageHasSafeExceptionHandlers></ImageHasSafeExceptionHandlers>
+      <ImportLibrary>D:/Dev/Projects/Shard/Shard/build_engine/llama.cpp/src/Release/llama.lib</ImportLibrary>
+      <LinkErrorReporting></LinkErrorReporting>
+      <ProgramDataBaseFile>D:/Dev/Projects/Shard/Shard/build_engine/bin/Release/llama.pdb</ProgramDataBaseFile>
+      <RandomizedBaseAddress></RandomizedBaseAddress>
+      <SubSystem>Console</SubSystem>
+    </Link>
+    <ProjectReference>
+      <LinkLibraryDependencies>false</LinkLibraryDependencies>
+    </ProjectReference>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">
+    <ClCompile>
+      <AdditionalIncludeDirectories>D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\.;D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\..\include;D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\ggml\src\..\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalOptions>%(AdditionalOptions) /utf-8 /bigobj</AdditionalOptions>
+      <AssemblerListingLocation>$(IntDir)</AssemblerListingLocation>
+      <BasicRuntimeChecks>Default</BasicRuntimeChecks>
+      <BufferSecurityCheck></BufferSecurityCheck>
+      <CallingConvention></CallingConvention>
+      <ExceptionHandling>Sync</ExceptionHandling>
+      <FloatingPointModel></FloatingPointModel>
+      <ForceConformanceInForLoopScope></ForceConformanceInForLoopScope>
+      <InlineFunctionExpansion>OnlyExplicitInline</InlineFunctionExpansion>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <MinimalRebuild></MinimalRebuild>
+      <Optimization>MinSpace</Optimization>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <RemoveUnreferencedCodeData></RemoveUnreferencedCodeData>
+      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+      <RuntimeTypeInfo>true</RuntimeTypeInfo>
+      <SupportJustMyCode></SupportJustMyCode>
+      <TreatWChar_tAsBuiltInType></TreatWChar_tAsBuiltInType>
+      <UseFullPaths>false</UseFullPaths>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;LLAMA_BUILD;LLAMA_SHARED;_CRT_SECURE_NO_WARNINGS;GGML_USE_CPU;GGML_SHARED;GGML_BACKEND_SHARED;CMAKE_INTDIR="MinSizeRel";llama_EXPORTS</PreprocessorDefinitions>
+      <ObjectFileName>$(IntDir)</ObjectFileName>
+      <DebugInformationFormat>
+      </DebugInformationFormat>
+      <ScanSourceForModuleDependencies>false</ScanSourceForModuleDependencies>
+    </ClCompile>
+    <ResourceCompile>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;LLAMA_BUILD;LLAMA_SHARED;_CRT_SECURE_NO_WARNINGS;GGML_USE_CPU;GGML_SHARED;GGML_BACKEND_SHARED;CMAKE_INTDIR=\"MinSizeRel\";llama_EXPORTS</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\.;D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\..\include;D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\ggml\src\..\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ResourceCompile>
+    <Midl>
+      <AdditionalIncludeDirectories>D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\.;D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\..\include;D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\ggml\src\..\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
+      <HeaderFileName>%(Filename).h</HeaderFileName>
+      <TypeLibraryName>%(Filename).tlb</TypeLibraryName>
+      <InterfaceIdentifierFileName>%(Filename)_i.c</InterfaceIdentifierFileName>
+      <ProxyFileName>%(Filename)_p.c</ProxyFileName>
+    </Midl>
+    <Link>
+      <AdditionalDependencies>..\ggml\src\MinSizeRel\ggml.lib;..\ggml\src\MinSizeRel\ggml-cpu.lib;..\ggml\src\MinSizeRel\ggml-base.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;comdlg32.lib;advapi32.lib</AdditionalDependencies>
+      <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalOptions>%(AdditionalOptions) /machine:x64</AdditionalOptions>
+      <DataExecutionPrevention></DataExecutionPrevention>
+      <GenerateDebugInformation>false</GenerateDebugInformation>
+      <IgnoreSpecificDefaultLibraries>%(IgnoreSpecificDefaultLibraries)</IgnoreSpecificDefaultLibraries>
+      <ImageHasSafeExceptionHandlers></ImageHasSafeExceptionHandlers>
+      <ImportLibrary>D:/Dev/Projects/Shard/Shard/build_engine/llama.cpp/src/MinSizeRel/llama.lib</ImportLibrary>
+      <LinkErrorReporting></LinkErrorReporting>
+      <ProgramDataBaseFile>D:/Dev/Projects/Shard/Shard/build_engine/bin/MinSizeRel/llama.pdb</ProgramDataBaseFile>
+      <RandomizedBaseAddress></RandomizedBaseAddress>
+      <SubSystem>Console</SubSystem>
+    </Link>
+    <ProjectReference>
+      <LinkLibraryDependencies>false</LinkLibraryDependencies>
+    </ProjectReference>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">
+    <ClCompile>
+      <AdditionalIncludeDirectories>D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\.;D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\..\include;D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\ggml\src\..\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalOptions>%(AdditionalOptions) /utf-8 /bigobj</AdditionalOptions>
+      <AssemblerListingLocation>$(IntDir)</AssemblerListingLocation>
+      <BasicRuntimeChecks>Default</BasicRuntimeChecks>
+      <BufferSecurityCheck></BufferSecurityCheck>
+      <CallingConvention></CallingConvention>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <ExceptionHandling>Sync</ExceptionHandling>
+      <FloatingPointModel></FloatingPointModel>
+      <ForceConformanceInForLoopScope></ForceConformanceInForLoopScope>
+      <InlineFunctionExpansion>OnlyExplicitInline</InlineFunctionExpansion>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <MinimalRebuild></MinimalRebuild>
+      <Optimization>MaxSpeed</Optimization>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <RemoveUnreferencedCodeData></RemoveUnreferencedCodeData>
+      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+      <RuntimeTypeInfo>true</RuntimeTypeInfo>
+      <SupportJustMyCode></SupportJustMyCode>
+      <TreatWChar_tAsBuiltInType></TreatWChar_tAsBuiltInType>
+      <UseFullPaths>false</UseFullPaths>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;LLAMA_BUILD;LLAMA_SHARED;_CRT_SECURE_NO_WARNINGS;GGML_USE_CPU;GGML_SHARED;GGML_BACKEND_SHARED;CMAKE_INTDIR="RelWithDebInfo";llama_EXPORTS</PreprocessorDefinitions>
+      <ObjectFileName>$(IntDir)</ObjectFileName>
+      <ScanSourceForModuleDependencies>false</ScanSourceForModuleDependencies>
+    </ClCompile>
+    <ResourceCompile>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;LLAMA_BUILD;LLAMA_SHARED;_CRT_SECURE_NO_WARNINGS;GGML_USE_CPU;GGML_SHARED;GGML_BACKEND_SHARED;CMAKE_INTDIR=\"RelWithDebInfo\";llama_EXPORTS</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\.;D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\..\include;D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\ggml\src\..\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ResourceCompile>
+    <Midl>
+      <AdditionalIncludeDirectories>D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\.;D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\..\include;D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\ggml\src\..\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
+      <HeaderFileName>%(Filename).h</HeaderFileName>
+      <TypeLibraryName>%(Filename).tlb</TypeLibraryName>
+      <InterfaceIdentifierFileName>%(Filename)_i.c</InterfaceIdentifierFileName>
+      <ProxyFileName>%(Filename)_p.c</ProxyFileName>
+    </Midl>
+    <Link>
+      <AdditionalDependencies>..\ggml\src\RelWithDebInfo\ggml.lib;..\ggml\src\RelWithDebInfo\ggml-cpu.lib;..\ggml\src\RelWithDebInfo\ggml-base.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;comdlg32.lib;advapi32.lib</AdditionalDependencies>
+      <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalOptions>%(AdditionalOptions) /machine:x64</AdditionalOptions>
+      <DataExecutionPrevention></DataExecutionPrevention>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <IgnoreSpecificDefaultLibraries>%(IgnoreSpecificDefaultLibraries)</IgnoreSpecificDefaultLibraries>
+      <ImageHasSafeExceptionHandlers></ImageHasSafeExceptionHandlers>
+      <ImportLibrary>D:/Dev/Projects/Shard/Shard/build_engine/llama.cpp/src/RelWithDebInfo/llama.lib</ImportLibrary>
+      <LinkErrorReporting></LinkErrorReporting>
+      <ProgramDataBaseFile>D:/Dev/Projects/Shard/Shard/build_engine/bin/RelWithDebInfo/llama.pdb</ProgramDataBaseFile>
+      <RandomizedBaseAddress></RandomizedBaseAddress>
+      <SubSystem>Console</SubSystem>
+    </Link>
+    <ProjectReference>
+      <LinkLibraryDependencies>false</LinkLibraryDependencies>
+    </ProjectReference>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <CustomBuild Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\CMakeLists.txt">
+      <UseUtf8Encoding>Always</UseUtf8Encoding>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Building Custom Rule D:/Dev/Projects/Shard/Shard/cpp/llama.cpp/src/CMakeLists.txt</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -SD:/Dev/Projects/Shard/Shard/cpp/shard-bridge -BD:/Dev/Projects/Shard/Shard/build_engine --check-stamp-file D:/Dev/Projects/Shard/Shard/build_engine/llama.cpp/src/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">D:\Dev\Projects\Shard\Shard\build_engine\llama.cpp\src\CMakeFiles\generate.stamp</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</LinkObjects>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Building Custom Rule D:/Dev/Projects/Shard/Shard/cpp/llama.cpp/src/CMakeLists.txt</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -SD:/Dev/Projects/Shard/Shard/cpp/shard-bridge -BD:/Dev/Projects/Shard/Shard/build_engine --check-stamp-file D:/Dev/Projects/Shard/Shard/build_engine/llama.cpp/src/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">D:\Dev\Projects\Shard\Shard\build_engine\llama.cpp\src\CMakeFiles\generate.stamp</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</LinkObjects>
+      <Message Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">Building Custom Rule D:/Dev/Projects/Shard/Shard/cpp/llama.cpp/src/CMakeLists.txt</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -SD:/Dev/Projects/Shard/Shard/cpp/shard-bridge -BD:/Dev/Projects/Shard/Shard/build_engine --check-stamp-file D:/Dev/Projects/Shard/Shard/build_engine/llama.cpp/src/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">D:\Dev\Projects\Shard\Shard\build_engine\llama.cpp\src\CMakeFiles\generate.stamp</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">false</LinkObjects>
+      <Message Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">Building Custom Rule D:/Dev/Projects/Shard/Shard/cpp/llama.cpp/src/CMakeLists.txt</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -SD:/Dev/Projects/Shard/Shard/cpp/shard-bridge -BD:/Dev/Projects/Shard/Shard/build_engine --check-stamp-file D:/Dev/Projects/Shard/Shard/build_engine/llama.cpp/src/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">D:\Dev\Projects\Shard\Shard\build_engine\llama.cpp\src\CMakeFiles\generate.stamp</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">false</LinkObjects>
+    </CustomBuild>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\include\llama.h" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\llama.cpp">
+      <ObjectFileName>$(IntDir)/llama.cpp.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\llama-adapter.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\llama-arch.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\llama-batch.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\llama-chat.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\llama-context.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\llama-cparams.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\llama-grammar.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\llama-graph.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\llama-hparams.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\llama-impl.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\llama-io.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\llama-kv-cache.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\llama-kv-cache-iswa.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\llama-memory.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\llama-memory-hybrid.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\llama-memory-hybrid-iswa.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\llama-memory-recurrent.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\llama-mmap.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\llama-model-loader.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\llama-model-saver.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\llama-model.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\llama-quant.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\llama-sampler.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\llama-vocab.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\unicode-data.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\unicode.cpp" />
+    <ClInclude Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\unicode.h" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\afmoe.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\apertus.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\arcee.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\arctic.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\arwkv7.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\baichuan.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\bailingmoe.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\bailingmoe2.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\bert.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\bitnet.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\bloom.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\chameleon.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\chatglm.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\codeshell.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\cogvlm.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\cohere2-iswa.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\command-r.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\dbrx.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\deci.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\deepseek.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\deepseek2.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\dots1.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\dream.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\ernie4-5-moe.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\ernie4-5.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\exaone.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\exaone4.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\exaone-moe.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\falcon-h1.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\falcon.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\gemma-embedding.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\gemma.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\gemma2-iswa.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\gemma3.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\gemma3n-iswa.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\glm4-moe.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\glm4.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\gpt2.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\gptneox.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\granite-hybrid.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\granite.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\grok.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\grovemoe.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\hunyuan-dense.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\hunyuan-moe.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\internlm2.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\jais.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\jamba.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\kimi-linear.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\lfm2.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\llada-moe.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\llada.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\llama-iswa.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\llama.cpp">
+      <ObjectFileName>$(IntDir)/models/llama.cpp.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\maincoder.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\mamba.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\mimo2-iswa.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\minicpm3.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\minimax-m2.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\modern-bert.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\mpt.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\nemotron-h.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\nemotron.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\neo-bert.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\olmo.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\olmo2.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\olmoe.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\openai-moe-iswa.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\openelm.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\orion.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\pangu-embedded.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\phi2.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\phi3.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\plamo.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\plamo2.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\plamo3.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\plm.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\qwen.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\qwen2.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\qwen2moe.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\qwen2vl.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\qwen3.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\qwen3vl.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\qwen3vl-moe.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\qwen3moe.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\qwen3next.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\qwen35.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\qwen35moe.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\refact.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\rnd1.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\rwkv6-base.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\rwkv6.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\rwkv6qwen2.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\rwkv7-base.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\rwkv7.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\seed-oss.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\smallthinker.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\smollm3.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\stablelm.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\starcoder.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\starcoder2.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\step35-iswa.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\t5-dec.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\t5-enc.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\wavtokenizer-dec.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\xverse.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\mistral3.cpp" />
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\graph-context-mamba.cpp" />
+  </ItemGroup>
+  <ItemGroup />
+  <ItemGroup>
+    <ProjectReference Include="D:\Dev\Projects\Shard\Shard\build_engine\ZERO_CHECK.vcxproj">
+      <Project>{534D1A0F-A226-39C2-A539-18347B99109D}</Project>
+      <Name>ZERO_CHECK</Name>
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </ProjectReference>
+    <ProjectReference Include="D:\Dev\Projects\Shard\Shard\build_engine\llama.cpp\ggml\src\ggml.vcxproj">
+      <Project>{EAF5C3D4-4810-35FD-9726-04F795B3D989}</Project>
+      <Name>ggml</Name>
+    </ProjectReference>
+    <ProjectReference Include="D:\Dev\Projects\Shard\Shard\build_engine\llama.cpp\ggml\src\ggml-base.vcxproj">
+      <Project>{731A9D51-FCCA-32EF-B2A3-00A95F0BF599}</Project>
+      <Name>ggml-base</Name>
+    </ProjectReference>
+    <ProjectReference Include="D:\Dev\Projects\Shard\Shard\build_engine\llama.cpp\ggml\src\ggml-cpu.vcxproj">
+      <Project>{81D19A15-6919-3536-B91E-7512CCD489D8}</Project>
+      <Name>ggml-cpu</Name>
+    </ProjectReference>
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets">
+  </ImportGroup>
+</Project>
