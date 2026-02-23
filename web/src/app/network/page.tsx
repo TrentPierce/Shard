@@ -18,10 +18,10 @@ import {
 } from "lucide-react"
 
 interface NetworkStats {
-  activeScouts: number
-  activeShards: number
-  requestsLast24h: number
-  gpuHoursSaved: number
+  scouts: number
+  shards: number
+  activeNodes: number
+  avgLatencyMs: number
 }
 
 interface NodeInfo {
@@ -100,10 +100,10 @@ function generateMockActivity(): ActivityEvent[] {
 
 export default function NetworkExplorerPage() {
   const [stats, setStats] = useState<NetworkStats>({
-    activeScouts: 0,
-    activeShards: 0,
-    requestsLast24h: 0,
-    gpuHoursSaved: 0
+    scouts: 0,
+    shards: 0,
+    activeNodes: 0,
+    avgLatencyMs: 0,
   })
   const [nodes, setNodes] = useState<NodeInfo[]>([])
   const [activity, setActivity] = useState<ActivityEvent[]>([])
@@ -113,51 +113,86 @@ export default function NetworkExplorerPage() {
 
   const fetchData = useCallback(async () => {
     try {
-      // Try to fetch real data from daemon
-      const [topologyRes, metricsRes] = await Promise.all([
-        fetch('/api/v1/system/topology').catch(() => null),
-        fetch('/api/metrics/summary').catch(() => null)
+      const [topologyRes, metricsRes, healthRes, peersRes] = await Promise.all([
+        fetch("/api/v1/system/topology").catch(() => null),
+        fetch("/api/metrics/summary").catch(() => null),
+        fetch("/api/health").catch(() => null),
+        fetch("/api/v1/system/peers").catch(() => null),
       ])
-      
-      if (topologyRes?.ok && metricsRes?.ok) {
-        const topology = await topologyRes.json()
-        const metrics = await metricsRes.json()
-        
-        // Transform real data
-        const peerCount = topology.peers?.length || 0
-        const scoutCount = Math.floor(peerCount * 0.7) // Estimate
-        const shardCount = peerCount - scoutCount
-        
-        setStats({
-          activeScouts: scoutCount,
-          activeShards: shardCount,
-          requestsLast24h: metrics.requestsLast24h || Math.floor(Math.random() * 1000),
-          gpuHoursSaved: Math.floor((metrics.tokensGenerated || 0) / 1000 * 0.5) // Rough estimate
-        })
-      } else {
-        // Use mock data if daemon not available
-        setStats({
-          activeScouts: Math.floor(Math.random() * 50) + 10,
-          activeShards: Math.floor(Math.random() * 10) + 3,
-          requestsLast24h: Math.floor(Math.random() * 5000) + 1000,
-          gpuHoursSaved: Math.floor(Math.random() * 100) + 20
+
+      const topology = topologyRes?.ok ? await topologyRes.json() : null
+      const metrics = metricsRes?.ok ? await metricsRes.json() : null
+      const health = healthRes?.ok ? await healthRes.json() : null
+      const peersPayload = peersRes?.ok ? await peersRes.json() : null
+
+      const peersList: any[] = Array.isArray(peersPayload?.peers) ? peersPayload.peers : []
+      const connectedPeers = peersList.length || Number(peersPayload?.count ?? 0) || 0
+
+      const scouts = Number(health?.active_scouts ?? 0) || 0
+      const shardOnline = health?.status === "ok" || topology?.status === "ok"
+      const shardsBase = Number(connectedPeers) || 0
+      const shards = shardOnline ? Math.max(1, shardsBase) : shardsBase
+      const activeNodes = shards + scouts
+      const avgLatencyMs = Number(metrics?.average_latency_ms ?? health?.latency_ms ?? 0) || 0
+
+      setStats({
+        scouts,
+        shards,
+        activeNodes,
+        avgLatencyMs,
+      })
+
+      const now = Date.now()
+      const nodeList: NodeInfo[] = []
+
+      if (shardOnline && topology?.shard_peer_id) {
+        nodeList.push({
+          id: topology.shard_peer_id,
+          type: "Shard",
+          region: "Bootstrap",
+          status: "active",
+          uptime: "—",
+          draftsToday: 0,
         })
       }
+
+      for (const peer of peersList) {
+        const id = String(peer.peer_id || peer.id || "unknown")
+        const connectedAt = typeof peer.connected_at === "number" ? peer.connected_at : null
+
+        let uptime = "—"
+        if (connectedAt) {
+          const diffSec = Math.max(0, Math.floor((now - connectedAt) / 1000))
+          const hours = Math.floor(diffSec / 3600)
+          const minutes = Math.floor((diffSec % 3600) / 60)
+          uptime = `${hours}h ${minutes}m`
+        }
+
+        nodeList.push({
+          id,
+          type: "Shard",
+          region: "Unknown",
+          status: peer.verified ? "active" : "idle",
+          uptime,
+          draftsToday: 0,
+        })
+      }
+
+      setNodes(nodeList)
+
+      const activityEvents: ActivityEvent[] = nodeList.map((node, index) => ({
+        id: `event_${index}`,
+        type: "shard_join",
+        message: `Shard node [${node.id.substring(0, 12)}] is ${node.status}`,
+        timestamp: now,
+      }))
+
+      setActivity(activityEvents)
     } catch {
-      // Fallback to mock data
-      setStats({
-        activeScouts: Math.floor(Math.random() * 50) + 10,
-        activeShards: Math.floor(Math.random() * 10) + 3,
-        requestsLast24h: Math.floor(Math.random() * 5000) + 1000,
-        gpuHoursSaved: Math.floor(Math.random() * 100) + 20
-      })
+      // leave previous stats/nodes/activity on failure
     } finally {
       setLoading(false)
     }
-    
-    // Set nodes and activity (mock)
-    setNodes(generateMockNodes())
-    setActivity(generateMockActivity())
   }, [])
 
   useEffect(() => {
@@ -189,13 +224,14 @@ export default function NetworkExplorerPage() {
   const joinSteps = [
     {
       title: "Run the Shard daemon",
-      command: "docker run -d -p 9091:9091 shard-daemon",
-      description: "Start the verifier node on your server"
+      command:
+        'shard-daemon --control-port 9091 --tcp-port 4001 --webrtc-port 9090 --quic-port 9092 --bootstrap-node "/ip4/35.175.242.222/tcp/4001/p2p/12D3KooWConhJakwyGN72uZ1Jtxi3LFecN3cYKxEX3aNLDAo48by"',
+      description: "Start a verifier node connected to the public Shard mesh"
     },
     {
       title: "Open the web interface",
-      command: "open http://localhost:9091",
-      description: "Access the dashboard to become a Scout"
+      command: "open https://shardnetwork.live",
+      description: "Visit the live network dashboard and chat interface"
     },
     {
       title: "Start contributing",
@@ -251,7 +287,7 @@ export default function NetworkExplorerPage() {
                 <Users className="w-5 h-5 text-purple-400" />
                 <span className="text-xs text-slate-500">Live</span>
               </div>
-              <div className="text-3xl font-bold">{stats.activeScouts}</div>
+              <div className="text-3xl font-bold">{stats.scouts}</div>
               <div className="text-sm text-slate-400">Active Scouts</div>
             </div>
             
@@ -260,26 +296,26 @@ export default function NetworkExplorerPage() {
                 <Server className="w-5 h-5 text-emerald-400" />
                 <span className="text-xs text-slate-500">Live</span>
               </div>
-              <div className="text-3xl font-bold">{stats.activeShards}</div>
+              <div className="text-3xl font-bold">{stats.shards}</div>
               <div className="text-sm text-slate-400">Active Shards</div>
             </div>
             
             <div className="bg-slate-900 rounded-lg p-6">
               <div className="flex items-center justify-between mb-2">
                 <Clock className="w-5 h-5 text-cyan-400" />
-                <span className="text-xs text-slate-500">24h</span>
+                <span className="text-xs text-slate-500">Now</span>
               </div>
-              <div className="text-3xl font-bold">{stats.requestsLast24h.toLocaleString()}</div>
-              <div className="text-sm text-slate-400">Requests (24h)</div>
+              <div className="text-3xl font-bold">{stats.activeNodes.toLocaleString()}</div>
+              <div className="text-sm text-slate-400">Active Nodes</div>
             </div>
             
             <div className="bg-slate-900 rounded-lg p-6">
               <div className="flex items-center justify-between mb-2">
                 <Zap className="w-5 h-5 text-yellow-400" />
-                <span className="text-xs text-slate-500">Est.</span>
+                <span className="text-xs text-slate-500">Avg</span>
               </div>
-              <div className="text-3xl font-bold text-yellow-400">{stats.gpuHoursSaved}</div>
-              <div className="text-sm text-slate-400">GPU Hours Saved</div>
+              <div className="text-3xl font-bold text-yellow-400">{stats.avgLatencyMs.toFixed(1)}</div>
+              <div className="text-sm text-slate-400">Latency (ms)</div>
             </div>
           </div>
         </section>

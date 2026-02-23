@@ -1,10 +1,11 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect } from "react"
 import Link from "next/link"
 import Header from "@/components/Header"
 import Footer from "@/components/Footer"
 import { apiUrl } from "@/lib/config"
+import { useSwarmTelemetry } from "@/hooks/useSwarmTelemetry"
 import {
     Zap, Shield, Globe, Cpu,
     ArrowRight, CheckCircle, Code,
@@ -97,7 +98,7 @@ const comparisonData = [
 interface NetworkStats {
     scouts: number
     shards: number
-    tokens24h: number
+    activeNodes: number
     uptime: number
 }
 
@@ -105,41 +106,27 @@ export default function HomePage() {
     const [networkStats, setNetworkStats] = useState<NetworkStats>({
         scouts: 0,
         shards: 0,
-        tokens24h: 0,
-        uptime: 99.9,
+        activeNodes: 0,
+        uptime: 0,
     })
     const [statsLoading, setStatsLoading] = useState(true)
     const [activeApiTab, setActiveApiTab] = useState("python")
     const [copiedCode, setCopiedCode] = useState("")
 
-    const fetchNetworkStats = useCallback(async () => {
-        try {
-            const [topologyData, metricsData, healthData] = await Promise.all([
-                fetch(apiUrl("/v1/system/topology"), { cache: "no-store" }).then((res) => (res.ok ? res.json() : null)),
-                fetch(apiUrl("/v1/metrics/summary"), { cache: "no-store" }).then((res) => (res.ok ? res.json() : null)),
-                fetch(apiUrl("/health"), { cache: "no-store" }).then((res) => (res.ok ? res.json() : null)),
-            ])
-
-            if (topologyData || metricsData || healthData) {
-                setNetworkStats({
-                    scouts: Number(topologyData?.scout_count ?? healthData?.active_scouts ?? 0),
-                    shards: Number(topologyData?.shard_count ?? healthData?.connected_peers ?? 0),
-                    tokens24h: Number(metricsData?.tokens_verified_24h ?? 0),
-                    uptime: Number(healthData?.status === "ok" ? 99.99 : 99.5),
-                })
-            }
-        } catch {
-            // Keep fallback values
-        } finally {
-            setStatsLoading(false)
-        }
-    }, [])
+    const { telemetry, isConnected } = useSwarmTelemetry()
 
     useEffect(() => {
-        fetchNetworkStats()
-        const interval = setInterval(fetchNetworkStats, 30000)
-        return () => clearInterval(interval)
-    }, [fetchNetworkStats])
+        setNetworkStats({
+            scouts: telemetry.scoutCount,
+            shards: telemetry.shardCount,
+            activeNodes: telemetry.scoutCount + telemetry.shardCount,
+            uptime: isConnected ? 99.99 : 0,
+        })
+        if (statsLoading && (telemetry.scoutCount > 0 || telemetry.shardCount > 0 || isConnected)) {
+            setStatsLoading(false)
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [telemetry.scoutCount, telemetry.shardCount, isConnected])
 
     const copyCode = (code: string, id: string) => {
         navigator.clipboard.writeText(code)
@@ -324,8 +311,8 @@ for chunk in response:
                                 <div className="stat-label">Verifier Nodes</div>
                             </div>
                             <div className="stat-card">
-                                <div className="stat-value">{statsLoading ? "..." : `${networkStats.tokens24h.toLocaleString()}`}</div>
-                                <div className="stat-label">Tokens Verified (24h)</div>
+                                <div className="stat-value">{statsLoading ? "..." : `${networkStats.activeNodes.toLocaleString()}`}</div>
+                                <div className="stat-label">Active Nodes</div>
                             </div>
                             <div className="stat-card">
                                 <div className="stat-value">{statsLoading ? "..." : `${networkStats.uptime}%`}</div>
