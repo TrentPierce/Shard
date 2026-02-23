@@ -7,7 +7,7 @@
 
   [![CI](https://github.com/TrentPierce/Shard/actions/workflows/ci.yml/badge.svg)](https://github.com/TrentPierce/Shard/actions/workflows/ci.yml)
   [![License: BUSL-1.1](https://img.shields.io/badge/license-BUSL--1.1-blue.svg)](LICENSE)
-   [![Version](https://img.shields.io/badge/version-0.5.0-00d4ff.svg)](#)
+   [![Version](https://img.shields.io/badge/version-0.6.0-00d4ff.svg)](https://github.com/TrentPierce/Shard/releases/tag/v0.6.0)
   [![Demo Video](https://img.shields.io/badge/Demo-Video-red?style=for-the-badge&logo=youtube)](#)
 
 </div>
@@ -22,48 +22,46 @@ Shard eliminates the exorbitant cost of centralized AI APIs by utilizing the idl
 | :--- | :--- | :--- |
 | **Cost** | $0.002–$0.06 per 1K tokens | **$0 (Compute-for-Access)** |
 | **Privacy** | Data processed on 3rd-party servers | **Localhost-first routing** |
-| **Scalability** | Subject to strict API rate limits | **Infinite horizontal scaling** |
+| **Incentives** | Pay per token | **Proof-of-Compute Credits** |
 
 ---
 
 ## How It Works
 
-Shard uses a technique called **speculative decoding** to deliver high-quality AI responses without requiring massive server infrastructure:
+Shard uses **speculative decoding** and **1.58-bit BitNet** quantization to deliver high-quality AI responses at zero marginal cost:
 
-1. **User Sends a Prompt**: Your application sends a request to the Shard API.
-2. **Scouts Generate Drafts**: Active browser tabs (Scouts) generate lightweight "candidate" tokens using WebGPU.
-3. **Shards Verify Results**: A single server (Shard) verifies the candidate tokens in one parallel pass using a full-scale model.
-4. **Instant Delivery**: You get the same quality as a giant 70B model but only pay for the fraction of compute needed to verify the work.
-5. **Private Mesh**: Sensitive data stays within your network; browser compute is contributed only by authorized users.
+1. **User Sends a Prompt**: Your application sends a request to the Shard API (OAI-compatible).
+2. **Scouts Generate Drafts**: Active browser tabs or desktop background services (Scouts) generate lightweight candidate tokens using WebGPU or low-power CPU.
+3. **Verifiers Validate Results**: High-performance nodes (Verifiers) check the candidate tokens in a single parallel pass using authoritative 1.58-bit model weights.
+4. **Instant Delivery**: Verified tokens are delivered to the client at high speed, significantly faster than traditional autoregressive generation.
+5. **Trustless Integrity**: Every exchange is cryptographically signed. Verifiers award **Proof-of-Compute (PoC)** receipts to Scouts, which translate into network priority and higher API rate limits.
 
 ---
 
 ## Get Started in 5 Minutes
 
-### 1. Join as a Scout (Contribute Compute)
-Open the [Live Demo](https://shardnetwork.live) in any Chrome or Edge browser. Your browser will automatically begin loading a lightweight WebGPU model and contributing compute to the public mesh.
+### 1. Join as a Verifier (Desktop App)
+Download the [Shard Desktop App](https://github.com/TrentPierce/Shard/releases/tag/v0.6.0) for Windows or macOS. 
+*   **One-Click Setup**: The app automatically downloads model weights and joins the P2P mesh.
+*   **Background Mode**: Minimize to the system tray to contribute compute and earn credits silently.
 
-### 2. Run a Shard Node (Host Your Own)
-Run the verifier daemon on any machine with a GPU or decent CPU:
-```bash
-docker compose up --build shard-daemon
-```
-*Your node is now ready to verify drafts from the mesh.*
+### 2. Join as a Scout (Web Browser)
+Open the [Live Dashboard](https://shard-web-client.vercel.app/) in any Chrome or Edge browser. Your browser will automatically begin loading a lightweight WebGPU model and contributing compute.
 
-### 3. Enterprise Integration (Python SDK)
-Install the Shard inference network SDK directly from PyPI:
+### 3. Developer Integration (Python SDK)
+Install the Shard SDK directly from PyPI:
 ```bash
 pip install shard-inference
 ```
 
-It works as a drop-in replacement for existing AI workflows:
+It works as a drop-in replacement for OpenAI:
 ```python
 from shard import Shard
-client = Shard()  # Defaults to localhost:9091
+client = Shard()
 
 response = client.chat.completions.create(
     model="shard-hybrid",
-    messages=[{"role": "user", "content": "Explain quantum computing simply."}]
+    messages=[{"role": "user", "content": "Explain the Shard network architecture."}]
 )
 print(response.choices[0].message.content)
 ```
@@ -72,11 +70,12 @@ print(response.choices[0].message.content)
 
 ## Architecture & Technical Deep-Dive
 
-Shard is built on a hybrid P2P mesh using **libp2p**. It separates the "heavy lifting" of LLM inference into two roles:
-- **Scouts (TypeScript/WebGPU)**: Run 1B-3B parameter models (like Phi-3 or TinyLlama) via WebLLM to produce rapid speculative drafts.
-- **Shards (Rust/BitNet)**: Run authoritative 1.58-bit ternary models to verify drafts at scale with minimal VRAM requirements.
+Shard is built on a high-integrity libp2p mesh:
+- **Transport**: TCP, QUIC, and WebRTC with DCUtR hole punching for universal reachability.
+- **Verification**: 1.58-bit ternary quantization allows full-scale model verification on consumer hardware with minimal VRAM.
+- **Incentives**: A signed distributed ledger tracks compute contributions and enforces participation-based rate limiting.
 
-[**Read the Whitepaper**](docs/Shard-White-Paper-Feb-2026.md) | [**API Documentation**](docs/API.md) | [**Contributing Guide**](CONTRIBUTING.md)
+[**Read the Architecture Guide**](ARCHITECTURE.md) | [**API Documentation**](docs/API.md) | [**Contributing Guide**](CONTRIBUTING.md)
 
 ---
 

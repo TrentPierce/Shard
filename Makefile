@@ -8,11 +8,11 @@ version: ## Show current unified project version
 	@cat VERSION
 
 version-sync: ## Sync all component versions from VERSION file
-	python manage.py version
+	python scripts/sync_versions.py
 
-version-set: ## Set a new version and sync all component versions (usage: make version-set V=0.4.6)
-	@if [ -z "$(V)" ]; then echo "Usage: make version-set V=0.4.6"; exit 1; fi
-	python manage.py version --set $(V)
+version-set: ## Set a new version and sync all component versions (usage: make version-set V=0.6.0)
+	@if [ -z "$(V)" ]; then echo "Usage: make version-set V=0.6.0"; exit 1; fi
+	python scripts/sync_versions.py --set $(V)
 	@echo "  Shard — Distributed Inference Network"
 	@echo "  ======================================"
 	@echo ""

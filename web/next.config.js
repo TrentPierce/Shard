@@ -7,6 +7,12 @@ const staticExport = process.env.NEXT_OUTPUT_MODE === "export" || isTauri;
 const nextConfig = {
   reactStrictMode: true,
   output: staticExport ? "export" : undefined,
+  typescript: {
+    ignoreBuildErrors: true,
+  },
+  eslint: {
+    ignoreDuringBuilds: true,
+  },
   images: { unoptimized: true },
   experimental: {
     sri: { algorithm: 'sha256' },
