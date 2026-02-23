@@ -1,3 +1,29 @@
+Metadata-Version: 2.4
+Name: shard-inference
+Version: 0.1.0
+Summary: Python SDK for the Shard distributed inference network
+Author-email: Shard Team <sdk@shard.ai>
+License: MIT
+Classifier: Development Status :: 4 - Beta
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.9
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Typing :: Typed
+Requires-Python: >=3.9
+Description-Content-Type: text/markdown
+Requires-Dist: httpx>=0.25.0
+Requires-Dist: pydantic>=2.0
+Provides-Extra: async
+Requires-Dist: aiohttp>=3.9.0; extra == "async"
+Provides-Extra: dev
+Requires-Dist: pytest>=7.0; extra == "dev"
+Requires-Dist: pytest-asyncio>=0.23; extra == "dev"
+Requires-Dist: respx>=0.21; extra == "dev"
+
 # Shard Python SDK
 
 Python client for the Shard distributed inference network.
@@ -89,7 +115,7 @@ asyncio.run(main())
 client = Shard(api_key="sk-your-key-here")
 
 # Connect to remote server
-client = Shard(base_url="https://pypi.org/project/shard-inference/0.5.0/com", api_key="sk-...")
+client = Shard(base_url="https://your-shard-server.com", api_key="sk-...")
 ```
 
 ## Private Mesh Routing

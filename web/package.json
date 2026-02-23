@@ -1,6 +1,6 @@
 {
   "name": "shard-web-client",
-  "version": "0.4.8",
+  "version": "0.5.0",
   "private": true,
   "scripts": {
     "dev": "next dev --port 3000",

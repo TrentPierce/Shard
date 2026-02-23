@@ -7,7 +7,7 @@
 
   [![CI](https://github.com/TrentPierce/Shard/actions/workflows/ci.yml/badge.svg)](https://github.com/TrentPierce/Shard/actions/workflows/ci.yml)
   [![License: BUSL-1.1](https://img.shields.io/badge/license-BUSL--1.1-blue.svg)](LICENSE)
-  [![Version](https://img.shields.io/badge/version-0.4.9-00d4ff.svg)](#)
+   [![Version](https://img.shields.io/badge/version-0.5.0-00d4ff.svg)](#)
   [![Demo Video](https://img.shields.io/badge/Demo-Video-red?style=for-the-badge&logo=youtube)](#)
 
 </div>
@@ -50,11 +50,22 @@ docker compose up --build shard-daemon
 ```
 *Your node is now ready to verify drafts from the mesh.*
 
-### 3. Enterprise Integration (API Drop-in)
-Replace your OpenAI base URL with your local Shard endpoint. It works instantly with existing SDKs:
+### 3. Enterprise Integration (Python SDK)
+Install the Shard inference network SDK directly from PyPI:
+```bash
+pip install shard-inference
+```
+
+It works as a drop-in replacement for existing AI workflows:
 ```python
-from openai import OpenAI
-client = OpenAI(base_url="http://localhost:9091/v1", api_key="shard")
+from shard import Shard
+client = Shard()  # Defaults to localhost:9091
+
+response = client.chat.completions.create(
+    model="shard-hybrid",
+    messages=[{"role": "user", "content": "Explain quantum computing simply."}]
+)
+print(response.choices[0].message.content)
 ```
 
 ---
