@@ -84,7 +84,9 @@ ExecStart=${SHARD_HOME}/bin/shard-daemon \
   --control-port ${SHARD_CONTROL_PORT} \
   --tcp-port ${SHARD_TCP_PORT} \
   --webrtc-port ${SHARD_WEBRTC_PORT} \
-  --quic-port ${SHARD_QUIC_PORT}
+  --quic-port ${SHARD_QUIC_PORT} \
+  --public-api true \
+  --relay-mode true
 Restart=always
 RestartSec=5
 LimitNOFILE=65536

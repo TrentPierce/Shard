@@ -2814,8 +2814,9 @@ async fn main() -> Result<()> {
                         }
                     }
 
-                    // Note: relay client disabled - libp2p API changed
-                    // SwarmEvent::Behaviour(ShardBehaviourEvent::RelayClient(event)) => { ... }
+                    SwarmEvent::Behaviour(ShardBehaviourEvent::RelayClient(event)) => {
+                        tracing::info!("RelayClient event: {:?}", event);
+                    }
 
                     // ── relay server ──
                     SwarmEvent::Behaviour(ShardBehaviourEvent::RelayServer(event)) => {
@@ -2842,6 +2843,16 @@ async fn main() -> Result<()> {
                         autonat::Event::StatusChanged { old, new },
                     )) => {
                         tracing::info!(?old, ?new, "AutoNAT status changed");
+                        let mut topo = state.topology.lock().await;
+                        match new {
+                            autonat::NatStatus::Public(_) => {
+                                topo.is_public = true;
+                            }
+                            autonat::NatStatus::Private => {
+                                topo.is_public = false;
+                            }
+                            _ => {}
+                        }
                     }
 
                     // ── identify ──
@@ -2855,6 +2866,30 @@ async fn main() -> Result<()> {
                                 // Update with observed public address if behind NAT
                                 if topo.public_api_addr.is_none() && !observed_addr.to_string().starts_with("/ip4/127.0.0.1") && !observed_addr.to_string().starts_with("/ip6/::1") {
                                     topo.public_api_addr = Some(format!("{}/p2p/{}", observed_addr, local_peer_id));
+                                }
+                                
+                                if !cli.relay_mode && cli.nat_traversal {
+                                    // Check if the peer supports being a relay server
+                                    let is_relay = info.protocols.iter().any(|p| p.as_ref() == "/libp2p/circuit/relay/0.2.0/hop");
+                                    if is_relay {
+                                        let has_relay_listen = swarm.listeners().any(|a| {
+                                            a.iter().any(|p| matches!(p, libp2p::multiaddr::Protocol::P2pCircuit))
+                                        });
+                                        if !has_relay_listen {
+                                            // Try to find a public address for the relay
+                                            if let Some(relay_addr) = info.listen_addrs.iter().find(|a| !a.to_string().contains("127.0.0.1") && !a.to_string().contains("::1")) {
+                                                // Make sure the address contains the peer_id
+                                                let mut full_relay_addr = relay_addr.clone();
+                                                if !full_relay_addr.iter().any(|p| matches!(p, libp2p::multiaddr::Protocol::P2p(_))) {
+                                                    full_relay_addr = full_relay_addr.with(libp2p::multiaddr::Protocol::P2p(peer_id));
+                                                }
+                                                let p2p_circuit_addr = full_relay_addr.with(libp2p::multiaddr::Protocol::P2pCircuit);
+                                                
+                                                tracing::info!(%peer_id, "Found relay server, attempting reservation: {}", p2p_circuit_addr);
+                                                let _ = swarm.listen_on(p2p_circuit_addr);
+                                            }
+                                        }
+                                    }
                                 }
                             }
                             identify::Event::Sent { .. } => {
