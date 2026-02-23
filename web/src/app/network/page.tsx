@@ -115,7 +115,7 @@ export default function NetworkExplorerPage() {
     try {
       const [topologyRes, metricsRes, healthRes, peersRes] = await Promise.all([
         fetch("/api/v1/system/topology").catch(() => null),
-        fetch("/api/metrics/summary").catch(() => null),
+        fetch("/api/v1/metrics/summary").catch(() => null),
         fetch("/api/health").catch(() => null),
         fetch("/api/v1/system/peers").catch(() => null),
       ])

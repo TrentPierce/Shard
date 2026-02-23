@@ -195,15 +195,21 @@ for chunk in response:
 
                             <div className="hero-stats">
                                 <div className="hero-stat">
-                                    <div className="hero-stat-value">{statsLoading ? "..." : networkStats.scouts.toLocaleString()}</div>
+                                    <div className={`hero-stat-value ${statsLoading ? 'skeleton' : ''}`} style={{ minWidth: statsLoading ? '80px' : 'auto' }}>
+                                        {statsLoading ? "000" : networkStats.scouts.toLocaleString()}
+                                    </div>
                                     <div className="hero-stat-label">Active Scouts</div>
                                 </div>
                                 <div className="hero-stat">
-                                    <div className="hero-stat-value">{statsLoading ? "..." : networkStats.shards.toLocaleString()}</div>
+                                    <div className={`hero-stat-value ${statsLoading ? 'skeleton' : ''}`} style={{ minWidth: statsLoading ? '80px' : 'auto' }}>
+                                        {statsLoading ? "000" : networkStats.shards.toLocaleString()}
+                                    </div>
                                     <div className="hero-stat-label">Verifier Nodes</div>
                                 </div>
                                 <div className="hero-stat">
-                                    <div className="hero-stat-value">{statsLoading ? "..." : `${networkStats.uptime}%`}</div>
+                                    <div className={`hero-stat-value ${statsLoading ? 'skeleton' : ''}`} style={{ minWidth: statsLoading ? '80px' : 'auto' }}>
+                                        {statsLoading ? "00.00%" : `${networkStats.uptime}%`}
+                                    </div>
                                     <div className="hero-stat-label">Network Uptime</div>
                                 </div>
                             </div>
@@ -303,19 +309,27 @@ for chunk in response:
 
                         <div className="stats-grid stagger-children">
                             <div className="stat-card">
-                                <div className="stat-value">{statsLoading ? "..." : networkStats.scouts.toLocaleString()}</div>
+                                <div className={`stat-value ${statsLoading ? 'skeleton' : ''}`} style={{ margin: statsLoading ? '0 auto var(--space-sm)' : '0' }}>
+                                    {statsLoading ? "0,000" : networkStats.scouts.toLocaleString()}
+                                </div>
                                 <div className="stat-label">Browser Scouts</div>
                             </div>
                             <div className="stat-card">
-                                <div className="stat-value">{statsLoading ? "..." : networkStats.shards.toLocaleString()}</div>
+                                <div className={`stat-value ${statsLoading ? 'skeleton' : ''}`} style={{ margin: statsLoading ? '0 auto var(--space-sm)' : '0' }}>
+                                    {statsLoading ? "0,000" : networkStats.shards.toLocaleString()}
+                                </div>
                                 <div className="stat-label">Verifier Nodes</div>
                             </div>
                             <div className="stat-card">
-                                <div className="stat-value">{statsLoading ? "..." : `${networkStats.activeNodes.toLocaleString()}`}</div>
+                                <div className={`stat-value ${statsLoading ? 'skeleton' : ''}`} style={{ margin: statsLoading ? '0 auto var(--space-sm)' : '0' }}>
+                                    {statsLoading ? "0,000" : `${networkStats.activeNodes.toLocaleString()}`}
+                                </div>
                                 <div className="stat-label">Active Nodes</div>
                             </div>
                             <div className="stat-card">
-                                <div className="stat-value">{statsLoading ? "..." : `${networkStats.uptime}%`}</div>
+                                <div className={`stat-value ${statsLoading ? 'skeleton' : ''}`} style={{ margin: statsLoading ? '0 auto var(--space-sm)' : '0' }}>
+                                    {statsLoading ? "00.00%" : `${networkStats.uptime}%`}
+                                </div>
                                 <div className="stat-label">Uptime</div>
                             </div>
                         </div>
@@ -456,7 +470,7 @@ for chunk in response:
                                     <Play size={18} />
                                     Start Building
                                 </Link>
-                                <Link href="/docs/Shard-White-Paper-Feb-2026" className="btn btn-secondary btn-lg">
+                                <Link href="/docs/Shard-White-Paper-Feb-2026.md" className="btn btn-secondary btn-lg">
                                     Read the White Paper
                                 </Link>
                             </div>

@@ -7,28 +7,28 @@ const footerLinks: Record<string, { title: string; links: { name: string; href: 
     product: {
         title: "Product",
         links: [
-            { name: "How It Works", href: "#how-it-works" },
-            { name: "Features", href: "#features" },
-            { name: "Use Cases", href: "#use-cases" },
-            { name: "API Reference", href: "/docs/api" },
+            { name: "How It Works", href: "/#how-it-works" },
+            { name: "Features", href: "/#features" },
+            { name: "Use Cases", href: "/#use-cases" },
+            { name: "API Reference", href: "/docs/API.md" },
         ],
     },
     developers: {
         title: "Developers",
         links: [
-            { name: "Documentation", href: "/docs" },
-            { name: "Quick Start", href: "/docs/deployment-guide" },
+            { name: "Documentation", href: "/docs/API.md" },
+            { name: "Quick Start", href: "/docs/deployment-guide.md" },
             { name: "GitHub", href: "https://github.com/TrentPierce/Shard", external: true },
-            { name: "Contributing", href: "/docs/CONTRIBUTING" },
+            { name: "Contributing", href: "https://github.com/TrentPierce/Shard/blob/main/CONTRIBUTING.md", external: true },
         ],
     },
     resources: {
         title: "Resources",
         links: [
-            { name: "White Paper", href: "/docs/Shard-White-Paper-Feb-2026" },
-            { name: "Architecture", href: "/docs/ARCHITECTURE" },
-            { name: "Security", href: "/SECURITY" },
-            { name: "Changelog", href: "/CHANGELOG" },
+            { name: "White Paper", href: "/docs/Shard-White-Paper-Feb-2026.md" },
+            { name: "Architecture", href: "/docs/ARCHITECTURE.md" },
+            { name: "Security", href: "/SECURITY.md" },
+            { name: "Changelog", href: "/CHANGELOG.md" },
         ],
     },
 }
