@@ -89,7 +89,7 @@ asyncio.run(main())
 client = Shard(api_key="sk-your-key-here")
 
 # Connect to remote server
-client = Shard(base_url="https://pypi.org/project/shard-inference/0.5.0/com", api_key="sk-...")
+client = Shard(base_url="https://your-shard-server.com", api_key="sk-...")
 ```
 
 ## Private Mesh Routing
