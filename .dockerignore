@@ -1,0 +1,14 @@
+**/node_modules
+**/target
+**/.next
+**/.swc
+**/dist
+**/build
+**/.git
+**/.github
+**/.pytest_cache
+**/__pycache__
+**/*.gguf
+**/*.so
+**/*.exe
+**/*.bin

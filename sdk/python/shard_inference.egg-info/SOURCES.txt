@@ -1,3 +1,4 @@
+MANIFEST.in
 README.md
 pyproject.toml
 setup.py
@@ -7,6 +8,7 @@ shard/client.py
 shard/daemon.py
 shard/exceptions.py
 shard/models.py
+shard/shard_engine.dll
 shard_inference.egg-info/PKG-INFO
 shard_inference.egg-info/SOURCES.txt
 shard_inference.egg-info/dependency_links.txt

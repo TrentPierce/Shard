@@ -3,6 +3,8 @@ import { forwardRequestHeaders, shardBackendUrl } from "@/lib/server/shard-backe
 
 export const dynamic = "force-dynamic"
 
+const TTFT_TIMEOUT_MS = 2000 // 2 second threshold for "Enterprise" stability
+
 export async function GET() {
   return NextResponse.json({
     message: "Use POST to send chat messages",
@@ -11,17 +13,49 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
-  const url = shardBackendUrl("/v1/chat/completions")
+  const primaryUrl = shardBackendUrl("/v1/chat/completions", false)
+  const fallbackUrl = shardBackendUrl("/v1/chat/completions", true)
 
   try {
-    const body = await request.text()
-    const response = await fetch(url, {
+    const bodyText = await request.text()
+    const headers = forwardRequestHeaders()
+
+    // 1. Start the primary request
+    const primaryController = new AbortController()
+    const primaryPromise = fetch(primaryUrl, {
       method: "POST",
-      headers: forwardRequestHeaders(),
-      body,
-      signal: AbortSignal.timeout(120000),
+      headers,
+      body: bodyText,
+      signal: primaryController.signal,
       cache: "no-store",
     })
+
+    // 2. Race the primary against a timeout
+    const timeoutPromise = new Promise<null>((resolve) => 
+      setTimeout(() => resolve(null), TTFT_TIMEOUT_MS)
+    )
+
+    const result = await Promise.race([primaryPromise, timeoutPromise])
+
+    let response: Response
+    let usedFallback = false
+
+    if (result === null || !result.ok) {
+      // Primary timed out or failed immediately - trigger fallback
+      console.log(`[Enterprise Guard] Primary stalled or failed. Routing to fallback: ${fallbackUrl}`)
+      usedFallback = true
+      primaryController.abort() // Cancel primary if it's still hanging
+      
+      response = await fetch(fallbackUrl, {
+        method: "POST",
+        headers,
+        body: bodyText,
+        signal: AbortSignal.timeout(60000),
+        cache: "no-store",
+      })
+    } else {
+      response = result
+    }
 
     if (response.body) {
       return new NextResponse(response.body, {
@@ -30,6 +64,7 @@ export async function POST(request: NextRequest) {
           "Content-Type": response.headers.get("content-type") || "text/event-stream",
           "Cache-Control": "no-cache",
           Connection: "keep-alive",
+          "X-Shard-Fallback": usedFallback ? "true" : "false",
           "Access-Control-Allow-Origin": "*",
         },
       })
@@ -40,8 +75,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     return NextResponse.json(
       {
-        error: "Chat completion failed",
-        backend: url,
+        error: "Chat completion failed after fallback attempt",
         details: String(error),
       },
       { status: 502 }

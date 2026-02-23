@@ -4,16 +4,15 @@ import { useEffect, useRef, useState } from "react"
 import { useAppContext, type NodeMode } from "@/lib/context"
 import { sendMessage, type ChatMessage } from "@/lib/api"
 import { useProductSignals } from "@/hooks/useProductSignals"
-import { apiUrl } from "@/lib/config"
 
 interface ChatPanelProps {
     mode: NodeMode
 }
 
-import { Terminal, Activity, Cpu, Send, MessageSquare, Sparkles, AlertCircle } from "lucide-react"
+import { Activity, Cpu, Send, MessageSquare, Sparkles, User, Bot } from "lucide-react"
 
 export default function ChatPanel({ mode }: ChatPanelProps) {
-    const { topology, theme } = useAppContext()
+    const { topology } = useAppContext()
     const [messages, setMessages] = useState<ChatMessage[]>([])
     const [input, setInput] = useState("")
     const [streaming, setStreaming] = useState(false)
@@ -23,8 +22,7 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
     const [inferenceMode, setInferenceMode] = useState<"standard" | "distributed">("distributed")
     const [opsSummary, setOpsSummary] = useState<{ active_nodes?: number }>({})
 
-    const isEnterprise = theme === "enterprise"
-    const modelLabel = topology?.model_id ?? "default-model"
+    const modelLabel = topology?.model_id ?? "TinyLlama-1.1B"
 
     const scrollToBottom = () => {
         messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
@@ -46,15 +44,14 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
         let cancelled = false
         const poll = async () => {
             try {
-                const res = await fetch(apiUrl("/v1/metrics/summary"), { cache: "no-store" })
+                const res = await fetch("/api/v1/metrics/summary", { cache: "no-store" })
                 if (!res.ok) return
                 const data = await res.json()
                 if (!cancelled) setOpsSummary(data ?? {})
             } catch {
-                // ignore telemetry polling failures
+                // ignore
             }
         }
-
         poll()
         const timer = setInterval(poll, 5000)
         return () => {
@@ -106,18 +103,14 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
                 inferenceMode,
             )
         } catch (err: any) {
-            if (typeof window !== "undefined") {
-                window.dispatchEvent(new Event("shard:chat-failure"))
-            }
+            console.error("Chat Error:", err)
             setMessages((prev) => {
                 const updated = [...prev]
                 const last = updated[updated.length - 1]
                 if (last.role === "assistant") {
                     updated[updated.length - 1] = {
                         ...last,
-                        content:
-                            "Network unavailable: " +
-                            (err?.message ?? "Could not connect to the local Shard daemon."),
+                        content: "Network error: Failed to connect to the Shard verifier node. Please ensure the daemon is running or check your connection.",
                     }
                 }
                 return updated
@@ -134,7 +127,6 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
     }
 
     const ready = mode !== "loading"
-    const versionLabel = health.rust_version ? `v${health.rust_version}` : "v0.0.0"
 
     const quickPrompts = [
         "How does distributed inference work?",
@@ -143,104 +135,75 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
     ]
 
     return (
-        <main className={`chat ${isEnterprise ? 'chat--enterprise' : 'chat--terminal'}`} aria-label="Shard gateway">
-            <div className="chat__header glass-card">
+        <main className="chat-panel">
+            {/* Panel Header */}
+            <header className="chat-panel__header">
                 <div className="flex items-center gap-md">
-                    {isEnterprise && (
-                        <div className="w-10 h-10 rounded-full bg-primary-glow flex items-center justify-center text-primary">
-                            <Sparkles size={20} />
-                        </div>
-                    )}
+                    <div className="avatar-orb avatar-orb--bot">
+                        <Sparkles size={18} />
+                    </div>
                     <div>
-                        <h2 className="chat__title">
-                            {isEnterprise ? "Neural Assistant" : "[ NEURAL_GATEWAY_V1.4 ]"}
-                        </h2>
-                        <div className="chat__meta">
-                            <span className="flex items-center gap-1"><Cpu size={12} /> {modelLabel.toUpperCase()}</span>
-                            <span className="flex items-center gap-1"><Activity size={12} /> {versionLabel.toUpperCase()}</span>
-                            <select
-                                id="inference-mode-select"
-                                value={inferenceMode}
-                                onChange={(e) => setInferenceMode(e.target.value as "standard" | "distributed")}
-                                className="chat__mode-select"
-                            >
-                                <option value="standard">{isEnterprise ? "Standard Mode" : "MODE: SINGLE_NODE"}</option>
-                                <option value="distributed">{isEnterprise ? "Distributed Mesh" : "MODE: DIST_MESH"}</option>
-                            </select>
+                        <h2 className="text-lg font-bold tracking-tight leading-tight">Neural Assistant</h2>
+                        <div className="flex items-center gap-md mt-1">
+                            <span className="badge badge-primary flex items-center gap-1">
+                                <Cpu size={10} /> {modelLabel}
+                            </span>
+                            <span className="text-xs text-muted font-medium flex items-center gap-1">
+                                <Activity size={10} /> {successRate}% Reliability
+                            </span>
                         </div>
                     </div>
                 </div>
-                <div className="text-right">
-                    <div className={`chat__status ${ready ? "text-primary" : "text-error"}`}>
-                        {ready ? (isEnterprise ? "CONNECTED" : "STATUS: ONLINE") : (isEnterprise ? "SYNCING..." : "STATUS: SYNCING")}
-                    </div>
-                    <div className="chat__stats">
-                        {opsSummary.active_nodes ?? 0} NODES • {successRate}% RELIABILITY
+                
+                <div className="flex flex-col items-end">
+                    <select
+                        value={inferenceMode}
+                        onChange={(e) => setInferenceMode(e.target.value as any)}
+                        className="mode-selector"
+                    >
+                        <option value="distributed">Distributed Mesh</option>
+                        <option value="standard">Local Direct</option>
+                    </select>
+                    <div className="flex items-center gap-1.5 mt-1.5">
+                        <div className={`w-2 h-2 rounded-full ${ready ? 'bg-primary animate-pulse' : 'bg-error'}`} />
+                        <span className="text-[10px] uppercase font-bold tracking-widest text-muted">
+                            {ready ? 'Connected' : 'Syncing'}
+                        </span>
                     </div>
                 </div>
-            </div>
+            </header>
 
-            <div className="chat__messages">
+            {/* Messages Area */}
+            <div className="chat-panel__messages">
                 {messages.length === 0 ? (
-                    <div className="chat__empty">
-                        {!isEnterprise ? (
-                            <pre className="chat__ascii">{`
-   _____ _    _          _____  _____  
-  / ____| |  | |   /\   |  __ \\|  __ \\ 
- | (___ | |__| |  /  \\  | |__) | |  | |
-  \\___ \\|  __  | / /\\ \\ |  _  /| |  | |
-  ____) | |  | |/ ____ \\| | \\ \\| |__| |
- |_____/|_|  |_/_/    \\_\\_|  \\_\\_____/ 
-                                       
-        `}</pre>
-                        ) : (
-                            <div className="w-16 h-16 rounded-2xl bg-primary-glow flex items-center justify-center text-primary mb-6">
-                                <MessageSquare size={32} />
-                            </div>
-                        )}
-                        <h3 className="chat__empty-title">
-                            {isEnterprise ? "What can I help you build?" : "ESTABLISHING_TRUSTLESS_MESH_LINK..."}
-                        </h3>
-                        <p className="chat__empty-hint">
-                            {isEnterprise
-                                ? "Ask anything. All compute is distributed across the Shard decentralized network for private, local-first inference."
-                                : "// ALL COMPUTE IS DECENTRALIZED AND ENCRYPTED"}
+                    <div className="empty-state">
+                        <div className="empty-state__icon">
+                            <Bot size={40} className="text-primary" />
+                        </div>
+                        <h3 className="text-xl font-bold mt-4">How can I help you build?</h3>
+                        <p className="text-muted mt-2 max-w-sm">
+                            Experience decentralized inference powered by the Shard Network. 
+                            Your compute, your network, your AI.
                         </p>
-                        <div className="chat__quick-prompts">
-                            {quickPrompts.map((prompt) => (
-                                <button
-                                    key={prompt}
-                                    type="button"
-                                    className="chat__quick-prompt-btn"
-                                    onClick={() => setInput(prompt)}
-                                >
-                                    {!isEnterprise ? "> " : ""}{prompt}
+                        <div className="quick-prompts-grid mt-8">
+                            {quickPrompts.map(p => (
+                                <button key={p} onClick={() => setInput(p)} className="quick-prompt-card">
+                                    {p}
                                 </button>
                             ))}
                         </div>
                     </div>
                 ) : (
                     messages.map((msg, i) => (
-                        <div
-                            key={i}
-                            className={`message ${msg.role === "user" ? "message--user" : "message--assistant"}`}
-                        >
-                            <div className="message__avatar">
-                                <span className="message__role">
-                                    {isEnterprise
-                                        ? (msg.role === "user" ? "YOU" : "SHARD AI")
-                                        : (msg.role === "user" ? "GUEST@SHARD-NET:~$" : "SYSTEM@SHARD-CORE:~#")}
-                                </span>
-                                <span className="message__separator">•</span>
-                                <span className="message__time">{new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                            </div>
-                            <div className="message__bubble">
-                                {msg.content || (
-                                    <span className="animate-pulse">●</span>
-                                )}
-                                {streaming && i === messages.length - 1 && msg.role === 'assistant' && (
-                                    <span className="message__cursor">●</span>
-                                )}
+                        <div key={i} className={`message-row ${msg.role === 'user' ? 'message-row--user' : 'message-row--bot'}`}>
+                            <div className="message-bubble">
+                                <div className="message-header">
+                                    <span className="role-label">{msg.role === 'user' ? 'You' : 'Shard AI'}</span>
+                                    <span className="time-label">{new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                                </div>
+                                <div className="message-content">
+                                    {msg.content || <span className="typing-dots"><span>.</span><span>.</span><span>.</span></span>}
+                                </div>
                             </div>
                         </div>
                     ))
@@ -248,100 +211,81 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
                 <div ref={messagesEndRef} />
             </div>
 
-            <div className="chat__input-area">
-                <div className="chat__input-wrapper">
-                    {!isEnterprise && <span className="chat__prompt-char">&gt;</span>}
+            {/* Input Area */}
+            <footer className="chat-panel__input-area">
+                <div className="input-wrapper">
                     <textarea
-                        id="chat-prompt-input"
                         ref={textareaRef}
-                        className="chat__input"
-                        placeholder={mode === "loading" ? "Initializing..." : (isEnterprise ? "Ask anything..." : "COMMAND:")}
+                        placeholder={ready ? "Message Neural Assistant..." : "Establishing network connection..."}
                         value={input}
                         onChange={(e) => setInput(e.target.value)}
                         onKeyDown={handleKeyDown}
-                        disabled={mode === "loading"}
+                        disabled={!ready || streaming}
                         rows={1}
                     />
-                    <button
-                        className="chat__send-btn"
+                    <button 
                         onClick={handleSend}
-                        disabled={!input.trim() || streaming || mode === "loading"}
+                        disabled={!input.trim() || streaming || !ready}
+                        className="send-button"
                     >
-                        {streaming ? <div className="animate-spin h-4 w-4 border-2 border-white/20 border-t-white rounded-full" /> : (isEnterprise ? <Send size={18} /> : "[ SEND ]")}
+                        {streaming ? (
+                            <div className="spinner" />
+                        ) : (
+                            <Send size={18} />
+                        )}
                     </button>
                 </div>
-                <div className="chat__footer-hint">
-                    {streaming ? (isEnterprise ? "Assistant is thinking..." : "WAITING_FOR_SWARM_RESPONSE...") : (isEnterprise ? "Private & Decentralized" : "READY_FOR_INPUT // SHIFT+ENTER_NEWLINE")}
+                <div className="input-footer">
+                    <span>{streaming ? 'Generating verified tokens via Shard Mesh...' : 'End-to-end encrypted • Decentralized compute'}</span>
                 </div>
-            </div>
+            </footer>
 
             <style jsx>{`
-                .chat {
+                .chat-panel {
                     display: flex;
                     flex-direction: column;
                     height: 100%;
-                    background: var(--bg-primary);
-                    color: var(--text-primary);
-                    position: relative;
+                    background: transparent;
                 }
-                .chat__header {
+                .chat-panel__header {
+                    padding: var(--space-lg);
+                    border-bottom: 1px solid var(--border);
                     display: flex;
                     justify-content: space-between;
                     align-items: center;
-                    padding: var(--space-md) var(--space-lg);
-                    border-bottom: 1px solid var(--border);
-                    background: var(--bg-secondary);
+                    background: rgba(255, 255, 255, 0.02);
                 }
-                .chat__title {
-                    font-size: 1.125rem;
-                    font-weight: 700;
-                    letter-spacing: 0.05em;
-                }
-                .chat--terminal .chat__title {
-                    font-family: var(--font-mono);
-                    letter-spacing: 2px;
-                }
-                .chat__meta {
+                .avatar-orb {
+                    width: 44px;
+                    height: 44px;
+                    border-radius: 50%;
                     display: flex;
-                    gap: var(--space-md);
-                    margin-top: var(--space-xs);
-                    font-size: 0.6875rem;
-                    opacity: 0.7;
-                    font-family: var(--font-mono);
+                    align-items: center;
+                    justify-content: center;
+                    background: var(--primary-glow);
+                    color: var(--primary);
+                    border: 1px solid rgba(0, 212, 170, 0.2);
                 }
-                .chat__mode-select {
-                    background: transparent;
-                    color: inherit;
-                    border: none;
-                    border-bottom: 1px solid var(--border);
-                    padding: 0;
-                    font-size: inherit;
+                .mode-selector {
+                    background: var(--bg-tertiary);
+                    border: 1px solid var(--border);
+                    color: var(--text-secondary);
+                    font-size: 11px;
+                    font-weight: 600;
+                    padding: 4px 8px;
+                    border-radius: var(--radius-sm);
                     cursor: pointer;
                     width: auto;
-                    border-radius: 0;
                 }
-                .chat__status {
-                    font-size: 0.75rem;
-                    font-weight: 800;
-                    font-family: var(--font-mono);
-                }
-                .chat__stats {
-                    font-size: 0.625rem;
-                    opacity: 0.6;
-                    margin-top: 2px;
-                    font-family: var(--font-mono);
-                }
-                .chat__messages {
+                .chat-panel__messages {
                     flex: 1;
                     overflow-y: auto;
-                    padding: var(--space-xl);
+                    padding: var(--space-xl) var(--space-lg);
                     display: flex;
                     flex-direction: column;
+                    gap: var(--space-xl);
                 }
-                .chat--terminal .chat__messages {
-                    font-family: var(--font-mono);
-                }
-                .chat__empty {
+                .empty-state {
                     display: flex;
                     flex-direction: column;
                     align-items: center;
@@ -349,206 +293,166 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
                     height: 100%;
                     text-align: center;
                 }
-                .chat__ascii {
-                    color: var(--primary);
-                    margin-bottom: var(--space-lg);
-                    font-size: 0.75rem;
-                    line-height: 1.2;
-                }
-                .chat__empty-title {
-                    font-size: 1.5rem;
-                    font-weight: 700;
-                    margin-bottom: var(--space-sm);
-                }
-                .chat--terminal .chat__empty-title {
-                    font-size: 0.875rem;
-                    font-family: var(--font-mono);
-                }
-                .chat__empty-hint {
-                    font-size: 0.875rem;
-                    color: var(--text-muted);
-                    max-width: 400px;
-                }
-                .chat__quick-prompts {
-                    margin-top: var(--space-2xl);
+                .empty-state__icon {
+                    width: 80px;
+                    height: 80px;
+                    background: var(--bg-tertiary);
+                    border-radius: 24px;
                     display: flex;
-                    flex-wrap: wrap;
+                    align-items: center;
                     justify-content: center;
-                    gap: var(--space-sm);
+                    border: 1px solid var(--border);
                 }
-                .chat__quick-prompt-btn {
+                .quick-prompts-grid {
+                    display: grid;
+                    grid-template-columns: repeat(2, 1fr);
+                    gap: var(--space-sm);
+                    width: 100%;
+                    max-width: 500px;
+                }
+                .quick-prompt-card {
                     background: var(--bg-tertiary);
                     border: 1px solid var(--border);
-                    color: var(--text-secondary);
-                    padding: var(--space-sm) var(--space-md);
+                    padding: var(--space-md);
                     border-radius: var(--radius-md);
+                    color: var(--text-secondary);
+                    font-size: 13px;
+                    text-align: left;
                     cursor: pointer;
-                    font-size: 0.75rem;
                     transition: all var(--transition-fast);
                 }
-                .chat__quick-prompt-btn:hover {
+                .quick-prompt-card:hover {
                     border-color: var(--primary);
                     color: var(--text-primary);
                     background: var(--bg-elevated);
                 }
-                .chat--enterprise .chat__quick-prompt-btn {
-                    border-radius: var(--radius-full);
-                    background: var(--glass-bg);
-                }
-                .message {
-                    margin-bottom: var(--space-xl);
-                    max-width: 85%;
-                }
-                .chat--terminal .message {
-                    max-width: 100%;
-                }
-                .message--user {
-                    align-self: flex-end;
-                }
-                .message--assistant {
-                    align-self: flex-start;
-                }
-                .message__avatar {
-                    font-size: 0.6875rem;
-                    margin-bottom: var(--space-xs);
+                .message-row {
                     display: flex;
-                    gap: var(--space-sm);
-                    align-items: center;
-                    font-family: var(--font-mono);
+                    width: 100%;
                 }
-                .message--user .message__avatar {
-                    flex-direction: row-reverse;
-                }
-                .message__role {
-                    font-weight: 700;
-                }
-                .message--user .message__role { color: var(--secondary); }
-                .message--assistant .message__role { color: var(--primary); }
+                .message-row--user { justify-content: flex-end; }
+                .message-row--bot { justify-content: flex-start; }
                 
-                .message__bubble {
+                .message-bubble {
+                    max-width: 80%;
                     padding: var(--space-md) var(--space-lg);
                     border-radius: var(--radius-lg);
-                    font-size: 0.9375rem;
-                    line-height: 1.6;
                     position: relative;
                 }
-                .message--user .message__bubble {
-                    background: var(--bg-tertiary);
-                    color: var(--text-primary);
-                    border: 1px solid var(--border);
-                    border-bottom-right-radius: var(--radius-xs);
-                }
-                .message--assistant .message__bubble {
-                    background: var(--bg-secondary);
-                    color: var(--text-primary);
-                    border: 1px solid var(--border);
-                    border-bottom-left-radius: var(--radius-xs);
-                }
-                .chat--enterprise .message--user .message__bubble {
-                    background: var(--primary-glow);
-                    border-color: var(--primary);
-                }
-                .chat--terminal .message__bubble {
-                    border-radius: 0;
-                    border: none;
-                    padding: 0 var(--space-sm);
-                    background: transparent !important;
-                }
-                .chat--terminal .message--user .message__bubble {
-                    border-left: 2px solid var(--secondary);
-                }
-                .chat--terminal .message--assistant .message__bubble {
-                    border-left: 2px solid var(--primary);
-                }
-                .message__cursor {
-                    display: inline-block;
-                    width: 8px;
-                    height: 15px;
-                    background: var(--primary);
-                    margin-left: 4px;
-                    animation: pulse 1s infinite;
-                    vertical-align: middle;
-                }
-                .chat__input-area {
-                    padding: var(--space-lg);
-                    border-top: 1px solid var(--border);
-                    background: var(--bg-secondary);
-                }
-                .chat__input-wrapper {
-                    display: flex;
-                    align-items: center;
-                    background: var(--bg-tertiary);
-                    border: 1px solid var(--border);
-                    border-radius: var(--radius-lg);
-                    padding: var(--space-xs) var(--space-sm);
-                    position: relative;
-                }
-                .chat--enterprise .chat__input-wrapper {
-                    border-radius: var(--radius-xl);
-                }
-                .chat--terminal .chat__input-wrapper {
-                    border-radius: 0;
-                    background: transparent;
-                }
-                .chat__prompt-char {
-                    color: var(--primary);
-                    font-family: var(--font-mono);
-                    margin-left: var(--space-sm);
-                    font-weight: 700;
-                }
-                .chat__input {
-                    background: transparent;
-                    border: none;
-                    box-shadow: none;
-                    padding: var(--space-sm) var(--space-md);
-                    font-size: 0.9375rem;
-                    min-height: 44px;
-                }
-                .chat__input:focus {
-                    box-shadow: none;
-                }
-                .chat__send-btn {
+                .message-row--user .message-bubble {
                     background: var(--primary);
                     color: var(--text-inverse);
-                    border: none;
-                    border-radius: var(--radius-md);
-                    padding: var(--space-sm) var(--space-lg);
+                    border-bottom-right-radius: 4px;
+                }
+                .message-row--bot .message-bubble {
+                    background: var(--bg-tertiary);
+                    color: var(--text-primary);
+                    border: 1px solid var(--border);
+                    border-bottom-left-radius: 4px;
+                }
+                .message-header {
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    margin-bottom: 4px;
+                    font-size: 10px;
                     font-weight: 700;
-                    cursor: pointer;
-                    transition: all var(--transition-fast);
+                    text-transform: uppercase;
+                    letter-spacing: 0.05em;
+                    opacity: 0.8;
+                }
+                .message-content {
+                    font-size: 15px;
+                    line-height: 1.6;
+                    white-space: pre-wrap;
+                }
+                .chat-panel__input-area {
+                    padding: var(--space-lg);
+                    background: rgba(255, 255, 255, 0.01);
+                    border-top: 1px solid var(--border);
+                }
+                .input-wrapper {
+                    background: var(--bg-tertiary);
+                    border: 1px solid var(--border-hover);
+                    border-radius: var(--radius-lg);
+                    display: flex;
+                    align-items: flex-end;
+                    padding: 8px;
+                    transition: border-color var(--transition-fast);
+                }
+                .input-wrapper:focus-within {
+                    border-color: var(--primary);
+                }
+                textarea {
+                    flex: 1;
+                    background: transparent;
+                    border: none !important;
+                    box-shadow: none !important;
+                    padding: 8px 12px;
+                    color: var(--text-primary);
+                    font-size: 15px;
+                    resize: none;
+                    min-height: 40px;
+                }
+                .send-button {
+                    width: 40px;
+                    height: 40px;
+                    border-radius: 12px;
+                    background: var(--primary);
+                    color: var(--text-inverse);
                     display: flex;
                     align-items: center;
                     justify-content: center;
+                    cursor: pointer;
+                    transition: all var(--transition-fast);
+                    border: none;
+                    flex-shrink: 0;
                 }
-                .chat__send-btn:hover:not(:disabled) {
+                .send-button:hover:not(:disabled) {
                     background: var(--primary-hover);
-                    transform: translateY(-1px);
+                    transform: scale(1.05);
                 }
-                .chat__send-btn:disabled {
-                    opacity: 0.5;
-                    cursor: not-allowed;
-                    background: var(--text-muted);
-                }
-                .chat--terminal .chat__send-btn {
-                    background: transparent;
-                    color: var(--primary);
-                    font-family: var(--font-mono);
-                    border: 1px solid var(--primary);
-                }
-                .chat--terminal .chat__send-btn:hover:not(:disabled) {
-                    background: var(--primary-glow);
-                }
-                .chat__footer-hint {
-                    font-size: 0.625rem;
+                .send-button:disabled {
+                    background: var(--bg-elevated);
                     color: var(--text-muted);
-                    margin-top: var(--space-sm);
+                    cursor: not-allowed;
+                }
+                .input-footer {
+                    display: flex;
+                    justify-content: center;
+                    margin-top: 12px;
+                    font-size: 10px;
+                    color: var(--text-muted);
                     text-transform: uppercase;
-                    letter-spacing: 1px;
-                    text-align: center;
-                    font-family: var(--font-mono);
+                    letter-spacing: 0.05em;
+                    font-weight: 600;
+                }
+                .spinner {
+                    width: 18px;
+                    height: 18px;
+                    border: 2px solid rgba(255,255,255,0.2);
+                    border-top-color: white;
+                    border-radius: 50%;
+                    animation: spin 0.8s linear infinite;
+                }
+                @keyframes spin {
+                    to { transform: rotate(360deg); }
+                }
+                .typing-dots {
+                    display: flex;
+                    gap: 2px;
+                }
+                .typing-dots span {
+                    animation: blink 1.4s infinite both;
+                }
+                .typing-dots span:nth-child(2) { animation-delay: 0.2s; }
+                .typing-dots span:nth-child(3) { animation-delay: 0.4s; }
+                @keyframes blink {
+                    0% { opacity: 0.2; }
+                    20% { opacity: 1; }
+                    100% { opacity: 0.2; }
                 }
             `}</style>
         </main>
     )
-
 }

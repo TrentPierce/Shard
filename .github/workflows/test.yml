@@ -24,11 +24,11 @@ jobs:
       - name: Install Python dependencies
         run: |
           pip install -e ./sdk/python[dev]
-          pip install pytest pytest-asyncio httpx
+          pip install pytest pytest-asyncio httpx pytest-cov
           
       - name: Run Python tests
         run: |
-          python -m pytest tests/ -v --cov=shard_sdk --cov-report=xml
+          python -m pytest tests/ -v --cov=shard --cov-report=xml
           
       - name: Check Rust compilation
         run: |
