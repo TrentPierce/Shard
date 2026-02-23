@@ -1,12 +1,48 @@
 # syntax=docker/dockerfile:1.7
 FROM rust:1.85-bookworm AS builder
 WORKDIR /build
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    cmake \
+    build-essential \
+    pkg-config \
+    clang \
+    git
+
+# Copy C++ source
+COPY cpp/ ./cpp/
+
+# Build shard-bridge (C++ engine)
+RUN mkdir -p build/engine && \
+    cmake -S cpp/shard-bridge -B build/engine -DCMAKE_BUILD_TYPE=Release && \
+    cmake --build build/engine --config Release --parallel $(nproc)
+
+# Copy Rust source (workspace)
 COPY desktop/rust/Cargo.toml desktop/rust/Cargo.lock* ./desktop/rust/
-COPY desktop/rust/src ./desktop/rust/src
-RUN cd desktop/rust && cargo build --release
+COPY desktop/rust/crates ./desktop/rust/crates
+COPY desktop/rust/daemon ./desktop/rust/daemon
+
+# Build daemon
+RUN cd desktop/rust && cargo build --release --bin shard-daemon
 
 FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy binaries
 COPY --from=builder /build/desktop/rust/target/release/shard-daemon /usr/local/bin/shard-daemon
+# Copy shared library
+COPY --from=builder /build/build/engine/libshard_engine.so /usr/local/lib/libshard_engine.so
+
+# Ensure library is found
+ENV LD_LIBRARY_PATH=/usr/local/lib
+RUN ldconfig
+
+# Set default library path for daemon
+ENV BITNET_LIB=/usr/local/lib/libshard_engine.so
+
 EXPOSE 9091 4001 4101 9090/udp 9092/udp
 ENTRYPOINT ["shard-daemon"]

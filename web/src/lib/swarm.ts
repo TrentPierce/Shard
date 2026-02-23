@@ -51,15 +51,16 @@ export type HandshakeResult = {
 }
 
 export type WorkRequest = {
-    prompt: string
-    workId: string
-    timestamp: number
+    prompt_context: string
+    request_id: string
+    min_tokens: number
+    created_at_ms?: number
 }
 
 export type WorkResult = {
-    workId: string
-    draftText: string
-    scoutId: string
+    work_id: string
+    draft_text: string
+    scout_id: string
     timestamp: number
 }
 
@@ -245,19 +246,36 @@ export async function initSwarmWorker(
  */
 export async function handleScoutWork(work: WorkRequest): Promise<ScoutSubmissionResult> {
     try {
-        // Import WebLLM functions dynamically to avoid SSR issues
-        const { generateDraftTokens, isWebLLMReady } = await import("./webllm")
+        import { getActiveEngine, generateDrafts, initScoutEngine } from "./scout-engine"
 
-        // Check if WebLLM is ready
-        if (!isWebLLMReady()) {
+// ... (imports)
+
+export type WorkResult = {
+    work_id: string
+    draft_text: string
+    scout_id: string
+    timestamp: number
+    scout_mode: "webgpu" | "wasm"
+}
+
+// ...
+
+export async function handleScoutWork(work: WorkRequest): Promise<ScoutSubmissionResult> {
+    try {
+        const engine = getActiveEngine()
+        
+        // Ensure engine is ready
+        if (!engine) {
+            // Try to auto-init if not ready?
+            // Usually init happens at startup.
             return {
                 success: false,
-                detail: "WebLLM engine not initialized or still loading",
+                detail: "Scout engine not initialized",
             }
         }
 
         // Generate draft tokens
-        const draftResult = await generateDraftTokens(work.prompt)
+        const draftResult = await generateDrafts(work.prompt_context, { maxTokens: work.min_tokens })
 
         if (!draftResult.success) {
             return {
@@ -266,15 +284,16 @@ export async function handleScoutWork(work: WorkRequest): Promise<ScoutSubmissio
             }
         }
 
-        // Generate a scout ID (could be from libp2p peer ID in the future)
+        // Generate a scout ID
         const scoutId = generateScoutId()
 
         // Prepare the result for submission
         const result: WorkResult = {
-            workId: work.workId,
-            draftText: draftResult.text,
-            scoutId,
-            timestamp: Date.now(),
+            work_id: work.request_id,
+            draft_text: draftResult.text,
+            scout_id: scoutId,
+            timestamp: Date.now() / 1000,
+            scout_mode: engine.mode,
         }
 
         // Submit the result to the API
