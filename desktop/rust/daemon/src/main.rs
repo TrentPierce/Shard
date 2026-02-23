@@ -96,6 +96,7 @@ use shard_network::network::private_mesh::{
 use shard_network::network::tensor_wire::TensorWirePacket;
 use shard_scheduler::scheduler::{
     load_reputation, save_reputation, weighted_select, NodeReputation, NodeSchedulerInput,
+use crate::bootstrap_discovery;
 };
 
 // ─── CLI ────────────────────────────────────────────────────────────────────
@@ -1981,6 +1982,48 @@ async fn main() -> Result<()> {
                     }
                 }
                 tokio::time::sleep(Duration::from_secs(3600)).await; // Refresh every hour
+            }
+        });
+    }
+
+    // ── spawn bootstrap advertisement loop ──
+    if let Some(advertise_url) = cli.bootstrap_advertise_url {
+        let advertise_state = state.clone();
+        let local_peer_id = local_peer_id.to_string();
+        let stability_threshold = cli.stability_threshold_hours;
+        tokio::spawn(async move {
+            let client = reqwest::Client::new();
+            loop {
+                tokio::time::sleep(Duration::from_secs(300)).await; // Check every 5 minutes
+                
+                let now = now_ms();
+                let uptime_hours = (now - advertise_state.daemon_start) / (1000 * 60 * 60);
+                
+                // Only advertise if stable enough
+                if uptime_hours < stability_threshold {
+                    continue;
+                }
+                
+                // Get our advertised addresses
+                let topo = advertise_state.topology.lock().await;
+                let addrs = topo.listen_addrs.clone();
+                drop(topo);
+                
+                if let Some(multiaddr) = addrs.first() {
+                    let registration = bootstrap_discovery::BootstrapRegistration {
+                        peer_id: local_peer_id.clone(),
+                        multiaddr: multiaddr.clone(),
+                        stability_score: 100, // TODO: calculate dynamically
+                        uptime_hours,
+                        version: env!("CARGO_PKG_VERSION").to_string(),
+                    };
+                    
+                    if let Err(e) = bootstrap_discovery::register_as_bootstrap(&advertise_url, &registration).await {
+                        tracing::warn!({});
+                    } else {
+                        tracing::info!(peer_id = %local_peer_id, hours = uptime_hours, "Registered as bootstrap peer");
+                    }
+                }
             }
         });
     }

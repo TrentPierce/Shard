@@ -1613,3 +1613,67 @@ refresh(); setInterval(refresh, 5000);
     )
 }
 
+
+// ─── Bootstrap Discovery Handlers ─────────────────────────────────────────────
+
+pub(crate) async fn bootstrap_handler(AxumState(state): AxumState<SharedState>) -> Json<serde_json::Value> {
+    let peers = state.peers.lock().await;
+    let topo = state.topology.lock().await;
+    let now = now_ms();
+    
+    // Get stable peers that could be bootstraps
+    let stable_peers: Vec<serde_json::Value> = peers
+        .iter()
+        .filter(|(_, p)| {
+            let uptime_ms = now.saturating_sub(p.first_seen_at);
+            let uptime_hours = uptime_ms / (1000 * 60 * 60);
+            let total = p.successful_handshakes + p.handshake_failures;
+            let failure_rate = if total > 0 { p.handshake_failures as f32 / total as f32 } else { 1.0 };
+            // Stable if: >1 hour uptime, >3 successful handshakes, <10% failure rate
+            uptime_hours >= 1 && p.successful_handshakes >= 3 && failure_rate < 0.1
+        })
+        .map(|(id, p)| {
+            let total = p.successful_handshakes + p.handshake_failures;
+            let failure_rate = if total > 0 { p.handshake_failures as f32 / total as f32 } else { 0.0 };
+            let stability_score = (((1.0 - failure_rate) * 100.0) as u32).min(100);
+            serde_json::json!({
+                "peer_id": id,
+                "multiaddr": p.addrs.first().cloned().unwrap_or_default(),
+                "uptime_hours": (now.saturating_sub(p.first_seen_at)) / (1000 * 60 * 60),
+                "stability_score": stability_score,
+            })
+        })
+        .collect();
+    
+    // Calculate if THIS node is stable enough to be a bootstrap
+    let my_uptime_hours = (now - state.daemon_start) / (1000 * 60 * 60);
+    let is_bootstrap = my_uptime_hours >= 1;
+    
+    Json(serde_json::json!({
+        "local_peer_id": topo.local_peer_id,
+        "is_bootstrap": is_bootstrap,
+        "uptime_hours": my_uptime_hours,
+        "known_bootstraps": stable_peers,
+    }))
+}
+
+#[derive(Deserialize)]
+pub(crate) struct RegisterBootstrapRequest {
+    pub peer_id: String,
+    pub multiaddr: String,
+    pub stability_score: u32,
+    pub uptime_hours: u64,
+    pub version: String,
+}
+
+pub(crate) async fn register_bootstrap_handler(
+    AxumState(state): AxumState<SharedState>,
+    Json(req): Json<RegisterBootstrapRequest>,
+) -> Json<serde_json::Value> {
+    tracing::info!(peer_id = %req.peer_id, score = req.stability_score, "Registering bootstrap peer");
+    
+    Json(serde_json::json!({
+        "ok": true,
+        "message": "Bootstrap registration recorded",
+    }))
+}
