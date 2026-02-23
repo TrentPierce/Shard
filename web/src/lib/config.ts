@@ -4,7 +4,9 @@
 
 // In production, we want relative URLs so they hit the Next.js API routes (proxies).
 // Locally, they will also hit the same relative routes which proxy to the daemon.
-export const API_BASE = process.env.NEXT_PUBLIC_API_URL || "" 
+// In Tauri, there is no server-side proxy, so we must hit the local daemon directly.
+const isTauri = typeof window !== "undefined" && (window as any).__TAURI_INTERNALS__ !== undefined;
+export const API_BASE = process.env.NEXT_PUBLIC_API_URL || (isTauri ? "http://localhost:9091" : "")
 export const RUST_BASE = process.env.NEXT_PUBLIC_RUST_URL || "http://localhost:9091"
 export const SHARD_BACKEND_BASE = process.env.NEXT_PUBLIC_SHARD_BACKEND_URL || "http://localhost:9091"
 
