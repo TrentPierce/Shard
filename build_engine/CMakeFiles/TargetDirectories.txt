@@ -1,0 +1,15 @@
+D:/Dev/Projects/Shard/Shard/build_engine/CMakeFiles/shard_engine.dir
+D:/Dev/Projects/Shard/Shard/build_engine/CMakeFiles/INSTALL.dir
+D:/Dev/Projects/Shard/Shard/build_engine/CMakeFiles/ALL_BUILD.dir
+D:/Dev/Projects/Shard/Shard/build_engine/CMakeFiles/ZERO_CHECK.dir
+D:/Dev/Projects/Shard/Shard/build_engine/llama.cpp/CMakeFiles/INSTALL.dir
+D:/Dev/Projects/Shard/Shard/build_engine/llama.cpp/CMakeFiles/ALL_BUILD.dir
+D:/Dev/Projects/Shard/Shard/build_engine/llama.cpp/ggml/CMakeFiles/INSTALL.dir
+D:/Dev/Projects/Shard/Shard/build_engine/llama.cpp/ggml/CMakeFiles/ALL_BUILD.dir
+D:/Dev/Projects/Shard/Shard/build_engine/llama.cpp/ggml/src/CMakeFiles/ggml-base.dir
+D:/Dev/Projects/Shard/Shard/build_engine/llama.cpp/ggml/src/CMakeFiles/ggml.dir
+D:/Dev/Projects/Shard/Shard/build_engine/llama.cpp/ggml/src/CMakeFiles/ggml-cpu.dir
+D:/Dev/Projects/Shard/Shard/build_engine/llama.cpp/ggml/src/CMakeFiles/INSTALL.dir
+D:/Dev/Projects/Shard/Shard/build_engine/llama.cpp/ggml/src/ggml-cpu/CMakeFiles/INSTALL.dir
+D:/Dev/Projects/Shard/Shard/build_engine/llama.cpp/src/CMakeFiles/llama.dir
+D:/Dev/Projects/Shard/Shard/build_engine/llama.cpp/src/CMakeFiles/INSTALL.dir

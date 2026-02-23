@@ -1,0 +1,429 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="17.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\llama.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\llama-adapter.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\llama-arch.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\llama-batch.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\llama-chat.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\llama-context.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\llama-cparams.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\llama-grammar.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\llama-graph.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\llama-hparams.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\llama-impl.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\llama-io.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\llama-kv-cache.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\llama-kv-cache-iswa.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\llama-memory.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\llama-memory-hybrid.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\llama-memory-hybrid-iswa.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\llama-memory-recurrent.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\llama-mmap.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\llama-model-loader.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\llama-model-saver.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\llama-model.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\llama-quant.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\llama-sampler.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\llama-vocab.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\unicode-data.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\unicode.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\afmoe.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\apertus.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\arcee.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\arctic.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\arwkv7.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\baichuan.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\bailingmoe.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\bailingmoe2.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\bert.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\bitnet.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\bloom.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\chameleon.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\chatglm.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\codeshell.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\cogvlm.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\cohere2-iswa.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\command-r.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\dbrx.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\deci.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\deepseek.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\deepseek2.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\dots1.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\dream.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\ernie4-5-moe.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\ernie4-5.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\exaone.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\exaone4.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\exaone-moe.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\falcon-h1.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\falcon.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\gemma-embedding.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\gemma.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\gemma2-iswa.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\gemma3.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\gemma3n-iswa.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\glm4-moe.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\glm4.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\gpt2.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\gptneox.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\granite-hybrid.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\granite.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\grok.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\grovemoe.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\hunyuan-dense.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\hunyuan-moe.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\internlm2.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\jais.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\jamba.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\kimi-linear.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\lfm2.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\llada-moe.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\llada.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\llama-iswa.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\llama.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\maincoder.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\mamba.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\mimo2-iswa.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\minicpm3.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\minimax-m2.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\modern-bert.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\mpt.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\nemotron-h.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\nemotron.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\neo-bert.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\olmo.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\olmo2.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\olmoe.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\openai-moe-iswa.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\openelm.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\orion.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\pangu-embedded.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\phi2.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\phi3.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\plamo.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\plamo2.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\plamo3.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\plm.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\qwen.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\qwen2.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\qwen2moe.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\qwen2vl.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\qwen3.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\qwen3vl.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\qwen3vl-moe.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\qwen3moe.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\qwen3next.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\qwen35.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\qwen35moe.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\refact.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\rnd1.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\rwkv6-base.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\rwkv6.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\rwkv6qwen2.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\rwkv7-base.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\rwkv7.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\seed-oss.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\smallthinker.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\smollm3.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\stablelm.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\starcoder.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\starcoder2.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\step35-iswa.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\t5-dec.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\t5-enc.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\wavtokenizer-dec.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\xverse.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\mistral3.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\models\graph-context-mamba.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\include\llama.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\unicode.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <CustomBuild Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\src\CMakeLists.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="Header Files">
+      <UniqueIdentifier>{49F77627-A758-34B1-A3D7-3490BAB48D4A}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files">
+      <UniqueIdentifier>{1D540C87-22EA-31A0-A012-690BCA0017B9}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>

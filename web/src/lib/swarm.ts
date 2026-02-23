@@ -7,7 +7,8 @@
  * - P2P networking via js-libp2p (browser Scout nodes)
  */
 
-import { apiUrl, RUST_BASE } from "./config"
+import { apiUrl } from "./config"
+import { getActiveEngine, generateDrafts } from "./scout-engine"
 
 // Re-export P2P functions for convenience
 export {
@@ -42,6 +43,8 @@ export type Topology = {
     shard_quic_multiaddr?: string | null
     shard_ws_multiaddr?: string | null
     listen_addrs?: string[]
+    scout_count?: number
+    shard_count?: number
 }
 
 export type HandshakeResult = {
@@ -62,6 +65,7 @@ export type WorkResult = {
     draft_text: string
     scout_id: string
     timestamp: number
+    scout_mode: "webgpu" | "wasm"
 }
 
 export type ScoutSubmissionResult = {
@@ -75,13 +79,6 @@ export type ScoutSubmissionResult = {
  * Probe localhost for a running native Shard exe.
  * If detected, the browser MUST disable WebGPU and route to the local
  * Shard (double-dip prevention per the agents.md spec).
- * 
- * Detection criteria:
- * 1. Health endpoint responds with "ok"
- * 2. Latency is < 2ms (indicates same machine)
- * 
- * If both conditions are met, WebGPU must be disabled to prevent
- * GPU OOM crashes from Scout and Shard fighting for VRAM.
  */
 export async function probeLocalShard(): Promise<LocalShardProbe> {
     const endpoint = apiUrl("/health")
@@ -97,8 +94,6 @@ export async function probeLocalShard(): Promise<LocalShardProbe> {
         const json = await res.json()
         const isHealthy = Boolean(json?.status === "ok")
         
-        // Double-dip prevention: if latency < 2ms, we're on same machine
-        // Must disable WebGPU to prevent VRAM conflicts
         if (isHealthy && rttMs < LATENCY_THRESHOLD_MS) {
             console.log(
                 `[Double-Dip Guard] Local Shard detected at ${endpoint} ` +
@@ -115,9 +110,7 @@ export async function probeLocalShard(): Promise<LocalShardProbe> {
 }
 
 /**
- * Fetch network topology from the Python Driver API.
- * The topology includes the Rust sidecar's listen addresses so the
- * browser can dial directly.
+ * Fetch network topology.
  */
 export async function fetchTopology(): Promise<Topology> {
     try {
@@ -130,11 +123,7 @@ export async function fetchTopology(): Promise<Topology> {
 }
 
 /**
- * Perform a PING/PONG heartbeat through the local Driver API.
- *
- * CI does not have access to every transitive dependency required by
- * libp2p's browser+native stacks, so this lightweight heartbeat keeps the
- * web runner verifiable without requiring restricted packages.
+ * Perform a PING/PONG heartbeat.
  */
 export async function heartbeatShard(
     shardAddr: string
@@ -197,7 +186,6 @@ export async function initSwarmWorker(
                 if (addr.startsWith('ws://') || addr.startsWith('wss://')) {
                     return addr
                 }
-                // Parse multiaddr format
                 const hostMatch = addr.match(/(?:ip4|dns4)\/([^/]+)/)
                 const portMatch = addr.match(/tcp\/(\d+)/)
                 if (hostMatch && portMatch) {
@@ -206,23 +194,6 @@ export async function initSwarmWorker(
                 return null
             })
             .filter((addr): addr is string => addr !== null)
-
-        // Prepare WebTransport endpoint hints from QUIC multiaddrs when supported.
-        const quicCandidates = topology.listen_addrs
-            .filter(addr => addr.includes('/quic-v1'))
-            .map(addr => {
-                const hostMatch = addr.match(/(?:ip4|dns4)\/([^/]+)/)
-                const portMatch = addr.match(/udp\/(\d+)/)
-                if (hostMatch && portMatch) {
-                    return `https://${hostMatch[1]}:${portMatch[1]}`
-                }
-                return null
-            })
-            .filter((addr): addr is string => addr !== null)
-
-        if (typeof window !== 'undefined' && 'WebTransport' in window && quicCandidates.length > 0) {
-            console.log('[swarm] WebTransport-capable browser detected; QUIC candidates:', quicCandidates)
-        }
     }
 
     registration.active?.postMessage({
@@ -237,44 +208,18 @@ export async function initSwarmWorker(
 
 /**
  * Handle incoming work request from the swarm.
- *
- * This function generates draft tokens using WebLLM and submits the results
- * back to the API for verification by a Shard node.
- *
- * @param work - The work request containing the prompt
- * @returns Promise containing the result of the submission
  */
-export async function handleScoutWork(work: WorkRequest): Promise<ScoutSubmissionResult> {
-    try {
-        import { getActiveEngine, generateDrafts, initScoutEngine } from "./scout-engine"
-
-// ... (imports)
-
-export type WorkResult = {
-    work_id: string
-    draft_text: string
-    scout_id: string
-    timestamp: number
-    scout_mode: "webgpu" | "wasm"
-}
-
-// ...
-
 export async function handleScoutWork(work: WorkRequest): Promise<ScoutSubmissionResult> {
     try {
         const engine = getActiveEngine()
         
-        // Ensure engine is ready
         if (!engine) {
-            // Try to auto-init if not ready?
-            // Usually init happens at startup.
             return {
                 success: false,
                 detail: "Scout engine not initialized",
             }
         }
 
-        // Generate draft tokens
         const draftResult = await generateDrafts(work.prompt_context, { maxTokens: work.min_tokens })
 
         if (!draftResult.success) {
@@ -284,10 +229,8 @@ export async function handleScoutWork(work: WorkRequest): Promise<ScoutSubmissio
             }
         }
 
-        // Generate a scout ID
         const scoutId = generateScoutId()
 
-        // Prepare the result for submission
         const result: WorkResult = {
             work_id: work.request_id,
             draft_text: draftResult.text,
@@ -296,7 +239,6 @@ export async function handleScoutWork(work: WorkRequest): Promise<ScoutSubmissio
             scout_mode: engine.mode,
         }
 
-        // Submit the result to the API
         const submissionResult = await submitDraftResult(result)
 
         return submissionResult
@@ -309,10 +251,7 @@ export async function handleScoutWork(work: WorkRequest): Promise<ScoutSubmissio
 }
 
 /**
- * Submit a draft result to the Python API for verification.
- *
- * @param result - The draft result containing generated tokens
- * @returns Promise containing the submission result
+ * Submit a draft result.
  */
 async function submitDraftResult(result: WorkResult): Promise<ScoutSubmissionResult> {
     try {
@@ -346,9 +285,6 @@ async function submitDraftResult(result: WorkResult): Promise<ScoutSubmissionRes
 
 /**
  * Generate a unique scout identifier.
- *
- * In a full implementation, this would be the libp2p peer ID.
- * For now, we use a random string.
  */
 function generateScoutId(): string {
     if (typeof window === "undefined") {
@@ -365,11 +301,7 @@ function generateScoutId(): string {
 }
 
 /**
- * Request work from the Python API.
- *
- * This polls for available work that the Scout can process.
- *
- * @returns Promise containing the work request or null if no work is available
+ * Request work from the API.
  */
 export async function requestWork(): Promise<WorkRequest | null> {
     try {
@@ -377,16 +309,26 @@ export async function requestWork(): Promise<WorkRequest | null> {
             method: "GET",
         })
 
-        if (res.status === 204) {
-            // No work available
+        if (res.status === 204 || res.status === 404) {
             return null
         }
 
         if (!res.ok) {
+            const text = await res.text()
+            if (text.includes("null")) return null
             throw new Error(`Work request failed (${res.status})`)
         }
 
-        return (await res.json()) as WorkRequest
+        const data = await res.json()
+        if (!data || !data.work) return null
+        
+        // Transform backend response to local type
+        return {
+            request_id: data.work.request_id,
+            prompt_context: data.work.prompt_context,
+            min_tokens: data.work.min_tokens,
+            created_at_ms: data.work.created_at_ms
+        }
     } catch (error: any) {
         console.error("Failed to request work:", error)
         return null
@@ -395,18 +337,12 @@ export async function requestWork(): Promise<WorkRequest | null> {
 
 /**
  * Start a Scout worker loop.
- *
- * This continuously polls for work and processes it when available.
- * Intended to be run in a background context (service worker or interval).
- *
- * @param onRequest - Optional callback when work is requested
- * @param onResult - Optional callback when work is completed
  */
 export async function startScoutWorker(
     onRequest?: (work: WorkRequest) => void,
     onResult?: (result: ScoutSubmissionResult) => void
 ): Promise<() => void> {
-    const pollInterval = 2000 // Poll every 2 seconds
+    const pollInterval = 2000 
 
     const poll = async () => {
         const work = await requestWork()
@@ -417,9 +353,6 @@ export async function startScoutWorker(
         }
     }
 
-    // Start the polling loop
     const intervalId = setInterval(poll, pollInterval)
-
-    // Return a cleanup function
     return () => clearInterval(intervalId)
 }

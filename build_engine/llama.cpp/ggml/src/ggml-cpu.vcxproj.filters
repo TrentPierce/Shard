@@ -1,0 +1,105 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="17.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\ggml\src\ggml-cpu\ggml-cpu.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\ggml\src\ggml-cpu\ggml-cpu.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\ggml\src\ggml-cpu\repack.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\ggml\src\ggml-cpu\hbm.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\ggml\src\ggml-cpu\quants.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\ggml\src\ggml-cpu\traits.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\ggml\src\ggml-cpu\amx\amx.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\ggml\src\ggml-cpu\amx\mmq.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\ggml\src\ggml-cpu\binary-ops.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\ggml\src\ggml-cpu\unary-ops.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\ggml\src\ggml-cpu\vec.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\ggml\src\ggml-cpu\ops.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\ggml\src\ggml-cpu\llamafile\sgemm.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\ggml\src\ggml-cpu\arch\x86\quants.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\ggml\src\ggml-cpu\arch\x86\repack.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\ggml\src\ggml-cpu\repack.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\ggml\src\ggml-cpu\hbm.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\ggml\src\ggml-cpu\quants.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\ggml\src\ggml-cpu\traits.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\ggml\src\ggml-cpu\amx\amx.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\ggml\src\ggml-cpu\amx\mmq.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\ggml\src\ggml-cpu\ggml-cpu-impl.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\ggml\src\ggml-cpu\common.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\ggml\src\ggml-cpu\binary-ops.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\ggml\src\ggml-cpu\unary-ops.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\ggml\src\ggml-cpu\simd-mappings.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\ggml\src\ggml-cpu\vec.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\ggml\src\ggml-cpu\ops.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\ggml\src\ggml-cpu\llamafile\sgemm.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <CustomBuild Include="D:\Dev\Projects\Shard\Shard\cpp\llama.cpp\ggml\src\CMakeLists.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="Header Files">
+      <UniqueIdentifier>{49F77627-A758-34B1-A3D7-3490BAB48D4A}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files">
+      <UniqueIdentifier>{1D540C87-22EA-31A0-A012-690BCA0017B9}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>
