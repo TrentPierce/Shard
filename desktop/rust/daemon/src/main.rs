@@ -1010,6 +1010,7 @@ struct ShardBehaviour {
     autonat: autonat::v1::Behaviour,
     identify: identify::Behaviour,
     ping: ping::Behaviour,
+    mdns: libp2p::mdns::tokio::Behaviour,
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -3546,12 +3547,18 @@ async fn main() -> Result<()> {
         })
         .unwrap_or_default();
 
+    let mut hardcoded_bootstrap = vec![
+        "/dns4/bootstrap1.shard.network/tcp/4001/p2p/12D3KooWStAA8FVj7W2E1E68kP2qQG9Yy99Yy99Yy99Yy99Yy99".to_string(),
+        "/dns4/bootstrap2.shard.network/tcp/4001/p2p/12D3KooWStAA8FVj7W2E1E68kP2qQG9Yy99Yy99Yy99Yy99Yy99".to_string(),
+    ];
+
     let bootstrap_addrs = unique_addrs(
         default_bootstrap
             .into_iter()
             .chain(cli.bootstrap_node.iter().cloned())
             .chain(file_bootstrap)
             .chain(bootstrap_addrs)
+            .chain(hardcoded_bootstrap)
             .collect(),
     );
 
@@ -3773,7 +3780,10 @@ async fn main() -> Result<()> {
             gossipsub::Config::default(),
         )
         .map_err(|e| anyhow::anyhow!(e.to_string()))?;
-        let kad = KadBehaviour::new(local_peer_id, MemoryStore::new(local_peer_id));
+        let mut kad = KadBehaviour::new(local_peer_id, MemoryStore::new(local_peer_id));
+        if !cli.relay_mode {
+            kad.set_mode(Some(libp2p::kad::Mode::Client));
+        }
         let handshake = request_response::cbor::Behaviour::new(
             [(
                 StreamProtocol::new("/shard/1.0.0/handshake"),
@@ -3828,6 +3838,10 @@ async fn main() -> Result<()> {
             id_keys.public(),
         ));
         let ping = ping::Behaviour::new(ping::Config::new());
+        let mdns = libp2p::mdns::tokio::Behaviour::new(
+            libp2p::mdns::Config::default(),
+            local_peer_id,
+        ).map_err(|e| anyhow::anyhow!(e))?;
         ShardBehaviour {
             gossipsub,
             kad,
@@ -3841,6 +3855,7 @@ async fn main() -> Result<()> {
             autonat,
             identify,
             ping,
+            mdns,
         }
     };
 
@@ -4883,6 +4898,23 @@ async fn main() -> Result<()> {
                         let _ = event;
                         // ping events - simplified for compatibility
                         tracing::debug!("ping event: {:?}", event);
+                    }
+
+                    // ── mdns ──
+                    SwarmEvent::Behaviour(ShardBehaviourEvent::Mdns(event)) => {
+                        match event {
+                            libp2p::mdns::Event::Discovered(list) => {
+                                for (peer_id, multiaddr) in list {
+                                    tracing::info!(%peer_id, %multiaddr, "mDNS discovered peer");
+                                    swarm.behaviour_mut().kad.add_address(&peer_id, multiaddr);
+                                }
+                            }
+                            libp2p::mdns::Event::Expired(list) => {
+                                for (peer_id, _multiaddr) in list {
+                                    tracing::debug!(%peer_id, "mDNS peer expired");
+                                }
+                            }
+                        }
                     }
 
                     // ── new listen addresses → update topology ──

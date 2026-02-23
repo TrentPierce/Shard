@@ -55,7 +55,19 @@ class AsyncShardClient:
         base_url: str = _DEFAULT_BASE_URL,
         timeout: float = _DEFAULT_TIMEOUT,
         max_retries: int = _MAX_RETRIES,
+        auto_start_daemon: bool = True,
     ):
+        if auto_start_daemon and ("localhost" in base_url or "127.0.0.1" in base_url):
+            try:
+                from urllib.parse import urlparse
+                parsed = urlparse(base_url)
+                port = parsed.port or 9091
+                from .daemon import start_daemon
+                start_daemon(port=port)
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning(f"Failed to auto-start daemon: {e}")
+
         self.api_key = api_key
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout

@@ -19,6 +19,7 @@ from .exceptions import (
     ShardConnectionError,
     ShardAuthError,
 )
+from .daemon import start_daemon, stop_daemon
 
 __version__ = "0.1.0"
 __all__ = [
@@ -36,4 +37,6 @@ __all__ = [
     "ShardTimeoutError",
     "ShardConnectionError",
     "ShardAuthError",
+    "start_daemon",
+    "stop_daemon",
 ]
