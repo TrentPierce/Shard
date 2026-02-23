@@ -58,6 +58,7 @@ cpp/shard-bridge/build/
 *.lib
 *.spec
 build/
+build_engine/
 dist/
 
 # ─── Shard Specific ───
