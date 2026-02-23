@@ -152,12 +152,13 @@ export function useSwarmTelemetry() {
           contributors: contributorsRef.current
         })
         setIsConnected(true)
-        setIsLoading(false)
       } catch (e) {
         console.error("Telemetry poll failed:", e)
         if (!isUnmounted) {
           setIsConnected(false)
-          // We only set loading false if we have a failure on the first try
+        }
+      } finally {
+        if (!isUnmounted) {
           setIsLoading(false)
         }
       }
@@ -166,12 +167,18 @@ export function useSwarmTelemetry() {
     // Initial fetch
     pollTelemetry()
 
+    // Safety timeout to ensure loading state doesn't hang UI
+    const safetyTimeout = setTimeout(() => {
+      if (!isUnmounted) setIsLoading(false)
+    }, 5000)
+
     // Poll every 3 seconds for live updates
     const interval = setInterval(pollTelemetry, 3000)
 
     return () => {
       isUnmounted = true
       clearInterval(interval)
+      clearTimeout(safetyTimeout)
     }
   }, [])
 
