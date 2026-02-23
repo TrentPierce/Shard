@@ -1,3 +1,4 @@
+use axum::http::{HeaderName, HeaderValue, StatusCode};
 use super::*;
 
 // ─── Speculative Decoding Functions ────────────────────────────────────────
@@ -135,6 +136,53 @@ pub(crate) async fn chat_completions_handler(
     headers: HeaderMap,
     Json(req): Json<ChatRequest>,
 ) -> impl IntoResponse {
+    // 1. Authenticate API Key
+    let api_key = headers
+        .get("authorization")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "));
+
+    if let Some(key) = api_key {
+        let keys = state.api_keys.lock().await;
+        if !keys.contains(key) {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(serde_json::json!({ "error": "Invalid API Key" })),
+            )
+                .into_response();
+        }
+    } else {
+        // Require API key for now (Task 4.3 Policy)
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({ "error": "Authentication required" })),
+        )
+            .into_response();
+    }
+
+    // 2. Check Contribution Balance and Rate Limit
+    let contribution_balance = {
+        let ledger = state.ledger.lock().await;
+        ledger.balance_of(api_key.unwrap())
+    };
+
+    let rate_limit = state.rate_limiter.check(api_key, None, contribution_balance);
+    if !rate_limit.is_allowed() {
+        return (
+            StatusCode::TOO_MANY_REQUESTS,
+            HeaderMap::from_iter([(
+                HeaderName::from_static("retry-after"),
+                HeaderValue::from_str(&rate_limit.retry_after().unwrap_or(60).to_string()).unwrap(),
+            )]),
+            Json(serde_json::json!({
+                "error": "Rate limit exceeded. Contribute compute to increase your quota.",
+                "contribution_balance": contribution_balance,
+                "limit": rate_limit.limit(),
+            })),
+        )
+            .into_response();
+    }
+
     let stream_mode = req.stream.unwrap_or(false);
     let max_tokens = req.max_tokens.or(req.max_new_tokens).unwrap_or(256);
 
@@ -209,6 +257,18 @@ pub(crate) async fn chat_completions_handler(
                                 draft.latency_ms = draft_latency;
                                 // Verify the draft against our model
                                 let result = verify_draft_tokens(engine, &prompt_tokens, &draft.draft_tokens).await;
+
+                                if !result.accepted_tokens.is_empty() {
+                                    let mut ledger = state.ledger.lock().await;
+                                    let receipt = LedgerState::sign_poc_receipt(
+                                        &state.signing_key,
+                                        &draft.work_id,
+                                        &draft.scout_id,
+                                        result.accepted_tokens.len() as u32,
+                                        now_ms()
+                                    );
+                                    let _ = ledger.apply_poc_receipt(receipt);
+                                }
 
                                 {
                                     let p95 = state.gossipsub_latency_hist.percentiles().p95_ms;
@@ -341,6 +401,18 @@ pub(crate) async fn chat_completions_handler(
                                     &draft.draft_tokens,
                                 )
                                 .await;
+
+                                if !result.accepted_tokens.is_empty() {
+                                    let mut ledger = state.ledger.lock().await;
+                                    let receipt = LedgerState::sign_poc_receipt(
+                                        &state.signing_key,
+                                        &draft.work_id,
+                                        &draft.scout_id,
+                                        result.accepted_tokens.len() as u32,
+                                        now_ms()
+                                    );
+                                    let _ = ledger.apply_poc_receipt(receipt);
+                                }
 
                                 {
                                     let p95 = state.gossipsub_latency_hist.percentiles().p95_ms;
