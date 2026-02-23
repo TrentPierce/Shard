@@ -2,6 +2,29 @@
 
 This guide explains what each role does, how to join, and why distributed mode is different from a single EC2 node.
 
+## Quick Start (Connect Your Node)
+
+To join the Shard network as a verifier node, you need to connect to the bootstrap peer. Run:
+
+### Windows
+```cmd
+C:\Users\Trent\AppData\Local\shard\shard-daemon.exe --bootstrap-node "/ip4/35.175.242.222/tcp/4001/p2p/12D3KooWConhJakwyGN72uZ1Jtxi3LFecN3cYKxEX3aNLDAo48by"
+```
+
+### Linux/Mac
+```bash
+./shard-daemon --bootstrap-node "/ip4/35.175.242.222/tcp/4001/p2p/12D3KooWConhJakwyGN72uZ1Jtxi3LFecN3cYKxEX3aNLDAo48by"
+```
+
+Or create a `bootstrap.txt` file with the multiaddr and use `--bootstrap_file bootstrap.txt`.
+
+**Current Bootstrap Peer:**
+- IP: `35.175.242.222`
+- Peer ID: `12D3KooWConhJakwyGN72uZ1Jtxi3LFecN3cYKxEX3aNLDAo48by`
+- Multiaddr: `/ip4/35.175.242.222/tcp/4001/p2p/12D3KooWConhJakwyGN72uZ1Jtxi3LFecN3cYKxEX3aNLDAo48by`
+
+---
+
 ## Roles
 
 ### Scout (browser contributor)

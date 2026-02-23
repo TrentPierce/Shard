@@ -113,17 +113,32 @@ export default function NetworkExplorerPage() {
 
   const fetchData = useCallback(async () => {
     try {
-      const [topologyRes, metricsRes, healthRes, peersRes] = await Promise.all([
-        fetch("/api/v1/system/topology").catch(() => null),
-        fetch("/api/v1/metrics/summary").catch(() => null),
-        fetch("/api/health").catch(() => null),
-        fetch("/api/v1/system/peers").catch(() => null),
+      // Use Promise.allSettled to handle partial failures gracefully
+      const [topologyRes, metricsRes, healthRes, peersRes] = await Promise.allSettled([
+        fetch("/api/v1/system/topology"),
+        fetch("/api/v1/metrics/summary"),
+        fetch("/api/health"),
+        fetch("/api/v1/system/peers"),
       ])
 
-      const topology = topologyRes?.ok ? await topologyRes.json() : null
-      const metrics = metricsRes?.ok ? await metricsRes.json() : null
-      const health = healthRes?.ok ? await healthRes.json() : null
-      const peersPayload = peersRes?.ok ? await peersRes.json() : null
+      // Helper to extract JSON from fulfilled results
+      const getJson = async (result: PromiseSettledResult<Response>) => {
+        if (result.status === 'fulfilled' && result.value.ok) {
+          try {
+            return await result.value.json()
+          } catch {
+            return null
+          }
+        }
+        return null
+      }
+
+      const [topology, metrics, health, peersPayload] = await Promise.all([
+        getJson(topologyRes),
+        getJson(metricsRes),
+        getJson(healthRes),
+        getJson(peersRes),
+      ])
 
       const peersList: any[] = Array.isArray(peersPayload?.peers) ? peersPayload.peers : []
       const connectedPeers = peersList.length || Number(peersPayload?.count ?? 0) || 0
