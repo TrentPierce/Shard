@@ -126,8 +126,7 @@ Type=simple
 User=$SERVICE_USER
 Group=$SERVICE_USER
 WorkingDirectory=$APP_DIR/rust
-ExecStart=$APP_DIR/rust/target/release/shard-daemon --control-port 9091 --tcp-port 4001 --public-api
-Restart=on-failure
+    ExecStart=$APP_DIR/rust/target/release/shard-daemon --control-port 9091 --tcp-port 4001 --public-api --relay-mode trueRestart=on-failure
 RestartSec=10
 StandardOutput=journal
 StandardError=journal
