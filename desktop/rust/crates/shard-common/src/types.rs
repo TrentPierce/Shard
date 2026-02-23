@@ -13,7 +13,8 @@ pub struct WorkRequest {
 pub struct WorkResponse {
     pub request_id: String,
     pub peer_id: String,
-    pub draft_tokens: Vec<String>,
+    pub draft_tokens: Vec<i32>,
+    pub draft_text: String,
     pub latency_ms: f32,
     #[serde(default)]
     pub created_at_ms: Option<u128>,

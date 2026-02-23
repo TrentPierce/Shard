@@ -465,8 +465,16 @@ pub(crate) struct SharedState {
     /// Channel for receiving scout draft submissions
     scout_draft_tx: mpsc::Sender<ScoutDraft>,
     scout_draft_rx: Arc<Mutex<Option<mpsc::Receiver<ScoutDraft>>>>,
+    /// Channel for announcing bans to the network
+    ban_tx: mpsc::Sender<(String, String)>,
     /// Timeout tracker for speculative decoding
     scout_timeout_tracker: Arc<Mutex<ScoutTimeoutTracker>>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub(crate) struct BanAnnouncement {
+    pub peer_id: String,
+    pub reason: String,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -608,6 +616,8 @@ struct DraftResultSubmission {
     work_id: String,
     scout_id: String,
     draft_text: String,
+    #[serde(default)]
+    draft_tokens: Vec<i32>,
     #[serde(default)]
     timestamp: Option<f64>,
     #[serde(default)]
@@ -1543,6 +1553,7 @@ async fn main() -> Result<()> {
     let (pipeline_tx, mut pipeline_rx) = mpsc::channel::<PipelineDispatch>(256);
     let (browser_result_tx, mut browser_result_rx) = mpsc::channel::<ForwardPassActivation>(256);
     let (scout_draft_tx, scout_draft_rx) = mpsc::channel::<ScoutDraft>(64);
+    let (ban_tx, mut ban_rx) = mpsc::channel::<(String, String)>(128);
 
     let node_identity = NodeIdentity::load_or_create(&identity_path)?;
     let node_wallet = node_identity.wallet_address();
@@ -1654,6 +1665,7 @@ async fn main() -> Result<()> {
         })),
         scout_draft_tx,
         scout_draft_rx: Arc::new(Mutex::new(Some(scout_draft_rx))),
+        ban_tx,
         scout_timeout_tracker: Arc::new(Mutex::new(ScoutTimeoutTracker::new())),
     };
 
@@ -1851,6 +1863,8 @@ async fn main() -> Result<()> {
     let ledger_topic = IdentTopic::new("shard-ledger-tx");
     let layer_announce_topic = IdentTopic::new("shard-layer-announcements");
     let auction_topic = IdentTopic::new("auction.prompt");
+    let ban_topic = IdentTopic::new("shard-ban-list");
+    
     swarm.behaviour_mut().gossipsub.subscribe(&work_topic)?;
     swarm.behaviour_mut().gossipsub.subscribe(&result_topic)?;
     swarm.behaviour_mut().gossipsub.subscribe(&forward_topic)?;
@@ -1865,6 +1879,7 @@ async fn main() -> Result<()> {
         .gossipsub
         .subscribe(&layer_announce_topic)?;
     swarm.behaviour_mut().gossipsub.subscribe(&auction_topic)?;
+    swarm.behaviour_mut().gossipsub.subscribe(&ban_topic)?;
 
     // ── listen addresses ──
     let tcp_addr: Multiaddr = format!("/ip4/0.0.0.0/tcp/{}", cli.tcp_port).parse()?;
@@ -2232,14 +2247,38 @@ async fn main() -> Result<()> {
                 if work_req.created_at_ms.is_none() {
                     work_req.created_at_ms = Some(now_ms());
                 }
-                match serde_json::to_vec(&work_req) {
+                
+                let nonce = state.credit_nonce.fetch_add(1, Ordering::Relaxed);
+                let envelope = shard_common::common::signed_envelope::SignedEnvelope::sign(
+                    work_req,
+                    &signing_key,
+                    nonce,
+                    now_ms()
+                );
+
+                match serde_json::to_vec(&envelope) {
                     Ok(payload) => {
                         match swarm.behaviour_mut().gossipsub.publish(work_topic.clone(), payload) {
-                            Ok(_) => tracing::info!(id = %work_req.request_id, "published WorkRequest to gossipsub"),
-                            Err(e) => tracing::warn!(id = %work_req.request_id, %e, "gossipsub publish failed (no peers?)"),
+                            Ok(_) => tracing::info!(id = %envelope.payload.request_id, "published Signed WorkRequest to gossipsub"),
+                            Err(e) => tracing::warn!(id = %envelope.payload.request_id, %e, "gossipsub publish failed (no peers?)"),
                         }
                     }
-                    Err(e) => tracing::error!(%e, "failed to serialize WorkRequest"),
+                    Err(e) => tracing::error!(%e, "failed to serialize Signed WorkRequest"),
+                }
+            }
+
+            // ── outbound ban announcements ──
+            Some((peer_id, reason)) = ban_rx.recv() => {
+                tracing::warn!(%peer_id, %reason, "broadcasting ban to network");
+                if let Ok(pid) = peer_id.parse::<libp2p::PeerId>() {
+                    let _ = swarm.disconnect_peer_id(pid);
+                }
+                let announcement = BanAnnouncement {
+                    peer_id,
+                    reason,
+                };
+                if let Ok(payload) = serde_json::to_vec(&announcement) {
+                    let _ = swarm.behaviour_mut().gossipsub.publish(ban_topic.clone(), payload);
                 }
             }
 
@@ -2299,7 +2338,8 @@ async fn main() -> Result<()> {
                                     results.push_back(WorkResponse {
                                         request_id: packet_clone.request_id.clone(),
                                         peer_id: "centralized-fallback".to_string(),
-                                        draft_tokens: vec![response_text],
+                                        draft_tokens: Vec::new(),
+                                        draft_text: response_text,
                                         latency_ms: 0.0,
                                         created_at_ms: Some(now_ms()),
                                     });
@@ -2310,7 +2350,8 @@ async fn main() -> Result<()> {
                                     results.push_back(WorkResponse {
                                         request_id: packet_clone.request_id.clone(),
                                         peer_id: "centralized-fallback".to_string(),
-                                        draft_tokens: vec!["Fallback inference failed".to_string()],
+                                        draft_tokens: Vec::new(),
+                                        draft_text: "Fallback inference failed".to_string(),
                                         latency_ms: 0.0,
                                         created_at_ms: Some(now_ms()),
                                     });
@@ -2369,6 +2410,9 @@ async fn main() -> Result<()> {
                                 };
                                 if peer_is_blackholed {
                                     tracing::warn!(peer = %result.peer_id, "dropping WorkResponse from blackholed scout peer");
+                                    if let Ok(pid) = result.peer_id.parse::<libp2p::PeerId>() {
+                                        let _ = swarm.disconnect_peer_id(pid);
+                                    }
                                     continue;
                                 }
 
@@ -2389,6 +2433,28 @@ async fn main() -> Result<()> {
                                 let mut q = state.results.lock().await;
                                 q.push_back(result);
                                 while q.len() > 128 { q.pop_front(); }
+                            }
+                        } else if message.topic == work_topic.hash() {
+                            match serde_json::from_slice::<shard_common::common::signed_envelope::SignedEnvelope<WorkRequest>>(&message.data) {
+                                Ok(envelope) => {
+                                    let mut verifier = state.envelope_verifier.lock().await;
+                                    if let Err(e) = verifier.verify_full(&envelope) {
+                                        tracing::warn!(%e, "received invalid Signed WorkRequest; dropping");
+                                        continue;
+                                    }
+                                    
+                                    tracing::info!(id = %envelope.payload.request_id, signer = %envelope.signer_pubkey_hex, "received valid Signed WorkRequest via gossipsub");
+                                    
+                                    // If we are acting as a Scout, pick up this work
+                                    let mut queue = state.scout_work.lock().await;
+                                    queue.push_back(envelope.payload);
+                                    while queue.len() > 1024 {
+                                        queue.pop_front();
+                                    }
+                                }
+                                Err(e) => {
+                                    tracing::warn!(%e, "received unsigned or malformed WorkRequest; dropping");
+                                }
                             }
                         } else if message.topic == ledger_topic.hash() {
                             match serde_json::from_slice::<ComputeCreditTx>(&message.data) {
@@ -2412,6 +2478,28 @@ async fn main() -> Result<()> {
                                     routes.prune_expired(now_ms());
                                 }
                                 Err(e) => tracing::warn!(%e, "invalid layer announcement packet; ignoring"),
+                            }
+                        } else if message.topic == ban_topic.hash() {
+                            #[derive(Deserialize)]
+                            struct BanAnnouncement {
+                                peer_id: String,
+                                reason: String,
+                            }
+                            if let Ok(ban) = serde_json::from_slice::<BanAnnouncement>(&message.data) {
+                                tracing::info!(peer = %ban.peer_id, reason = %ban.reason, "received ban announcement via gossipsub");
+                                // We trust other verifiers for now (Phase 3 simplified)
+                                if let Ok(pid) = ban.peer_id.parse::<libp2p::PeerId>() {
+                                    let _ = swarm.disconnect_peer_id(pid);
+                                    // Also add to local blacklist
+                                    let mut penalties = state.scout_penalties.lock().await;
+                                    penalties.apply_update(ScoutPenaltyUpdate {
+                                        peer_id: ban.peer_id.clone(),
+                                        accepted: false,
+                                        probability_bound: 0.0,
+                                        latency_ms: None,
+                                        reason: Some(format!("Network ban: {}", ban.reason)),
+                                    }, 0);
+                                }
                             }
                         } else if message.topic == forward_result_topic.hash() {
                             if let Ok(TrainingGossipPacket::ForwardPass(packet)) =
@@ -2631,9 +2719,18 @@ async fn main() -> Result<()> {
                     )) => {
                         tracing::info!(
                             id = %request.request_id,
-                            "work request via req/resp -> publishing to gossipsub"
+                            "work request via req/resp -> publishing signed envelope to gossipsub"
                         );
-                        if let Ok(payload) = serde_json::to_vec(&request) {
+                        
+                        let nonce = state.credit_nonce.fetch_add(1, Ordering::Relaxed);
+                        let envelope = shard_common::common::signed_envelope::SignedEnvelope::sign(
+                            request,
+                            &signing_key,
+                            nonce,
+                            now_ms()
+                        );
+
+                        if let Ok(payload) = serde_json::to_vec(&envelope) {
                             let _ = swarm
                                 .behaviour_mut()
                                 .gossipsub
