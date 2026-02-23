@@ -41,26 +41,26 @@ export default function ChatPage() {
 
             <style jsx>{`
                 .chat-page-wrapper {
-                    min-height: 100vh;
+                    height: calc(100vh - var(--header-height));
                     display: flex;
                     flex-direction: column;
-                    padding-top: var(--header-height);
                     position: relative;
                     overflow: hidden;
                 }
                 .chat-main {
                     flex: 1;
                     display: flex;
-                    padding: var(--space-lg) var(--space-lg) var(--space-xl);
+                    padding: var(--space-md);
                     position: relative;
                     z-index: 1;
+                    overflow: hidden;
                 }
                 .chat-layout-grid {
                     display: grid;
                     grid-template-columns: 300px 1fr;
-                    gap: var(--space-xl);
+                    gap: var(--space-lg);
                     width: 100%;
-                    max-height: calc(100vh - var(--header-height) - var(--space-2xl));
+                    height: 100%;
                 }
                 .chat-sidebar {
                     height: 100%;

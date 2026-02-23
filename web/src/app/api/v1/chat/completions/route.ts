@@ -35,14 +35,20 @@ export async function POST(request: NextRequest) {
       setTimeout(() => resolve(null), TTFT_TIMEOUT_MS)
     )
 
-    const result = await Promise.race([primaryPromise, timeoutPromise])
+    let primaryRes: Response | null = null
+    try {
+      primaryRes = await Promise.race([primaryPromise, timeoutPromise])
+    } catch (e) {
+      console.error("[Enterprise Guard] Primary fetch exception:", e)
+      primaryRes = null
+    }
 
     let response: Response
     let usedFallback = false
 
-    if (result === null || !result.ok) {
+    if (primaryRes === null || !primaryRes.ok) {
       // Primary timed out or failed immediately - trigger fallback
-      console.log(`[Enterprise Guard] Primary stalled or failed. Routing to fallback: ${fallbackUrl}`)
+      console.log(`[Enterprise Guard] Primary stalled or failed (status: ${primaryRes?.status}). Routing to fallback: ${fallbackUrl}`)
       usedFallback = true
       primaryController.abort() // Cancel primary if it's still hanging
       
@@ -54,7 +60,7 @@ export async function POST(request: NextRequest) {
         cache: "no-store",
       })
     } else {
-      response = result
+      response = primaryRes
     }
 
     if (response.body) {
