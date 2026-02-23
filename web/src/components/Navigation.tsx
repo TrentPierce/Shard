@@ -6,7 +6,7 @@ import { usePathname } from "next/navigation"
 import { MessageSquare, Globe, LayoutDashboard } from "lucide-react"
 
 const navItems = [
-    { name: "Chat", href: "/", icon: <MessageSquare size={18} /> },
+    { name: "Chat", href: "/chat", icon: <MessageSquare size={18} /> },
     { name: "Network", href: "/network", icon: <Globe size={18} /> },
     { name: "Dashboard", href: "/dashboard", icon: <LayoutDashboard size={18} /> },
 ]
@@ -15,7 +15,7 @@ export default function Navigation() {
     const pathname = usePathname()
 
     return (
-        <nav className="main-nav glass-card">
+        <nav className="main-nav">
             <div className="main-nav__list">
                 {navItems.map((item) => {
                     const isActive = pathname === item.href
@@ -33,46 +33,39 @@ export default function Navigation() {
             </div>
             <style jsx>{`
                 .main-nav {
-                    padding: 8px;
-                    border: none;
-                    border-bottom: var(--border-width) solid var(--glass-border);
-                    background: var(--glass-bg);
+                    padding: 12px;
+                    border-bottom: 1px solid var(--border);
+                    background: rgba(10, 10, 15, 0.8);
                     backdrop-filter: blur(12px);
-                    border-radius: 0;
                 }
                 .main-nav__list {
                     display: flex;
-                    gap: 4px;
+                    gap: 8px;
                     justify-content: center;
+                    max-width: var(--max-width);
+                    margin: 0 auto;
                 }
                 .main-nav__item {
                     display: flex;
                     align-items: center;
                     gap: 10px;
-                    padding: 8px 16px;
-                    border-radius: var(--radius-inner);
+                    padding: 8px 20px;
+                    border-radius: var(--radius-md);
                     text-decoration: none;
                     color: var(--text-secondary);
-                    font-size: 13px;
-                    font-weight: 500;
-                    transition: all var(--transition);
-                    border: var(--border-width) solid transparent;
+                    font-size: 14px;
+                    font-weight: 600;
+                    transition: all var(--transition-fast);
+                    border: 1px solid transparent;
                 }
                 .main-nav__item:hover {
-                    background: var(--glass-bg);
+                    background: var(--bg-tertiary);
                     color: var(--text-primary);
-                    border-color: var(--glass-border);
                 }
                 .main-nav__item--active {
-                    background: rgba(var(--primary), 0.1);
+                    background: var(--primary-glow);
                     color: var(--primary);
-                    border-color: var(--primary);
-                    font-weight: 600;
-                }
-                .theme-enterprise .main-nav__item--active {
-                    background: rgba(0, 112, 243, 0.1);
-                    color: #0070f3;
-                    border-color: rgba(0, 112, 243, 0.2);
+                    border-color: rgba(0, 212, 170, 0.2);
                 }
                 .main-nav__icon {
                     display: flex;
@@ -83,7 +76,7 @@ export default function Navigation() {
                         display: none;
                     }
                     .main-nav__item {
-                        padding: 10px;
+                        padding: 12px;
                     }
                 }
             `}</style>

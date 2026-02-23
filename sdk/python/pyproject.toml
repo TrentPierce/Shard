@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68.0", "wheel", "setuptools-rust"]
+requires = ["setuptools>=68.0", "wheel", "setuptools-rust", "cmake"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -28,7 +28,7 @@ dependencies = [
 
 [project.optional-dependencies]
 async = ["aiohttp>=3.9.0"]
-dev = ["pytest>=7.0", "pytest-asyncio>=0.23", "respx>=0.21"]
+dev = ["pytest>=7.0", "pytest-asyncio>=0.23", "respx>=0.21", "pytest-cov"]
 
 [tool.setuptools.packages.find]
 where = ["."]

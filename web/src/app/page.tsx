@@ -109,11 +109,10 @@ export default function HomePage() {
         activeNodes: 0,
         uptime: 0,
     })
-    const [statsLoading, setStatsLoading] = useState(true)
     const [activeApiTab, setActiveApiTab] = useState("python")
     const [copiedCode, setCopiedCode] = useState("")
 
-    const { telemetry, isConnected } = useSwarmTelemetry()
+    const { telemetry, isConnected, isLoading: statsLoading } = useSwarmTelemetry()
 
     useEffect(() => {
         setNetworkStats({
@@ -122,10 +121,6 @@ export default function HomePage() {
             activeNodes: telemetry.scoutCount + telemetry.shardCount,
             uptime: isConnected ? 99.99 : 0,
         })
-        if (statsLoading && (telemetry.scoutCount > 0 || telemetry.shardCount > 0 || isConnected)) {
-            setStatsLoading(false)
-        }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [telemetry.scoutCount, telemetry.shardCount, isConnected])
 
     const copyCode = (code: string, id: string) => {

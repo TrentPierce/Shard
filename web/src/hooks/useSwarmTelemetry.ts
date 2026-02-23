@@ -119,6 +119,7 @@ export function useSwarmTelemetry() {
     contributors: []
   })
   const [isConnected, setIsConnected] = useState(false)
+  const [isLoading, setIsLoading] = useState(true)
   const historyRef = useRef<ThroughputSample[]>([])
   const contributorsRef = useRef<Contributor[]>([])
 
@@ -151,10 +152,13 @@ export function useSwarmTelemetry() {
           contributors: contributorsRef.current
         })
         setIsConnected(true)
+        setIsLoading(false)
       } catch (e) {
         console.error("Telemetry poll failed:", e)
         if (!isUnmounted) {
           setIsConnected(false)
+          // We only set loading false if we have a failure on the first try
+          setIsLoading(false)
         }
       }
     }
@@ -176,5 +180,5 @@ export function useSwarmTelemetry() {
     [isConnected],
   )
 
-  return { telemetry, isConnected, statusLabel }
+  return { telemetry, isConnected, isLoading, statusLabel }
 }

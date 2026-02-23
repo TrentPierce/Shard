@@ -1,6 +1,7 @@
 import { headers } from "next/headers"
 
 const DEFAULT_BACKEND = "http://35.175.242.222:9091"
+const DEFAULT_FALLBACK = "http://35.175.242.222:9091" // Can be a different dedicated verifier
 
 export function getShardBackendBaseUrl(): string {
   return (
@@ -10,9 +11,17 @@ export function getShardBackendBaseUrl(): string {
   ).replace(/\/$/, "")
 }
 
-export function shardBackendUrl(path: string): string {
+export function getFallbackBackendUrl(): string {
+  return (
+    process.env.SHARD_FALLBACK_URL?.trim() ||
+    DEFAULT_FALLBACK
+  ).replace(/\/$/, "")
+}
+
+export function shardBackendUrl(path: string, fallback = false): string {
   const cleanPath = path.startsWith("/") ? path : `/${path}`
-  return `${getShardBackendBaseUrl()}${cleanPath}`
+  const base = fallback ? getFallbackBackendUrl() : getShardBackendBaseUrl()
+  return `${base}${cleanPath}`
 }
 
 export function forwardRequestHeaders(contentType = "application/json"): HeadersInit {

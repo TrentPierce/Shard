@@ -2,11 +2,10 @@ import os
 import subprocess
 import sys
 import time
-import signal
 import platform
 import logging
 from pathlib import Path
-from typing import Optional, List
+from typing import Optional
 import httpx
 import atexit
 
@@ -32,27 +31,15 @@ def get_models_dir() -> Path:
     d.mkdir(parents=True, exist_ok=True)
     return d
 
-def get_lib_dir() -> Path:
-    d = get_shard_home() / "lib"
-    d.mkdir(parents=True, exist_ok=True)
-    return d
-
 def download_file(url: str, dest: Path):
     """Download a file with progress logging."""
     logger.info(f"Downloading {url} to {dest}...")
     try:
         with httpx.stream("GET", url, follow_redirects=True) as response:
             response.raise_for_status()
-            total = int(response.headers.get("Content-Length", 0))
-            
             with open(dest, "wb") as f:
-                downloaded = 0
                 for chunk in response.iter_bytes(chunk_size=8192):
                     f.write(chunk)
-                    downloaded += len(chunk)
-                    # Simple progress log every 10MB
-                    if downloaded % (10 * 1024 * 1024) < 8192:
-                        logger.info(f"Downloaded {downloaded / 1024 / 1024:.1f} MB")
         logger.info("Download complete.")
     except Exception as e:
         logger.error(f"Failed to download {url}: {e}")
@@ -72,43 +59,39 @@ def ensure_assets():
     # Set environment variables for the daemon
     os.environ["BITNET_MODEL"] = str(model_path)
     
-    # Note: libshard_engine logic is complex due to platform differences.
-    # We assume for now it is either in PATH, in lib dir, or bundled.
-    # If we had a URL for the lib, we would download it here too.
-    lib_dir = get_lib_dir()
-    if platform.system() == "Windows":
-        lib_name = "shard_engine.dll"
-    elif platform.system() == "Darwin":
-        lib_name = "libshard_engine.dylib"
-    else:
-        lib_name = "libshard_engine.so"
-        
-    lib_path = lib_dir / lib_name
-    if lib_path.exists():
-         os.environ["BITNET_LIB"] = str(lib_path)
+    # Check for bundled library first
+    package_root = Path(__file__).parent
+    lib_name = "shard_engine.dll" if platform.system() == "Windows" else \
+               "libshard_engine.dylib" if platform.system() == "Darwin" else \
+               "libshard_engine.so"
+               
+    bundled_lib = package_root / lib_name
+    if bundled_lib.exists():
+        os.environ["BITNET_LIB"] = str(bundled_lib)
+        logger.debug(f"Using bundled engine: {bundled_lib}")
 
 def find_daemon_executable() -> str:
-    """Find the shard-daemon executable."""
+    """Find the bundled shard-daemon executable."""
+    package_root = Path(__file__).parent
+    exe_name = "shard-daemon.exe" if platform.system() == "Windows" else "shard-daemon"
+    
+    # Check bundled location (site-packages/shard/bin/)
+    bundled_exe = package_root / "bin" / exe_name
+    if bundled_exe.exists():
+        return str(bundled_exe)
+        
+    # Fallback to PATH
     import shutil
     if shutil.which("shard-daemon"):
         return "shard-daemon"
         
-    # Check sys.prefix/bin (Unix) or sys.prefix/Scripts (Windows)
-    bin_dir = Path(sys.prefix) / ("Scripts" if platform.system() == "Windows" else "bin")
-    exe = bin_dir / ("shard-daemon.exe" if platform.system() == "Windows" else "shard-daemon")
-    if exe.exists():
-        return str(exe)
-
-    # Check common build locations
+    # Development fallback
     cwd = Path.cwd()
-    release_path = cwd / "desktop" / "rust" / "target" / "release" / "shard-daemon"
-    if platform.system() == "Windows":
-        release_path = release_path.with_suffix(".exe")
+    dev_path = cwd / "desktop" / "rust" / "target" / "release" / exe_name
+    if dev_path.exists():
+        return str(dev_path)
         
-    if release_path.exists():
-        return str(release_path)
-        
-    raise FileNotFoundError("shard-daemon executable not found. Please install the package or build the daemon.")
+    raise FileNotFoundError("shard-daemon executable not found. Please ensure the package is installed correctly.")
 
 _daemon_process: Optional[subprocess.Popen] = None
 
@@ -128,27 +111,27 @@ def start_daemon(port: int = 9091, background: bool = True):
     """Start the Shard daemon in the background."""
     global _daemon_process
     
-    # Check if already running on the port
+    # Check if already running
     url = f"http://127.0.0.1:{port}/health"
     try:
-        httpx.get(url, timeout=0.5)
-        logger.info("Daemon already running.")
+        httpx.get(url, timeout=0.2)
+        logger.debug("Shard daemon already running.")
         return
     except (httpx.ConnectError, httpx.TimeoutException):
         pass
 
     if _daemon_process and _daemon_process.poll() is None:
-        logger.info("Daemon process is already tracked.")
         return
 
     ensure_assets()
     
     exe = find_daemon_executable()
+    # Add --public-api to help stats visibility if requested, 
+    # but here we focus on the local onboarding.
     cmd = [exe, "--control-port", str(port)]
     
-    logger.info(f"Starting daemon: {' '.join(cmd)}")
+    logger.info(f"Launching Shard P2P node...")
     
-    # On Windows, use creationflags to hide the console window if desired
     creationflags = 0
     if platform.system() == "Windows" and background:
         creationflags = subprocess.CREATE_NO_WINDOW
@@ -157,23 +140,21 @@ def start_daemon(port: int = 9091, background: bool = True):
         cmd,
         stdout=subprocess.DEVNULL if background else None,
         stderr=subprocess.DEVNULL if background else None,
-        creationflags=creationflags
+        creationflags=creationflags,
+        env=os.environ.copy()
     )
     
     atexit.register(stop_daemon)
     
     # Wait for health check
-    retries = 20
-    url = f"http://127.0.0.1:{port}/health"
+    retries = 30
     for i in range(retries):
         try:
-            httpx.get(url, timeout=0.5)
-            logger.info("Daemon is ready.")
+            httpx.get(url, timeout=0.2)
+            logger.info("Shard node is online and ready.")
             return
         except (httpx.ConnectError, httpx.TimeoutException):
             time.sleep(0.5)
             
-    # If we get here, daemon failed to start
     stop_daemon()
-    raise RuntimeError("Failed to start Shard daemon (timeout waiting for health check)")
-
+    raise RuntimeError("Shard node failed to start or respond to health checks.")

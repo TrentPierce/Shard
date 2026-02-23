@@ -23,6 +23,7 @@ Provides-Extra: dev
 Requires-Dist: pytest>=7.0; extra == "dev"
 Requires-Dist: pytest-asyncio>=0.23; extra == "dev"
 Requires-Dist: respx>=0.21; extra == "dev"
+Requires-Dist: pytest-cov; extra == "dev"
 
 # Shard Python SDK
 
@@ -33,6 +34,26 @@ Python client for the Shard distributed inference network.
 ```bash
 pip install shard-inference
 ```
+
+### Run a local Shard node (public mesh)
+
+After installing, the `shard-daemon` binary is available on your `PATH` (or in
+your virtualenv `Scripts/` directory on Windows). To join the public
+`shardnetwork.live` mesh as a verifier node:
+
+```bash
+shard-daemon \
+  --control-port 9091 \
+  --tcp-port 4001 \
+  --webrtc-port 9090 \
+  --quic-port 9092 \
+  --bootstrap-node /ip4/35.175.242.222/tcp/4001/p2p/12D3KooWConhJakwyGN72uZ1Jtxi3LFecN3cYKxEX3aNLDAo48by
+```
+
+Once running, visit `https://shardnetwork.live` and your node will appear in the
+network view (it may take a few seconds after the first successful handshake).
+For self-hosted clusters, replace the `--bootstrap-node` address with your own
+seed peer or set `SHARD_DEFAULT_BOOTSTRAP` as described in `docs/ENVIRONMENT.md`.
 
 Or install from source:
 

@@ -7,6 +7,7 @@ import { heartbeatShard } from "@/lib/swarm"
 import type { ModelProgress } from "@/lib/webllm"
 import { apiUrl } from "@/lib/config"
 import { modeLabels } from "./Header"
+import { Activity, Database, Shield, Zap, RefreshCw } from "lucide-react"
 
 interface NetworkStatusProps {
     mode: NodeMode
@@ -77,7 +78,7 @@ export default function NetworkStatus({
     useEffect(() => {
         const fetchPeers = async () => {
             try {
-                const res = await fetch(apiUrl("/v1/system/peers"))
+                const res = await fetch("/api/v1/system/peers")
                 if (res.ok) {
                     const data = await res.json()
                     setPeers(data.peers ?? [])
@@ -111,113 +112,150 @@ export default function NetworkStatus({
 
     return (
         <aside className="sidebar" role="complementary">
-            <section className="sidebar__section">
-                <div className="sidebar__section-title">
-                    [ NEURAL_CORE ]
+            <section className="sidebar__section card">
+                <div className="sidebar__section-title flex items-center gap-2 mb-4">
+                    <Activity size={18} className="text-primary" />
+                    Core Node Status
                 </div>
                 <div className="stat-row">
-                    <span className="stat-label">PROTOCOL</span>
-                    <span className={`stat-value ${rustStatus === "connected" ? "stat-value--accent" : rustStatus === "downloading" || rustStatus === "degraded" ? "stat-value--warn" : "stat-value--error"}`}>
+                    <span className="stat-label">Protocol</span>
+                    <span className={`stat-value ${rustStatus === "connected" ? "text-primary" : rustStatus === "downloading" || rustStatus === "degraded" ? "text-accent-amber" : "text-error"}`}>
                         {rustStatus.toUpperCase()}
                     </span>
                 </div>
                 <div className="stat-row">
-                    <span className="stat-label">SUBSYSTEM</span>
-                    <span className="stat-value">{modeLabels[mode].toUpperCase()}</span>
+                    <span className="stat-label">Subsystem</span>
+                    <span className="stat-value">{modeLabels[mode]}</span>
                 </div>
                 <div className="stat-row">
-                    <span className="stat-label">CTL_PORT</span>
-                    <span className="stat-value">9091/HEX</span>
-                </div>
-                <div className="stat-row">
-                    <span className="stat-label">MESH_NET</span>
-                    <span className="stat-value">4001/P2P</span>
+                    <span className="stat-label">Control Port</span>
+                    <span className="stat-value">9091</span>
                 </div>
                 {rustStatus === "unreachable" && downloadProgress === null && (
-                    <div className="stat-row" style={{ marginTop: '10px' }}>
-                        <button className="btn-ping" type="button" onClick={() => window.location.reload()}>
-                            [ RE_ESTABLISH_LINK ]
-                        </button>
-                    </div>
+                    <button className="btn btn-primary btn-sm w-full mt-4" type="button" onClick={() => window.location.reload()}>
+                        Reconnect
+                    </button>
                 )}
                 {downloadProgress !== null && (
-                    <div className="sidebar__section" style={{ marginTop: '10px', borderStyle: 'dashed' }}>
-                        <div className="stat-label">TRANSFERRING_WEIGHTS</div>
-                        <div className="stat-value" style={{ fontSize: '10px' }}>
-                            [{'#'.repeat(Math.floor(downloadProgress / 5))}{'.'.repeat(20 - Math.floor(downloadProgress / 5))}] {downloadProgress.toFixed(1)}%
+                    <div className="mt-4">
+                        <div className="stat-label mb-2">Transferring Weights</div>
+                        <div className="w-full bg-bg-tertiary rounded-full h-2">
+                            <div 
+                                className="bg-primary h-2 rounded-full transition-all duration-300" 
+                                style={{ width: `${downloadProgress}%` }}
+                            />
                         </div>
+                        <div className="stat-value text-right mt-1" style={{ fontSize: '12px' }}>{downloadProgress.toFixed(1)}%</div>
                     </div>
                 )}
             </section>
 
-            <section className="sidebar__section">
-                <div className="sidebar__section-title">
-                    [ LEDGER_ALLOCATION ]
+            <section className="sidebar__section card mt-4">
+                <div className="sidebar__section-title flex items-center gap-2 mb-4">
+                    <Database size={18} className="text-secondary" />
+                    Allocation
                 </div>
                 <div className="stat-row">
-                    <span className="stat-label">REWARDS</span>
-                    <span className="stat-value stat-value--accent">2,450.00 SHRD</span>
+                    <span className="stat-label">Rewards</span>
+                    <span className="stat-value text-primary font-bold">2,450.00 SHRD</span>
                 </div>
                 <div className="stat-row">
-                    <span className="stat-label">VERIF_COUNT</span>
+                    <span className="stat-label">Verifications</span>
                     <span className="stat-value">14,288</span>
                 </div>
                 <div className="stat-row">
-                    <span className="stat-label">YIELD_AVG</span>
-                    <span className="stat-value">12.4/HR</span>
-                </div>
-                <div className="stat-row">
-                    <span className="stat-label">ID_SIG</span>
-                    <span className="stat-value" style={{ fontSize: '10px' }}>0x7F4B...3B9A</span>
+                    <span className="stat-label">Yield Avg</span>
+                    <span className="stat-value">12.4/hr</span>
                 </div>
             </section>
 
-            <section className="sidebar__section">
-                <div className="sidebar__section-title">
-                    [ ACTIVE_SWARM ({peers.length}) ]
+            <section className="sidebar__section card mt-4">
+                <div className="sidebar__section-title flex items-center gap-2 mb-4">
+                    <Zap size={18} className="text-accent-cyan" />
+                    Swarm ({peers.length})
                 </div>
                 {peers.length === 0 ? (
-                    <div className="stat-label" style={{ fontSize: '11px', fontStyle: 'italic' }}>// NO REMOTE PEERS DETECTED</div>
+                    <div className="text-muted italic text-sm mt-2">No remote peers detected</div>
                 ) : (
-                    <ul className="peer-list" style={{ borderLeft: '1px solid var(--border)', paddingLeft: '10px' }}>
-                        {peers.map((p) => (
-                            <li key={p.peer_id} className="peer-item" style={{ padding: '2px 0' }}>
-                                <span className="stat-value" style={{ fontSize: '10px' }}>+ {p.peer_id.substring(0, 16)}...</span>
+                    <ul className="space-y-2 mt-2">
+                        {peers.slice(0, 5).map((p) => (
+                            <li key={p.peer_id} className="flex items-center gap-2 text-sm text-secondary">
+                                <Shield size={12} />
+                                <span className="truncate">{p.peer_id.substring(0, 16)}...</span>
                             </li>
                         ))}
                     </ul>
                 )}
-                <div className="stat-row" style={{ marginTop: 12 }}>
-                    <button className="btn-ping" type="button" disabled={pinging} onClick={doPing}>
-                        {pinging ? "[ DIALING... ]" : "[ PING_SHARD ]"}
-                    </button>
-                </div>
-                <div className="stat-row">
-                    <span className="stat-label">HEARTBEAT</span>
-                    <span className="stat-value" style={{ fontSize: '11px' }}>{heartbeat.toUpperCase()}</span>
+                <button 
+                    className="btn btn-secondary btn-sm w-full mt-4 flex items-center justify-center gap-2" 
+                    type="button" 
+                    disabled={pinging} 
+                    onClick={doPing}
+                >
+                    {pinging ? <RefreshCw size={14} className="animate-spin" /> : <Zap size={14} />}
+                    {pinging ? "Pinging..." : "Ping Shard"}
+                </button>
+                <div className="stat-row mt-3">
+                    <span className="stat-label">Latency</span>
+                    <span className="stat-value" style={{ fontSize: '13px' }}>{heartbeat}</span>
                 </div>
             </section>
 
             {(mode === "scout" || mode === "scout-initializing" || webLLMError) && (
-                <section className="sidebar__section" style={{ borderColor: 'var(--secondary)' }}>
-                    <div className="sidebar__section-title" style={{ color: 'var(--secondary)' }}>
-                        [ INTEL_LAYER ]
+                <section className="sidebar__section card mt-4 border-secondary/30">
+                    <div className="sidebar__section-title flex items-center gap-2 mb-4 text-secondary">
+                        <Activity size={18} />
+                        Intelligence Layer
                     </div>
                     {webLLMError ? (
-                        <div className="stat-value--error" style={{ fontSize: '11px' }}>ERR: {webLLMError.toUpperCase()}</div>
+                        <div className="text-error text-sm">Error: {webLLMError}</div>
                     ) : webLLMProgress ? (
-                        <>
-                            <div className="stat-label">INITIALIZING_SCOUT</div>
-                            <div className="stat-value" style={{ fontSize: '10px', color: 'var(--secondary)' }}>
-                                [{'#'.repeat(Math.round(webLLMProgress.progress * 20))}{'.'.repeat(20 - Math.round(webLLMProgress.progress * 20))}] {Math.round(webLLMProgress.progress * 100)}%
+                        <div>
+                            <div className="stat-label mb-2">Initializing Scout</div>
+                            <div className="w-full bg-bg-tertiary rounded-full h-2">
+                                <div 
+                                    className="bg-secondary h-2 rounded-full transition-all duration-300" 
+                                    style={{ width: `${webLLMProgress.progress * 100}%` }}
+                                />
                             </div>
-                            <div className="stat-label" style={{ fontSize: '10px', marginTop: '4px' }}>{webLLMProgress.text.toUpperCase()}</div>
-                        </>
+                            <div className="text-muted text-xs mt-2 truncate">{webLLMProgress.text}</div>
+                        </div>
                     ) : (
-                        <div className="stat-label" style={{ fontSize: '11px' }}>// WEBGPU_DRAFT_GEN_ACTIVE</div>
+                        <div className="flex items-center gap-2 text-success text-sm font-medium">
+                            <Zap size={14} />
+                            Draft Generation Active
+                        </div>
                     )}
                 </section>
             )}
+
+            <style jsx>{`
+                .sidebar__section {
+                    padding: var(--space-lg);
+                }
+                .sidebar__section-title {
+                    font-weight: 700;
+                    font-size: 0.875rem;
+                    text-transform: uppercase;
+                    letter-spacing: 0.05em;
+                    color: var(--text-primary);
+                }
+                .stat-row {
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    margin-bottom: var(--space-sm);
+                }
+                .stat-label {
+                    font-size: 0.8125rem;
+                    color: var(--text-secondary);
+                }
+                .stat-value {
+                    font-size: 0.875rem;
+                    font-weight: 600;
+                    color: var(--text-primary);
+                }
+            `}</style>
         </aside>
     )
 }

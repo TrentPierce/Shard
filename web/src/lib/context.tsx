@@ -27,8 +27,6 @@ export type NodeMode =
     | "scout"
     | "leech"
 
-export type ThemeMode = "terminal" | "enterprise"
-
 type RustStatus = "connected" | "degraded" | "unreachable" | "downloading"
 
 interface AppContextType {
@@ -38,15 +36,12 @@ interface AppContextType {
     webLLMProgress: ModelProgress | null
     webLLMError: string | null
     retryScout: () => void
-    theme: ThemeMode
-    toggleTheme: () => void
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined)
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
     const [mode, setMode] = useState<NodeMode>("loading")
-    const [theme, setTheme] = useState<ThemeMode>("terminal")
     const [webLLMProgress, setWebLLMProgress] = useState<ModelProgress | null>(null)
     const [webLLMError, setWebLLMError] = useState<string | null>(null)
     const [scoutRetryNonce, setScoutRetryNonce] = useState(0)
@@ -81,25 +76,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         const interval = setInterval(pollHealth, 10000)
         return () => clearInterval(interval)
     }, [])
-
-    const toggleTheme = useCallback(() => {
-        const newTheme = theme === "terminal" ? "enterprise" : "terminal"
-        setTheme(newTheme)
-        localStorage.setItem("shard-ui-theme", newTheme)
-    }, [theme])
-
-    useEffect(() => {
-        const saved = localStorage.getItem("shard-ui-theme") as ThemeMode
-        if (saved === "terminal" || saved === "enterprise") {
-            setTheme(saved)
-        }
-    }, [])
-
-    useEffect(() => {
-        const root = document.documentElement
-        root.classList.remove("theme-terminal", "theme-enterprise")
-        root.classList.add(`theme-${theme}`)
-    }, [theme])
 
     const retryScout = useCallback(() => {
         stopScoutWorkerRef.current?.()
@@ -221,8 +197,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                 webLLMProgress,
                 webLLMError,
                 retryScout,
-                theme,
-                toggleTheme,
             }}
         >
             {children}
