@@ -21,7 +21,7 @@ struct TelemetrySnapshot {
     sampled_at_ms: u128,
 }
 
-pub fn spawn_telemetry_ws_server(state: SharedState, port: u16) {
+pub(crate) fn spawn_telemetry_ws_server(state: SharedState, port: u16) {
     tokio::spawn(async move {
         let app = Router::new()
             .route("/telemetry/ws", get(telemetry_ws_handler))

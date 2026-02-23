@@ -7,6 +7,8 @@
  * - unsupported: Browser cannot run Scout
  */
 
+import { useState, useEffect } from "react"
+
 export type ScoutCapability = "webgpu" | "wasm" | "unsupported"
 
 export interface ScoutCapabilityResult {
