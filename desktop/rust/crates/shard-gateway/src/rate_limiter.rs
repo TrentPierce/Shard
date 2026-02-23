@@ -5,8 +5,8 @@
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use std::sync::Arc;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
@@ -78,7 +78,11 @@ impl TokenBucket {
             if current == 0 {
                 return false;
             }
-            if self.tokens.compare_exchange(current, current - 1, Ordering::SeqCst, Ordering::SeqCst).is_ok() {
+            if self
+                .tokens
+                .compare_exchange(current, current - 1, Ordering::SeqCst, Ordering::SeqCst)
+                .is_ok()
+            {
                 return true;
             }
         }
@@ -193,7 +197,7 @@ impl RateLimiter {
     /// Get or create a bucket for an IP address
     fn get_ip_bucket(&self, ip: &str) -> Arc<TokenBucket> {
         let mut buckets = self.ip_buckets.lock().unwrap();
-        
+
         if let Some(bucket) = buckets.get(ip) {
             return bucket.clone();
         }
@@ -260,7 +264,7 @@ impl RateLimiter {
         RateLimitStatus {
             limit: bucket.capacity(),
             remaining: bucket.available(),
-            reset_after_seconds: bucket.time_until_available().as_secs() as u64,
+            reset_after_seconds: bucket.time_until_available().as_secs(),
             tier: if tier { "enterprise" } else { "default" }.to_string(),
         }
     }
