@@ -1391,6 +1391,8 @@ fn create_router(state: SharedState) -> Router {
         .route("/node/logs", get(node_logs_handler))
         .route("/peers", get(peers_handler))
         .route("/v1/system/peers", get(peers_handler))
+        .route("/v1/system/bootstrap", get(bootstrap_handler))
+        .route("/v1/system/bootstrap", post(register_bootstrap_handler))
         .route("/ledger/head", get(ledger_head_handler))
         .route("/ledger/stats", get(ledger_stats_handler))
         .route("/ledger/export", get(ledger_export_handler))
