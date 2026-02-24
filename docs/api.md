@@ -43,3 +43,9 @@ All signed endpoints require:
 - valid signature
 - signer-payload identity match
 - strictly increasing nonce (replay protection)
+
+## Bootstrap Registry
+- `GET /v1/system/bootstrap` now returns both:
+  - `known_bootstraps` (live stability view from connected peers)
+  - `registered_bootstraps` (persisted registry)
+- `POST /v1/system/bootstrap` persists bootstrap candidates and survives daemon restarts.

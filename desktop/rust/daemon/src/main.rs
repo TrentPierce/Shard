@@ -382,6 +382,21 @@ struct PersistedPeers {
     peers: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct BootstrapRegistryEntry {
+    peer_id: String,
+    multiaddr: String,
+    stability_score: u32,
+    uptime_hours: u64,
+    version: String,
+    updated_at_ms: u128,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PersistedBootstrapRegistry {
+    entries: Vec<BootstrapRegistryEntry>,
+}
+
 // ─── Shared State ───────────────────────────────────────────────────────────
 
 #[derive(Clone, Debug, Serialize)]
@@ -502,6 +517,8 @@ pub(crate) struct SharedState {
     /// Bootstrap peer failure tracking (peer_id -> consecutive failures)
     /// Used to remove unreachable bootstraps after MAX_BOOTSTRAP_FAILURES
     bootstrap_failures: Arc<Mutex<HashMap<String, u32>>>,
+    bootstrap_registry: Arc<Mutex<HashMap<String, BootstrapRegistryEntry>>>,
+    bootstrap_registry_path: PathBuf,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -1399,6 +1416,32 @@ async fn save_persisted_peers(path: &Path, peers: &[String]) {
     }
 }
 
+async fn load_bootstrap_registry(path: &Path) -> HashMap<String, BootstrapRegistryEntry> {
+    let Ok(raw) = tokio::fs::read(path).await else {
+        return HashMap::new();
+    };
+    let Ok(parsed) = serde_json::from_slice::<PersistedBootstrapRegistry>(&raw) else {
+        return HashMap::new();
+    };
+    parsed
+        .entries
+        .into_iter()
+        .map(|entry| (entry.peer_id.clone(), entry))
+        .collect()
+}
+
+async fn save_bootstrap_registry(
+    path: &Path,
+    registry: &HashMap<String, BootstrapRegistryEntry>,
+) {
+    let payload = PersistedBootstrapRegistry {
+        entries: registry.values().cloned().collect(),
+    };
+    if let Ok(bytes) = serde_json::to_vec_pretty(&payload) {
+        let _ = tokio::fs::write(path, bytes).await;
+    }
+}
+
 async fn append_event_log(state: &SharedState, event: impl Into<String>) {
     let mut log = state.event_log.lock().await;
     log.push_back(format!("{} {}", now_ms(), event.into()));
@@ -1600,6 +1643,7 @@ async fn main() -> Result<()> {
 
     let topo_path = data.join("topology.json");
     let known_peers_path = data.join("known_peers.json");
+    let bootstrap_registry_path = data.join("bootstrap_registry.json");
 
     let file_bootstrap = if let Some(path) = &cli.bootstrap_file {
         read_bootstrap_file(path).await
@@ -1607,6 +1651,7 @@ async fn main() -> Result<()> {
         Vec::new()
     };
     let persisted = load_persisted_peers(&known_peers_path).await;
+    let loaded_bootstrap_registry = load_bootstrap_registry(&bootstrap_registry_path).await;
     let mut bootstrap_addrs = persisted;
     bootstrap_addrs.extend(cli.bootstrap_node.clone());
 
@@ -1788,6 +1833,8 @@ async fn main() -> Result<()> {
         ban_tx,
         scout_timeout_tracker: Arc::new(Mutex::new(ScoutTimeoutTracker::new())),
         bootstrap_failures: Arc::new(Mutex::new(HashMap::new())),
+        bootstrap_registry: Arc::new(Mutex::new(loaded_bootstrap_registry)),
+        bootstrap_registry_path,
     };
 
     #[cfg(target_os = "windows")]
@@ -3304,13 +3351,15 @@ async fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        accept_replay_nonce, node_is_healthy, record_bootstrap_failure, should_attempt_reconnect,
-        should_reject_peer_connection, unique_addrs, validate_work_request, LatencyHistogram,
+        accept_replay_nonce, load_bootstrap_registry, node_is_healthy, record_bootstrap_failure,
+        save_bootstrap_registry, should_attempt_reconnect, should_reject_peer_connection,
+        unique_addrs, validate_work_request, BootstrapRegistryEntry, LatencyHistogram,
         ScoutPenaltyBook, ScoutPenaltyUpdate, WorkRequest, MAX_BOOTSTRAP_FAILURES,
     };
     use libp2p::{Multiaddr, PeerId};
     use std::collections::{HashMap, HashSet};
     use std::sync::Arc;
+    use tempfile::tempdir;
     use tokio::sync::Mutex;
 
     #[test]
@@ -3559,5 +3608,31 @@ mod tests {
         assert!(removed);
         assert!(known.is_empty());
         assert!(!failures.contains_key(&peer.to_string()));
+    }
+
+    #[tokio::test]
+    async fn bootstrap_registry_persists_and_loads() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("bootstrap_registry.json");
+        let mut registry = HashMap::new();
+        registry.insert(
+            "peer-a".to_string(),
+            BootstrapRegistryEntry {
+                peer_id: "peer-a".to_string(),
+                multiaddr: "/ip4/127.0.0.1/tcp/4001/p2p/12D3KooW".to_string(),
+                stability_score: 90,
+                uptime_hours: 4,
+                version: "0.6.1".to_string(),
+                updated_at_ms: 42,
+            },
+        );
+
+        save_bootstrap_registry(path.as_path(), &registry).await;
+        let loaded = load_bootstrap_registry(path.as_path()).await;
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(
+            loaded.get("peer-a").map(|entry| entry.stability_score),
+            Some(90)
+        );
     }
 }

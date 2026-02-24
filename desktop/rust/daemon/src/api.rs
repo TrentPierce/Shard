@@ -1802,11 +1802,27 @@ pub(crate) async fn bootstrap_handler(AxumState(state): AxumState<SharedState>) 
     let my_uptime_hours = (now - state.daemon_start) / (1000 * 60 * 60);
     let is_bootstrap = my_uptime_hours >= 1;
     
+    let registered = state.bootstrap_registry.lock().await;
+    let persisted_bootstraps: Vec<serde_json::Value> = registered
+        .values()
+        .map(|entry| {
+            serde_json::json!({
+                "peer_id": entry.peer_id,
+                "multiaddr": entry.multiaddr,
+                "uptime_hours": entry.uptime_hours,
+                "stability_score": entry.stability_score,
+                "version": entry.version,
+                "updated_at_ms": entry.updated_at_ms,
+            })
+        })
+        .collect();
+
     Json(serde_json::json!({
         "local_peer_id": topo.local_peer_id,
         "is_bootstrap": is_bootstrap,
         "uptime_hours": my_uptime_hours,
         "known_bootstraps": stable_peers,
+        "registered_bootstraps": persisted_bootstraps,
     }))
 }
 
@@ -1823,11 +1839,36 @@ pub(crate) async fn register_bootstrap_handler(
     AxumState(state): AxumState<SharedState>,
     Json(req): Json<RegisterBootstrapRequest>,
 ) -> Json<serde_json::Value> {
+    if req.peer_id.trim().is_empty() || req.multiaddr.trim().is_empty() {
+        return Json(serde_json::json!({
+            "ok": false,
+            "detail": "peer_id and multiaddr are required",
+        }));
+    }
+    if req.stability_score > 100 {
+        return Json(serde_json::json!({
+            "ok": false,
+            "detail": "stability_score must be <= 100",
+        }));
+    }
+
     tracing::info!(peer_id = %req.peer_id, score = req.stability_score, "Registering bootstrap peer");
+    let entry = BootstrapRegistryEntry {
+        peer_id: req.peer_id.clone(),
+        multiaddr: req.multiaddr.clone(),
+        stability_score: req.stability_score,
+        uptime_hours: req.uptime_hours,
+        version: req.version.clone(),
+        updated_at_ms: now_ms(),
+    };
+    let mut registry = state.bootstrap_registry.lock().await;
+    registry.insert(req.peer_id.clone(), entry);
+    save_bootstrap_registry(state.bootstrap_registry_path.as_path(), &registry).await;
     
     Json(serde_json::json!({
         "ok": true,
         "message": "Bootstrap registration recorded",
+        "total_registered": registry.len(),
     }))
 }
 
