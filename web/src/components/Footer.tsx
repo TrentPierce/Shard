@@ -25,10 +25,10 @@ const footerLinks: Record<string, { title: string; links: { name: string; href: 
     resources: {
         title: "Resources",
         links: [
-            { name: "White Paper", href: "/docs/Shard-White-Paper-Feb-2026.md" },
-            { name: "Architecture", href: "/docs/ARCHITECTURE.md" },
-            { name: "Security", href: "/SECURITY.md" },
-            { name: "Changelog", href: "/CHANGELOG.md" },
+            { name: "White Paper", href: "https://github.com/TrentPierce/Shard/blob/main/docs/Shard-White-Paper-Feb-2026.md", external: true },
+            { name: "Architecture", href: "https://github.com/TrentPierce/Shard/blob/main/ARCHITECTURE.md", external: true },
+            { name: "Security", href: "https://github.com/TrentPierce/Shard/blob/main/SECURITY.md", external: true },
+            { name: "Changelog", href: "https://github.com/TrentPierce/Shard/blob/main/CHANGELOG.md", external: true },
         ],
     },
 }
