@@ -672,7 +672,49 @@ pub(crate) async fn pop_result_handler(
     }
 }
 
-pub(crate) async fn pop_work_handler(AxumState(state): AxumState<SharedState>) -> Json<serde_json::Value> {
+#[derive(Debug, Deserialize)]
+pub(crate) struct ScoutWorkQuery {
+    scout_id: Option<String>,
+}
+
+fn require_scout_id(query: &ScoutWorkQuery) -> Result<&str, Json<serde_json::Value>> {
+    match query.scout_id.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        Some(id) => Ok(id),
+        None => Err(Json(serde_json::json!({
+            "ok": false,
+            "detail": "scout_id is required",
+        }))),
+    }
+}
+
+pub(crate) async fn ensure_pow_verified(
+    state: &SharedState,
+    scout_id: &str,
+) -> Result<(), Json<serde_json::Value>> {
+    let mut manager = state.pow_manager.lock().await;
+    manager.prune_expired();
+    if manager.is_verified(scout_id) {
+        Ok(())
+    } else {
+        state.system_metrics.inc_pow_challenges_failed();
+        Err(Json(serde_json::json!({
+            "ok": false,
+            "detail": "pow verification required for scout ingress",
+        })))
+    }
+}
+
+pub(crate) async fn pop_work_handler(
+    AxumState(state): AxumState<SharedState>,
+    Query(query): Query<ScoutWorkQuery>,
+) -> Json<serde_json::Value> {
+    let scout_id = match require_scout_id(&query) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    if let Err(response) = ensure_pow_verified(&state, scout_id).await {
+        return response;
+    }
     let mut queue = state.scout_work.lock().await;
     match queue.pop_front() {
         Some(work) => Json(serde_json::json!({ "work": work })),
@@ -715,7 +757,7 @@ pub(crate) async fn signed_submit_draft_handler(
 
 pub(crate) async fn process_draft_submission(
     state: &SharedState,
-    submission: DraftResultSubmission,
+    mut submission: DraftResultSubmission,
 ) -> Json<serde_json::Value> {
     if submission.work_id.trim().is_empty() || submission.scout_id.trim().is_empty() {
         state.system_metrics.inc_task_failures();
@@ -725,6 +767,31 @@ pub(crate) async fn process_draft_submission(
         return Json(serde_json::json!({
             "ok": false,
             "detail": "work_id and scout_id are required",
+        }));
+    }
+    if let Err(response) = ensure_pow_verified(state, submission.scout_id.as_str()).await {
+        state.system_metrics.inc_task_failures();
+        mark_node_failure(state, submission.scout_id.as_str()).await;
+        return response;
+    }
+
+    if submission.draft_tokens.is_empty() && !submission.draft_text.trim().is_empty() {
+        let mut engine_guard = state.engine.lock().await;
+        if let Some(engine) = engine_guard.as_mut() {
+            if let Ok(mut tokens) = engine.tokenize(submission.draft_text.as_str(), 256) {
+                if !tokens.is_empty() && tokens[0] == 128000 {
+                    tokens.remove(0);
+                }
+                submission.draft_tokens = tokens;
+            }
+        }
+    }
+    if submission.draft_tokens.is_empty() {
+        state.system_metrics.inc_task_failures();
+        mark_node_failure(state, submission.scout_id.as_str()).await;
+        return Json(serde_json::json!({
+            "ok": false,
+            "detail": "draft_tokens required or server tokenization must produce non-empty tokens",
         }));
     }
 
@@ -794,6 +861,7 @@ pub(crate) async fn pow_challenge_handler(
     AxumState(state): AxumState<SharedState>,
     Query(query): Query<PowChallengeQuery>,
 ) -> Json<serde_json::Value> {
+    state.system_metrics.inc_pow_challenges_issued();
     let mut manager = state.pow_manager.lock().await;
     let concurrency = query.hardware_concurrency.unwrap_or(4);
     let is_mobile = query.is_mobile.unwrap_or(false);
@@ -822,6 +890,9 @@ pub(crate) async fn pow_verify_handler(
         },
     );
     let ok = matches!(result, PowVerifyResult::Accepted);
+    if !ok {
+        state.system_metrics.inc_pow_challenges_failed();
+    }
     Json(serde_json::json!({ "ok": ok }))
 }
 
@@ -1529,6 +1600,25 @@ pub(crate) async fn metrics_summary_handler(
     } else {
         (counters.node_identity_auth_failures_total as f64 / total_tokens as f64) * 100.0
     };
+    let speculative_acceptance_rate = if counters.speculative_draft_tokens_total == 0 {
+        0.0
+    } else {
+        counters.speculative_accepted_tokens_total as f64
+            / counters.speculative_draft_tokens_total as f64
+    };
+    let speculative_reject_rate = if counters.speculative_draft_tokens_total == 0 {
+        0.0
+    } else {
+        counters.speculative_rejected_tokens_total as f64
+            / counters.speculative_draft_tokens_total as f64
+    };
+    let speculative_speedup_ratio = if counters.speculative_accepted_tokens_total == 0 {
+        1.0
+    } else {
+        1.0
+            + (counters.speculative_accepted_tokens_total as f64
+                / (counters.speculative_accepted_tokens_total + 1) as f64)
+    };
     let cost = estimate_cost(&CostEstimateInput {
         tokens_processed_total: counters.tokens_processed_total,
         offload_percent: offload_percentage,
@@ -1551,6 +1641,12 @@ pub(crate) async fn metrics_summary_handler(
         "equivalent_cloud_gpu_cost_usd": cost.equivalent_cloud_gpu_cost_usd,
         "estimated_gpu_savings_usd": cost.estimated_savings_usd,
         "authentication_failure_rate": auth_failure_rate,
+        "speculative_draft_tokens_total": counters.speculative_draft_tokens_total,
+        "speculative_accepted_tokens_total": counters.speculative_accepted_tokens_total,
+        "speculative_rejected_tokens_total": counters.speculative_rejected_tokens_total,
+        "speculative_acceptance_rate": speculative_acceptance_rate,
+        "speculative_reject_rate": speculative_reject_rate,
+        "speculative_speedup_ratio": speculative_speedup_ratio,
         "tokens_processed_total": counters.tokens_processed_total,
         "tokens_offloaded_to_scouts_total": counters.tokens_offloaded_to_scouts_total,
         "verification_fallback_total": counters.verification_fallback_total,
@@ -1676,4 +1772,25 @@ pub(crate) async fn register_bootstrap_handler(
         "ok": true,
         "message": "Bootstrap registration recorded",
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{require_scout_id, ScoutWorkQuery};
+
+    #[test]
+    fn scout_work_requires_identity() {
+        let missing = ScoutWorkQuery { scout_id: None };
+        assert!(require_scout_id(&missing).is_err());
+
+        let empty = ScoutWorkQuery {
+            scout_id: Some("  ".to_string()),
+        };
+        assert!(require_scout_id(&empty).is_err());
+
+        let valid = ScoutWorkQuery {
+            scout_id: Some("scout_123".to_string()),
+        };
+        assert_eq!(require_scout_id(&valid).ok(), Some("scout_123"));
+    }
 }

@@ -485,6 +485,8 @@ pub(crate) struct SharedState {
     rate_limiter: Arc<shard_gateway::rate_limiter::RateLimiter>,
     /// Optional admin token for managing API keys.
     admin_key: Option<String>,
+    /// Whether API keys are required for chat completions.
+    require_api_key: bool,
     /// Node signing key for PoC receipts
     signing_key: ed25519_dalek::SigningKey,
     /// WebRTC ICE servers (STUN/TURN)
@@ -1628,6 +1630,10 @@ async fn main() -> Result<()> {
         .map(|s| s.to_string())
         .collect();
     let admin_key = std::env::var("SHARD_ADMIN_KEY").ok();
+    let require_api_key = std::env::var("SHARD_REQUIRE_API_KEY")
+        .ok()
+        .map(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+        .unwrap_or(false);
 
     let initial_credit_nonce = loaded_ledger.head().height.saturating_add(1);
     let state = SharedState {
@@ -1708,6 +1714,7 @@ async fn main() -> Result<()> {
         api_keys: Arc::new(Mutex::new(initial_api_keys)),
         rate_limiter: Arc::new(shard_gateway::rate_limiter::RateLimiter::new(shard_gateway::rate_limiter::RateLimitConfig::default())),
         admin_key,
+        require_api_key,
         signing_key: signing_key.clone(),
         ice_servers: Arc::new(Mutex::new(if cli.ice_servers.is_empty() {
             node_cfg.ice_servers

@@ -1,6 +1,23 @@
 use axum::http::{HeaderName, HeaderValue, StatusCode};
 use super::*;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum InferenceMode {
+    Standard,
+    Speculative,
+}
+
+pub(crate) fn resolve_inference_mode(raw: Option<&str>) -> InferenceMode {
+    match raw.map(|value| value.trim().to_ascii_lowercase()) {
+        Some(mode) if mode == "distributed" || mode == "speculative" => InferenceMode::Speculative,
+        _ => InferenceMode::Standard,
+    }
+}
+
+pub(crate) fn auth_required(require_api_key: bool, route_private: bool) -> bool {
+    require_api_key || route_private
+}
+
 // ─── Speculative Decoding Functions ────────────────────────────────────────
 
 /// Wait for a scout draft submission with timeout.
@@ -136,6 +153,12 @@ pub(crate) async fn chat_completions_handler(
     headers: HeaderMap,
     Json(req): Json<ChatRequest>,
 ) -> impl IntoResponse {
+    let route_private = headers
+        .get("x-shard-route")
+        .and_then(|v| v.to_str().ok())
+        .map(|v| v.eq_ignore_ascii_case("private"))
+        .unwrap_or(false);
+
     // 1. Authenticate API Key
     let api_key = headers
         .get("authorization")
@@ -151,22 +174,29 @@ pub(crate) async fn chat_completions_handler(
             )
                 .into_response();
         }
-    } else {
-        // Require API key for now (Task 4.3 Policy)
+    } else if auth_required(state.require_api_key, route_private) {
         return (
             StatusCode::UNAUTHORIZED,
-            Json(serde_json::json!({ "error": "Authentication required" })),
+            Json(serde_json::json!({ "error": "Authentication required by policy" })),
         )
             .into_response();
     }
+    if route_private {
+        state.system_metrics.inc_private_route();
+    }
 
     // 2. Check Contribution Balance and Rate Limit
-    let contribution_balance = {
+    let contribution_subject = api_key.unwrap_or("anonymous");
+    let contribution_balance = if api_key.is_some() {
         let ledger = state.ledger.lock().await;
-        ledger.balance_of(api_key.unwrap())
+        ledger.balance_of(contribution_subject)
+    } else {
+        0
     };
 
-    let rate_limit = state.rate_limiter.check(api_key, None, contribution_balance);
+    let rate_limit = state
+        .rate_limiter
+        .check(Some(contribution_subject), None, contribution_balance);
     if !rate_limit.is_allowed() {
         return (
             StatusCode::TOO_MANY_REQUESTS,
@@ -186,12 +216,12 @@ pub(crate) async fn chat_completions_handler(
     let stream_mode = req.stream.unwrap_or(false);
     let max_tokens = req.max_tokens.or(req.max_new_tokens).unwrap_or(256);
 
-    // Check for speculative decoding mode
-    let use_speculative = headers
-        .get("x-shard-inference-mode")
-        .and_then(|v| v.to_str().ok())
-        .map(|v| v.eq_ignore_ascii_case("speculative"))
-        .unwrap_or(false);
+    let inference_mode = resolve_inference_mode(
+        headers
+            .get("x-shard-inference-mode")
+            .and_then(|v| v.to_str().ok()),
+    );
+    let use_speculative = inference_mode == InferenceMode::Speculative;
 
     let speculative_config = if use_speculative {
         Some(SpeculativeConfig::default())
@@ -257,6 +287,12 @@ pub(crate) async fn chat_completions_handler(
                                 draft.latency_ms = draft_latency;
                                 // Verify the draft against our model
                                 let result = verify_draft_tokens(engine, &prompt_tokens, &draft.draft_tokens).await;
+                                let accepted_count = result.accepted_tokens.len() as u64;
+                                let draft_count = draft.draft_tokens.len() as u64;
+                                let rejected_count = draft_count.saturating_sub(accepted_count);
+                                state.system_metrics.inc_speculative_draft_tokens(draft_count);
+                                state.system_metrics.inc_speculative_accepted_tokens(accepted_count);
+                                state.system_metrics.inc_speculative_rejected_tokens(rejected_count);
 
                                 if !result.accepted_tokens.is_empty() {
                                     let mut ledger = state.ledger.lock().await;
@@ -401,6 +437,12 @@ pub(crate) async fn chat_completions_handler(
                                     &draft.draft_tokens,
                                 )
                                 .await;
+                                let accepted_count = result.accepted_tokens.len() as u64;
+                                let draft_count = draft.draft_tokens.len() as u64;
+                                let rejected_count = draft_count.saturating_sub(accepted_count);
+                                state.system_metrics.inc_speculative_draft_tokens(draft_count);
+                                state.system_metrics.inc_speculative_accepted_tokens(accepted_count);
+                                state.system_metrics.inc_speculative_rejected_tokens(rejected_count);
 
                                 if !result.accepted_tokens.is_empty() {
                                     let mut ledger = state.ledger.lock().await;
@@ -497,6 +539,38 @@ pub(crate) async fn chat_completions_handler(
             "choices": [{"index": 0, "message": {"role": "assistant", "content": full_text}, "finish_reason": "stop"}],
             "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
         })).into_response()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{auth_required, resolve_inference_mode, InferenceMode};
+
+    #[test]
+    fn distributed_mode_maps_to_speculative() {
+        assert_eq!(
+            resolve_inference_mode(Some("distributed")),
+            InferenceMode::Speculative
+        );
+        assert_eq!(
+            resolve_inference_mode(Some("speculative")),
+            InferenceMode::Speculative
+        );
+    }
+
+    #[test]
+    fn standard_mode_disables_speculative() {
+        assert_eq!(resolve_inference_mode(Some("standard")), InferenceMode::Standard);
+        assert_eq!(resolve_inference_mode(None), InferenceMode::Standard);
+        assert_eq!(resolve_inference_mode(Some("unknown")), InferenceMode::Standard);
+    }
+
+    #[test]
+    fn auth_policy_matrix() {
+        assert!(!auth_required(false, false));
+        assert!(auth_required(true, false));
+        assert!(auth_required(false, true));
+        assert!(auth_required(true, true));
     }
 }
 

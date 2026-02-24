@@ -80,9 +80,19 @@ export function useBrowserScout({ onTokenGenerated, onStatusChange }: BrowserSco
       const workerUrl = new URL('./pow_solver.ts', import.meta.url)
       const worker = new Worker(workerUrl, { type: 'module' })
 
-      const nonce = await new Promise<number>((resolve, reject) => {
+      const solved = await new Promise<{ nonce: number; hashHex: string }>((resolve, reject) => {
         worker.onmessage = (e) => {
-          if (e.data.success) resolve(e.data.nonce)
+          if (e.data.type === "solved") {
+            resolve({ nonce: e.data.nonce, hashHex: e.data.hashHex })
+            return
+          }
+          if (e.data.type === "progress") {
+            return
+          }
+          if (e.data.type === "timeout") {
+            reject(new Error("PoW solve timed out"))
+            return
+          }
           else reject(new Error(e.data.error || "PoW failed"))
           worker.terminate()
         }
@@ -103,7 +113,7 @@ export function useBrowserScout({ onTokenGenerated, onStatusChange }: BrowserSco
       const verifyRes = await fetch(`/v1/pow/verify`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ peer_id: peerId, nonce })
+        body: JSON.stringify({ peer_id: peerId, nonce: solved.nonce, hash_hex: solved.hashHex })
       })
       if (!verifyRes.ok) {
         throw new Error(`Failed to verify PoW: ${verifyRes.statusText}`)

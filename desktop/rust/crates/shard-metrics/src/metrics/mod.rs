@@ -19,6 +19,9 @@ pub struct SystemMetrics {
     private_route_total: AtomicU64,
     prompt_replay_total: AtomicU64,
     fallback_invocations_total: AtomicU64,
+    speculative_draft_tokens_total: AtomicU64,
+    speculative_accepted_tokens_total: AtomicU64,
+    speculative_rejected_tokens_total: AtomicU64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -35,6 +38,9 @@ pub struct SystemMetricsSnapshot {
     pub private_route_total: u64,
     pub prompt_replay_total: u64,
     pub fallback_invocations_total: u64,
+    pub speculative_draft_tokens_total: u64,
+    pub speculative_accepted_tokens_total: u64,
+    pub speculative_rejected_tokens_total: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -128,7 +134,45 @@ impl SystemMetrics {
             .fetch_add(1, Ordering::Relaxed);
     }
 
+    pub fn inc_speculative_draft_tokens(&self, value: u64) {
+        self.speculative_draft_tokens_total
+            .fetch_add(value, Ordering::Relaxed);
+    }
+
+    pub fn inc_speculative_accepted_tokens(&self, value: u64) {
+        self.speculative_accepted_tokens_total
+            .fetch_add(value, Ordering::Relaxed);
+    }
+
+    pub fn inc_speculative_rejected_tokens(&self, value: u64) {
+        self.speculative_rejected_tokens_total
+            .fetch_add(value, Ordering::Relaxed);
+    }
+
     pub fn render_prometheus(&self, sample: PrometheusSample) -> String {
+        let draft_total = self.speculative_draft_tokens_total.load(Ordering::Relaxed);
+        let accepted_total = self
+            .speculative_accepted_tokens_total
+            .load(Ordering::Relaxed);
+        let rejected_total = self
+            .speculative_rejected_tokens_total
+            .load(Ordering::Relaxed);
+        let acceptance_rate = if draft_total == 0 {
+            0.0
+        } else {
+            accepted_total as f64 / draft_total as f64
+        };
+        let reject_rate = if draft_total == 0 {
+            0.0
+        } else {
+            rejected_total as f64 / draft_total as f64
+        };
+        let speedup_ratio = if accepted_total == 0 {
+            1.0
+        } else {
+            1.0 + (accepted_total as f64 / (accepted_total + 1) as f64)
+        };
+
         format!(
             concat!(
                 "# HELP shard_tokens_processed_total Total tokens processed.\n",
@@ -191,6 +235,24 @@ impl SystemMetrics {
                 "# HELP shard_fallback_invocations_total Centralized fallback invocations.\n",
                 "# TYPE shard_fallback_invocations_total counter\n",
                 "shard_fallback_invocations_total {}\n",
+                "# HELP shard_speculative_draft_tokens_total Draft tokens received for speculative verification.\n",
+                "# TYPE shard_speculative_draft_tokens_total counter\n",
+                "shard_speculative_draft_tokens_total {}\n",
+                "# HELP shard_speculative_accepted_tokens_total Draft tokens accepted by verifier.\n",
+                "# TYPE shard_speculative_accepted_tokens_total counter\n",
+                "shard_speculative_accepted_tokens_total {}\n",
+                "# HELP shard_speculative_rejected_tokens_total Draft tokens rejected by verifier.\n",
+                "# TYPE shard_speculative_rejected_tokens_total counter\n",
+                "shard_speculative_rejected_tokens_total {}\n",
+                "# HELP shard_speculative_acceptance_rate Ratio of accepted speculative draft tokens.\n",
+                "# TYPE shard_speculative_acceptance_rate gauge\n",
+                "shard_speculative_acceptance_rate {:.6}\n",
+                "# HELP shard_speculative_reject_rate Ratio of rejected speculative draft tokens.\n",
+                "# TYPE shard_speculative_reject_rate gauge\n",
+                "shard_speculative_reject_rate {:.6}\n",
+                "# HELP shard_speculative_speedup_ratio Estimated speculative speedup ratio.\n",
+                "# TYPE shard_speculative_speedup_ratio gauge\n",
+                "shard_speculative_speedup_ratio {:.6}\n",
             ),
             self.tokens_processed_total.load(Ordering::Relaxed),
             self.tokens_offloaded_to_scouts_total.load(Ordering::Relaxed),
@@ -213,6 +275,12 @@ impl SystemMetrics {
             self.private_route_total.load(Ordering::Relaxed),
             self.prompt_replay_total.load(Ordering::Relaxed),
             self.fallback_invocations_total.load(Ordering::Relaxed),
+            draft_total,
+            accepted_total,
+            rejected_total,
+            acceptance_rate,
+            reject_rate,
+            speedup_ratio,
         )
     }
 
@@ -236,6 +304,15 @@ impl SystemMetrics {
             private_route_total: self.private_route_total.load(Ordering::Relaxed),
             prompt_replay_total: self.prompt_replay_total.load(Ordering::Relaxed),
             fallback_invocations_total: self.fallback_invocations_total.load(Ordering::Relaxed),
+            speculative_draft_tokens_total: self
+                .speculative_draft_tokens_total
+                .load(Ordering::Relaxed),
+            speculative_accepted_tokens_total: self
+                .speculative_accepted_tokens_total
+                .load(Ordering::Relaxed),
+            speculative_rejected_tokens_total: self
+                .speculative_rejected_tokens_total
+                .load(Ordering::Relaxed),
         }
     }
 }
@@ -253,6 +330,9 @@ mod tests {
         metrics.inc_task_failures();
         metrics.inc_signature_verification_failures();
         metrics.inc_node_identity_auth_failures();
+        metrics.inc_speculative_draft_tokens(10);
+        metrics.inc_speculative_accepted_tokens(7);
+        metrics.inc_speculative_rejected_tokens(3);
 
         let snap = metrics.snapshot();
         assert_eq!(snap.tokens_processed_total, 12);
@@ -261,5 +341,8 @@ mod tests {
         assert_eq!(snap.task_failures_total, 1);
         assert_eq!(snap.signature_verification_failures_total, 1);
         assert_eq!(snap.node_identity_auth_failures_total, 1);
+        assert_eq!(snap.speculative_draft_tokens_total, 10);
+        assert_eq!(snap.speculative_accepted_tokens_total, 7);
+        assert_eq!(snap.speculative_rejected_tokens_total, 3);
     }
 }
