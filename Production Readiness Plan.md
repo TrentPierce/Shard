@@ -210,7 +210,7 @@ Production Readiness Plan (Enterprise + Maintainability)
   - Completed docs baseline: architecture, API, deployment, security, operations, contributing, versioning, model-upgrade strategy.
   - Completed runtime consistency work: distributed/speculative header contract and surfaced version in web runtime outputs.
   - Mesh reliability hardening now includes reconnect/bootstrap-failure recovery test coverage.
-  - In progress: Windows productization hardening (service and onboarding scripts improved; signing and GUI wizard remain follow-up items).
+  - Windows productization hardening: interactive first-run GUI onboarding is now implemented; signing pipeline enforcement hooks are in place pending production cert secrets.
   - P1 progress: spot-check verifier path, persisted bootstrap registry, scheduler decision audit trail, and observability runbooks are now implemented.
   - Release safety and model-upgrade readiness now include auto-update channels, release-manifest/signing standards, ADRs, and verifier-model compatibility abstraction.
   - Security abuse coverage expanded: replay/nonce/signature tamper tests now explicitly exercise negative cases in Rust unit suites.
