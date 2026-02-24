@@ -25,3 +25,5 @@
 - Daemon exposes version in `/health` (`rust_version`).
 - Web and SDK package versions are synchronized from `VERSION` in CI.
 
+## Decision Records
+- ADR index: `docs/adr/README.md`
