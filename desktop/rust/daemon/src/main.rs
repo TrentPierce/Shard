@@ -3381,7 +3381,8 @@ mod tests {
         accept_replay_nonce, load_bootstrap_registry, node_is_healthy, record_bootstrap_failure,
         save_bootstrap_registry, should_attempt_reconnect, should_reject_peer_connection,
         unique_addrs, validate_work_request, BootstrapRegistryEntry, LatencyHistogram,
-        ScoutPenaltyBook, ScoutPenaltyUpdate, WorkRequest, MAX_BOOTSTRAP_FAILURES,
+        ScoutPenaltyBook, ScoutPenaltyUpdate, ScoutTimeoutTracker, SpeculativeConfig,
+        WorkRequest, MAX_BOOTSTRAP_FAILURES,
     };
     use libp2p::{Multiaddr, PeerId};
     use std::collections::{HashMap, HashSet};
@@ -3661,5 +3662,38 @@ mod tests {
             loaded.get("peer-a").map(|entry| entry.stability_score),
             Some(90)
         );
+    }
+
+    #[test]
+    fn scout_timeout_triggers_cooldown_after_threshold() {
+        let config = SpeculativeConfig {
+            scout_timeout_ms: 100,
+            scout_cooldown_ms: 60_000,
+            max_consecutive_timeouts: 3,
+            draft_token_count: 4,
+        };
+        let mut tracker = ScoutTimeoutTracker::new();
+        assert!(!tracker.is_in_cooldown());
+        tracker.record_timeout(&config);
+        tracker.record_timeout(&config);
+        assert!(!tracker.is_in_cooldown());
+        tracker.record_timeout(&config);
+        assert!(tracker.is_in_cooldown());
+    }
+
+    #[test]
+    fn scout_timeout_success_resets_counter() {
+        let config = SpeculativeConfig {
+            scout_timeout_ms: 100,
+            scout_cooldown_ms: 60_000,
+            max_consecutive_timeouts: 3,
+            draft_token_count: 4,
+        };
+        let mut tracker = ScoutTimeoutTracker::new();
+        tracker.record_timeout(&config);
+        tracker.record_timeout(&config);
+        tracker.record_success();
+        tracker.record_timeout(&config);
+        assert!(!tracker.is_in_cooldown());
     }
 }

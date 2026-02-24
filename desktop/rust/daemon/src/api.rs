@@ -609,7 +609,7 @@ pub(crate) async fn process_work_request(state: &SharedState, req: WorkRequest) 
         }
     };
 
-    if token_count > state.fallback_config.long_context_threshold {
+    if should_route_long_context(token_count, state.fallback_config.long_context_threshold) {
         tracing::info!(%token_count, threshold = state.fallback_config.long_context_threshold, "routing long prompt to centralized fallback");
         let active_state = ActiveRequestState {
             request_id: req.request_id.clone(),
@@ -881,6 +881,10 @@ pub(crate) async fn process_draft_submission(
     }
 
     Json(serde_json::json!({ "ok": true, "detail": "draft queued" }))
+}
+
+fn should_route_long_context(token_count: usize, threshold: usize) -> bool {
+    token_count > threshold
 }
 
 fn spot_check_config_from_env() -> shard_verifier::verification::spot_check::SpotCheckConfig {
@@ -1924,7 +1928,8 @@ pub(crate) async fn register_bootstrap_handler(
 #[cfg(test)]
 mod tests {
     use super::{
-        push_scheduler_decision_log, require_scout_id, verify_spot_check_submission,
+        push_scheduler_decision_log, require_scout_id, should_route_long_context,
+        verify_spot_check_submission,
         DraftSpotCheckProof, ScoutWorkQuery,
     };
     use crate::SchedulerDecisionLog;
@@ -1994,5 +1999,12 @@ mod tests {
         assert_eq!(decisions.len(), 500);
         assert_eq!(decisions.front().map(|d| d.timestamp_ms), Some(20));
         assert_eq!(decisions.back().map(|d| d.timestamp_ms), Some(519));
+    }
+
+    #[test]
+    fn long_context_routing_threshold() {
+        assert!(!should_route_long_context(1024, 2048));
+        assert!(!should_route_long_context(2048, 2048));
+        assert!(should_route_long_context(2049, 2048));
     }
 }
