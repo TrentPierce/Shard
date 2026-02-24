@@ -36,3 +36,8 @@
 3. Drain failing nodes from scheduling path.
 4. Roll back release if SLO breach persists.
 5. Record timeline and corrective actions.
+
+## Runbooks
+- Incident response: `docs/runbooks/incident-response.md`
+- On-call: `docs/runbooks/on-call.md`
+- Latest tabletop outcome: `docs/runbooks/tabletop-2026-02-24.md`
