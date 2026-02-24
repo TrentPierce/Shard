@@ -18,10 +18,9 @@ AppUpdatesURL={#MyAppURL}
 DefaultDirName={autopf}\ShardNode
 DefaultGroupName={#MyAppName}
 AllowNoIcons=yes
-LicenseFile=..\LICENSE
-OutputDir=..\dist
+LicenseFile=..\..\LICENSE
+OutputDir=..\..\dist
 OutputBaseFilename=Shard_Setup_{#MyAppVersion}_windows_x64
-SetupIconFile=..\web\public\icon.ico
 Compression=lzma
 SolidCompression=yes
 WizardStyle=modern
@@ -37,7 +36,7 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 Name: "startup"; Description: "Run Shard Node at Windows startup"; GroupDescription: "Startup Options:"
 
 [Files]
-Source: "..\dist\ShardAI\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\..\dist\ShardAI\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "start-shard.bat"; DestDir: "{app}"; Flags: ignoreversion
 Source: "first-run.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "install.bat"; DestDir: "{app}"; Flags: ignoreversion
