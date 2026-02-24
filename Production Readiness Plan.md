@@ -212,3 +212,4 @@ Production Readiness Plan (Enterprise + Maintainability)
   - Mesh reliability hardening now includes reconnect/bootstrap-failure recovery test coverage.
   - In progress: Windows productization hardening (service and onboarding scripts improved; signing and GUI wizard remain follow-up items).
   - P1 progress: spot-check verifier path, persisted bootstrap registry, scheduler decision audit trail, and observability runbooks are now implemented.
+  - Release safety and model-upgrade readiness now include auto-update channels, release-manifest/signing standards, ADRs, and verifier-model compatibility abstraction.
