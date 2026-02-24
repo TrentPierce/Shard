@@ -122,3 +122,21 @@ def test_signed_envelope_contract() -> None:
     }
     validate(payload, schema)
 
+
+def test_release_manifest_contract() -> None:
+    schema = load_schema("release-manifest.schema.json")
+    payload = {
+        "version": "0.6.1",
+        "git_tag": "v0.6.1",
+        "git_commit": "abcdef1234567",
+        "artifacts": [
+            {
+                "path": "dist/shard-installer.exe",
+                "size_bytes": 123,
+                "sha256": "a" * 64,
+                "signature_path": "dist/shard-installer.exe.sig",
+                "signed": True,
+            }
+        ],
+    }
+    validate(payload, schema)

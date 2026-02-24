@@ -1,37 +1,64 @@
 #!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
 
-def sign_windows(file_path: Path):
-    print(f"Signing Windows executable: {file_path}")
-    # Placeholder for signtool integration
-    # subprocess.run(["signtool", "sign", "/a", "/tr", "http://timestamp.digicert.com", "/td", "sha256", "/fd", "sha256", str(file_path)], check=True)
-    print("Done (Simulated)")
 
-def sign_macos(file_path: Path):
-    print(f"Signing macOS binary: {file_path}")
-    # Placeholder for codesign integration
-    # subprocess.run(["codesign", "--force", "--options", "runtime", "--sign", "Developer ID Application", str(file_path)], check=True)
-    print("Done (Simulated)")
+def run(cmd: list[str], dry_run: bool) -> None:
+    print("$", " ".join(cmd))
+    if not dry_run:
+        subprocess.run(cmd, check=True)
 
-def notarize_macos(file_path: Path, bundle_id: str):
-    print(f"Notarizing macOS package: {file_path}")
-    # Placeholder for xcrun altool/notarytool
-    # subprocess.run(["xcrun", "notarytool", "submit", str(file_path), "--wait"], check=True)
-    print("Done (Simulated)")
+
+def sign_windows(path: Path, timestamp_url: str, dry_run: bool) -> None:
+    signtool = shutil.which("signtool")
+    if not signtool:
+        raise SystemExit("signtool not found in PATH")
+    run([signtool, "sign", "/fd", "SHA256", "/tr", timestamp_url, "/td", "SHA256", "/a", str(path)], dry_run)
+    run([signtool, "verify", "/pa", "/v", str(path)], dry_run)
+
+
+def sign_macos(path: Path, identity: str, dry_run: bool, notarize: bool) -> None:
+    if not shutil.which("codesign"):
+        raise SystemExit("codesign not found")
+    run(["codesign", "--force", "--options", "runtime", "--sign", identity, str(path)], dry_run)
+    if notarize:
+        if not shutil.which("xcrun"):
+            raise SystemExit("xcrun not found for notarization")
+        run(["xcrun", "notarytool", "submit", str(path), "--wait"], dry_run)
+
+
+def sign_linux(path: Path, dry_run: bool) -> None:
+    if not shutil.which("gpg"):
+        raise SystemExit("gpg not found")
+    run(["gpg", "--batch", "--yes", "--armor", "--detach-sign", str(path)], dry_run)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Sign Shard release artifacts")
+    parser.add_argument("artifact", help="Path to artifact")
+    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--timestamp-url", default="http://timestamp.digicert.com")
+    parser.add_argument("--macos-identity", default="Developer ID Application")
+    parser.add_argument("--notarize", action="store_true")
+    args = parser.parse_args()
+
+    path = Path(args.artifact)
+    if not path.exists() and not args.dry_run:
+        raise SystemExit(f"Artifact not found: {path}")
+
+    if os.name == "nt":
+        sign_windows(path, args.timestamp_url, args.dry_run)
+    elif sys.platform == "darwin":
+        sign_macos(path, args.macos_identity, args.dry_run, args.notarize)
+    else:
+        sign_linux(path, args.dry_run)
+
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        print("Usage: sign_release.py <path_to_binary> [--notarize <bundle_id>]")
-        sys.exit(1)
-    
-    path = Path(sys.argv[1])
-    if os.name == "nt":
-        sign_windows(path)
-    elif sys.platform == "darwin":
-        sign_macos(path)
-        if "--notarize" in sys.argv:
-            idx = sys.argv.index("--notarize")
-            notarize_macos(path, sys.argv[idx+1])
+    main()

@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://shard.network/schemas/release-manifest.schema.json",
+  "title": "Shard Release Manifest",
+  "type": "object",
+  "required": ["version", "git_tag", "git_commit", "artifacts"],
+  "properties": {
+    "version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
+    "git_tag": { "type": "string" },
+    "git_commit": { "type": "string", "pattern": "^[0-9a-f]{7,40}$" },
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "size_bytes", "sha256", "signed"],
+        "properties": {
+          "path": { "type": "string" },
+          "size_bytes": { "type": "integer", "minimum": 0 },
+          "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "signature_path": { "type": ["string", "null"] },
+          "signed": { "type": "boolean" }
+        }
+      }
+    }
+  }
+}
+
