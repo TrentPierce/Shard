@@ -9,7 +9,9 @@
 // ─── Imports ───────────────────────────────────────────────────────────────
 
 import {
+    CreateMLCEngine,
     CreateWebWorkerMLCEngine,
+    type MLCEngineInterface,
     type WebWorkerMLCEngine,
     type InitProgressReport,
 } from "@mlc-ai/web-llm"
@@ -63,9 +65,18 @@ const DEFAULT_DRAFT_OPTIONS: DraftGenerationOptions = {
 
 // ─── State ─────────────────────────────────────────────────────────────────
 
-let engine: WebWorkerMLCEngine | null = null
+let engine: MLCEngineInterface | null = null
 let isLoading = false
 let currentModel: string = DRAFT_MODEL
+
+function isWorkerInitBug(error: unknown): boolean {
+    const msg = String((error as any)?.message ?? error ?? "").toLowerCase()
+    return (
+        msg.includes("failed to read the 'lost' property from 'gpudevice'") ||
+        msg.includes("illegal invocation") ||
+        msg.includes("ftvmffierrorsetraisedfromcstr")
+    )
+}
 
 // ─── Mobile Detection ─────────────────────────────────────────────────────────
 
@@ -236,20 +247,38 @@ export async function initWebLLM(
         const model = getModelForDevice()
         currentModel = model
 
-        // Initialize MLCEngine with the appropriate draft model using a background Web Worker
-        const worker = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' })
-        engine = await CreateWebWorkerMLCEngine(
-            worker,
-            model,
-            {
-                initProgressCallback: wrappedCallback,
-                logLevel: "INFO",
-            },
-            {
-                // Use a smaller context window for draft generation
-                context_window_size: 2048,
+        try {
+            // Preferred path: background worker engine.
+            const worker = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' })
+            engine = await CreateWebWorkerMLCEngine(
+                worker,
+                model,
+                {
+                    initProgressCallback: wrappedCallback,
+                    logLevel: "INFO",
+                },
+                {
+                    // Use a smaller context window for draft generation
+                    context_window_size: 2048,
+                }
+            )
+        } catch (workerError: any) {
+            if (!isWorkerInitBug(workerError)) {
+                throw workerError
             }
-        )
+            console.warn("[WebLLM] Worker init failed; retrying in direct-engine mode", workerError)
+            // Fallback path for Windows Chrome WebGPU binding issues.
+            engine = await CreateMLCEngine(
+                model,
+                {
+                    initProgressCallback: wrappedCallback,
+                    logLevel: "INFO",
+                },
+                {
+                    context_window_size: 2048,
+                }
+            )
+        }
 
         isLoading = false
     } catch (error: any) {

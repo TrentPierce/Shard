@@ -44,7 +44,10 @@ const AppContext = createContext<AppContextType | undefined>(undefined)
 function normalizeScoutInitError(error: unknown): string {
     const raw = String((error as any)?.message ?? error ?? "Unknown initialization error")
     if (raw.includes("FTVMFFIErrorSetRaisedFromCStr")) {
-        return "WebLLM runtime is not compatible with this browser build. Use latest Chrome or Edge with hardware acceleration enabled."
+        return "WebLLM runtime failed to initialize on this browser/GPU combination. Update GPU drivers and Chrome/Edge, then retry Scout mode."
+    }
+    if (raw.includes("Failed to read the 'lost' property from 'GPUDevice'") || raw.includes("Illegal invocation")) {
+        return "WebGPU initialization hit a known Windows browser runtime bug. Update browser + GPU driver and retry; fallback mode was attempted automatically."
     }
     if (raw.includes("WebGPU not available")) {
         return raw
