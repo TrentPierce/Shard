@@ -296,11 +296,11 @@ Execution Backlog (Epics, Tickets, Acceptance Criteria, Sequencing)
   - P1-T6: `Done` (timeout/cooldown and long-context fallback policy tests added)
   - P1-T8: `Done` (bootstrap registry persisted and queryable via `/v1/system/bootstrap`)
   - P1-T9: `Done` (scheduler decisions now logged with auditable inputs via `/v1/system/scheduler-decisions`)
-  - P1-T12: `Pending`
+  - P1-T12: `Done` (replay/nonce/signature abuse tests expanded in `shard-common` and daemon replay tests; CI-covered via rust test job)
   - P1-T15: `Done` (stable/canary auto-update channel + rollback-safe updater implemented)
-  - P1-T16: `Pending`
-  - P1-T17: `Pending`
-  - P1-T18: `Pending`
+  - P1-T16: `Done` (single canonical scout work/draft path consolidated in `web/src/lib/scout-draft.ts`; duplicate browser scout path removed)
+  - P1-T17: `Done` (browser capability profiling now drives explicit contribution status/reason in app context and start page UX; telemetry event emitted)
+  - P1-T18: `Done` (scout submission queue discipline, bounded retries/backoff, timeout controls, and resilient polling retries implemented + tested)
   - P1-T21: `Done` (release manifest generation/verification and artifact signing workflow standardized)
   - P1-T23: `Done` (Prometheus alert rules + Grafana panel hardening with runbook mapping)
   - P1-T24: `Done` (incident/on-call runbooks and tabletop drill outcomes documented)
