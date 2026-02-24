@@ -43,3 +43,4 @@
 - Incident response: `docs/runbooks/incident-response.md`
 - On-call: `docs/runbooks/on-call.md`
 - Latest tabletop outcome: `docs/runbooks/tabletop-2026-02-24.md`
+- Benchmark proof protocol: `benchmarks/README.md`

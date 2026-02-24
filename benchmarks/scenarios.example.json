@@ -1,0 +1,19 @@
+{
+  "scenarios": [
+    {
+      "name": "single-node",
+      "node_count": 1,
+      "base_url": "http://127.0.0.1:19091"
+    },
+    {
+      "name": "three-node-mesh",
+      "node_count": 3,
+      "base_url": "http://127.0.0.1:19091"
+    },
+    {
+      "name": "five-node-mesh",
+      "node_count": 5,
+      "base_url": "http://127.0.0.1:19091"
+    }
+  ]
+}

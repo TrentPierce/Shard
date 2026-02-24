@@ -1,0 +1,49 @@
+name: Benchmark Proof
+
+on:
+  workflow_dispatch:
+    inputs:
+      scenarios_json:
+        description: "Scenarios JSON path"
+        required: true
+        default: "benchmarks/scenarios.example.json"
+      runs_per_scenario:
+        description: "Repeated runs per scenario"
+        required: true
+        default: "5"
+      requests_per_run:
+        description: "Requests per run"
+        required: true
+        default: "40"
+      concurrency:
+        description: "Client concurrency"
+        required: true
+        default: "8"
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r benchmarks/requirements.txt
+
+      - name: Run benchmark
+        run: |
+          python benchmarks/mesh_scale_benchmark.py \
+            --scenarios-json "${{ github.event.inputs.scenarios_json }}" \
+            --runs-per-scenario "${{ github.event.inputs.runs_per_scenario }}" \
+            --requests-per-run "${{ github.event.inputs.requests_per_run }}" \
+            --concurrency "${{ github.event.inputs.concurrency }}"
+
+      - name: Upload benchmark artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-artifacts
+          path: benchmarks/results/mesh-scale-*/

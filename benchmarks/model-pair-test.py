@@ -3,7 +3,11 @@
 Model Pair Compatibility Test
 
 Tests compatibility between draft and verifier models for speculative decoding.
-Calculates acceptance rate and speedup vs baseline.
+
+WARNING: This script uses synthetic/randomized acceptance simulation and is NOT
+valid for production or investor benchmarking claims. Use:
+  - benchmarks/mesh_scale_benchmark.py
+  - benchmarks/run_pipeline_scale.py
 """
 
 import argparse
@@ -147,6 +151,13 @@ def main():
     )
     
     args = parser.parse_args()
+
+    if not args.allow_synthetic:
+        print(
+            "Refusing to run synthetic benchmark without --allow-synthetic.\n"
+            "Use benchmarks/mesh_scale_benchmark.py for real measured results."
+        )
+        sys.exit(2)
     
     result = run_compatibility_test(
         args.draft,
@@ -178,3 +189,8 @@ def main():
 
 if __name__ == "__main__":
     main()
+    parser.add_argument(
+        "--allow-synthetic",
+        action="store_true",
+        help="Required acknowledgment: this script is synthetic and non-production.",
+    )

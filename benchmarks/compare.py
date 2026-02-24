@@ -4,6 +4,11 @@ Shard Benchmark Comparison Script
 
 Compares performance between OpenAI API and local Shard network.
 Measures: time-to-first-token, total latency, tokens/second.
+
+WARNING: This script includes estimated cost assumptions and should not be used
+as the sole source for investor claims. For production-grade evidence use:
+  - benchmarks/mesh_scale_benchmark.py
+  - benchmarks/run_pipeline_scale.py
 """
 
 import argparse
@@ -351,7 +356,20 @@ def main():
     parser.add_argument("--shard-url", "-s", default="http://localhost:9091", help="Shard daemon URL")
     parser.add_argument("--output", "-o", default="benchmarks/results_latest.json", help="Output file")
     parser.add_argument("--skip-openai", action="store_true", help="Skip OpenAI benchmarks")
+    parser.add_argument(
+        "--allow-estimated-cost",
+        action="store_true",
+        help="Required acknowledgment: this script uses estimated cost assumptions.",
+    )
     args = parser.parse_args()
+
+    if not args.allow_estimated_cost:
+        print(
+            "Refusing to run without --allow-estimated-cost because this script "
+            "contains estimated cost assumptions. Use mesh_scale_benchmark.py "
+            "for investor-safe measured benchmarking."
+        )
+        sys.exit(2)
     
     api_key = args.openai_key or os.environ.get("OPENAI_API_KEY")
     

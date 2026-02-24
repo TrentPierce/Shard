@@ -77,6 +77,11 @@ Shard is built on a high-integrity libp2p mesh:
 
 [**Read the Architecture Guide**](docs/architecture.md) | [**API Documentation**](docs/api.md) | [**Contributing Guide**](docs/contributing.md)
 
+## Benchmarking and Proof
+
+For investor-safe, reproducible performance evidence (raw artifacts + confidence intervals), use:
+- [Benchmarking Guide](benchmarks/README.md)
+
 ---
 
 <div align="center">
