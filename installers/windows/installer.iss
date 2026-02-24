@@ -2,7 +2,7 @@
 ; Download Inno Setup: https://jrsoftware.org/isinfo.php
 
 #define MyAppName "Shard Node"
-#define MyAppVersion "0.4.2"
+#define MyAppVersion "0.6.1"
 #define MyAppPublisher "Shard Project"
 #define MyAppURL "https://github.com/TrentPierce/Shard"
 #define MyAppExeName "ShardAI.exe"
@@ -38,6 +38,9 @@ Name: "startup"; Description: "Run Shard Node at Windows startup"; GroupDescript
 
 [Files]
 Source: "..\dist\ShardAI\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "start-shard.bat"; DestDir: "{app}"; Flags: ignoreversion
+Source: "first-run.ps1"; DestDir: "{app}"; Flags: ignoreversion
+Source: "install.bat"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
@@ -49,6 +52,7 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: de
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "ShardNode"; ValueData: """{app}\{#MyAppExeName}"" --background"; Flags: uninsdeletevalue; Tasks: startup
 
 [Run]
+Filename: "{app}\install.bat"; Parameters: "/S"; Flags: runhidden
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
 
 [Code]
