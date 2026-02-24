@@ -33,6 +33,7 @@
 - Sign Windows installers with `installers/windows/sign-installer.ps1`.
 - Requires `signtool.exe` and an installed signing certificate.
 - Verification is performed after signing (`signtool verify /pa`).
+- Release workflow enforces signing secrets for Windows `release` events and verifies Authenticode signatures on produced `.exe` artifacts.
 
 ## Windows Auto-Update Channels
 - Updater script: `installers/windows/update.ps1`
@@ -42,3 +43,13 @@
   - `canary`
 - Installer creates scheduled task `ShardAutoUpdate` by default.
 - Rollback: updater snapshots current install under `%ProgramData%\Shard\rollback` and restores on failed update.
+
+## Windows First-Run Onboarding
+- Script: `installers/windows/first-run.ps1`
+- Installer behavior:
+  - interactive install runs GUI onboarding wizard
+  - silent install runs non-interactive onboarding (`/S /NOGUI`)
+- Manual flags:
+  - `install.bat /DOWNLOADMODEL` to force model acquisition
+  - `install.bat /NOGUI` to force console onboarding
+  - `install.bat /NOONBOARD` to skip onboarding

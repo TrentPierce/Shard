@@ -54,7 +54,8 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: de
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "ShardNode"; ValueData: """{app}\{#MyAppExeName}"" --background"; Flags: uninsdeletevalue; Tasks: startup
 
 [Run]
-Filename: "{app}\install.bat"; Parameters: "/S"; Flags: runhidden
+Filename: "{app}\install.bat"; Parameters: "/S /NOGUI"; Flags: runhidden skipifnotsilent
+Filename: "{app}\install.bat"; Flags: waituntilterminated skipifsilent
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
 
 [Code]

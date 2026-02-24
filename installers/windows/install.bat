@@ -14,15 +14,19 @@ set "UNINSTALL=0"
 set "DOWNLOAD_MODEL=0"
 set "AUTOUPDATE=1"
 set "UPDATE_CHANNEL=stable"
+set "ONBOARD_GUI=1"
 set "BACKUP_DIR=%ProgramData%\Shard\rollback\%VERSION%"
 
-if /I "%~1"=="/S" set "SILENT=1"
-if /I "%~1"=="/NOSERVICE" set "INSTALL_SERVICE=0"
-if /I "%~1"=="/NOONBOARD" set "RUN_ONBOARDING=0"
-if /I "%~1"=="/UNINSTALL" set "UNINSTALL=1"
-if /I "%~1"=="/DOWNLOADMODEL" set "DOWNLOAD_MODEL=1"
-if /I "%~1"=="/NOAUTOUPDATE" set "AUTOUPDATE=0"
-if /I "%~1"=="/CANARY" set "UPDATE_CHANNEL=canary"
+for %%A in (%*) do (
+    if /I "%%~A"=="/S" set "SILENT=1"
+    if /I "%%~A"=="/NOSERVICE" set "INSTALL_SERVICE=0"
+    if /I "%%~A"=="/NOONBOARD" set "RUN_ONBOARDING=0"
+    if /I "%%~A"=="/UNINSTALL" set "UNINSTALL=1"
+    if /I "%%~A"=="/DOWNLOADMODEL" set "DOWNLOAD_MODEL=1"
+    if /I "%%~A"=="/NOAUTOUPDATE" set "AUTOUPDATE=0"
+    if /I "%%~A"=="/CANARY" set "UPDATE_CHANNEL=canary"
+    if /I "%%~A"=="/NOGUI" set "ONBOARD_GUI=0"
+)
 
 echo ============================================
 echo   Shard Node Installer
@@ -94,6 +98,7 @@ if "%RUN_ONBOARDING%"=="1" if exist "%INSTALL_DIR%\first-run.ps1" (
     set "ONBOARD_FLAGS="
     if "%SILENT%"=="1" set "ONBOARD_FLAGS=!ONBOARD_FLAGS! -NonInteractive"
     if "%DOWNLOAD_MODEL%"=="1" set "ONBOARD_FLAGS=!ONBOARD_FLAGS! -DownloadModelIfMissing"
+    if "%SILENT%"=="0" if "%ONBOARD_GUI%"=="1" set "ONBOARD_FLAGS=!ONBOARD_FLAGS! -Gui"
     if "%SILENT%"=="1" (
         powershell -ExecutionPolicy Bypass -File "%INSTALL_DIR%\first-run.ps1" -InstallDir "%INSTALL_DIR%" !ONBOARD_FLAGS!
     ) else (
