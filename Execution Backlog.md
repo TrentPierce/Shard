@@ -306,3 +306,8 @@ Execution Backlog (Epics, Tickets, Acceptance Criteria, Sequencing)
   - P1-T24: `Done` (incident/on-call runbooks and tabletop drill outcomes documented)
   - P1-T27: `Done` (ADR index and accepted protocol/security/scheduler records added)
   - P1-T28: `Done` (verifier model abstraction + compatibility checks exposed in runtime health)
+
+  ## 8. P2 Status (2026-02-24)
+
+  - P2-T29: `Done` (canary verifier rollout controller added with request traffic-splitting, runtime status endpoint, and auto-rollback on latency/quality threshold regressions)
+  - P2-T30: `Done` (published draft/verifier compatibility matrix and enforced compatibility checks in scheduler/chat and layer scheduling paths)

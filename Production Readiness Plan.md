@@ -216,3 +216,5 @@ Production Readiness Plan (Enterprise + Maintainability)
   - Security abuse coverage expanded: replay/nonce/signature tamper tests now explicitly exercise negative cases in Rust unit suites.
   - Scout web hardening completed: duplicate scout runtime path removed, canonical draft/work path consolidated, and contribution-state UX + telemetry added.
   - Scout reliability guardrails completed: bounded queueing, timeout-aware retries, and resilient work polling backoff are active in the browser scout runtime.
+  - Model rollout framework completed: canary traffic splitting with auto-rollback thresholds and operational reset endpoint now active in daemon runtime.
+  - Compatibility governance completed: published draft/verifier matrix is now enforced by scheduler compatibility checks and surfaced in upgrade docs.
