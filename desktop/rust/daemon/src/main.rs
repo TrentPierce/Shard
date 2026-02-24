@@ -1364,6 +1364,12 @@ fn extract_peer_id_from_multiaddr(addr: &Multiaddr) -> Option<PeerId> {
     None
 }
 
+fn peer_id_from_addr_str(addr: &str) -> Option<String> {
+    addr.parse::<Multiaddr>()
+        .ok()
+        .and_then(|multiaddr| extract_peer_id_from_multiaddr(&multiaddr).map(|peer| peer.to_string()))
+}
+
 fn should_attempt_reconnect(
     addr: &Multiaddr,
     local_peer_id: &PeerId,
@@ -2387,7 +2393,11 @@ async fn main() -> Result<()> {
     // ── bootstrap peers ──
     for addr_str in &bootstrap_addrs {
         if let Ok(addr) = addr_str.parse::<Multiaddr>() {
-            tracing::info!(%addr, "dialing bootstrap peer");
+            if let Some(peer_id) = extract_peer_id_from_multiaddr(&addr) {
+                tracing::info!(%peer_id, "dialing bootstrap peer");
+            } else {
+                tracing::info!("dialing bootstrap peer");
+            }
             let _ = swarm.dial(addr.clone());
             if let Some(peer_id) = extract_peer_id_from_multiaddr(&addr) {
                 swarm.behaviour_mut().kad.add_address(&peer_id, addr);
@@ -2702,9 +2712,13 @@ async fn main() -> Result<()> {
                     if let Ok(addr) = addr_str.parse::<Multiaddr>() {
                         if should_attempt_reconnect(&addr, &local_peer_id, &connected) {
                             if let Err(err) = swarm.dial(addr.clone()) {
-                                tracing::debug!(%addr, %err, "reconnect dial skipped/failed");
+                                let peer_ref = peer_id_from_addr_str(&addr_str)
+                                    .unwrap_or_else(|| "<unknown>".to_string());
+                                tracing::debug!(peer_id = %peer_ref, %err, "reconnect dial skipped/failed");
                             } else {
-                                tracing::info!(%addr, "reconnect dial attempted for disconnected peer");
+                                let peer_ref = peer_id_from_addr_str(&addr_str)
+                                    .unwrap_or_else(|| "<unknown>".to_string());
+                                tracing::info!(peer_id = %peer_ref, "reconnect dial attempted for disconnected peer");
                             }
                         }
                     }
@@ -3495,7 +3509,7 @@ async fn main() -> Result<()> {
                             identify::Event::Received { peer_id, info, .. } => {
                                 tracing::info!(%peer_id, protocol_version = %info.protocol_version, "identify info received");
                                 let observed_addr = info.observed_addr;
-                                tracing::info!(%peer_id, ?observed_addr, "observed address");
+                                tracing::debug!(%peer_id, "observed address received");
                                 let mut topo = state.topology.lock().await;
                                 // Update with observed public address if behind NAT
                                 if topo.public_api_addr.is_none() && !observed_addr.to_string().starts_with("/ip4/127.0.0.1") && !observed_addr.to_string().starts_with("/ip6/::1") {
@@ -3519,7 +3533,7 @@ async fn main() -> Result<()> {
                                                 }
                                                 let p2p_circuit_addr = full_relay_addr.with(libp2p::multiaddr::Protocol::P2pCircuit);
 
-                                                tracing::info!(%peer_id, "Found relay server, attempting reservation: {}", p2p_circuit_addr);
+                                                tracing::info!(%peer_id, "found relay server; attempting reservation");
                                                 let _ = swarm.listen_on(p2p_circuit_addr);
                                             }
                                         }
@@ -3550,7 +3564,7 @@ async fn main() -> Result<()> {
                         match event {
                             libp2p::mdns::Event::Discovered(list) => {
                                 for (peer_id, multiaddr) in list {
-                                    tracing::info!(%peer_id, %multiaddr, "mDNS discovered peer");
+                                    tracing::info!(%peer_id, "mDNS discovered peer");
                                     swarm.behaviour_mut().kad.add_address(&peer_id, multiaddr);
                                 }
                             }
@@ -3612,7 +3626,7 @@ async fn main() -> Result<()> {
                             continue;
                         }
 
-                        tracing::info!(%peer_id, ?endpoint, "peer connected");
+                        tracing::info!(%peer_id, "peer connected");
                         let remote_addr = endpoint.get_remote_address().to_string();
 
                         {
@@ -3653,7 +3667,8 @@ async fn main() -> Result<()> {
                     }
 
                     SwarmEvent::OutgoingConnectionError { peer_id, error, .. } => {
-                        tracing::warn!(?peer_id, %error, "outgoing connection error");
+                        tracing::warn!(?peer_id, "outgoing connection error");
+                        tracing::debug!(?peer_id, %error, "outgoing connection error details");
 
                         // Track bootstrap peer failures
                         if let Some(peer_id) = peer_id {
@@ -3679,7 +3694,7 @@ async fn main() -> Result<()> {
 mod tests {
     use super::{
         accept_replay_nonce, filter_bootstrap_addrs, is_non_public_bootstrap_addr,
-        load_bootstrap_registry, node_is_healthy, record_bootstrap_failure,
+        load_bootstrap_registry, node_is_healthy, peer_id_from_addr_str, record_bootstrap_failure,
         save_bootstrap_registry, should_attempt_reconnect, should_reject_peer_connection,
         unique_addrs, validate_work_request, BootstrapRegistryEntry, CanaryRolloutConfig,
         CanaryRolloutController, LatencyHistogram, ScoutPenaltyBook, ScoutPenaltyUpdate,
@@ -3975,6 +3990,14 @@ mod tests {
         assert!(removed);
         assert!(known.is_empty());
         assert!(!failures.contains_key(&peer.to_string()));
+    }
+
+    #[test]
+    fn peer_id_parser_extracts_peer_from_multiaddr_string() {
+        let peer = PeerId::random();
+        let addr = format!("/ip4/127.0.0.1/tcp/4001/p2p/{peer}");
+        assert_eq!(peer_id_from_addr_str(&addr), Some(peer.to_string()));
+        assert_eq!(peer_id_from_addr_str("/ip4/127.0.0.1/tcp/4001"), None);
     }
 
     #[test]
