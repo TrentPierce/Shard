@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState } from "react"
-import { apiUrl } from "@/lib/config"
+import { canUseLocalDaemonFallback, localDaemonUrl } from "@/lib/runtime"
 
 type Contributor = {
   id: string
@@ -24,45 +24,39 @@ type SwarmTelemetrySnapshot = {
 }
 
 async function fetchRealTelemetry(): Promise<SwarmTelemetrySnapshot> {
-  const localBase = "http://127.0.0.1:9091"
-
-  // Fetch both proxied backend data and local daemon data.
-  const [healthRes, peersRes, topoRes, localHealthRes, localPeersRes, localTopoRes] = await Promise.allSettled([
-    fetch("/api/health", { cache: "no-store" }),
-    fetch("/api/v1/system/peers", { cache: "no-store" }),
-    fetch("/api/v1/system/topology", { cache: "no-store" }),
-    fetch(`${localBase}/health`, { cache: "no-store" }),
-    fetch(`${localBase}/v1/system/peers`, { cache: "no-store" }),
-    fetch(`${localBase}/v1/system/topology`, { cache: "no-store" }),
-  ])
-
-  // Helper to extract JSON from fulfilled results
-  const getJson = async (result: PromiseSettledResult<Response>) => {
-    if (result.status === 'fulfilled' && result.value.ok) {
-      try {
-        return await result.value.json()
-      } catch {
-        return null
-      }
+  const fetchJson = async (url: string): Promise<any | null> => {
+    try {
+      const res = await fetch(url, { cache: "no-store" })
+      if (!res.ok) return null
+      return await res.json()
+    } catch {
+      return null
     }
-    return null
   }
 
-  const [proxyHealth, proxyPeersData, proxyTopo, localHealth, localPeersData, localTopo] = await Promise.all([
-    getJson(healthRes),
-    getJson(peersRes),
-    getJson(topoRes),
-    getJson(localHealthRes),
-    getJson(localPeersRes),
-    getJson(localTopoRes),
+  const [proxyHealth, proxyPeersData, proxyTopo] = await Promise.all([
+    fetchJson("/api/health"),
+    fetchJson("/api/v1/system/peers"),
+    fetchJson("/api/v1/system/topology"),
   ])
 
-  // If none of the endpoints responded, we're truly offline
+  let localHealth: any | null = null
+  let localPeersData: any | null = null
+  let localTopo: any | null = null
+
+  if (canUseLocalDaemonFallback()) {
+    ;[localHealth, localPeersData, localTopo] = await Promise.all([
+      fetchJson(localDaemonUrl("/health")),
+      fetchJson(localDaemonUrl("/v1/system/peers")),
+      fetchJson(localDaemonUrl("/v1/system/topology")),
+    ])
+  }
+
   if (!proxyHealth && !proxyPeersData && !proxyTopo && !localHealth && !localPeersData && !localTopo) {
     throw new Error("All API endpoints unreachable")
   }
 
-  // Prefer local daemon data when available on the user's machine.
+  // Prefer local daemon data when explicitly available and safe.
   const health = localHealth ?? proxyHealth
   const peersData = localPeersData ?? proxyPeersData
   const topo = localTopo ?? proxyTopo

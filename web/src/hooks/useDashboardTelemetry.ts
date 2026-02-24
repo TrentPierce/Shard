@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useSwarmTelemetry } from "@/hooks/useSwarmTelemetry"
-import { createInitialTelemetry, tickTelemetry } from "@/lib/mockSwarmTelemetry"
 
 type DashboardTelemetry = {
   verifierNodes: number
@@ -14,24 +13,23 @@ type DashboardTelemetry = {
 
 export function useDashboardTelemetry(): DashboardTelemetry {
   const { telemetry, isConnected } = useSwarmTelemetry()
-  const [fallback, setFallback] = useState(() => createInitialTelemetry())
   const liveTotalRef = useRef(0)
+  const [lastKnownTps, setLastKnownTps] = useState(0)
 
   useEffect(() => {
-    const timer = setInterval(() => {
-      setFallback((current) => tickTelemetry(current))
-    }, 2500)
-
-    return () => clearInterval(timer)
-  }, [])
+    if (!isConnected) return
+    if (telemetry.throughputHistory.length < 1) return
+    const latest = telemetry.throughputHistory[telemetry.throughputHistory.length - 1]
+    setLastKnownTps(Math.max(1, Math.round(latest.tflops * 35)))
+  }, [isConnected, telemetry.throughputHistory])
 
   const tokensPerSecond = useMemo(() => {
-    if (telemetry.throughputHistory.length > 1) {
+    if (telemetry.throughputHistory.length > 0) {
       const latest = telemetry.throughputHistory[telemetry.throughputHistory.length - 1]
-      return Math.max(45, Math.round(latest.tflops * 35))
+      return Math.max(1, Math.round(latest.tflops * 35))
     }
-    return Math.round(fallback.globalTflops * 35)
-  }, [telemetry.throughputHistory, fallback.globalTflops])
+    return isConnected ? Math.max(1, Math.round(telemetry.globalTflops * 35)) : lastKnownTps
+  }, [isConnected, telemetry.globalTflops, telemetry.throughputHistory, lastKnownTps])
 
   const totalTokensGenerated = useMemo(() => {
     const liveTotal = telemetry.contributors.reduce((acc, item) => acc + item.tokensProcessed, 0)
@@ -41,15 +39,14 @@ export function useDashboardTelemetry(): DashboardTelemetry {
       return liveTotal
     }
 
-    const fallbackTotal = fallback.contributors.reduce((acc, item) => acc + item.tokensProcessed, 0)
-    const base = liveTotalRef.current > 0 ? liveTotalRef.current : fallbackTotal
+    const base = liveTotalRef.current
 
-    return base + tokensPerSecond * 8
-  }, [telemetry.contributors, fallback.contributors, tokensPerSecond])
+    return base > 0 ? base + tokensPerSecond * 8 : 0
+  }, [telemetry.contributors, tokensPerSecond])
 
   return {
-    verifierNodes: telemetry.shardCount > 0 ? telemetry.shardCount : fallback.shardCount,
-    scouts: telemetry.scoutCount > 0 ? telemetry.scoutCount : fallback.scoutCount,
+    verifierNodes: telemetry.shardCount,
+    scouts: telemetry.scoutCount,
     tokensPerSecond,
     totalTokensGenerated,
     isLive: isConnected,

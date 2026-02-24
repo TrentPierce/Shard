@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 
 const navItems = [
   { href: "/", label: "Dashboard" },
@@ -13,6 +13,10 @@ const navItems = [
 export function SiteNav() {
   const pathname = usePathname()
   const [open, setOpen] = useState(false)
+
+  useEffect(() => {
+    setOpen(false)
+  }, [pathname])
 
   return (
     <header className="sticky top-0 z-40 border-b border-ring bg-base-900/90 backdrop-blur">
@@ -48,17 +52,18 @@ export function SiteNav() {
         <button
           type="button"
           className="inline-flex h-11 w-11 items-center justify-center rounded-lg border border-ring text-ink-100 md:hidden"
+          aria-controls="mobile-nav"
           aria-expanded={open}
           aria-label="Toggle menu"
           onClick={() => setOpen((prev) => !prev)}
         >
           <span className="sr-only">Menu</span>
-          <span className="text-lg leading-none">{open ? "x" : "="}</span>
+          <span aria-hidden="true" className="text-lg leading-none">{open ? "\u2715" : "\u2630"}</span>
         </button>
       </div>
 
       {open ? (
-        <nav className="border-t border-ring px-4 py-3 md:hidden" aria-label="Mobile">
+        <nav id="mobile-nav" className="border-t border-ring px-4 py-3 md:hidden" aria-label="Mobile menu">
           <div className="flex flex-col gap-2">
             {navItems.map((item) => (
               <Link

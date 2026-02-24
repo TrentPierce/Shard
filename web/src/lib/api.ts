@@ -8,6 +8,7 @@
 import { apiUrl } from "./config"
 import { generateDraftTokens, isWebLLMReady } from "./webllm"
 import { submitDraft } from "./scout-draft"
+import { canUseLocalDaemonFallback, localDaemonUrl } from "./runtime"
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -26,26 +27,56 @@ export interface ChatCompletionRequest {
 }
 
 const API_KEY = process.env.NEXT_PUBLIC_SHARD_API_KEY?.trim() || ""
-const LOCAL_DAEMON_BASE = process.env.NEXT_PUBLIC_LOCAL_DAEMON_URL?.trim() || "http://127.0.0.1:9091"
 
 function authHeaders(): Record<string, string> {
     return API_KEY ? { "Authorization": `Bearer ${API_KEY}` } : {}
 }
 
-function localDaemonUrl(path: string): string {
-    const cleanPath = path.startsWith("/") ? path : `/${path}`
-    return `${LOCAL_DAEMON_BASE.replace(/\/$/, "")}${cleanPath}`
-}
-
 async function fetchWithLocalFallback(path: string, init: RequestInit): Promise<Response> {
     const primary = apiUrl(path)
+    let primaryError: unknown = null
     try {
         const res = await fetch(primary, init)
-        if (res.ok) return res
+        if (res.ok || !canUseLocalDaemonFallback()) return res
     } catch {
-        // fall through to local daemon
+        primaryError = new Error(`Primary API fetch failed for ${path}`)
     }
+
+    if (!canUseLocalDaemonFallback()) {
+        if (primaryError) throw primaryError
+        throw new Error(`Primary API failed and local fallback disabled for ${path}`)
+    }
+
     return fetch(localDaemonUrl(path), init)
+}
+
+async function sendMessageNonStreaming(
+    history: ChatMessage[],
+    onToken: (token: string) => void
+): Promise<void> {
+    const body: ChatCompletionRequest = {
+        model: "shard-hybrid",
+        messages: history.map((m) => ({ role: m.role, content: m.content })),
+        stream: false,
+        max_tokens: 256,
+    }
+
+    const res = await fetchWithLocalFallback("/v1/chat/completions", {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            ...authHeaders(),
+        },
+        body: JSON.stringify(body),
+    })
+
+    if (!res.ok) {
+        throw new Error(`API error: ${res.status} ${res.statusText}`)
+    }
+
+    const data = await res.json()
+    const content = data?.choices?.[0]?.message?.content ?? ""
+    if (content) onToken(content)
 }
 
 // Generate a unique work ID for scout draft tracking
@@ -158,7 +189,16 @@ export async function sendMessage(
 
     const reader = res.body?.getReader()
     if (!reader) {
-        throw new Error("ReadableStream not supported")
+        await sendMessageNonStreaming(history, onToken)
+        if (typeof window !== "undefined") {
+            window.dispatchEvent(
+                new CustomEvent("shard:chat-success", {
+                    detail: { latencyMs: Math.round(performance.now() - startedAt) },
+                })
+            )
+        }
+        onDone()
+        return
     }
 
     const decoder = new TextDecoder()

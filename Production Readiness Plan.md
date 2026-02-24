@@ -218,3 +218,4 @@ Production Readiness Plan (Enterprise + Maintainability)
   - Scout reliability guardrails completed: bounded queueing, timeout-aware retries, and resilient work polling backoff are active in the browser scout runtime.
   - Model rollout framework completed: canary traffic splitting with auto-rollback thresholds and operational reset endpoint now active in daemon runtime.
   - Compatibility governance completed: published draft/verifier matrix is now enforced by scheduler compatibility checks and surfaced in upgrade docs.
+  - Web production UX hotfix completed: hosted mobile clients now avoid unsafe localhost fallback paths, chat degrades to non-stream completions when SSE streams are unavailable, and telemetry dashboards show backend truth instead of synthetic simulation defaults.
