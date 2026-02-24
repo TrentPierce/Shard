@@ -1,7 +1,10 @@
 # Deployment
 
 ## Required Environment Variables
-- `SHARD_BACKEND_URL` / `NEXT_PUBLIC_SHARD_BACKEND_URL`
+- `SHARD_BACKEND_URLS` / `NEXT_PUBLIC_SHARD_BACKEND_URLS` (comma/newline/space separated backend list for HA)
+- `SHARD_BACKEND_URL` / `NEXT_PUBLIC_SHARD_BACKEND_URL` (single backend fallback)
+- `SHARD_FALLBACK_URLS` (optional failover list for chat and API proxy)
+- `SHARD_FALLBACK_URL` (single fallback backend)
 - `SHARD_REQUIRE_API_KEY` (`true|false`)
 - `SHARD_API_KEYS` (comma-separated)
 - `SHARD_ADMIN_KEY` (admin API key management endpoint)
@@ -20,6 +23,11 @@
 - Daemon: `desktop/rust/daemon`
 - Web app: `web`
 - Monitoring: `deploy/monitoring/prometheus`, `deploy/monitoring/grafana`
+
+## HA Baseline
+- Run at least two publicly reachable shard daemon backends.
+- Configure both in `SHARD_BACKEND_URLS` so the web API proxy can fail over automatically.
+- Do not rely on a single bootstrap or a single public telemetry endpoint.
 
 ## Health Checks
 - Daemon health: `GET /health`

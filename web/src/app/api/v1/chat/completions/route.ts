@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
-import { forwardRequestHeaders, shardBackendUrl } from "@/lib/server/shard-backend"
+import {
+  forwardRequestHeaders,
+  shardBackendUrls,
+} from "@/lib/server/shard-backend"
 
 export const dynamic = "force-dynamic"
 
@@ -13,54 +16,73 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
-  const primaryUrl = shardBackendUrl("/v1/chat/completions", false)
-  const fallbackUrl = shardBackendUrl("/v1/chat/completions", true)
+  const primaryCandidates = shardBackendUrls("/v1/chat/completions", false)
+  const fallbackCandidates = shardBackendUrls("/v1/chat/completions", true)
+  const allCandidates = Array.from(new Set([...primaryCandidates, ...fallbackCandidates]))
 
   try {
     const bodyText = await request.text()
     const headers = forwardRequestHeaders()
-
-    // 1. Start the primary request
-    const primaryController = new AbortController()
-    const primaryPromise = fetch(primaryUrl, {
-      method: "POST",
-      headers,
-      body: bodyText,
-      signal: primaryController.signal,
-      cache: "no-store",
-    })
-
-    // 2. Race the primary against a timeout
-    const timeoutPromise = new Promise<null>((resolve) => 
-      setTimeout(() => resolve(null), TTFT_TIMEOUT_MS)
-    )
-
-    let primaryRes: Response | null = null
-    try {
-      primaryRes = await Promise.race([primaryPromise, timeoutPromise])
-    } catch (e) {
-      console.error("[Enterprise Guard] Primary fetch exception:", e)
-      primaryRes = null
-    }
-
-    let response: Response
+    const attempts: string[] = []
     let usedFallback = false
+    let response: Response | null = null
+    let backendUsed: string | null = null
 
-    if (primaryRes === null || !primaryRes.ok) {
-      // Primary timed out or failed immediately - trigger fallback
-      console.log(`[Enterprise Guard] Primary stalled or failed (status: ${primaryRes?.status}). Routing to fallback: ${fallbackUrl}`)
-      usedFallback = true
-      primaryController.abort() // Cancel primary if it's still hanging
-      
-      response = await fetch(fallbackUrl, {
+    for (let i = 0; i < allCandidates.length; i += 1) {
+      const candidate = allCandidates[i]
+      attempts.push(candidate)
+      const isFallbackCandidate = !primaryCandidates.includes(candidate)
+
+      const controller = new AbortController()
+      const candidateRequest = fetch(candidate, {
         method: "POST",
         headers,
         body: bodyText,
-        signal: AbortSignal.timeout(60000),
+        signal: controller.signal,
         cache: "no-store",
       })
-    } else {
-      response = primaryRes
+
+      const timeoutMs = isFallbackCandidate ? 60000 : TTFT_TIMEOUT_MS
+      const timeoutPromise = new Promise<null>((resolve) =>
+        setTimeout(() => resolve(null), timeoutMs),
+      )
+
+      let candidateResponse: Response | null = null
+      try {
+        candidateResponse = await Promise.race([candidateRequest, timeoutPromise])
+      } catch (error) {
+        console.error("[Enterprise Guard] Candidate fetch exception:", candidate, error)
+        candidateResponse = null
+      }
+
+      if (candidateResponse === null) {
+        controller.abort()
+        continue
+      }
+
+      if (candidateResponse.ok) {
+        response = candidateResponse
+        backendUsed = candidate
+        usedFallback = isFallbackCandidate
+        break
+      }
+
+      if (candidateResponse.status < 500) {
+        response = candidateResponse
+        backendUsed = candidate
+        usedFallback = isFallbackCandidate
+        break
+      }
+    }
+
+    if (!response || !backendUsed) {
+      return NextResponse.json(
+        {
+          error: "Chat completion failed after failover attempts",
+          backend_attempts: attempts,
+        },
+        { status: 502 },
+      )
     }
 
     if (response.body) {
@@ -71,13 +93,17 @@ export async function POST(request: NextRequest) {
           "Cache-Control": "no-cache",
           Connection: "keep-alive",
           "X-Shard-Fallback": usedFallback ? "true" : "false",
+          "X-Shard-Backend": backendUsed,
           "Access-Control-Allow-Origin": "*",
         },
       })
     }
 
     const data = await response.json()
-    return NextResponse.json(data, { status: response.status })
+    return NextResponse.json(
+      { ...data, backend: backendUsed, backend_attempts: attempts, fallback_used: usedFallback },
+      { status: response.status },
+    )
   } catch (error) {
     return NextResponse.json(
       {
