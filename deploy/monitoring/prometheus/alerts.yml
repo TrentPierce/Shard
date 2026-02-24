@@ -1,0 +1,47 @@
+groups:
+  - name: shard-slo-alerts
+    rules:
+      - alert: ShardHighTaskFailureRate
+        expr: increase(shard_task_failures_total[5m]) > 20
+        for: 5m
+        labels:
+          severity: page
+          team: shard-sre
+        annotations:
+          summary: "Shard task failure rate is elevated"
+          description: "More than 20 task failures in 5 minutes."
+          runbook_url: "https://github.com/TrentPierce/Shard/blob/main/docs/operations.md"
+
+      - alert: ShardHighP95Latency
+        expr: shard_e2e_request_latency_p95_ms > 2500
+        for: 10m
+        labels:
+          severity: page
+          team: shard-sre
+        annotations:
+          summary: "Shard p95 latency SLO breached"
+          description: "End-to-end p95 latency exceeded 2500ms for 10 minutes."
+          runbook_url: "https://github.com/TrentPierce/Shard/blob/main/docs/operations.md"
+
+      - alert: ShardSpeculativeAcceptanceDrop
+        expr: shard_speculative_acceptance_rate < 0.60
+        for: 10m
+        labels:
+          severity: warn
+          team: shard-sre
+        annotations:
+          summary: "Speculative acceptance rate dropped below SLO"
+          description: "Speculative acceptance rate has remained below 0.60."
+          runbook_url: "https://github.com/TrentPierce/Shard/blob/main/docs/operations.md"
+
+      - alert: ShardPowFailureSpike
+        expr: increase(shard_pow_challenges_failed_total[10m]) > 30
+        for: 5m
+        labels:
+          severity: warn
+          team: shard-security
+        annotations:
+          summary: "PoW verification failures spiking"
+          description: "PoW failures exceeded 30 over 10 minutes."
+          runbook_url: "https://github.com/TrentPierce/Shard/blob/main/docs/security.md"
+

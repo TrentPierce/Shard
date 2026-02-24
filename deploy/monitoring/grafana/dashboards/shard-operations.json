@@ -7,37 +7,74 @@
   "panels": [
     {
       "type": "timeseries",
-      "title": "Chat Requests / min",
+      "title": "Tokens Processed / min",
+      "description": "Runbook: https://github.com/TrentPierce/Shard/blob/main/docs/operations.md",
       "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
-      "targets": [{"expr": "increase(shard_chat_requests_total[1m])", "refId": "A"}],
-      "fieldConfig": {"defaults": {"unit": "reqpm"}, "overrides": []}
+      "targets": [{"expr": "increase(shard_tokens_processed_total[1m])", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []}
     },
     {
       "type": "timeseries",
-      "title": "Inference Failures / min",
+      "title": "Task Failures / min",
+      "description": "Runbook: https://github.com/TrentPierce/Shard/blob/main/docs/operations.md",
       "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
-      "targets": [{"expr": "increase(shard_chat_failures_total[1m])", "refId": "A"}],
-      "fieldConfig": {"defaults": {"unit": "reqpm"}, "overrides": []}
+      "targets": [{"expr": "increase(shard_task_failures_total[1m])", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []}
     },
     {
-      "type": "stat",
-      "title": "Auth Failures (5m)",
+      "type": "timeseries",
+      "title": "Node Latency (ms)",
+      "description": "SLO target p95 < 2500ms",
       "gridPos": {"h": 8, "w": 8, "x": 0, "y": 8},
-      "targets": [{"expr": "increase(shard_auth_failures_total[5m])", "refId": "A"}],
-      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []}
+      "targets": [{"expr": "shard_node_latency_ms", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "ms"}, "overrides": []}
     },
     {
-      "type": "stat",
-      "title": "Rate Limited (5m)",
+      "type": "timeseries",
+      "title": "Queue Depth",
+      "description": "Runbook: https://github.com/TrentPierce/Shard/blob/main/docs/operations.md",
       "gridPos": {"h": 8, "w": 8, "x": 8, "y": 8},
-      "targets": [{"expr": "increase(shard_rate_limited_total[5m])", "refId": "A"}],
+      "targets": [{"expr": "shard_queue_depth", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []}
+    },
+    {
+      "type": "timeseries",
+      "title": "Speculative Acceptance Rate",
+      "description": "SLO target >= 0.60",
+      "gridPos": {"h": 8, "w": 8, "x": 16, "y": 8},
+      "targets": [{"expr": "shard_speculative_acceptance_rate", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0, "max": 1}, "overrides": []}
+    },
+    {
+      "type": "stat",
+      "title": "PoW Failures (10m)",
+      "description": "Runbook: https://github.com/TrentPierce/Shard/blob/main/docs/security.md",
+      "gridPos": {"h": 6, "w": 6, "x": 0, "y": 16},
+      "targets": [{"expr": "increase(shard_pow_challenges_failed_total[10m])", "refId": "A"}],
       "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []}
     },
     {
       "type": "stat",
-      "title": "Golden Tickets Failed (1h)",
-      "gridPos": {"h": 8, "w": 8, "x": 16, "y": 8},
-      "targets": [{"expr": "increase(shard_golden_tickets_failed_total[1h])", "refId": "A"}],
+      "title": "Auth Failures (10m)",
+      "description": "Runbook: https://github.com/TrentPierce/Shard/blob/main/docs/security.md",
+      "gridPos": {"h": 6, "w": 6, "x": 6, "y": 16},
+      "targets": [{"expr": "increase(shard_node_identity_auth_failures_total[10m])", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []}
+    },
+    {
+      "type": "stat",
+      "title": "Signature Failures (10m)",
+      "description": "Runbook: https://github.com/TrentPierce/Shard/blob/main/docs/security.md",
+      "gridPos": {"h": 6, "w": 6, "x": 12, "y": 16},
+      "targets": [{"expr": "increase(shard_signature_verification_failures_total[10m])", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []}
+    },
+    {
+      "type": "stat",
+      "title": "Fallbacks (10m)",
+      "description": "Runbook: https://github.com/TrentPierce/Shard/blob/main/docs/operations.md",
+      "gridPos": {"h": 6, "w": 6, "x": 18, "y": 16},
+      "targets": [{"expr": "increase(shard_verification_fallback_total[10m])", "refId": "A"}],
       "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []}
     }
   ],
@@ -46,10 +83,10 @@
   "style": "dark",
   "tags": ["shard", "production"],
   "templating": {"list": []},
-  "time": {"from": "now-15m", "to": "now"},
+  "time": {"from": "now-30m", "to": "now"},
   "timepicker": {},
   "timezone": "browser",
   "title": "Shard Operations",
   "uid": "shard-ops",
-  "version": 1
+  "version": 2
 }
