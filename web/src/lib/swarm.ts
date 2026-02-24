@@ -9,6 +9,7 @@
 
 import { apiUrl } from "./config"
 import { getActiveEngine, generateDrafts } from "./scout-engine"
+import { getScoutId, pollForWork, submitDraft } from "./scout-draft"
 
 // Re-export P2P functions for convenience
 export {
@@ -229,7 +230,7 @@ export async function handleScoutWork(work: WorkRequest): Promise<ScoutSubmissio
             }
         }
 
-        const scoutId = generateScoutId()
+        const scoutId = getScoutId()
 
         const result: WorkResult = {
             work_id: work.request_id,
@@ -255,25 +256,15 @@ export async function handleScoutWork(work: WorkRequest): Promise<ScoutSubmissio
  */
 async function submitDraftResult(result: WorkResult): Promise<ScoutSubmissionResult> {
     try {
-        const res = await fetch(apiUrl("/v1/scout/draft"), {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-            },
-            body: JSON.stringify(result),
+        const response = await submitDraft(result.work_id, result.draft_text, {
+            timeoutMs: 1000,
+            maxRetries: 2,
+            retryBackoffMs: 250,
+            maxQueueDepth: 16,
         })
-
-        if (!res.ok) {
-            return {
-                success: false,
-                detail: `API submission failed (${res.status})`,
-            }
-        }
-
-        const data = await res.json()
         return {
-            success: true,
-            detail: data?.detail || "Draft submitted successfully",
+            success: response.ok,
+            detail: response.detail || (response.ok ? "Draft submitted successfully" : "Draft submission failed"),
         }
     } catch (error: any) {
         return {
@@ -284,50 +275,28 @@ async function submitDraftResult(result: WorkResult): Promise<ScoutSubmissionRes
 }
 
 /**
- * Generate a unique scout identifier.
- */
-function generateScoutId(): string {
-    if (typeof window === "undefined") {
-        return `scout_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`
-    }
-
-    const key = "shard-scout-id"
-    const existing = localStorage.getItem(key)
-    if (existing) return existing
-
-    const created = `scout_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`
-    localStorage.setItem(key, created)
-    return created
-}
-
-/**
  * Request work from the API.
  */
 export async function requestWork(): Promise<WorkRequest | null> {
     try {
-        const res = await fetch(apiUrl("/v1/scout/work"), {
-            method: "GET",
+        const polled = await pollForWork(getScoutId(), {
+            pollTimeoutMs: 1500,
+            pollRetries: 2,
+            pollRetryBackoffMs: 300,
         })
-
-        if (res.status === 204 || res.status === 404) {
+        if (!polled.work) {
+            if (polled.transient_error) {
+                console.warn("Transient scout polling failure:", polled.detail)
+            }
             return null
         }
-
-        if (!res.ok) {
-            const text = await res.text()
-            if (text.includes("null")) return null
-            throw new Error(`Work request failed (${res.status})`)
-        }
-
-        const data = await res.json()
-        if (!data || !data.work) return null
         
         // Transform backend response to local type
         return {
-            request_id: data.work.request_id,
-            prompt_context: data.work.prompt_context,
-            min_tokens: data.work.min_tokens,
-            created_at_ms: data.work.created_at_ms
+            request_id: polled.work.request_id,
+            prompt_context: polled.work.prompt_context ?? polled.work.prompt ?? "",
+            min_tokens: polled.work.min_tokens ?? polled.work.max_tokens ?? 4,
+            created_at_ms: polled.work.created_at_ms
         }
     } catch (error: any) {
         console.error("Failed to request work:", error)
@@ -342,17 +311,50 @@ export async function startScoutWorker(
     onRequest?: (work: WorkRequest) => void,
     onResult?: (result: ScoutSubmissionResult) => void
 ): Promise<() => void> {
-    const pollInterval = 2000 
+    const pollIntervalMs = 2000
+    const maxBackoffMs = 10000
+    let stopped = false
+    let timer: ReturnType<typeof setTimeout> | null = null
+    let inFlight = false
+    let consecutiveFailures = 0
 
-    const poll = async () => {
-        const work = await requestWork()
-        if (work) {
-            onRequest?.(work)
-            const result = await handleScoutWork(work)
-            onResult?.(result)
+    const schedule = (delayMs: number) => {
+        if (stopped) return
+        timer = setTimeout(runOnce, delayMs)
+    }
+
+    const runOnce = async () => {
+        if (stopped || inFlight) {
+            schedule(pollIntervalMs)
+            return
+        }
+        inFlight = true
+        try {
+            const work = await requestWork()
+            if (work) {
+                onRequest?.(work)
+                const result = await handleScoutWork(work)
+                onResult?.(result)
+                if (!result.success) {
+                    consecutiveFailures += 1
+                } else {
+                    consecutiveFailures = 0
+                }
+            } else {
+                consecutiveFailures = 0
+            }
+        } finally {
+            inFlight = false
+            const backoff = consecutiveFailures > 0
+                ? Math.min(maxBackoffMs, pollIntervalMs * Math.pow(2, consecutiveFailures))
+                : pollIntervalMs
+            schedule(backoff)
         }
     }
 
-    const intervalId = setInterval(poll, pollInterval)
-    return () => clearInterval(intervalId)
+    schedule(0)
+    return () => {
+        stopped = true
+        if (timer) clearTimeout(timer)
+    }
 }

@@ -1,13 +1,4 @@
-/**
- * Scout Draft Service
- * 
- * Handles draft token generation and submission to the Shard verifier.
- * Part of the speculative decoding loop.
- */
-
 import { apiUrl } from "./config"
-
-// ─── Types ──────────────────────────────────────────────────────────────────
 
 export interface DraftSubmission {
   work_id: string
@@ -19,6 +10,8 @@ export interface DraftSubmission {
 export interface DraftResponse {
   ok: boolean
   detail?: string
+  status?: number
+  retried?: number
 }
 
 export interface ScoutConfig {
@@ -26,30 +19,54 @@ export interface ScoutConfig {
   temperature: number
   topP: number
   timeoutMs: number
+  maxRetries: number
+  retryBackoffMs: number
+  maxQueueDepth: number
+  pollTimeoutMs: number
+  pollRetries: number
+  pollRetryBackoffMs: number
 }
 
 const DEFAULT_CONFIG: ScoutConfig = {
   maxDraftTokens: 4,
   temperature: 0.8,
   topP: 0.9,
-  timeoutMs: 800, // Default timeout for verifier response
+  timeoutMs: 800,
+  maxRetries: 2,
+  retryBackoffMs: 250,
+  maxQueueDepth: 16,
+  pollTimeoutMs: 1500,
+  pollRetries: 2,
+  pollRetryBackoffMs: 300,
 }
 
-// ─── State ──────────────────────────────────────────────────────────────────
+const SCOUT_ID_KEY = "shard_scout_id"
 
 let scoutId: string | null = null
 let isSubmitting = false
+let activeSubmissionAbort: AbortController | null = null
 
-// ─── Helpers ──────────────────────────────────────────────────────────────
+type QueueItem = {
+  submission: DraftSubmission
+  cfg: ScoutConfig
+  resolve: (value: DraftResponse) => void
+}
 
-function getScoutId(): string {
+const submissionQueue: QueueItem[] = []
+const queuedWorkIds = new Set<string>()
+let processingQueue = false
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+export function getScoutId(): string {
   if (!scoutId) {
-    // Try to get existing ID from localStorage
     if (typeof window !== "undefined") {
-      scoutId = localStorage.getItem("shard_scout_id")
+      scoutId = localStorage.getItem(SCOUT_ID_KEY)
       if (!scoutId) {
         scoutId = `scout_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`
-        localStorage.setItem("shard_scout_id", scoutId)
+        localStorage.setItem(SCOUT_ID_KEY, scoutId)
       }
     } else {
       scoutId = `scout_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`
@@ -58,36 +75,21 @@ function getScoutId(): string {
   return scoutId
 }
 
-// ─── Draft Submission API ────────────────────────────────────────────────
+function shouldRetrySubmission(result: DraftResponse): boolean {
+  if (result.ok) return false
+  if ((result.status ?? 0) >= 500) return true
+  const detail = (result.detail ?? "").toLowerCase()
+  return detail.includes("timeout") || detail.includes("network") || detail.includes("failed to fetch")
+}
 
-/**
- * Submit draft tokens to the verifier for speculative decoding.
- * 
- * @param workId - Unique ID for this work item (matches the request)
- * @param draftText - The draft tokens as a space-separated string
- * @param config - Optional configuration overrides
- * @returns Promise with the verifier's response
- */
-export async function submitDraft(
-  workId: string,
-  draftText: string,
-  config: Partial<ScoutConfig> = {}
+async function submitDraftOnce(
+  submission: DraftSubmission,
+  cfg: ScoutConfig
 ): Promise<DraftResponse> {
-  const cfg = { ...DEFAULT_CONFIG, ...config }
-  const submission: DraftSubmission = {
-    work_id: workId,
-    scout_id: getScoutId(),
-    draft_text: draftText,
-    timestamp: Date.now() / 1000, // Unix timestamp in seconds
-  }
-
-  // Create abort controller for timeout
   const controller = new AbortController()
+  activeSubmissionAbort = controller
   const timeoutId = setTimeout(() => controller.abort(), cfg.timeoutMs)
-
   try {
-    isSubmitting = true
-    
     const response = await fetch(apiUrl("/v1/scout/draft"), {
       method: "POST",
       headers: {
@@ -96,7 +98,6 @@ export async function submitDraft(
       body: JSON.stringify(submission),
       signal: controller.signal,
     })
-
     clearTimeout(timeoutId)
 
     if (!response.ok) {
@@ -104,93 +105,182 @@ export async function submitDraft(
       return {
         ok: false,
         detail: error.detail || `HTTP ${response.status}`,
+        status: response.status,
       }
     }
 
-    const result = await response.json()
-    isSubmitting = false
-    return result
+    const result = (await response.json()) as DraftResponse
+    return {
+      ...result,
+      status: response.status,
+    }
   } catch (error) {
     clearTimeout(timeoutId)
-    isSubmitting = false
-    
-    if (error instanceof Error) {
-      if (error.name === "AbortError") {
-        return {
-          ok: false,
-          detail: `Timeout: verifier did not respond within ${cfg.timeoutMs}ms`,
-        }
-      }
+    if (error instanceof Error && error.name === "AbortError") {
       return {
         ok: false,
-        detail: error.message,
+        detail: `Timeout: verifier did not respond within ${cfg.timeoutMs}ms`,
       }
     }
-    
     return {
       ok: false,
-      detail: "Unknown error submitting draft",
+      detail: error instanceof Error ? error.message : "Unknown error submitting draft",
     }
+  } finally {
+    activeSubmissionAbort = null
   }
 }
 
-/**
- * Check if the scout is currently submitting a draft.
- */
+async function submitWithRetry(
+  submission: DraftSubmission,
+  cfg: ScoutConfig
+): Promise<DraftResponse> {
+  let attempt = 0
+  while (attempt <= cfg.maxRetries) {
+    const result = await submitDraftOnce(submission, cfg)
+    if (result.ok) {
+      return {
+        ...result,
+        retried: attempt,
+      }
+    }
+    if (attempt >= cfg.maxRetries || !shouldRetrySubmission(result)) {
+      return {
+        ...result,
+        retried: attempt,
+      }
+    }
+    await sleep(cfg.retryBackoffMs * (attempt + 1))
+    attempt += 1
+  }
+  return { ok: false, detail: "Draft submission retry budget exhausted", retried: cfg.maxRetries }
+}
+
+async function processSubmissionQueue(): Promise<void> {
+  if (processingQueue) return
+  processingQueue = true
+  while (submissionQueue.length > 0) {
+    const next = submissionQueue.shift()
+    if (!next) continue
+    isSubmitting = true
+    const response = await submitWithRetry(next.submission, next.cfg)
+    isSubmitting = false
+    queuedWorkIds.delete(next.submission.work_id)
+    next.resolve(response)
+  }
+  processingQueue = false
+}
+
+export async function submitDraft(
+  workId: string,
+  draftText: string,
+  config: Partial<ScoutConfig> = {}
+): Promise<DraftResponse> {
+  const cfg = { ...DEFAULT_CONFIG, ...config }
+  if (!workId.trim()) {
+    return { ok: false, detail: "work_id is required" }
+  }
+  if (!draftText.trim()) {
+    return { ok: false, detail: "draft_text is required" }
+  }
+  if (queuedWorkIds.has(workId)) {
+    return { ok: false, detail: "Duplicate work_id already queued" }
+  }
+  if (submissionQueue.length >= cfg.maxQueueDepth) {
+    return { ok: false, detail: "Draft submission queue is full" }
+  }
+
+  const submission: DraftSubmission = {
+    work_id: workId,
+    scout_id: getScoutId(),
+    draft_text: draftText,
+    timestamp: Date.now() / 1000,
+  }
+
+  queuedWorkIds.add(workId)
+
+  return new Promise<DraftResponse>((resolve) => {
+    submissionQueue.push({ submission, cfg, resolve })
+    void processSubmissionQueue()
+  })
+}
+
 export function isDraftSubmitting(): boolean {
-  return isSubmitting
+  return isSubmitting || processingQueue
 }
 
-/**
- * Cancel any in-progress draft submission.
- * Note: This uses a best-effort approach since the request may already be complete.
- */
 export function cancelDraftSubmission(): void {
+  activeSubmissionAbort?.abort()
+  activeSubmissionAbort = null
+  for (const queued of submissionQueue) {
+    queued.resolve({ ok: false, detail: "Cancelled" })
+    queuedWorkIds.delete(queued.submission.work_id)
+  }
+  submissionQueue.length = 0
   isSubmitting = false
-  // The actual abort would need to be handled by the caller
-  // passing a signal to submitDraft (future enhancement)
+  processingQueue = false
 }
-
-// ─── Work Polling API ────────────────────────────────────────────────────
 
 export interface WorkItem {
   work: {
     request_id: string
-    prompt: string
-    max_tokens: number
+    prompt?: string
+    prompt_context?: string
+    max_tokens?: number
+    min_tokens?: number
+    created_at_ms?: number
   } | null
+  transient_error?: boolean
+  detail?: string
 }
 
-/**
- * Poll for available work from the verifier.
- * Called periodically by the scout to check if there's pending work.
- * 
- * @param scoutId - The scout's unique identifier
- * @returns WorkItem if work is available, null otherwise
- */
-export async function pollForWork(scoutId: string): Promise<WorkItem> {
-  try {
-    const response = await fetch(
-      apiUrl(`/v1/scout/work?scout_id=${encodeURIComponent(scoutId)}`),
-      {
-        method: "GET",
-        headers: {
-          "Content-Type": "application/json",
-        },
+export async function pollForWork(
+  scoutIdValue: string,
+  config: Partial<ScoutConfig> = {}
+): Promise<WorkItem> {
+  const cfg = { ...DEFAULT_CONFIG, ...config }
+  let attempt = 0
+  while (attempt <= cfg.pollRetries) {
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), cfg.pollTimeoutMs)
+    try {
+      const response = await fetch(
+        apiUrl(`/v1/scout/work?scout_id=${encodeURIComponent(scoutIdValue)}`),
+        {
+          method: "GET",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          signal: controller.signal,
+        }
+      )
+      clearTimeout(timeoutId)
+      if (!response.ok) {
+        if (response.status >= 500 && attempt < cfg.pollRetries) {
+          await sleep(cfg.pollRetryBackoffMs * (attempt + 1))
+          attempt += 1
+          continue
+        }
+        return { work: null, detail: `HTTP ${response.status}` }
       }
-    )
-
-    if (!response.ok) {
-      return { work: null }
+      return (await response.json()) as WorkItem
+    } catch (error) {
+      clearTimeout(timeoutId)
+      if (attempt >= cfg.pollRetries) {
+        const detail =
+          error instanceof Error && error.name === "AbortError"
+            ? `Timeout waiting for /v1/scout/work (${cfg.pollTimeoutMs}ms)`
+            : error instanceof Error
+              ? error.message
+              : "Unknown polling error"
+        return { work: null, transient_error: true, detail }
+      }
+      await sleep(cfg.pollRetryBackoffMs * (attempt + 1))
+      attempt += 1
     }
-
-    return await response.json()
-  } catch {
-    return { work: null }
   }
+  return { work: null, transient_error: true, detail: "Polling retry budget exhausted" }
 }
-
-// ─── Draft Generation + Submission Combined ───────────────────────────────
 
 export interface DraftResult {
   success: boolean
@@ -200,30 +290,14 @@ export interface DraftResult {
   error?: string
 }
 
-/**
- * Complete flow: generate draft tokens and submit to verifier.
- * 
- * This combines the WebLLM draft generation with submission to the verifier.
- * Used by the chat flow when in distributed inference mode.
- * 
- * @param prompt - The prompt to generate drafts for
- * @param workId - Unique work identifier
- * @param generateDraftFn - Function to generate draft tokens (from WebLLM)
- * @param config - Optional configuration
- * @returns DraftResult with success status and details
- */
 export async function generateAndSubmitDraft(
   prompt: string,
   workId: string,
   generateDraftFn: (prompt: string) => Promise<string[]>,
   config: Partial<ScoutConfig> = {}
 ): Promise<DraftResult> {
-  const cfg = { ...DEFAULT_CONFIG, ...config }
-
   try {
-    // Step 1: Generate draft tokens using WebLLM
     const tokens = await generateDraftFn(prompt)
-    
     if (tokens.length === 0) {
       return {
         success: false,
@@ -234,10 +308,7 @@ export async function generateAndSubmitDraft(
       }
     }
 
-    // Step 2: Join tokens into draft text (space-separated)
     const draftText = tokens.join(" ")
-
-    // Step 3: Submit to verifier
     const response = await submitDraft(workId, draftText, config)
 
     return {

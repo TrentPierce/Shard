@@ -3,6 +3,7 @@
 ## Components
 - `desktop/rust/daemon`: control plane, verifier runtime, mesh networking, and ingress APIs.
 - `web`: browser scout UI, contribution runtime, and proxy API routes.
+- Canonical browser scout runtime path: `web/src/lib/scout-draft.ts` (work polling + draft submission).
 - `sdk/python` and `sdk/node`: OpenAI-compatible clients.
 - `installers`: platform-specific packaging and onboarding scripts.
 
