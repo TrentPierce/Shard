@@ -209,4 +209,5 @@ Production Readiness Plan (Enterprise + Maintainability)
   - Completed foundations: protocol schemas, contract tests, auth/PoW runtime enforcement, and version-governance CI checks.
   - Completed docs baseline: architecture, API, deployment, security, operations, contributing, versioning, model-upgrade strategy.
   - Completed runtime consistency work: distributed/speculative header contract and surfaced version in web runtime outputs.
-  - In progress: Windows productization hardening (code paths present; signing and GUI wizard remain as follow-up items).
+  - Mesh reliability hardening now includes reconnect/bootstrap-failure recovery test coverage.
+  - In progress: Windows productization hardening (service and onboarding scripts improved; signing and GUI wizard remain follow-up items).
