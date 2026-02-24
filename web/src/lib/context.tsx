@@ -41,6 +41,17 @@ interface AppContextType {
 
 const AppContext = createContext<AppContextType | undefined>(undefined)
 
+function normalizeScoutInitError(error: unknown): string {
+    const raw = String((error as any)?.message ?? error ?? "Unknown initialization error")
+    if (raw.includes("FTVMFFIErrorSetRaisedFromCStr")) {
+        return "WebLLM runtime is not compatible with this browser build. Use latest Chrome or Edge with hardware acceleration enabled."
+    }
+    if (raw.includes("WebGPU not available")) {
+        return raw
+    }
+    return `Failed to initialize Scout runtime: ${raw}`
+}
+
 export function AppProvider({ children }: { children: React.ReactNode }) {
     const [mode, setMode] = useState<NodeMode>("loading")
     const [webLLMProgress, setWebLLMProgress] = useState<ModelProgress | null>(null)
@@ -157,7 +168,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                     return
                 }
 
-                await initWebLLM((progress) => setWebLLMProgress(progress))
+                try {
+                    await initWebLLM((progress) => setWebLLMProgress(progress))
+                } catch (error: any) {
+                    const reason = normalizeScoutInitError(error)
+                    setWebLLMError(reason)
+                    setMode("leech")
+                    setContributionStatusState(
+                        setContributionStatus("not_contributing", reason, capability.capability)
+                    )
+                    return
+                }
                 setWebLLMProgress(null)
                 setWebLLMError(null)
                 setMode("scout")
@@ -197,12 +218,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                     console.error(e)
                 }
             } catch (error: any) {
-                setWebLLMError(error?.message ?? "Failed to initialize Scout")
+                const reason = normalizeScoutInitError(error)
+                setWebLLMError(reason)
                 setMode("leech")
                 setContributionStatusState(
                     setContributionStatus(
                         "degraded",
-                        error?.message ?? "Failed to initialize Scout"
+                        reason
                     )
                 )
             }

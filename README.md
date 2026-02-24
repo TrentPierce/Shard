@@ -46,7 +46,7 @@ Download the [Shard Desktop App](https://github.com/TrentPierce/Shard/releases/t
 *   **Background Mode**: Minimize to the system tray to contribute compute and earn credits silently.
 
 ### 2. Join as a Scout (Web Browser)
-Open the [Live Dashboard](https://shard-web-client.vercel.app/) in any Chrome or Edge browser. Your browser will automatically begin loading a lightweight WebGPU model and contributing compute.
+Open the [Live Dashboard](https://www.shardnetwork.live/) in latest Chrome or Edge with hardware acceleration enabled. Your browser will automatically begin loading a lightweight WebGPU model and contributing compute.
 
 ### 3. Developer Integration (Python SDK)
 Install the Shard SDK directly from PyPI:

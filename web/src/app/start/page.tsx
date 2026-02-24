@@ -20,16 +20,16 @@ const sections: Section[] = [
     body:
       "Download the Shard Desktop App for Windows or macOS. The README notes one-click setup with model download and background contribution mode.",
     codeLabel: "Open releases",
-    code: "start https://github.com/TrentPierce/Shard/releases/tag/v0.6.0",
+    code: "https://github.com/TrentPierce/Shard/releases/latest",
   },
   {
     id: "scout",
     title: "Become a Scout",
     summary: "Browser-based participation",
     body:
-      "Open the live dashboard in Chrome or Edge. The README specifies your browser will load a lightweight WebGPU model and begin contributing compute.",
+      "Open the live dashboard in latest Chrome or Edge with hardware acceleration enabled, then keep the tab open to contribute scout compute.",
     codeLabel: "Open dashboard",
-    code: "start https://shard-web-client.vercel.app/",
+    code: "https://www.shardnetwork.live/",
   },
   {
     id: "api",
