@@ -29,11 +29,12 @@
 - Release version comes only from root `VERSION`.
 - CI blocks merges on version mismatch (`python scripts/verify_versions.py`).
 
-## Windows Signing
-- Sign Windows installers with `installers/windows/sign-installer.ps1`.
-- Requires `signtool.exe` and an installed signing certificate.
-- Verification is performed after signing (`signtool verify /pa`).
-- Release workflow enforces signing secrets for Windows `release` events and verifies Authenticode signatures on produced `.exe` artifacts.
+## Windows Signing and Trust State
+- Windows releases support two trust states:
+  - `signed` (preferred): Sign installers with `installers/windows/sign-installer.ps1` using `signtool.exe` and a trusted Authenticode certificate.
+  - `unsigned-supported` preview: Build and publish unsigned artifacts when no trusted cert is available; release output must include explicit unsigned preview disclosure.
+- Verification for signed artifacts is performed after signing (`signtool verify /pa`).
+- Release workflow signs Windows artifacts when `WIN_CODESIGN_CERT_BASE64` and `WIN_CODESIGN_CERT_PASSWORD` are present; otherwise it emits an unsigned preview marker file in release assets.
 
 ## Windows Auto-Update Channels
 - Updater script: `installers/windows/update.ps1`

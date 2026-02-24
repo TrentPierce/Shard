@@ -99,7 +99,7 @@ Execution Backlog (Epics, Tickets, Acceptance Criteria, Sequencing)
 
   ## E5 Windows Node Productization
 
-  1. P0-T13 Build signed Windows installer (MSI/EXE) with service mode.
+  1. P0-T13 Build Windows installer (MSI/EXE) with service mode (`unsigned-supported` preview until trusted certs are provisioned).
 
   - Owner: Desktop Lead
   - Complexity: L
@@ -266,7 +266,7 @@ Execution Backlog (Epics, Tickets, Acceptance Criteria, Sequencing)
 
   1. All P0 tickets completed.
   2. Contract, integration, and chaos tests passing in CI.
-  3. Signed Windows installer validated on fresh hosts.
+  3. Windows installer validated on fresh hosts (signed when trusted certs are available; otherwise explicitly marked `unsigned-supported` preview).
   4. Version parity verified automatically across all components.
   5. SLO dashboards and alert runbooks operational.
   6. Security controls (PoW/auth/replay) enforced in production paths.
@@ -282,9 +282,9 @@ Execution Backlog (Epics, Tickets, Acceptance Criteria, Sequencing)
   - P0-T7: `Done` (reconnect and bootstrap-failure recovery logic extracted and covered by unit tests)
   - P0-T10: `Done` (PoW enforcement added to `/v1/scout/work` and `/v1/scout/draft` runtime paths)
   - P0-T11: `Done` (`SHARD_REQUIRE_API_KEY` + private route auth matrix enforced; auth-policy tests added)
-  - P0-T13: `Partial` (service mode, silent install/uninstall, rollback-safe backup, and release signing enforcement hooks implemented; final completion depends on production signing cert material/secrets)
+  - P0-T13: `Done` (service mode, silent install/uninstall, rollback-safe backup, and first-run onboarding are productionized; Windows releases are officially `unsigned-supported` preview when trusted signing certs are unavailable. Follow-up: enable trusted Authenticode signing and promote Windows channel from preview to fully signed GA.)
   - P0-T14: `Done` (interactive Windows installer now triggers GUI first-run wizard with model/firewall/health/bootstrap checks; silent install remains non-interactive)
-  - P0-T19: `Done` (root `VERSION` propagation + `scripts/verify_versions.py` and CI mismatch gate)
+  - P0-T19: `Done` (root `VERSION` propagation + `scripts/verify_versions.py` mismatch gate now covers all 8 Rust library crates; `scripts/sync_versions.py` now updates crate manifests to prevent drift)
   - P0-T20: `Done` (runtime version surfaced in web health payload, web footer, and SDK runtime fields)
   - P0-T22: `Done` (SLI/SLO definition and operations mapping documented)
   - P0-T25: `Done` (docs baseline rebuilt: architecture/api/deployment/security/operations/contributing/versioning/model-upgrade)

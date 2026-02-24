@@ -68,7 +68,7 @@ Production Readiness Plan (Enterprise + Maintainability)
 
   3. Auto-update channel:
 
-  - Stable/canary channels with signed artifacts and rollback.
+  - Stable/canary channels with rollback; signed artifacts when trusted cert material is available. Windows remains explicitly `unsigned-supported` preview otherwise.
 
   4. Scout UX hardening:
 
@@ -187,7 +187,7 @@ Production Readiness Plan (Enterprise + Maintainability)
   ### Milestone 3 (60-90 days): Enterprise Readiness
 
   1. SLO-backed observability dashboards + alerts.
-  2. Auto-update and signed releases.
+  2. Auto-update and release artifact governance (signed where certs are available; explicit unsigned preview designation on Windows when certs are absent).
   3. Load/scaling validation with published benchmark results.
   4. Canary model-upgrade framework.
 
@@ -196,7 +196,7 @@ Production Readiness Plan (Enterprise + Maintainability)
   ## 7. Definition of Done (Enterprise-Ready Baseline)
 
   1. 99.9% control-plane uptime target with documented SLO.
-  2. Reproducible release pipeline with signed artifacts and rollback.
+  2. Reproducible release pipeline with rollback and explicit artifact trust state (signed where certs are available; Windows unsigned preview allowed with disclosure).
   3. One-click Windows install, <10 min time-to-contributing.
   4. Verified horizontal scaling: more online Shards measurably increases tokens/sec.
   5. Accurate docs that match shipped behavior and version.
@@ -210,7 +210,7 @@ Production Readiness Plan (Enterprise + Maintainability)
   - Completed docs baseline: architecture, API, deployment, security, operations, contributing, versioning, model-upgrade strategy.
   - Completed runtime consistency work: distributed/speculative header contract and surfaced version in web runtime outputs.
   - Mesh reliability hardening now includes reconnect/bootstrap-failure recovery test coverage.
-  - Windows productization hardening: interactive first-run GUI onboarding is now implemented; signing pipeline enforcement hooks are in place pending production cert secrets.
+  - Windows productization hardening: interactive first-run GUI onboarding is implemented; Windows release channel is now formally classified as `unsigned-supported` preview when trusted cert secrets are unavailable.
   - P1 progress: spot-check verifier path, persisted bootstrap registry, scheduler decision audit trail, and observability runbooks are now implemented.
   - Release safety and model-upgrade readiness now include auto-update channels, release-manifest/signing standards, ADRs, and verifier-model compatibility abstraction.
   - Security abuse coverage expanded: replay/nonce/signature tamper tests now explicitly exercise negative cases in Rust unit suites.

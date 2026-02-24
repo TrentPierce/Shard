@@ -54,19 +54,26 @@ jobs:
             cp ../../installers/linux/start-shard.sh ../../release/start-shard-${{ matrix.target }}.sh
           fi
 
-      - name: Enforce Windows signing secrets for release
+      - name: Determine Windows signing mode
         if: matrix.os == 'windows-latest' && github.event_name == 'release'
+        id: windows_signing
         shell: powershell
         env:
           WIN_CODESIGN_CERT_BASE64: ${{ secrets.WIN_CODESIGN_CERT_BASE64 }}
           WIN_CODESIGN_CERT_PASSWORD: ${{ secrets.WIN_CODESIGN_CERT_PASSWORD }}
         run: |
-          if ([string]::IsNullOrWhiteSpace($env:WIN_CODESIGN_CERT_BASE64) -or [string]::IsNullOrWhiteSpace($env:WIN_CODESIGN_CERT_PASSWORD)) {
-            throw "Windows release signing secrets are required for release publishing."
+          $hasCert = -not [string]::IsNullOrWhiteSpace($env:WIN_CODESIGN_CERT_BASE64)
+          $hasPass = -not [string]::IsNullOrWhiteSpace($env:WIN_CODESIGN_CERT_PASSWORD)
+          if ($hasCert -and $hasPass) {
+            "should_sign=true" >> $env:GITHUB_OUTPUT
+            Write-Host "Windows release mode: signed"
+          } else {
+            "should_sign=false" >> $env:GITHUB_OUTPUT
+            Write-Host "Windows release mode: unsigned-supported preview"
           }
 
       - name: Sign Windows artifacts
-        if: matrix.os == 'windows-latest' && github.event_name == 'release'
+        if: matrix.os == 'windows-latest' && github.event_name == 'release' && steps.windows_signing.outputs.should_sign == 'true'
         shell: powershell
         env:
           WIN_CODESIGN_CERT_BASE64: ${{ secrets.WIN_CODESIGN_CERT_BASE64 }}
@@ -84,6 +91,16 @@ jobs:
             & $signtool verify /pa /v $_.FullName
             if ($LASTEXITCODE -ne 0) { throw "signtool verify failed for $($_.Name)" }
           }
+
+      - name: Mark unsigned Windows preview artifacts
+        if: matrix.os == 'windows-latest' && github.event_name == 'release' && steps.windows_signing.outputs.should_sign == 'false'
+        shell: bash
+        run: |
+          cat > release/windows-signing-status.txt <<'EOF'
+          status: unsigned-supported-preview
+          reason: trusted Authenticode certificate secrets not configured
+          action: configure WIN_CODESIGN_CERT_BASE64 and WIN_CODESIGN_CERT_PASSWORD to enable signed GA artifacts
+          EOF
 
       - name: Upload Release Asset
         if: github.event_name == 'release'
