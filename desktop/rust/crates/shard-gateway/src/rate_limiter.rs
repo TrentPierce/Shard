@@ -210,21 +210,26 @@ impl RateLimiter {
 
     /// Check if request is allowed for the given API key and IP
     /// Returns Some(Ok) if allowed, Some(Err) if rate limited, None if no limit applies
-    pub fn check(&self, api_key: Option<&str>, ip: Option<&str>, contribution_balance: i64) -> RateLimitResult {
+    pub fn check(
+        &self,
+        api_key: Option<&str>,
+        ip: Option<&str>,
+        contribution_balance: i64,
+    ) -> RateLimitResult {
         // Check API key limit first (higher priority)
         if let Some(key) = api_key {
             let bucket = self.get_key_bucket(key);
-            
+
             // Scaled capacity based on contribution: base + (contribution / 10)
-            let scaled_capacity = if contribution_balance > 0 {
+            let _scaled_capacity = if contribution_balance > 0 {
                 self.config.default_limit + (contribution_balance as u64 / 10)
             } else {
                 self.config.default_limit
             };
-            
+
             // Adjust bucket capacity dynamically if needed (simple version)
             // In a real impl, we'd update the refill rate too.
-            
+
             if !bucket.try_consume() {
                 return RateLimitResult::RateLimited {
                     limit: bucket.capacity(),
@@ -391,12 +396,12 @@ mod tests {
         let limiter = RateLimitConfig::default().to_limiter();
 
         // First request should succeed
-        let result = limiter.check(Some("test-key"), None);
+        let result = limiter.check(Some("test-key"), None, 0);
         assert!(result.is_allowed());
 
         // Set as enterprise and recreate limiter
         limiter.register_key("enterprise-key", true);
-        let result2 = limiter.check(Some("enterprise-key"), None);
+        let result2 = limiter.check(Some("enterprise-key"), None, 0);
         assert!(result2.is_allowed());
     }
 
@@ -405,7 +410,7 @@ mod tests {
         let limiter = RateLimitConfig::default().to_limiter();
 
         // First IP request should succeed
-        let result = limiter.check(None, Some("192.168.1.1"));
+        let result = limiter.check(None, Some("192.168.1.1"), 0);
         assert!(result.is_allowed());
     }
 

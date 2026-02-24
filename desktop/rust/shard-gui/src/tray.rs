@@ -1,27 +1,24 @@
+use anyhow::Result;
 use tray_icon::{
     menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem},
     TrayIcon, TrayIconBuilder,
 };
-use muda::Menu as MudaMenu;
-use anyhow::Result;
 
 pub struct TrayManager {
-    tray_icon: Option<TrayIcon>,
-    pub menu_channel: tray_icon::menu::MenuEventReceiver,
+    _tray_icon: Option<TrayIcon>,
+    pub _menu_channel: tray_icon::menu::MenuEventReceiver,
 }
 
 impl TrayManager {
     pub fn new() -> Result<Self> {
         let tray_menu = Menu::new();
-        
+
         let show_item = MenuItem::new("Open Dashboard", true, None);
         let pause_item = MenuItem::new("Pause Node", true, None);
         let quit_item = MenuItem::new("Quit", true, None);
 
         let _show_id = show_item.id().clone();
         let _pause_id = pause_item.id().clone();
-        let quit_id = quit_item.id().clone();
-
         tray_menu.append_items(&[
             &show_item,
             &PredefinedMenuItem::separator(),
@@ -40,8 +37,8 @@ impl TrayManager {
 
         // Optionally, register IDs for handling
         Ok(Self {
-            tray_icon: Some(tray_icon),
-            menu_channel: MenuEvent::receiver().clone(),
+            _tray_icon: Some(tray_icon),
+            _menu_channel: MenuEvent::receiver().clone(),
         })
     }
 
@@ -49,6 +46,7 @@ impl TrayManager {
         // For now, return a blank/default icon or load a bytes resource
         // In a real app, we'd load a .ico or .png
         let (icon_rgba, icon_width, icon_height) = (vec![255_u8; 32 * 32 * 4], 32, 32);
-        tray_icon::Icon::from_rgba(icon_rgba, icon_width, icon_height).expect("Failed to create icon")
+        tray_icon::Icon::from_rgba(icon_rgba, icon_width, icon_height)
+            .expect("Failed to create icon")
     }
 }

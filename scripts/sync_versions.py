@@ -35,6 +35,21 @@ def sync_version(version: str) -> None:
         r'^version = "\d+\.\d+\.\d+"$',
         f'version = "{version}"',
     )
+    for crate in [
+        "shard-common",
+        "shard-crypto",
+        "shard-gateway",
+        "shard-ledger",
+        "shard-metrics",
+        "shard-network",
+        "shard-scheduler",
+        "shard-verifier",
+    ]:
+        replace_in_file(
+            ROOT / "desktop" / "rust" / "crates" / crate / "Cargo.toml",
+            r'^version = "\d+\.\d+\.\d+"$',
+            f'version = "{version}"',
+        )
     # Web Package
     replace_in_file(
         ROOT / "web" / "package.json",

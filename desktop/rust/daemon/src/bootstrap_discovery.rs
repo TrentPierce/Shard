@@ -30,23 +30,26 @@ pub struct BootstrapRegistration {
 /// Fetch bootstrap peers from a discovery URL
 pub async fn fetch_bootstrap_peers(url: &str) -> Result<Vec<BootstrapPeer>, String> {
     let client = reqwest::Client::new();
-    
+
     let response = client
         .get(url)
         .timeout(std::time::Duration::from_secs(10))
         .send()
         .await
         .map_err(|e| format!("Failed to fetch bootstrap peers: {}", e))?;
-    
+
     if !response.status().is_success() {
-        return Err(format!("Bootstrap endpoint returned status: {}", response.status()));
+        return Err(format!(
+            "Bootstrap endpoint returned status: {}",
+            response.status()
+        ));
     }
-    
+
     let peers: Vec<BootstrapPeer> = response
         .json()
         .await
         .map_err(|e| format!("Failed to parse bootstrap response: {}", e))?;
-    
+
     Ok(peers)
 }
 
@@ -56,7 +59,7 @@ pub async fn register_as_bootstrap(
     registration: &BootstrapRegistration,
 ) -> Result<(), String> {
     let client = reqwest::Client::new();
-    
+
     client
         .post(url)
         .json(registration)
@@ -64,6 +67,6 @@ pub async fn register_as_bootstrap(
         .send()
         .await
         .map_err(|e| format!("Failed to register as bootstrap: {}", e))?;
-    
+
     Ok(())
 }

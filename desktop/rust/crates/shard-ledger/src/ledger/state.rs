@@ -125,11 +125,11 @@ impl LedgerState {
                 receipts: Vec::new(),
             };
         }
-        
+
         // Very basic export for now
         let end_exclusive = (start + limit).min(self.tx_log.len());
         let txs = self.tx_log[start..end_exclusive].to_vec();
-        
+
         LedgerExport {
             from_height,
             end_height: end_exclusive as u64,
@@ -170,7 +170,10 @@ impl LedgerState {
     ) -> ProofOfComputeReceipt {
         let verifier_id = hex::encode(signing_key.verifying_key().to_bytes());
         let receipt_id = format!("poc-{}-{}", work_id, verifier_id);
-        let body = format!("poc|{}|{}|{}|{}|{}", receipt_id, work_id, scout_id, token_count, timestamp_ms);
+        let body = format!(
+            "poc|{}|{}|{}|{}|{}",
+            receipt_id, work_id, scout_id, token_count, timestamp_ms
+        );
         let sig = signing_key.sign(body.as_bytes());
         ProofOfComputeReceipt {
             receipt_id,
@@ -190,16 +193,33 @@ impl LedgerState {
 
         let pubkey_bytes = hex::decode(&receipt.verifier_id).map_err(|_| "invalid verifier id")?;
         let verifier_key = VerifyingKey::from_bytes(
-            pubkey_bytes.as_slice().try_into().map_err(|_| "invalid pubkey length")?
-        ).map_err(|_| "invalid verifier key")?;
-        
-        let sig_bytes = hex::decode(&receipt.verifier_signature_hex).map_err(|_| "invalid signature hex")?;
+            pubkey_bytes
+                .as_slice()
+                .try_into()
+                .map_err(|_| "invalid pubkey length")?,
+        )
+        .map_err(|_| "invalid verifier key")?;
+
+        let sig_bytes =
+            hex::decode(&receipt.verifier_signature_hex).map_err(|_| "invalid signature hex")?;
         let signature = Signature::from_bytes(
-            sig_bytes.as_slice().try_into().map_err(|_| "invalid signature length")?
+            sig_bytes
+                .as_slice()
+                .try_into()
+                .map_err(|_| "invalid signature length")?,
         );
 
-        let body = format!("poc|{}|{}|{}|{}|{}", receipt.receipt_id, receipt.work_id, receipt.scout_id, receipt.token_count, receipt.timestamp_ms);
-        verifier_key.verify(body.as_bytes(), &signature).map_err(|_| "PoC receipt signature invalid")?;
+        let body = format!(
+            "poc|{}|{}|{}|{}|{}",
+            receipt.receipt_id,
+            receipt.work_id,
+            receipt.scout_id,
+            receipt.token_count,
+            receipt.timestamp_ms
+        );
+        verifier_key
+            .verify(body.as_bytes(), &signature)
+            .map_err(|_| "PoC receipt signature invalid")?;
 
         *self.balances.entry(receipt.scout_id.clone()).or_insert(0) += receipt.token_count as i64;
         self.seen.insert(receipt.receipt_id.clone());
@@ -290,11 +310,23 @@ impl LedgerState {
         if tx.amount <= 0 {
             return Err("amount must be positive".into());
         }
-        let pubkey_bytes = hex::decode(&tx.signer_pubkey_hex).map_err(|_| "invalid signer pubkey hex")?;
-        let vk = VerifyingKey::from_bytes(pubkey_bytes.as_slice().try_into().map_err(|_| "invalid pubkey length")?).map_err(|_| "invalid verifying key")?;
+        let pubkey_bytes =
+            hex::decode(&tx.signer_pubkey_hex).map_err(|_| "invalid signer pubkey hex")?;
+        let vk = VerifyingKey::from_bytes(
+            pubkey_bytes
+                .as_slice()
+                .try_into()
+                .map_err(|_| "invalid pubkey length")?,
+        )
+        .map_err(|_| "invalid verifying key")?;
 
         let sig_bytes = hex::decode(&tx.signature_hex).map_err(|_| "invalid signature hex")?;
-        let sig = Signature::from_bytes(sig_bytes.as_slice().try_into().map_err(|_| "invalid signature length")?);
+        let sig = Signature::from_bytes(
+            sig_bytes
+                .as_slice()
+                .try_into()
+                .map_err(|_| "invalid signature length")?,
+        );
 
         let body = signing_payload(
             &tx.tx_id,
@@ -307,7 +339,8 @@ impl LedgerState {
             tx.created_at_ms,
             &tx.signer_pubkey_hex,
         );
-        vk.verify(body.as_bytes(), &sig).map_err(|_| "signature verification failed")?;
+        vk.verify(body.as_bytes(), &sig)
+            .map_err(|_| "signature verification failed")?;
 
         if let Some(prev_nonce) = self.last_nonce_by_signer.get(&tx.signer_pubkey_hex) {
             if tx.nonce <= *prev_nonce {
@@ -320,7 +353,8 @@ impl LedgerState {
     fn apply_verified_tx(&mut self, tx: ComputeCreditTx) {
         *self.balances.entry(tx.from_wallet.clone()).or_insert(0) -= tx.amount;
         *self.balances.entry(tx.to_wallet.clone()).or_insert(0) += tx.amount;
-        self.last_nonce_by_signer.insert(tx.signer_pubkey_hex.clone(), tx.nonce);
+        self.last_nonce_by_signer
+            .insert(tx.signer_pubkey_hex.clone(), tx.nonce);
         self.seen.insert(tx.tx_id.clone());
         self.roll_tx_chain_hash(&tx);
         self.tx_log.push(tx);

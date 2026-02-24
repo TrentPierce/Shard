@@ -16,9 +16,9 @@ use tray::TrayManager;
 async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
 
-    let tray_manager = TrayManager::new()?;
+    let _tray_manager = TrayManager::new()?;
     let process_manager = Arc::new(Mutex::new(ProcessManager::new()));
-    
+
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([500.0, 400.0])
@@ -35,32 +35,37 @@ async fn main() -> Result<()> {
         Box::new(|cc| {
             let pm_for_app = process_manager.clone();
             let app = ShardApp::new(cc, pm_for_app, telemetry_rx);
-            
+
             // Spawn background task for telemetry and events
             let tx = telemetry_tx.clone();
             tokio::spawn(async move {
                 let mut count = 0;
                 loop {
-                    let _ = tx.send(app::TelemetryUpdate {
-                        role: "Scout".to_string(),
-                        peers: count % 10,
-                        tokens: (count * 100) as u64,
-                        uptime: format!("{:02}:{:02}:{:02}", count / 3600, (count / 60) % 60, count % 60),
-                    }).await;
+                    let _ = tx
+                        .send(app::TelemetryUpdate {
+                            role: "Scout".to_string(),
+                            peers: count % 10,
+                            tokens: (count * 100) as u64,
+                            uptime: format!(
+                                "{:02}:{:02}:{:02}",
+                                count / 3600,
+                                (count / 60) % 60,
+                                count % 60
+                            ),
+                        })
+                        .await;
                     count += 1;
                     tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
                 }
             });
 
-            let process_mgr_clone = process_manager.clone();
-            
             tokio::spawn(async move {
                 let tray_receiver = MenuEvent::receiver();
                 loop {
                     while let Ok(event) = tray_receiver.try_recv() {
                         tracing::info!("Tray event: {:?}", event);
-                        // If we had the IDs, we'd check them here. 
-                        // For now, let's just assume any event is a debug signal 
+                        // If we had the IDs, we'd check them here.
+                        // For now, let's just assume any event is a debug signal
                         // and we can add a simple string match if muda provided it.
                     }
                     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;

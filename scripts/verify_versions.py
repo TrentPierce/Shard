@@ -25,7 +25,7 @@ def read_version() -> str:
 
 
 def collect_checks(version: str) -> list[VersionCheck]:
-    return [
+    checks = [
         VersionCheck(ROOT / "desktop" / "rust" / "daemon" / "Cargo.toml", rf'^version = "{re.escape(version)}"$', "daemon crate version"),
         VersionCheck(ROOT / "web" / "package.json", rf'"version": "{re.escape(version)}"', "web package version"),
         VersionCheck(ROOT / "web" / "src-tauri" / "tauri.conf.json", rf'"version": "{re.escape(version)}"', "tauri app version"),
@@ -41,6 +41,24 @@ def collect_checks(version: str) -> list[VersionCheck]:
         VersionCheck(ROOT / "installers" / "windows" / "installer.iss", rf'#define MyAppVersion "{re.escape(version)}"', "inno installer version"),
         VersionCheck(ROOT / "installers" / "windows" / "shard.nsi", rf'!define VERSION "{re.escape(version)}"', "nsis installer version"),
     ]
+    for crate in [
+        "shard-common",
+        "shard-crypto",
+        "shard-gateway",
+        "shard-ledger",
+        "shard-metrics",
+        "shard-network",
+        "shard-scheduler",
+        "shard-verifier",
+    ]:
+        checks.append(
+            VersionCheck(
+                ROOT / "desktop" / "rust" / "crates" / crate / "Cargo.toml",
+                rf'^version = "{re.escape(version)}"$',
+                f"{crate} crate version",
+            )
+        )
+    return checks
 
 
 def main() -> None:

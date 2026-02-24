@@ -2066,8 +2066,8 @@ mod tests {
     #[test]
     fn spot_check_rejects_tampered_matmul() {
         let proof = DraftSpotCheckProof {
-            input_a: vec![1.0, 2.0, 3.0, 4.0],      // 2x2
-            weights_b: vec![1.0, 0.0, 0.0, 1.0],    // identity
+            input_a: vec![1.0, 2.0, 3.0, 4.0],       // 2x2
+            weights_b: vec![1.0, 0.0, 0.0, 1.0],     // identity
             claimed_c: vec![10.0, 20.0, 30.0, 40.0], // tampered all elements
             m: 2,
             k: 2,

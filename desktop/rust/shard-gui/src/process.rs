@@ -1,6 +1,6 @@
-use std::process::{Child, Command, Stdio};
 use anyhow::Result;
-use tracing::{info, error};
+use std::process::{Child, Command, Stdio};
+use tracing::{error, info};
 
 pub struct ProcessManager {
     child: Option<Child>,
@@ -42,24 +42,6 @@ impl ProcessManager {
             }
         }
         Ok(())
-    }
-
-    pub fn is_running(&self) -> bool {
-        if let Some(mut child) = self.child.as_ref() {
-            // Check if it's still alive
-            match Command::new("tasklist")
-                .arg("/FI")
-                .arg(format!("PID eq {}", child.id()))
-                .output() {
-                    Ok(output) => {
-                        let stdout = String::from_utf8_lossy(&output.stdout);
-                        stdout.contains(&child.id().to_string())
-                    }
-                    Err(_) => true, // Fallback to assuming it's running
-                }
-        } else {
-            false
-        }
     }
 }
 

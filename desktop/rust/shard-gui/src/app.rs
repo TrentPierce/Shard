@@ -1,6 +1,6 @@
-use serde::{Deserialize, Serialize};
 use anyhow::Result;
 use directories::ProjectDirs;
+use serde::{Deserialize, Serialize};
 use std::fs;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -84,7 +84,11 @@ pub struct TelemetryUpdate {
 }
 
 impl ShardApp {
-    pub fn new(cc: &eframe::CreationContext<'_>, pm: Arc<Mutex<crate::process::ProcessManager>>, rx: tokio::sync::mpsc::Receiver<TelemetryUpdate>) -> Self {
+    pub fn new(
+        cc: &eframe::CreationContext<'_>,
+        pm: Arc<Mutex<crate::process::ProcessManager>>,
+        rx: tokio::sync::mpsc::Receiver<TelemetryUpdate>,
+    ) -> Self {
         // Customize look
         let mut visuals = egui::Visuals::dark();
         visuals.window_rounding = 8.0.into();
@@ -152,7 +156,7 @@ impl ShardApp {
         self.is_downloading = true;
         self.status = "Downloading assets...".to_string();
         self.download_progress = Some(0.0);
-        
+
         // In a real implementation, we'd use a more sophisticated download task
         // for now, we'll simulate it or use reqwest in a thread
         let url = url.to_string();
@@ -173,10 +177,16 @@ impl eframe::App for ShardApp {
 
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.horizontal(|ui| {
-                if ui.selectable_label(matches!(self.view, View::Dashboard), "Dashboard").clicked() {
+                if ui
+                    .selectable_label(matches!(self.view, View::Dashboard), "Dashboard")
+                    .clicked()
+                {
                     self.view = View::Dashboard;
                 }
-                if ui.selectable_label(matches!(self.view, View::Settings), "Settings").clicked() {
+                if ui
+                    .selectable_label(matches!(self.view, View::Settings), "Settings")
+                    .clicked()
+                {
                     self.view = View::Settings;
                 }
             });
@@ -207,10 +217,13 @@ impl ShardApp {
                 ui.label("This may take a few minutes depending on your connection.");
             });
             ui.add_space(10.0);
-            
+
             // Simple check to see if download finished
             if let Some(proj_dirs) = ProjectDirs::from("com", "shard", "Shard") {
-                let model_path = proj_dirs.data_dir().join("models").join("tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf");
+                let model_path = proj_dirs
+                    .data_dir()
+                    .join("models")
+                    .join("tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf");
                 if model_path.exists() {
                     self.is_downloading = false;
                     self.status = "Idle".to_string();
@@ -224,21 +237,20 @@ impl ShardApp {
             if self.is_running {
                 if ui.button("Stop Node").clicked() {
                     let mut pm = self.process_manager.blocking_lock();
-                    if let Ok(_) = pm.stop() {
+                    if pm.stop().is_ok() {
                         self.is_running = false;
                         self.status = "Idle".to_string();
                     }
                 }
-            } else {
-                if ui.button("Start Node").clicked() {
-                    if self.ensure_assets() {
-                        let mut pm = self.process_manager.blocking_lock();
-                        // Example: start the daemon
-                        if let Ok(_) = pm.start("shard-daemon.exe", &["--control-port", "9091"]) {
-                            self.is_running = true;
-                            self.status = "Running".to_string();
-                        }
-                    }
+            } else if ui.button("Start Node").clicked() && self.ensure_assets() {
+                let mut pm = self.process_manager.blocking_lock();
+                // Example: start the daemon
+                if pm
+                    .start("shard-daemon.exe", &["--control-port", "9091"])
+                    .is_ok()
+                {
+                    self.is_running = true;
+                    self.status = "Running".to_string();
                 }
             }
             ui.label(format!("Status: {}", self.status));

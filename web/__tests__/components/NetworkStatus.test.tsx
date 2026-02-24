@@ -41,7 +41,7 @@ describe("NetworkStatus", () => {
   })
 
   it("renders webllm progress details", () => {
-    render(
+    const { container } = render(
       <NetworkStatus
         {...defaultProps}
         webLLMProgress={{
@@ -52,7 +52,8 @@ describe("NetworkStatus", () => {
       />,
     )
     expect(screen.getByText(/Loading model/i)).toBeInTheDocument()
-    expect(screen.getByText(/50%/i)).toBeInTheDocument()
+    const progressBar = container.querySelector('div[style*="width: 50%"]')
+    expect(progressBar).toBeInTheDocument()
   })
 
   it("renders webllm error details", () => {
