@@ -4,7 +4,8 @@ param(
     [string]$InstallDir = "$env:ProgramFiles\ShardNode",
     [int]$ControlPort = 9091,
     [string]$BootstrapHealthUrl = "http://127.0.0.1:9091/v1/system/bootstrap",
-    [switch]$DownloadModelIfMissing
+    [switch]$DownloadModelIfMissing,
+    [switch]$NonInteractive
 )
 
 Write-Host "Shard First-Run Onboarding" -ForegroundColor Cyan
@@ -21,6 +22,12 @@ if (-not $env:BITNET_MODEL) {
 
 if (-not (Test-Path $env:BITNET_MODEL)) {
     Write-Host "Model not found at $($env:BITNET_MODEL)." -ForegroundColor Yellow
+    if (-not $NonInteractive -and -not $DownloadModelIfMissing) {
+        $answer = Read-Host "Download baseline model now? (y/N)"
+        if ($answer -match "^(y|yes)$") {
+            $DownloadModelIfMissing = $true
+        }
+    }
     if ($DownloadModelIfMissing) {
         $modelUrl = "https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/resolve/main/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf"
         Write-Host "Downloading baseline model from $modelUrl ..."
@@ -37,8 +44,19 @@ if (-not (Test-Path $env:BITNET_MODEL)) {
 Write-Host "Checking firewall rule..."
 $ruleName = "Shard Node Control Plane"
 if (-not (Get-NetFirewallRule -DisplayName $ruleName -ErrorAction SilentlyContinue)) {
-    New-NetFirewallRule -DisplayName $ruleName -Direction Inbound -Protocol TCP -LocalPort $ControlPort -Action Allow | Out-Null
-    Write-Host "Created firewall allow rule for port $ControlPort."
+    $createRule = $true
+    if (-not $NonInteractive) {
+        $firewallAnswer = Read-Host "Create firewall allow rule for port $ControlPort? (Y/n)"
+        if ($firewallAnswer -match "^(n|no)$") {
+            $createRule = $false
+        }
+    }
+    if ($createRule) {
+        New-NetFirewallRule -DisplayName $ruleName -Direction Inbound -Protocol TCP -LocalPort $ControlPort -Action Allow | Out-Null
+        Write-Host "Created firewall allow rule for port $ControlPort."
+    } else {
+        Write-Host "Skipped firewall rule creation by user choice." -ForegroundColor Yellow
+    }
 }
 
 Write-Host "Starting service health check..."

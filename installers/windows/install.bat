@@ -87,10 +87,13 @@ if "%INSTALL_SERVICE%"=="1" (
 )
 
 if "%RUN_ONBOARDING%"=="1" if exist "%INSTALL_DIR%\first-run.ps1" (
-    if "%DOWNLOAD_MODEL%"=="1" (
-        powershell -ExecutionPolicy Bypass -File "%INSTALL_DIR%\first-run.ps1" -InstallDir "%INSTALL_DIR%" -DownloadModelIfMissing
+    set "ONBOARD_FLAGS="
+    if "%SILENT%"=="1" set "ONBOARD_FLAGS=!ONBOARD_FLAGS! -NonInteractive"
+    if "%DOWNLOAD_MODEL%"=="1" set "ONBOARD_FLAGS=!ONBOARD_FLAGS! -DownloadModelIfMissing"
+    if "%SILENT%"=="1" (
+        powershell -ExecutionPolicy Bypass -File "%INSTALL_DIR%\first-run.ps1" -InstallDir "%INSTALL_DIR%" !ONBOARD_FLAGS!
     ) else (
-        powershell -ExecutionPolicy Bypass -File "%INSTALL_DIR%\first-run.ps1" -InstallDir "%INSTALL_DIR%"
+        powershell -ExecutionPolicy Bypass -File "%INSTALL_DIR%\first-run.ps1" -InstallDir "%INSTALL_DIR%" !ONBOARD_FLAGS!
     )
 )
 

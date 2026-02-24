@@ -22,3 +22,7 @@
 - Release version comes only from root `VERSION`.
 - CI blocks merges on version mismatch (`python scripts/verify_versions.py`).
 
+## Windows Signing
+- Sign Windows installers with `installers/windows/sign-installer.ps1`.
+- Requires `signtool.exe` and an installed signing certificate.
+- Verification is performed after signing (`signtool verify /pa`).
