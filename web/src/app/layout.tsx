@@ -4,6 +4,8 @@ import "./globals.css"
 import ErrorBoundary from "@/components/ErrorBoundary"
 import ServiceWorkerManager from "@/components/ServiceWorkerManager"
 import { SiteNav } from "@/components/shell/SiteNav"
+import { Providers } from "@/components/Providers"
+
 
 const sans = Space_Grotesk({ subsets: ["latin"], variable: "--font-sans" })
 const mono = IBM_Plex_Mono({ subsets: ["latin"], variable: "--font-mono", weight: ["400", "500"] })
@@ -32,7 +34,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           Skip to content
         </a>
         <SiteNav />
-        <ErrorBoundary>{children}</ErrorBoundary>
+        <Providers>
+          <ErrorBoundary>{children}</ErrorBoundary>
+        </Providers>
+
         <ServiceWorkerManager />
       </body>
     </html>
