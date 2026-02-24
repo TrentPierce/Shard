@@ -1379,6 +1379,51 @@ fn should_attempt_reconnect(
     false
 }
 
+fn is_non_public_bootstrap_addr(addr: &Multiaddr) -> bool {
+    for proto in addr.iter() {
+        match proto {
+            libp2p::multiaddr::Protocol::Ip4(ip) => {
+                let [a, b, _, _] = ip.octets();
+                if a == 10
+                    || (a == 172 && (16..=31).contains(&b))
+                    || (a == 192 && b == 168)
+                    || a == 127
+                    || (a == 169 && b == 254)
+                {
+                    return true;
+                }
+            }
+            libp2p::multiaddr::Protocol::Ip6(ip) => {
+                if ip.is_loopback()
+                    || ip.is_unspecified()
+                    || ip.is_unique_local()
+                    || ip.is_unicast_link_local()
+                {
+                    return true;
+                }
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
+fn filter_bootstrap_addrs(addrs: Vec<String>, allow_private: bool) -> Vec<String> {
+    unique_addrs(addrs)
+        .into_iter()
+        .filter(|addr| {
+            let Ok(multiaddr) = addr.parse::<Multiaddr>() else {
+                return true;
+            };
+            if !allow_private && is_non_public_bootstrap_addr(&multiaddr) {
+                tracing::warn!(%addr, "dropping non-public bootstrap address; set SHARD_ALLOW_PRIVATE_BOOTSTRAP=true to allow");
+                return false;
+            }
+            true
+        })
+        .collect()
+}
+
 fn record_bootstrap_failure(
     known: &mut Vec<String>,
     failures: &mut HashMap<String, u32>,
@@ -1957,7 +2002,12 @@ async fn main() -> Result<()> {
         Vec::new()
     };
 
-    let bootstrap_addrs = unique_addrs(
+    let allow_private_bootstrap = std::env::var("SHARD_ALLOW_PRIVATE_BOOTSTRAP")
+        .ok()
+        .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
+        .unwrap_or(false);
+
+    let bootstrap_addrs = filter_bootstrap_addrs(
         default_bootstrap
             .into_iter()
             .chain(cli.bootstrap_node.iter().cloned())
@@ -1965,6 +2015,7 @@ async fn main() -> Result<()> {
             .chain(bootstrap_addrs)
             .chain(hardcoded_bootstrap)
             .collect(),
+        allow_private_bootstrap,
     );
 
     // ── channels ──
@@ -3627,7 +3678,8 @@ async fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        accept_replay_nonce, load_bootstrap_registry, node_is_healthy, record_bootstrap_failure,
+        accept_replay_nonce, filter_bootstrap_addrs, is_non_public_bootstrap_addr,
+        load_bootstrap_registry, node_is_healthy, record_bootstrap_failure,
         save_bootstrap_registry, should_attempt_reconnect, should_reject_peer_connection,
         unique_addrs, validate_work_request, BootstrapRegistryEntry, CanaryRolloutConfig,
         CanaryRolloutController, LatencyHistogram, ScoutPenaltyBook, ScoutPenaltyUpdate,
@@ -3648,6 +3700,27 @@ mod tests {
         ];
         let out = unique_addrs(in_addrs);
         assert_eq!(out.len(), 2);
+    }
+
+    #[test]
+    fn bootstrap_filter_drops_private_addrs_by_default() {
+        let input = vec![
+            "/ip4/192.168.1.85/tcp/4001".to_string(),
+            "/ip4/35.175.242.222/tcp/4001".to_string(),
+        ];
+        let out = filter_bootstrap_addrs(input, false);
+        assert_eq!(out.len(), 1);
+        assert!(out[0].contains("35.175.242.222"));
+    }
+
+    #[test]
+    fn non_public_bootstrap_detection_handles_ipv4_and_ipv6() {
+        let private_v4: Multiaddr = "/ip4/192.168.1.10/tcp/4001".parse().unwrap();
+        let public_v4: Multiaddr = "/ip4/8.8.8.8/tcp/4001".parse().unwrap();
+        let loopback_v6: Multiaddr = "/ip6/::1/tcp/4001".parse().unwrap();
+        assert!(is_non_public_bootstrap_addr(&private_v4));
+        assert!(!is_non_public_bootstrap_addr(&public_v4));
+        assert!(is_non_public_bootstrap_addr(&loopback_v6));
     }
 
     #[test]
