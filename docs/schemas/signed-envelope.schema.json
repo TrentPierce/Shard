@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://shard.network/schemas/signed-envelope.schema.json",
+  "title": "Signed Envelope",
+  "type": "object",
+  "required": ["envelope"],
+  "properties": {
+    "envelope": {
+      "type": "object",
+      "required": ["payload", "signer_pubkey_hex", "nonce", "signature_hex"],
+      "properties": {
+        "payload": { "type": "object" },
+        "signer_pubkey_hex": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{64}$"
+        },
+        "nonce": { "type": "integer", "minimum": 1 },
+        "signature_hex": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{128}$"
+        }
+      }
+    }
+  }
+}
+

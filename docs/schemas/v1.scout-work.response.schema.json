@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://shard.network/schemas/v1.scout-work.response.schema.json",
+  "title": "Scout Work Response",
+  "type": "object",
+  "required": ["work"],
+  "properties": {
+    "work": {
+      "anyOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "required": ["request_id", "prompt_context", "min_tokens"],
+          "properties": {
+            "request_id": { "type": "string" },
+            "prompt_context": { "type": "string" },
+            "min_tokens": { "type": "integer", "minimum": 1 },
+            "created_at_ms": { "type": ["integer", "null"] }
+          }
+        }
+      ]
+    }
+  }
+}
+

@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://shard.network/schemas/v1.scout-draft.request.schema.json",
+  "title": "Scout Draft Submission Request",
+  "type": "object",
+  "required": ["work_id", "scout_id", "draft_text"],
+  "additionalProperties": true,
+  "properties": {
+    "work_id": { "type": "string", "minLength": 1 },
+    "scout_id": { "type": "string", "minLength": 1 },
+    "draft_text": { "type": "string" },
+    "draft_tokens": {
+      "type": "array",
+      "items": { "type": "integer" }
+    },
+    "timestamp": { "type": "number" },
+    "scout_mode": { "type": "string" }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "draft_text": { "maxLength": 0 }
+        },
+        "required": ["draft_text"]
+      },
+      "then": {
+        "properties": {
+          "draft_tokens": { "minItems": 1 }
+        },
+        "required": ["draft_tokens"]
+      }
+    }
+  ]
+}
+
