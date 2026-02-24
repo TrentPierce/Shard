@@ -12,6 +12,7 @@ pub(crate) async fn health_handler(AxumState(state): AxumState<SharedState>) -> 
     let load = state.current_load.load(Ordering::Relaxed);
     let latency_ms = state.avg_latency_ms.load(Ordering::Relaxed);
     let scout_count = browser_sessions.len();
+    let model_compat = shard_verifier::inference::check_model_compatibility(state.model_id.as_str());
     let engine_guard = state.engine.lock().await;
     let engine_loaded = engine_guard.is_some();
     drop(engine_guard);
@@ -34,6 +35,8 @@ pub(crate) async fn health_handler(AxumState(state): AxumState<SharedState>) -> 
         "contribute": topo.contribute_enabled,
         "wallet": state.node_wallet.clone(),
         "model_id": state.model_id.clone(),
+        "model_protocol_version": model_compat.protocol_version,
+        "model_supports_speculative": model_compat.supports_speculative,
         "layer_start": state.layer_start,
         "layer_end": state.layer_end,
         "race_pool_size": state.race_pool_size,

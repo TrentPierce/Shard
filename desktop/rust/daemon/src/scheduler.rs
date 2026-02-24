@@ -61,7 +61,7 @@ pub(crate) async fn wait_for_scout_draft(
 /// Verify draft tokens against the verifier model.
 /// Returns accepted tokens, text, and optionally a token to resample.
 pub(crate) async fn verify_draft_tokens(
-    engine: &mut shard_verifier::inference::ShardEngine,
+    engine: &mut impl shard_verifier::inference::VerifierModel,
     prompt_tokens: &[i32],
     draft_tokens: &[i32],
 ) -> DraftVerificationResult {

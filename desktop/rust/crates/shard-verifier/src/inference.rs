@@ -21,6 +21,30 @@ pub struct ShardTensorView {
     pub dtype: c_int,
 }
 
+#[derive(Debug, Clone)]
+pub struct ModelCompatibility {
+    pub model_id: String,
+    pub protocol_version: String,
+    pub supports_speculative: bool,
+}
+
+pub fn check_model_compatibility(model_id: &str) -> ModelCompatibility {
+    let supports_speculative = !model_id.trim().is_empty();
+    ModelCompatibility {
+        model_id: model_id.to_string(),
+        protocol_version: "v1".to_string(),
+        supports_speculative,
+    }
+}
+
+pub trait VerifierModel {
+    fn eval(&mut self, tokens: &[i32]) -> Result<i32>;
+    fn tokenize(&mut self, text: &str, max_tokens: usize) -> Result<Vec<i32>>;
+    fn get_logits(&mut self, vocab_size: usize) -> Result<Vec<f32>>;
+    fn token_to_piece(&mut self, token_id: i32) -> Result<String>;
+    fn rollback(&mut self, steps: i32) -> Result<i32>;
+}
+
 pub struct ShardEngine {
     _lib: Library,
     handle: *mut c_void,
@@ -183,5 +207,39 @@ impl Drop for ShardEngine {
                 (self.free_fn)(self.handle);
             }
         }
+    }
+}
+
+impl VerifierModel for ShardEngine {
+    fn eval(&mut self, tokens: &[i32]) -> Result<i32> {
+        ShardEngine::eval(self, tokens)
+    }
+
+    fn tokenize(&mut self, text: &str, max_tokens: usize) -> Result<Vec<i32>> {
+        ShardEngine::tokenize(self, text, max_tokens)
+    }
+
+    fn get_logits(&mut self, vocab_size: usize) -> Result<Vec<f32>> {
+        ShardEngine::get_logits(self, vocab_size)
+    }
+
+    fn token_to_piece(&mut self, token_id: i32) -> Result<String> {
+        ShardEngine::token_to_piece(self, token_id)
+    }
+
+    fn rollback(&mut self, steps: i32) -> Result<i32> {
+        ShardEngine::rollback(self, steps)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::check_model_compatibility;
+
+    #[test]
+    fn compatibility_reports_protocol_defaults() {
+        let compat = check_model_compatibility("bitnet-1.58b");
+        assert_eq!(compat.protocol_version, "v1");
+        assert!(compat.supports_speculative);
     }
 }
