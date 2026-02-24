@@ -1,0 +1,9 @@
+{
+  "stable": {
+    "manifest_url": "https://shard.network/releases/stable/manifest.json"
+  },
+  "canary": {
+    "manifest_url": "https://shard.network/releases/canary/manifest.json"
+  }
+}
+

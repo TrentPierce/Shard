@@ -41,6 +41,8 @@ Source: "..\dist\ShardAI\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdi
 Source: "start-shard.bat"; DestDir: "{app}"; Flags: ignoreversion
 Source: "first-run.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "install.bat"; DestDir: "{app}"; Flags: ignoreversion
+Source: "update.ps1"; DestDir: "{app}"; Flags: ignoreversion
+Source: "update-channels.json"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"

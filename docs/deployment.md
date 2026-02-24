@@ -26,3 +26,12 @@
 - Sign Windows installers with `installers/windows/sign-installer.ps1`.
 - Requires `signtool.exe` and an installed signing certificate.
 - Verification is performed after signing (`signtool verify /pa`).
+
+## Windows Auto-Update Channels
+- Updater script: `installers/windows/update.ps1`
+- Channel config: `installers/windows/update-channels.json`
+- Supported channels:
+  - `stable`
+  - `canary`
+- Installer creates scheduled task `ShardAutoUpdate` by default.
+- Rollback: updater snapshots current install under `%ProgramData%\Shard\rollback` and restores on failed update.

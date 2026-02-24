@@ -12,6 +12,8 @@ set "INSTALL_SERVICE=1"
 set "RUN_ONBOARDING=1"
 set "UNINSTALL=0"
 set "DOWNLOAD_MODEL=0"
+set "AUTOUPDATE=1"
+set "UPDATE_CHANNEL=stable"
 set "BACKUP_DIR=%ProgramData%\Shard\rollback\%VERSION%"
 
 if /I "%~1"=="/S" set "SILENT=1"
@@ -19,6 +21,8 @@ if /I "%~1"=="/NOSERVICE" set "INSTALL_SERVICE=0"
 if /I "%~1"=="/NOONBOARD" set "RUN_ONBOARDING=0"
 if /I "%~1"=="/UNINSTALL" set "UNINSTALL=1"
 if /I "%~1"=="/DOWNLOADMODEL" set "DOWNLOAD_MODEL=1"
+if /I "%~1"=="/NOAUTOUPDATE" set "AUTOUPDATE=0"
+if /I "%~1"=="/CANARY" set "UPDATE_CHANNEL=canary"
 
 echo ============================================
 echo   Shard Node Installer
@@ -97,6 +101,10 @@ if "%RUN_ONBOARDING%"=="1" if exist "%INSTALL_DIR%\first-run.ps1" (
     )
 )
 
+if "%AUTOUPDATE%"=="1" if exist "%INSTALL_DIR%\update.ps1" (
+    schtasks /Create /F /SC DAILY /ST 03:00 /TN "ShardAutoUpdate" /TR "powershell -ExecutionPolicy Bypass -File \"%INSTALL_DIR%\update.ps1\" -Channel %UPDATE_CHANNEL% -InstallDir \"%INSTALL_DIR%\"" >nul 2>&1
+)
+
 echo.
 echo Installation complete.
 echo Installed to: %INSTALL_DIR%
@@ -122,6 +130,7 @@ if %errorlevel% equ 0 (
 )
 
 reg delete "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v ShardNode /f >nul 2>&1
+schtasks /Delete /F /TN "ShardAutoUpdate" >nul 2>&1
 
 if exist "%INSTALL_DIR%" (
     rmdir /S /Q "%INSTALL_DIR%"
