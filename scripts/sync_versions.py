@@ -47,17 +47,81 @@ def sync_version(version: str) -> None:
         r'"version": "\d+\.\d+\.\d+"',
         f'"version": "{version}"',
     )
+    replace_in_file(
+        ROOT / "web" / "src" / "lib" / "version.ts",
+        r'export const SHARD_VERSION = "\d+\.\d+\.\d+"',
+        f'export const SHARD_VERSION = "{version}"',
+    )
     # Python SDK
     replace_in_file(
         ROOT / "sdk" / "python" / "pyproject.toml",
         r'^version = "\d+\.\d+\.\d+"$',
         f'version = "{version}"',
     )
+    replace_in_file(
+        ROOT / "sdk" / "python" / "shard" / "__init__.py",
+        r'__version__ = "\d+\.\d+\.\d+"',
+        f'__version__ = "{version}"',
+    )
+    # Node SDK
+    replace_in_file(
+        ROOT / "sdk" / "node" / "package.json",
+        r'"version": "\d+\.\d+\.\d+"',
+        f'"version": "{version}"',
+    )
+    replace_in_file(
+        ROOT / "sdk" / "node" / "src" / "client.ts",
+        r"const SDK_VERSION = '\d+\.\d+\.\d+'",
+        f"const SDK_VERSION = '{version}'",
+    )
+    # Widget SDK
+    replace_in_file(
+        ROOT / "sdk" / "widget" / "package.json",
+        r'"version": "\d+\.\d+\.\d+"',
+        f'"version": "{version}"',
+    )
+    # Homebrew formula
+    replace_in_file(
+        ROOT / "installers" / "homebrew" / "Formula" / "shard.rb",
+        r'version "\d+\.\d+\.\d+"',
+        f'version "{version}"',
+    )
+    # Winget manifest
+    replace_in_file(
+        ROOT / "installers" / "winget" / "manifest.yaml",
+        r"^Version:\s*\d+\.\d+\.\d+$",
+        f"Version: {version}",
+    )
+    replace_in_file(
+        ROOT / "installers" / "winget" / "manifest.yaml",
+        r"releases/download/v\d+\.\d+\.\d+/shard-\d+\.\d+\.\d+-windows-x64\.exe",
+        f"releases/download/v{version}/shard-{version}-windows-x64.exe",
+    )
+    replace_in_file(
+        ROOT / "installers" / "windows" / "installer.iss",
+        r'#define MyAppVersion "\d+\.\d+\.\d+"',
+        f'#define MyAppVersion "{version}"',
+    )
+    replace_in_file(
+        ROOT / "installers" / "windows" / "shard.nsi",
+        r'!define VERSION "\d+\.\d+\.\d+"',
+        f'!define VERSION "{version}"',
+    )
+    replace_in_file(
+        ROOT / "installers" / "windows" / "install.bat",
+        r'set "VERSION=\d+\.\d+\.\d+"',
+        f'set "VERSION={version}"',
+    )
     # README badge
     replace_in_file(
         ROOT / "README.md",
         r"version-\d+\.\d+\.\d+",
         f"version-{version}",
+    )
+    replace_in_file(
+        ROOT / "README.md",
+        r"releases/tag/v\d+\.\d+\.\d+",
+        f"releases/tag/v{version}",
     )
 
 

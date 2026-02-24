@@ -50,6 +50,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Verify version consistency
+        run: python scripts/verify_versions.py
       - name: Set up Python
         uses: actions/setup-python@v5
         with:

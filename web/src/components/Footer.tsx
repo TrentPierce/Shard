@@ -1,7 +1,8 @@
 "use client"
 
 import Link from "next/link"
-import { Github, Twitter, FileText, Zap } from "lucide-react"
+import { Github, Twitter, FileText } from "lucide-react"
+import { SHARD_VERSION } from "@/lib/version"
 
 const footerLinks: Record<string, { title: string; links: { name: string; href: string; external?: boolean }[] }> = {
     product: {
@@ -10,23 +11,23 @@ const footerLinks: Record<string, { title: string; links: { name: string; href: 
             { name: "How It Works", href: "/#how-it-works" },
             { name: "Features", href: "/#features" },
             { name: "Use Cases", href: "/#use-cases" },
-            { name: "API Reference", href: "/docs/API.md" },
+            { name: "API Reference", href: "https://github.com/TrentPierce/Shard/blob/main/docs/api.md", external: true },
         ],
     },
     developers: {
         title: "Developers",
         links: [
-            { name: "Documentation", href: "/docs/API.md" },
-            { name: "Quick Start", href: "/docs/deployment-guide.md" },
+            { name: "Documentation", href: "https://github.com/TrentPierce/Shard/tree/main/docs", external: true },
+            { name: "Quick Start", href: "https://github.com/TrentPierce/Shard/blob/main/docs/deployment.md", external: true },
             { name: "GitHub", href: "https://github.com/TrentPierce/Shard", external: true },
-            { name: "Contributing", href: "https://github.com/TrentPierce/Shard/blob/main/CONTRIBUTING.md", external: true },
+            { name: "Contributing", href: "https://github.com/TrentPierce/Shard/blob/main/docs/contributing.md", external: true },
         ],
     },
     resources: {
         title: "Resources",
         links: [
-            { name: "White Paper", href: "https://github.com/TrentPierce/Shard/blob/main/docs/Shard-White-Paper-Feb-2026.md", external: true },
-            { name: "Architecture", href: "https://github.com/TrentPierce/Shard/blob/main/ARCHITECTURE.md", external: true },
+            { name: "Architecture", href: "https://github.com/TrentPierce/Shard/blob/main/docs/architecture.md", external: true },
+            { name: "Versioning", href: "https://github.com/TrentPierce/Shard/blob/main/docs/versioning.md", external: true },
             { name: "Security", href: "https://github.com/TrentPierce/Shard/blob/main/SECURITY.md", external: true },
             { name: "Changelog", href: "https://github.com/TrentPierce/Shard/blob/main/CHANGELOG.md", external: true },
         ],
@@ -76,7 +77,7 @@ export default function Footer() {
 
                 <div className="footer-bottom">
                     <p>
-                        &copy; {currentYear} Shard Network. All rights reserved.
+                        &copy; {currentYear} Shard Network. All rights reserved. v{SHARD_VERSION}
                     </p>
                     
                     <div className="footer-social">

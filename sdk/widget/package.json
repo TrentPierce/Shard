@@ -1,6 +1,6 @@
 {
     "name": "@shard/widget",
-    "version": "0.5.0",
+    "version": "0.6.1",
     "description": "Drop-in browser scout widget for Shard inference network",
     "main": "dist/scout.js",
     "scripts": {

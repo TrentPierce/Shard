@@ -21,7 +21,7 @@ from .exceptions import (
 )
 from .daemon import start_daemon, stop_daemon
 
-__version__ = "0.1.0"
+__version__ = "0.6.1"
 __all__ = [
     "Shard",
     "ShardClient",

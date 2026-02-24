@@ -7,7 +7,7 @@
 
   [![CI](https://github.com/TrentPierce/Shard/actions/workflows/ci.yml/badge.svg)](https://github.com/TrentPierce/Shard/actions/workflows/ci.yml)
   [![License: BUSL-1.1](https://img.shields.io/badge/license-BUSL--1.1-blue.svg)](LICENSE)
-   [![Version](https://img.shields.io/badge/version-0.6.1-00d4ff.svg)](https://github.com/TrentPierce/Shard/releases/tag/v0.6.0)
+   [![Version](https://img.shields.io/badge/version-0.6.1-00d4ff.svg)](https://github.com/TrentPierce/Shard/releases/tag/v0.6.1)
   [![Demo Video](https://img.shields.io/badge/Demo-Video-red?style=for-the-badge&logo=youtube)](#)
 
 </div>
@@ -41,7 +41,7 @@ Shard uses **speculative decoding** and **1.58-bit BitNet** quantization to deli
 ## Get Started in 5 Minutes
 
 ### 1. Join as a Verifier (Desktop App)
-Download the [Shard Desktop App](https://github.com/TrentPierce/Shard/releases/tag/v0.6.0) for Windows or macOS. 
+Download the [Shard Desktop App](https://github.com/TrentPierce/Shard/releases/tag/v0.6.1) for Windows or macOS. 
 *   **One-Click Setup**: The app automatically downloads model weights and joins the P2P mesh.
 *   **Background Mode**: Minimize to the system tray to contribute compute and earn credits silently.
 
@@ -75,7 +75,7 @@ Shard is built on a high-integrity libp2p mesh:
 - **Verification**: 1.58-bit ternary quantization allows full-scale model verification on consumer hardware with minimal VRAM.
 - **Incentives**: A signed distributed ledger tracks compute contributions and enforces participation-based rate limiting.
 
-[**Read the Architecture Guide**](ARCHITECTURE.md) | [**API Documentation**](docs/API.md) | [**Contributing Guide**](CONTRIBUTING.md)
+[**Read the Architecture Guide**](docs/architecture.md) | [**API Documentation**](docs/api.md) | [**Contributing Guide**](docs/contributing.md)
 
 ---
 

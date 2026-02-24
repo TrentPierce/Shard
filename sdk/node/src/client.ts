@@ -23,8 +23,10 @@ const DEFAULT_BASE_URL = 'http://localhost:8080'
 const DEFAULT_TIMEOUT = 30_000
 const DEFAULT_MAX_RETRIES = 3
 const RETRY_BACKOFF_BASE = 500
+const SDK_VERSION = '0.6.1'
 
 export class ShardClient {
+    public readonly version = SDK_VERSION
     private readonly apiKey: string | undefined
     private readonly baseUrl: string
     private readonly timeout: number
