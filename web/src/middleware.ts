@@ -21,11 +21,9 @@ const buildConnectSources = () => {
 }
 
 export function middleware(request: NextRequest) {
-  const isDev = process.env.NODE_ENV !== "production"
-
   const cspHeader = `
     default-src 'self';
-    script-src 'self' ${isDev ? "'unsafe-eval'" : ""} 'unsafe-inline' blob:;
+    script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval' 'unsafe-inline' blob:;
     style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
     font-src 'self' data: https://fonts.gstatic.com;
     connect-src ${buildConnectSources()};
