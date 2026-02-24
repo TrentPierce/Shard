@@ -11,6 +11,7 @@
 - `SHARD_SCOUT_TIMEOUT_MS`
 - `SHARD_HEARTBEAT_TIMEOUT_MS`
 - `SHARD_ALLOW_PRIVATE_BOOTSTRAP` (`true|false`, default `false`; allows dialing private/loopback bootstrap multiaddrs)
+- `SHARD_HARDCODED_BOOTSTRAP_MODE` (`fallback|always|disabled`, default `fallback`; `fallback` only uses built-in bootstrap when no user/bootstrap-url/persisted peers exist)
 - `SHARD_CANARY_ENABLED`
 - `SHARD_CANARY_MODEL_ID`
 - `SHARD_CANARY_TRAFFIC_PERCENT`

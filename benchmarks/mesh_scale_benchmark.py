@@ -50,6 +50,45 @@ def safe_get_json(url: str, timeout_s: float = 10.0) -> dict[str, Any]:
     response.raise_for_status()
     return response.json()
 
+def safe_get_json_retry(
+    url: str,
+    timeout_s: float = 10.0,
+    retries: int = 4,
+    backoff_s: float = 0.8,
+) -> dict[str, Any]:
+    last_error: Exception | None = None
+    for attempt in range(retries + 1):
+        try:
+            return safe_get_json(url, timeout_s=timeout_s)
+        except Exception as exc:  # noqa: BLE001
+            last_error = exc
+            if attempt < retries:
+                time.sleep(backoff_s * (attempt + 1))
+    raise RuntimeError(f"Failed to fetch JSON from {url}") from last_error
+
+def safe_get_json_optional(
+    url: str,
+    timeout_s: float = 10.0,
+    retries: int = 2,
+) -> dict[str, Any]:
+    try:
+        return safe_get_json_retry(url, timeout_s=timeout_s, retries=retries)
+    except Exception as exc:  # noqa: BLE001
+        return {"status": "unavailable", "error": str(exc), "url": url}
+
+def get_metrics_summary(base_url: str) -> dict[str, Any]:
+    candidates = [
+        f"{base_url}/metrics/summary",
+        f"{base_url}/v1/metrics/summary",
+    ]
+    last_error: Exception | None = None
+    for url in candidates:
+        try:
+            return safe_get_json_retry(url, retries=4)
+        except Exception as exc:  # noqa: BLE001
+            last_error = exc
+    raise RuntimeError(f"Unable to fetch metrics summary from {candidates}") from last_error
+
 
 def parse_scenarios(path: Path) -> list[Scenario]:
     data = json.loads(path.read_text(encoding="utf-8"))
@@ -105,12 +144,14 @@ def run_one_request(
     inference_mode: str,
     prompt: str,
     timeout_s: float,
+    max_tokens: int,
 ) -> dict[str, Any]:
     request_id = str(uuid.uuid4())
     body = {
         "model": "shard-hybrid",
         "messages": [{"role": "user", "content": prompt}],
         "stream": False,
+        "max_tokens": max_tokens,
     }
     headers = {
         "Content-Type": "application/json",
@@ -155,13 +196,18 @@ def benchmark_scenario(
     inference_mode: str,
     request_timeout_s: float,
     prompt: str,
+    max_tokens: int,
 ) -> dict[str, Any]:
-    metrics_before = safe_get_json(f"{scenario.base_url}/metrics/summary")
-    health_before = safe_get_json(f"{scenario.base_url}/health")
+    metrics_before = get_metrics_summary(scenario.base_url)
+    health_before = safe_get_json_optional(f"{scenario.base_url}/health")
 
     for _ in range(max(0, warmup_requests)):
         run_one_request(
-            scenario.base_url, inference_mode, prompt, timeout_s=request_timeout_s
+            scenario.base_url,
+            inference_mode,
+            prompt,
+            timeout_s=request_timeout_s,
+            max_tokens=max_tokens,
         )
 
     started = time.perf_counter()
@@ -174,6 +220,7 @@ def benchmark_scenario(
                 inference_mode,
                 prompt,
                 request_timeout_s,
+                max_tokens,
             )
             for _ in range(requests_per_run)
         ]
@@ -181,8 +228,8 @@ def benchmark_scenario(
             events.append(future.result())
     elapsed_s = max(0.001, time.perf_counter() - started)
 
-    metrics_after = safe_get_json(f"{scenario.base_url}/metrics/summary")
-    health_after = safe_get_json(f"{scenario.base_url}/health")
+    metrics_after = get_metrics_summary(scenario.base_url)
+    health_after = safe_get_json_optional(f"{scenario.base_url}/health")
 
     successes = [e for e in events if e["success"]]
     failures = [e for e in events if not e["success"]]
@@ -431,6 +478,7 @@ def main() -> None:
     parser.add_argument("--inference-mode", default="distributed")
     parser.add_argument("--prompt", default=DEFAULT_PROMPT)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--max-tokens", type=int, default=48)
     args = parser.parse_args()
 
     random.seed(args.seed)
@@ -455,6 +503,7 @@ def main() -> None:
                 inference_mode=args.inference_mode,
                 request_timeout_s=args.request_timeout_s,
                 prompt=args.prompt,
+                max_tokens=args.max_tokens,
             )
             run_results.append(result)
             print(
@@ -484,6 +533,7 @@ def main() -> None:
         "concurrency": args.concurrency,
         "request_timeout_s": args.request_timeout_s,
         "inference_mode": args.inference_mode,
+        "max_tokens": args.max_tokens,
     }
     metadata_json = run_dir / "metadata.json"
     metadata_json.write_text(json.dumps(meta, indent=2), encoding="utf-8")

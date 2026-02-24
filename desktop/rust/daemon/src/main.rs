@@ -1370,6 +1370,39 @@ fn peer_id_from_addr_str(addr: &str) -> Option<String> {
         .and_then(|multiaddr| extract_peer_id_from_multiaddr(&multiaddr).map(|peer| peer.to_string()))
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HardcodedBootstrapMode {
+    Always,
+    Fallback,
+    Disabled,
+}
+
+fn parse_hardcoded_bootstrap_mode(raw: Option<String>) -> HardcodedBootstrapMode {
+    match raw
+        .unwrap_or_else(|| "fallback".to_string())
+        .trim()
+        .to_lowercase()
+        .as_str()
+    {
+        "always" => HardcodedBootstrapMode::Always,
+        "disabled" | "disable" | "off" | "false" | "none" => {
+            HardcodedBootstrapMode::Disabled
+        }
+        _ => HardcodedBootstrapMode::Fallback,
+    }
+}
+
+fn should_include_hardcoded_bootstrap(
+    mode: HardcodedBootstrapMode,
+    has_user_bootstrap: bool,
+) -> bool {
+    match mode {
+        HardcodedBootstrapMode::Always => true,
+        HardcodedBootstrapMode::Disabled => false,
+        HardcodedBootstrapMode::Fallback => !has_user_bootstrap,
+    }
+}
+
 fn should_attempt_reconnect(
     addr: &Multiaddr,
     local_peer_id: &PeerId,
@@ -1960,8 +1993,6 @@ async fn main() -> Result<()> {
     };
     let persisted = load_persisted_peers(&known_peers_path).await;
     let loaded_bootstrap_registry = load_bootstrap_registry(&bootstrap_registry_path).await;
-    let mut bootstrap_addrs = persisted;
-    bootstrap_addrs.extend(cli.bootstrap_node.clone());
 
     // Optional defaults from environment to avoid stale hardcoded peers.
     let default_bootstrap = std::env::var("SHARD_DEFAULT_BOOTSTRAP")
@@ -2013,15 +2044,27 @@ async fn main() -> Result<()> {
         .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
         .unwrap_or(false);
 
-    let bootstrap_addrs = filter_bootstrap_addrs(
-        default_bootstrap
-            .into_iter()
-            .chain(cli.bootstrap_node.iter().cloned())
-            .chain(file_bootstrap)
-            .chain(bootstrap_addrs)
-            .chain(hardcoded_bootstrap)
-            .collect(),
-        allow_private_bootstrap,
+    let mut bootstrap_sources = default_bootstrap;
+    bootstrap_sources.extend(cli.bootstrap_node.clone());
+    bootstrap_sources.extend(file_bootstrap);
+    bootstrap_sources.extend(persisted);
+    bootstrap_sources.extend(url_bootstrap);
+
+    let hardcoded_mode = parse_hardcoded_bootstrap_mode(
+        std::env::var("SHARD_HARDCODED_BOOTSTRAP_MODE").ok(),
+    );
+    let include_hardcoded =
+        should_include_hardcoded_bootstrap(hardcoded_mode, !bootstrap_sources.is_empty());
+    if include_hardcoded {
+        bootstrap_sources.extend(hardcoded_bootstrap);
+    }
+
+    let bootstrap_addrs = filter_bootstrap_addrs(bootstrap_sources, allow_private_bootstrap);
+    tracing::info!(
+        bootstrap_count = bootstrap_addrs.len(),
+        include_hardcoded_bootstrap = include_hardcoded,
+        hardcoded_bootstrap_mode = ?hardcoded_mode,
+        "resolved bootstrap peers"
     );
 
     // ── channels ──
@@ -3516,6 +3559,22 @@ async fn main() -> Result<()> {
                                     topo.public_api_addr = Some(format!("{}/p2p/{}", observed_addr, local_peer_id));
                                 }
 
+                                let mut learned_addrs = Vec::new();
+                                for listen_addr in &info.listen_addrs {
+                                    let mut full_addr = listen_addr.clone();
+                                    if !full_addr.iter().any(|p| matches!(p, libp2p::multiaddr::Protocol::P2p(_))) {
+                                        full_addr = full_addr.with(libp2p::multiaddr::Protocol::P2p(peer_id));
+                                    }
+                                    swarm.behaviour_mut().kad.add_address(&peer_id, full_addr.clone());
+                                    learned_addrs.push(full_addr.to_string());
+                                }
+                                if !learned_addrs.is_empty() {
+                                    let mut known = state.known_peers.lock().await;
+                                    known.extend(learned_addrs);
+                                    *known = unique_addrs(known.clone());
+                                    save_persisted_peers(&known_peers_path, &known).await;
+                                }
+
                                 if !cli.relay_mode && cli.nat_traversal {
                                     // Check if the peer supports being a relay server
                                     let is_relay = info.protocols.iter().any(|p| p.as_ref() == "/libp2p/circuit/relay/0.2.0/hop");
@@ -3694,10 +3753,12 @@ async fn main() -> Result<()> {
 mod tests {
     use super::{
         accept_replay_nonce, filter_bootstrap_addrs, is_non_public_bootstrap_addr,
-        load_bootstrap_registry, node_is_healthy, peer_id_from_addr_str, record_bootstrap_failure,
-        save_bootstrap_registry, should_attempt_reconnect, should_reject_peer_connection,
-        unique_addrs, validate_work_request, BootstrapRegistryEntry, CanaryRolloutConfig,
-        CanaryRolloutController, LatencyHistogram, ScoutPenaltyBook, ScoutPenaltyUpdate,
+        load_bootstrap_registry, node_is_healthy, parse_hardcoded_bootstrap_mode,
+        peer_id_from_addr_str, record_bootstrap_failure, save_bootstrap_registry,
+        should_attempt_reconnect, should_include_hardcoded_bootstrap,
+        should_reject_peer_connection, unique_addrs, validate_work_request,
+        BootstrapRegistryEntry, CanaryRolloutConfig, CanaryRolloutController,
+        HardcodedBootstrapMode, LatencyHistogram, ScoutPenaltyBook, ScoutPenaltyUpdate,
         ScoutTimeoutTracker, SpeculativeConfig, WorkRequest, MAX_BOOTSTRAP_FAILURES,
     };
     use libp2p::{Multiaddr, PeerId};
@@ -3998,6 +4059,46 @@ mod tests {
         let addr = format!("/ip4/127.0.0.1/tcp/4001/p2p/{peer}");
         assert_eq!(peer_id_from_addr_str(&addr), Some(peer.to_string()));
         assert_eq!(peer_id_from_addr_str("/ip4/127.0.0.1/tcp/4001"), None);
+    }
+
+    #[test]
+    fn hardcoded_bootstrap_mode_parsing_is_backward_safe() {
+        assert_eq!(
+            parse_hardcoded_bootstrap_mode(None),
+            HardcodedBootstrapMode::Fallback
+        );
+        assert_eq!(
+            parse_hardcoded_bootstrap_mode(Some("always".to_string())),
+            HardcodedBootstrapMode::Always
+        );
+        assert_eq!(
+            parse_hardcoded_bootstrap_mode(Some("disabled".to_string())),
+            HardcodedBootstrapMode::Disabled
+        );
+        assert_eq!(
+            parse_hardcoded_bootstrap_mode(Some("unknown".to_string())),
+            HardcodedBootstrapMode::Fallback
+        );
+    }
+
+    #[test]
+    fn hardcoded_bootstrap_inclusion_respects_mode() {
+        assert!(should_include_hardcoded_bootstrap(
+            HardcodedBootstrapMode::Always,
+            true
+        ));
+        assert!(should_include_hardcoded_bootstrap(
+            HardcodedBootstrapMode::Fallback,
+            false
+        ));
+        assert!(!should_include_hardcoded_bootstrap(
+            HardcodedBootstrapMode::Fallback,
+            true
+        ));
+        assert!(!should_include_hardcoded_bootstrap(
+            HardcodedBootstrapMode::Disabled,
+            false
+        ));
     }
 
     #[test]

@@ -294,7 +294,7 @@ Execution Backlog (Epics, Tickets, Acceptance Criteria, Sequencing)
 
   - P1-T5: `Done` (live draft path now enforces configurable matmul spot-check; tamper tests added)
   - P1-T6: `Done` (timeout/cooldown and long-context fallback policy tests added)
-  - P1-T8: `Done` (bootstrap registry persisted and queryable via `/v1/system/bootstrap`)
+  - P1-T8: `Done` (bootstrap registry persisted and queryable via `/v1/system/bootstrap`; hardcoded bootstrap coupling reduced with configurable `SHARD_HARDCODED_BOOTSTRAP_MODE` and identify-driven peer address learning to strengthen decentralized self-discovery)
   - P1-T9: `Done` (scheduler decisions now logged with auditable inputs via `/v1/system/scheduler-decisions`)
   - P1-T12: `Done` (replay/nonce/signature abuse tests expanded in `shard-common` and daemon replay tests; CI-covered via rust test job)
   - P1-T15: `Done` (stable/canary auto-update channel + rollback-safe updater implemented)
