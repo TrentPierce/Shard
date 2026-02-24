@@ -270,3 +270,22 @@ Execution Backlog (Epics, Tickets, Acceptance Criteria, Sequencing)
   4. Version parity verified automatically across all components.
   5. SLO dashboards and alert runbooks operational.
   6. Security controls (PoW/auth/replay) enforced in production paths.
+
+  ---
+
+  ## 6. Execution Status (2026-02-24)
+
+  - P0-T1: `Done` (canonical schemas + contract tests in `tests/contract_protocol_test.py`)
+  - P0-T2: `Done` (inference-mode semantics aligned; `distributed` maps to speculative; scheduler tests added)
+  - P0-T3: `Done` (draft payload enforces non-empty verifier-consumable tokens via tokens-or-tokenization contract)
+  - P0-T4: `Done` (accept/reject/speedup speculative metrics added and surfaced in metrics summary and Prometheus)
+  - P0-T7: `Partial` (existing reconnect/health logic present; additional churn scenario test coverage still pending)
+  - P0-T10: `Done` (PoW enforcement added to `/v1/scout/work` and `/v1/scout/draft` runtime paths)
+  - P0-T11: `Done` (`SHARD_REQUIRE_API_KEY` + private route auth matrix enforced; auth-policy tests added)
+  - P0-T13: `Partial` (Windows installer upgraded with service mode and silent install flow; signing not implemented in repo)
+  - P0-T14: `Partial` (first-run onboarding script added for identity/model/firewall/health checks; full GUI wizard pending)
+  - P0-T19: `Done` (root `VERSION` propagation + `scripts/verify_versions.py` and CI mismatch gate)
+  - P0-T20: `Done` (runtime version surfaced in web health payload, web footer, and SDK runtime fields)
+  - P0-T22: `Done` (SLI/SLO definition and operations mapping documented)
+  - P0-T25: `Done` (docs baseline rebuilt: architecture/api/deployment/security/operations/contributing/versioning/model-upgrade)
+  - P0-T26: `Done` (README and web footer stale/broken links fixed)
