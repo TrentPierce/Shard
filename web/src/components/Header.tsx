@@ -20,7 +20,7 @@ const navLinks = [
     { name: "Features", href: "/#features" },
     { name: "Use Cases", href: "/#use-cases" },
     { name: "API", href: "/#api" },
-    { name: "Docs", href: "/docs/API.md", external: true },
+    { name: "Docs", href: "https://github.com/TrentPierce/Shard", external: true },
 ]
 
 export default function Header() {
