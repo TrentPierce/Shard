@@ -28,6 +28,22 @@ export interface ChatCompletionRequest {
 
 const API_KEY = process.env.NEXT_PUBLIC_SHARD_API_KEY?.trim() || ""
 
+function sanitizeAssistantContent(raw: string): string {
+    let out = ""
+    let i = 0
+    while (i < raw.length) {
+        if (raw[i] === "<" && raw[i + 1] === "|") {
+            const end = raw.indexOf("|>", i + 2)
+            if (end === -1) break
+            i = end + 2
+            continue
+        }
+        out += raw[i]
+        i += 1
+    }
+    return out
+}
+
 function authHeaders(): Record<string, string> {
     return API_KEY ? { "Authorization": `Bearer ${API_KEY}` } : {}
 }
@@ -75,7 +91,7 @@ async function sendMessageNonStreaming(
     }
 
     const data = await res.json()
-    const content = data?.choices?.[0]?.message?.content ?? ""
+    const content = sanitizeAssistantContent(data?.choices?.[0]?.message?.content ?? "")
     if (content) onToken(content)
 }
 
@@ -235,7 +251,8 @@ export async function sendMessage(
                 const parsed = JSON.parse(data)
                 const delta = parsed?.choices?.[0]?.delta?.content
                 if (delta) {
-                    onToken(delta)
+                    const clean = sanitizeAssistantContent(delta)
+                    if (clean) onToken(clean)
                 }
             } catch {
                 // Skip malformed JSON chunks
@@ -282,7 +299,7 @@ export async function sendMessageSync(
     }
 
     const data = await res.json()
-    return data?.choices?.[0]?.message?.content ?? ""
+    return sanitizeAssistantContent(data?.choices?.[0]?.message?.content ?? "")
 }
 
 // ─── Health ─────────────────────────────────────────────────────────────────

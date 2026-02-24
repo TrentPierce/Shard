@@ -29,7 +29,7 @@ describe("api transport fallbacks", () => {
         status: 200,
         statusText: "OK",
         json: async () => ({
-          choices: [{ message: { content: "fallback reply" } }],
+          choices: [{ message: { content: "fallback<|eot_id|> reply" } }],
         }),
       })
 
@@ -62,7 +62,7 @@ describe("api transport fallbacks", () => {
         status: 200,
         statusText: "OK",
         json: async () => ({
-          choices: [{ message: { content: "from local daemon" } }],
+          choices: [{ message: { content: "from local<|eot_id|> daemon" } }],
         }),
       })
 

@@ -18,6 +18,31 @@ pub(crate) fn auth_required(require_api_key: bool, route_private: bool) -> bool 
     require_api_key || route_private
 }
 
+fn strip_control_tokens(raw: &str) -> String {
+    let mut output = String::with_capacity(raw.len());
+    let mut i = 0;
+    let bytes = raw.as_bytes();
+
+    while i < bytes.len() {
+        if bytes[i] == b'<' && (i + 1) < bytes.len() && bytes[i + 1] == b'|' {
+            if let Some(close_idx) = raw[i + 2..].find("|>") {
+                i += close_idx + 4;
+                continue;
+            }
+            break;
+        }
+
+        if let Some(ch) = raw[i..].chars().next() {
+            output.push(ch);
+            i += ch.len_utf8();
+        } else {
+            break;
+        }
+    }
+
+    output
+}
+
 fn model_pair_acceptance_rates(
     draft_count: u64,
     accepted_count: u64,
@@ -367,15 +392,18 @@ pub(crate) async fn chat_completions_handler(
 
                                 // Emit accepted tokens
                                 if !result.accepted_text.is_empty() {
-                                    let chunk = serde_json::json!({
-                                        "id": request_id,
-                                        "object": "chat.completion.chunk",
-                                        "created": now_ms() / 1000,
-                                        "model": selected_verifier_model.as_str(),
-                                        "choices": [{"index": 0, "delta": {"content": result.accepted_text}, "finish_reason": serde_json::Value::Null}],
-                                    });
-                                    yield Ok::<_, std::convert::Infallible>(Event::default().data(chunk.to_string()));
-                                    accepted_text.push_str(&result.accepted_text);
+                                    let clean = strip_control_tokens(result.accepted_text.as_str());
+                                    if !clean.is_empty() {
+                                        let chunk = serde_json::json!({
+                                            "id": request_id,
+                                            "object": "chat.completion.chunk",
+                                            "created": now_ms() / 1000,
+                                            "model": selected_verifier_model.as_str(),
+                                            "choices": [{"index": 0, "delta": {"content": clean}, "finish_reason": serde_json::Value::Null}],
+                                        });
+                                        yield Ok::<_, std::convert::Infallible>(Event::default().data(chunk.to_string()));
+                                        accepted_text.push_str(clean.as_str());
+                                    }
                                 }
 
                                 // Record success
@@ -408,15 +436,18 @@ pub(crate) async fn chat_completions_handler(
                                     break;
                                 }
 
-                                if let Ok(piece) = engine.token_to_piece(best_idx as i32) {
-                                    let chunk = serde_json::json!({
-                                        "id": request_id,
-                                        "object": "chat.completion.chunk",
-                                        "created": now_ms() / 1000,
-                                        "model": selected_verifier_model.as_str(),
-                                        "choices": [{"index": 0, "delta": {"content": piece}, "finish_reason": serde_json::Value::Null}],
-                                    });
-                                    yield Ok::<_, std::convert::Infallible>(Event::default().data(chunk.to_string()));
+                                if let Ok(raw_piece) = engine.token_to_piece(best_idx as i32) {
+                                    let piece = strip_control_tokens(raw_piece.as_str());
+                                    if !piece.is_empty() {
+                                        let chunk = serde_json::json!({
+                                            "id": request_id,
+                                            "object": "chat.completion.chunk",
+                                            "created": now_ms() / 1000,
+                                            "model": selected_verifier_model.as_str(),
+                                            "choices": [{"index": 0, "delta": {"content": piece}, "finish_reason": serde_json::Value::Null}],
+                                        });
+                                        yield Ok::<_, std::convert::Infallible>(Event::default().data(chunk.to_string()));
+                                    }
                                 }
 
                                 if engine.eval(&[best_idx as i32]).is_err() {
@@ -551,7 +582,8 @@ pub(crate) async fn chat_completions_handler(
 
                                 // Add accepted tokens to output
                                 if !result.accepted_text.is_empty() {
-                                    full_text.push_str(&result.accepted_text);
+                                    let clean = strip_control_tokens(result.accepted_text.as_str());
+                                    full_text.push_str(clean.as_str());
                                 }
 
                                 // Record success
@@ -585,7 +617,8 @@ pub(crate) async fn chat_completions_handler(
                                 }
 
                                 if let Ok(piece) = engine.token_to_piece(best_idx as i32) {
-                                    full_text.push_str(&piece);
+                                    let clean = strip_control_tokens(piece.as_str());
+                                    full_text.push_str(clean.as_str());
                                 }
 
                                 if engine.eval(&[best_idx as i32]).is_err() {
@@ -617,6 +650,7 @@ pub(crate) async fn chat_completions_handler(
             );
         }
 
+        let full_text = strip_control_tokens(full_text.as_str());
         Json(serde_json::json!({
             "id": request_id,
             "object": "chat.completion",
@@ -636,7 +670,8 @@ pub(crate) async fn chat_completions_handler(
 #[cfg(test)]
 mod tests {
     use super::{
-        auth_required, model_pair_acceptance_rates, resolve_inference_mode, InferenceMode,
+        auth_required, model_pair_acceptance_rates, resolve_inference_mode, strip_control_tokens,
+        InferenceMode,
     };
 
     #[test]
@@ -680,5 +715,17 @@ mod tests {
         let (acceptance_empty, reject_empty) = model_pair_acceptance_rates(0, 0, 0);
         assert_eq!(acceptance_empty, 1.0);
         assert_eq!(reject_empty, 0.0);
+    }
+
+    #[test]
+    fn strips_control_tokens_from_output() {
+        let noisy = "Sure, how about you?<|eot_id|>user<|eot_id|><|start_header_id|>assistant";
+        assert_eq!(strip_control_tokens(noisy), "Sure, how about you?userassistant");
+    }
+
+    #[test]
+    fn strips_partial_control_token_tail() {
+        let noisy = "Hello there<|end_header_id";
+        assert_eq!(strip_control_tokens(noisy), "Hello there");
     }
 }
