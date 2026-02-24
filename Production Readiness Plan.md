@@ -211,3 +211,4 @@ Production Readiness Plan (Enterprise + Maintainability)
   - Completed runtime consistency work: distributed/speculative header contract and surfaced version in web runtime outputs.
   - Mesh reliability hardening now includes reconnect/bootstrap-failure recovery test coverage.
   - In progress: Windows productization hardening (service and onboarding scripts improved; signing and GUI wizard remain follow-up items).
+  - P1 progress: spot-check verifier path, persisted bootstrap registry, scheduler decision audit trail, and observability runbooks are now implemented.

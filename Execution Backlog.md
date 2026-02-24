@@ -289,3 +289,20 @@ Execution Backlog (Epics, Tickets, Acceptance Criteria, Sequencing)
   - P0-T22: `Done` (SLI/SLO definition and operations mapping documented)
   - P0-T25: `Done` (docs baseline rebuilt: architecture/api/deployment/security/operations/contributing/versioning/model-upgrade)
   - P0-T26: `Done` (README and web footer stale/broken links fixed)
+
+  ## 7. P1 Status (2026-02-24)
+
+  - P1-T5: `Done` (live draft path now enforces configurable matmul spot-check; tamper tests added)
+  - P1-T6: `Pending`
+  - P1-T8: `Done` (bootstrap registry persisted and queryable via `/v1/system/bootstrap`)
+  - P1-T9: `Done` (scheduler decisions now logged with auditable inputs via `/v1/system/scheduler-decisions`)
+  - P1-T12: `Pending`
+  - P1-T15: `Pending`
+  - P1-T16: `Pending`
+  - P1-T17: `Pending`
+  - P1-T18: `Pending`
+  - P1-T21: `Pending`
+  - P1-T23: `Done` (Prometheus alert rules + Grafana panel hardening with runbook mapping)
+  - P1-T24: `Done` (incident/on-call runbooks and tabletop drill outcomes documented)
+  - P1-T27: `Pending`
+  - P1-T28: `Pending`
