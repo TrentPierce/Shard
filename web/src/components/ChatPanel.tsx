@@ -232,12 +232,12 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
                         value={input}
                         onChange={(e) => setInput(e.target.value)}
                         onKeyDown={handleKeyDown}
-                        disabled={!ready || streaming}
+                        disabled={streaming}
                         rows={1}
                     />
                     <button 
                         onClick={handleSend}
-                        disabled={!input.trim() || streaming || !ready}
+                        disabled={!input.trim() || streaming}
                         className="send-button"
                     >
                         {streaming ? (

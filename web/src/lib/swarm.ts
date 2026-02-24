@@ -10,6 +10,7 @@
 import { apiUrl, rustUrl } from "./config"
 import { getActiveEngine, generateDrafts } from "./scout-engine"
 import { getScoutId, pollForWork, submitDraft } from "./scout-draft"
+import { canUseLocalDaemonFallback } from "./runtime"
 
 // Re-export P2P functions for convenience
 export {
@@ -115,22 +116,24 @@ export async function probeLocalShard(): Promise<LocalShardProbe> {
  */
 export async function fetchTopology(): Promise<Topology> {
     const degraded: Topology = { status: "degraded", shard_webrtc_multiaddr: null, shard_quic_multiaddr: null }
-    try {
-        const localRes = await fetch(rustUrl("/v1/system/topology"), { cache: "no-store" })
-        if (localRes.ok) {
-            return (await localRes.json()) as Topology
+    const endpoints = canUseLocalDaemonFallback()
+        ? [rustUrl("/v1/system/topology"), apiUrl("/v1/system/topology")]
+        : [apiUrl("/v1/system/topology")]
+
+    for (const endpoint of endpoints) {
+        try {
+            const res = await fetch(endpoint, {
+                cache: "no-store",
+                signal: AbortSignal.timeout(2500),
+            })
+            if (!res.ok) continue
+            return (await res.json()) as Topology
+        } catch {
+            // try next endpoint
         }
-    } catch {
-        // fall through to remote proxy
     }
 
-    try {
-        const res = await fetch(apiUrl("/v1/system/topology"), { cache: "no-store" })
-        if (!res.ok) return degraded
-        return (await res.json()) as Topology
-    } catch {
-        return degraded
-    }
+    return degraded
 }
 
 /**
@@ -139,7 +142,9 @@ export async function fetchTopology(): Promise<Topology> {
 export async function heartbeatShard(
     shardAddr: string
 ): Promise<HandshakeResult> {
-    const healthEndpoints = [rustUrl("/health"), apiUrl("/health")]
+    const healthEndpoints = canUseLocalDaemonFallback()
+        ? [rustUrl("/health"), apiUrl("/health")]
+        : [apiUrl("/health")]
 
     for (const endpoint of healthEndpoints) {
         try {

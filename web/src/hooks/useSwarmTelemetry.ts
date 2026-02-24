@@ -63,21 +63,28 @@ async function fetchRealTelemetry(): Promise<SwarmTelemetrySnapshot> {
 
   // Get peer count - handle both {peers: [...]} and {count: N} formats
   const peersList = peersData?.peers ?? []
-  const peerCountFromPeersEndpoint = Array.isArray(peersList) 
-    ? peersList.length 
+  const peerCountFromPeersEndpoint = Array.isArray(peersList)
+    ? peersList.length
     : Number(peersData?.count ?? 0)
-  const connectedPeers = peerCountFromPeersEndpoint || 0
+  const connectedPeersFromHealth = Number(health?.connected_peers ?? 0) || 0
+  const connectedPeers = Math.max(0, peerCountFromPeersEndpoint || 0, connectedPeersFromHealth)
   
   const activeScoutsFromHealth = Number(health?.active_scouts ?? 0) || 0
   const capacity = health?.capacity ?? topo?.capacity ?? 100
   const load = health?.load ?? topo?.load ?? 0
   const rustConnected = health?.rust_sidecar === "connected"
+  const healthOk = health?.status === "ok"
   const bitnetLoaded = health?.bitnet_loaded === true
 
-  // Count the main Shard plus connected daemon peers as Shard nodes.
-  // If health API is working, we count the local node plus peers
-  const localShardOnline = rustConnected || topo?.status === "ok"
-  const shardCount = localShardOnline ? 1 + Math.max(0, connectedPeers) : Math.max(0, connectedPeers)
+  // Count shards conservatively from all available sources.
+  const localShardOnline = healthOk || rustConnected || topo?.status === "ok"
+  const reportedShardCount = Math.max(
+    0,
+    Number(health?.shard_count ?? 0),
+    Number(topo?.shard_count ?? 0),
+  )
+  const inferredShardCount = (localShardOnline ? 1 : 0) + connectedPeers
+  const shardCount = Math.max(reportedShardCount, inferredShardCount)
 
   // Scout count comes from API-reported active browser/WebLLM workers.
   const scoutCount = Math.max(0, activeScoutsFromHealth)
@@ -93,9 +100,10 @@ async function fetchRealTelemetry(): Promise<SwarmTelemetrySnapshot> {
   // Build contributor list: start with the Shard node itself
   const contributors: Contributor[] = []
 
-  if (shardCount > 0 && topo?.shard_peer_id) {
+  const localPeerId = topo?.shard_peer_id ?? health?.peer_id
+  if (shardCount > 0 && localPeerId) {
     contributors.push({
-      id: topo.shard_peer_id.slice(0, 16),
+      id: localPeerId.slice(0, 16),
       role: "Shard",
       tokensProcessed: 0, // TODO: Real token tracking
       efficiency: bitnetLoaded ? 95 : 50,
