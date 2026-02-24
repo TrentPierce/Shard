@@ -1,5 +1,5 @@
-use axum::http::{HeaderName, HeaderValue, StatusCode};
 use super::*;
+use axum::http::{HeaderName, HeaderValue, StatusCode};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum InferenceMode {
@@ -16,6 +16,20 @@ pub(crate) fn resolve_inference_mode(raw: Option<&str>) -> InferenceMode {
 
 pub(crate) fn auth_required(require_api_key: bool, route_private: bool) -> bool {
     require_api_key || route_private
+}
+
+fn model_pair_acceptance_rates(
+    draft_count: u64,
+    accepted_count: u64,
+    rejected_count: u64,
+) -> (f64, f64) {
+    if draft_count == 0 {
+        return (1.0, 0.0);
+    }
+    (
+        accepted_count as f64 / draft_count as f64,
+        rejected_count as f64 / draft_count as f64,
+    )
 }
 
 // ─── Speculative Decoding Functions ────────────────────────────────────────
@@ -95,7 +109,10 @@ pub(crate) async fn verify_draft_tokens(
 
             // Probability bound check:
             // Either greedy match OR the draft token is within 1.0 log-probability of the best
-            let draft_logit = logits.get(draft_token as usize).copied().unwrap_or(-f32::INFINITY);
+            let draft_logit = logits
+                .get(draft_token as usize)
+                .copied()
+                .unwrap_or(-f32::INFINITY);
             let is_accepted = best_idx == draft_token as usize || (best_val - draft_logit) < 1.0;
 
             if is_accepted {
@@ -194,9 +211,10 @@ pub(crate) async fn chat_completions_handler(
         0
     };
 
-    let rate_limit = state
-        .rate_limiter
-        .check(Some(contribution_subject), None, contribution_balance);
+    let rate_limit =
+        state
+            .rate_limiter
+            .check(Some(contribution_subject), None, contribution_balance);
     if !rate_limit.is_allowed() {
         return (
             StatusCode::TOO_MANY_REQUESTS,
@@ -240,9 +258,29 @@ pub(crate) async fn chat_completions_handler(
     prompt.push_str("<|start_header_id|>assistant<|end_header_id|>\n\n");
 
     let request_id = format!("req-{}", now_ms());
+    let request_started_ms = now_ms();
+    let requested_draft_model = req
+        .model
+        .clone()
+        .unwrap_or_else(|| "shard-hybrid".to_string());
+    let rollout_decision = {
+        let rollout = state.canary_rollout.lock().await;
+        let canary_eligible = shard_verifier::inference::is_model_pair_compatible(
+            requested_draft_model.as_str(),
+            rollout.canary_model_id(),
+        );
+        rollout.decide(request_id.as_str(), canary_eligible)
+    };
+    let selected_verifier_model = rollout_decision.selected_model_id.clone();
+    let model_pair_compatible = shard_verifier::inference::is_model_pair_compatible(
+        requested_draft_model.as_str(),
+        selected_verifier_model.as_str(),
+    );
+    let use_speculative = inference_mode == InferenceMode::Speculative && model_pair_compatible;
 
     if stream_mode {
         let stream = async_stream::stream! {
+            let mut request_acceptance: Option<(f64, f64)> = None;
             let mut engine_guard = state.engine.lock().await;
             if let Some(engine) = engine_guard.as_mut() {
                 if let Ok(mut tokens) = engine.tokenize(&prompt, 4096) {
@@ -290,6 +328,11 @@ pub(crate) async fn chat_completions_handler(
                                 let accepted_count = result.accepted_tokens.len() as u64;
                                 let draft_count = draft.draft_tokens.len() as u64;
                                 let rejected_count = draft_count.saturating_sub(accepted_count);
+                                request_acceptance = Some(model_pair_acceptance_rates(
+                                    draft_count,
+                                    accepted_count,
+                                    rejected_count,
+                                ));
                                 state.system_metrics.inc_speculative_draft_tokens(draft_count);
                                 state.system_metrics.inc_speculative_accepted_tokens(accepted_count);
                                 state.system_metrics.inc_speculative_rejected_tokens(rejected_count);
@@ -316,7 +359,7 @@ pub(crate) async fn chat_completions_handler(
                                         latency_ms: Some(draft.latency_ms),
                                         reason: result.first_rejection_idx.map(|idx| format!("Rejected at token {}", idx)),
                                     }, p95);
-                                    
+
                                     if status.blackholed {
                                         let _ = state.ban_tx.try_send((draft.scout_id.clone(), status.last_reason.unwrap_or_else(|| "Repeated verification failure".to_string())));
                                     }
@@ -328,7 +371,7 @@ pub(crate) async fn chat_completions_handler(
                                         "id": request_id,
                                         "object": "chat.completion.chunk",
                                         "created": now_ms() / 1000,
-                                        "model": req.model.as_deref().unwrap_or("shard-hybrid"),
+                                        "model": selected_verifier_model.as_str(),
                                         "choices": [{"index": 0, "delta": {"content": result.accepted_text}, "finish_reason": serde_json::Value::Null}],
                                     });
                                     yield Ok::<_, std::convert::Infallible>(Event::default().data(chunk.to_string()));
@@ -370,7 +413,7 @@ pub(crate) async fn chat_completions_handler(
                                         "id": request_id,
                                         "object": "chat.completion.chunk",
                                         "created": now_ms() / 1000,
-                                        "model": req.model.as_deref().unwrap_or("shard-hybrid"),
+                                        "model": selected_verifier_model.as_str(),
                                         "choices": [{"index": 0, "delta": {"content": piece}, "finish_reason": serde_json::Value::Null}],
                                     });
                                     yield Ok::<_, std::convert::Infallible>(Event::default().data(chunk.to_string()));
@@ -395,11 +438,23 @@ pub(crate) async fn chat_completions_handler(
                 "id": request_id,
                 "object": "chat.completion.chunk",
                 "created": now_ms() / 1000,
-                "model": req.model.as_deref().unwrap_or("shard-hybrid"),
+                "model": selected_verifier_model.as_str(),
                 "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
             });
             yield Ok(Event::default().data(final_chunk.to_string()));
             yield Ok(Event::default().data("[DONE]"));
+
+            let latency_ms = (now_ms().saturating_sub(request_started_ms)) as u64;
+            let (acceptance_rate, reject_rate) = request_acceptance
+                .map(|v| (Some(v.0), Some(v.1)))
+                .unwrap_or((None, None));
+            let mut rollout = state.canary_rollout.lock().await;
+            rollout.record_request_outcome(
+                &rollout_decision,
+                latency_ms,
+                acceptance_rate,
+                reject_rate,
+            );
         };
 
         Sse::new(stream)
@@ -408,6 +463,7 @@ pub(crate) async fn chat_completions_handler(
     } else {
         // Run synchronously but hold the lock
         let mut full_text = String::new();
+        let mut request_acceptance: Option<(f64, f64)> = None;
         {
             let mut engine_guard = state.engine.lock().await;
             if let Some(engine) = engine_guard.as_mut() {
@@ -440,9 +496,20 @@ pub(crate) async fn chat_completions_handler(
                                 let accepted_count = result.accepted_tokens.len() as u64;
                                 let draft_count = draft.draft_tokens.len() as u64;
                                 let rejected_count = draft_count.saturating_sub(accepted_count);
-                                state.system_metrics.inc_speculative_draft_tokens(draft_count);
-                                state.system_metrics.inc_speculative_accepted_tokens(accepted_count);
-                                state.system_metrics.inc_speculative_rejected_tokens(rejected_count);
+                                request_acceptance = Some(model_pair_acceptance_rates(
+                                    draft_count,
+                                    accepted_count,
+                                    rejected_count,
+                                ));
+                                state
+                                    .system_metrics
+                                    .inc_speculative_draft_tokens(draft_count);
+                                state
+                                    .system_metrics
+                                    .inc_speculative_accepted_tokens(accepted_count);
+                                state
+                                    .system_metrics
+                                    .inc_speculative_rejected_tokens(rejected_count);
 
                                 if !result.accepted_tokens.is_empty() {
                                     let mut ledger = state.ledger.lock().await;
@@ -451,7 +518,7 @@ pub(crate) async fn chat_completions_handler(
                                         &draft.work_id,
                                         &draft.scout_id,
                                         result.accepted_tokens.len() as u32,
-                                        now_ms()
+                                        now_ms(),
                                     );
                                     let _ = ledger.apply_poc_receipt(receipt);
                                 }
@@ -473,7 +540,12 @@ pub(crate) async fn chat_completions_handler(
                                     );
 
                                     if status.blackholed {
-                                        let _ = state.ban_tx.try_send((draft.scout_id.clone(), status.last_reason.unwrap_or_else(|| "Repeated verification failure".to_string())));
+                                        let _ = state.ban_tx.try_send((
+                                            draft.scout_id.clone(),
+                                            status.last_reason.unwrap_or_else(|| {
+                                                "Repeated verification failure".to_string()
+                                            }),
+                                        ));
                                     }
                                 }
 
@@ -531,11 +603,30 @@ pub(crate) async fn chat_completions_handler(
             }
         }
 
+        let latency_ms = (now_ms().saturating_sub(request_started_ms)) as u64;
+        let (acceptance_rate, reject_rate) = request_acceptance
+            .map(|v| (Some(v.0), Some(v.1)))
+            .unwrap_or((None, None));
+        {
+            let mut rollout = state.canary_rollout.lock().await;
+            rollout.record_request_outcome(
+                &rollout_decision,
+                latency_ms,
+                acceptance_rate,
+                reject_rate,
+            );
+        }
+
         Json(serde_json::json!({
             "id": request_id,
             "object": "chat.completion",
             "created": now_ms() / 1000,
-            "model": req.model.as_deref().unwrap_or("shard-hybrid"),
+            "model": selected_verifier_model.as_str(),
+            "canary": {
+                "use_canary": rollout_decision.use_canary,
+                "canary_eligible": rollout_decision.canary_eligible,
+                "model_pair_compatible": model_pair_compatible,
+            },
             "choices": [{"index": 0, "message": {"role": "assistant", "content": full_text}, "finish_reason": "stop"}],
             "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
         })).into_response()
@@ -544,7 +635,9 @@ pub(crate) async fn chat_completions_handler(
 
 #[cfg(test)]
 mod tests {
-    use super::{auth_required, resolve_inference_mode, InferenceMode};
+    use super::{
+        auth_required, model_pair_acceptance_rates, resolve_inference_mode, InferenceMode,
+    };
 
     #[test]
     fn distributed_mode_maps_to_speculative() {
@@ -560,9 +653,15 @@ mod tests {
 
     #[test]
     fn standard_mode_disables_speculative() {
-        assert_eq!(resolve_inference_mode(Some("standard")), InferenceMode::Standard);
+        assert_eq!(
+            resolve_inference_mode(Some("standard")),
+            InferenceMode::Standard
+        );
         assert_eq!(resolve_inference_mode(None), InferenceMode::Standard);
-        assert_eq!(resolve_inference_mode(Some("unknown")), InferenceMode::Standard);
+        assert_eq!(
+            resolve_inference_mode(Some("unknown")),
+            InferenceMode::Standard
+        );
     }
 
     #[test]
@@ -572,5 +671,14 @@ mod tests {
         assert!(auth_required(false, true));
         assert!(auth_required(true, true));
     }
-}
 
+    #[test]
+    fn acceptance_rate_math_is_stable() {
+        let (acceptance, reject) = model_pair_acceptance_rates(10, 7, 3);
+        assert_eq!(acceptance, 0.7);
+        assert_eq!(reject, 0.3);
+        let (acceptance_empty, reject_empty) = model_pair_acceptance_rates(0, 0, 0);
+        assert_eq!(acceptance_empty, 1.0);
+        assert_eq!(reject_empty, 0.0);
+    }
+}

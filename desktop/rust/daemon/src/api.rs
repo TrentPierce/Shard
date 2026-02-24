@@ -2,7 +2,9 @@ use super::*;
 
 // ─── HTTP Control-Plane Handlers ────────────────────────────────────────────
 
-pub(crate) async fn health_handler(AxumState(state): AxumState<SharedState>) -> Json<serde_json::Value> {
+pub(crate) async fn health_handler(
+    AxumState(state): AxumState<SharedState>,
+) -> Json<serde_json::Value> {
     let topo = state.topology.lock().await;
     let peers = state.peers.lock().await;
     let known = state.known_peers.lock().await;
@@ -12,7 +14,12 @@ pub(crate) async fn health_handler(AxumState(state): AxumState<SharedState>) -> 
     let load = state.current_load.load(Ordering::Relaxed);
     let latency_ms = state.avg_latency_ms.load(Ordering::Relaxed);
     let scout_count = browser_sessions.len();
-    let model_compat = shard_verifier::inference::check_model_compatibility(state.model_id.as_str());
+    let model_compat =
+        shard_verifier::inference::check_model_compatibility(state.model_id.as_str());
+    let rollout_snapshot = {
+        let rollout = state.canary_rollout.lock().await;
+        rollout.snapshot()
+    };
     let engine_guard = state.engine.lock().await;
     let engine_loaded = engine_guard.is_some();
     drop(engine_guard);
@@ -37,6 +44,7 @@ pub(crate) async fn health_handler(AxumState(state): AxumState<SharedState>) -> 
         "model_id": state.model_id.clone(),
         "model_protocol_version": model_compat.protocol_version,
         "model_supports_speculative": model_compat.supports_speculative,
+        "model_rollout": rollout_snapshot,
         "layer_start": state.layer_start,
         "layer_end": state.layer_end,
         "race_pool_size": state.race_pool_size,
@@ -49,7 +57,9 @@ pub(crate) async fn health_handler(AxumState(state): AxumState<SharedState>) -> 
     }))
 }
 
-pub(crate) async fn connectivity_handler(AxumState(state): AxumState<SharedState>) -> Json<serde_json::Value> {
+pub(crate) async fn connectivity_handler(
+    AxumState(state): AxumState<SharedState>,
+) -> Json<serde_json::Value> {
     let topo = state.topology.lock().await;
 
     // Determine NAT type based on topology state
@@ -83,7 +93,9 @@ pub(crate) async fn connectivity_handler(AxumState(state): AxumState<SharedState
     }))
 }
 
-pub(crate) async fn node_status_handler(AxumState(state): AxumState<SharedState>) -> Json<serde_json::Value> {
+pub(crate) async fn node_status_handler(
+    AxumState(state): AxumState<SharedState>,
+) -> Json<serde_json::Value> {
     let topo = state.topology.lock().await;
     let logs = state.event_log.lock().await;
     Json(serde_json::json!({
@@ -119,7 +131,9 @@ pub(crate) async fn node_toggle_participation_handler(
     }))
 }
 
-pub(crate) async fn node_logs_handler(AxumState(state): AxumState<SharedState>) -> Json<serde_json::Value> {
+pub(crate) async fn node_logs_handler(
+    AxumState(state): AxumState<SharedState>,
+) -> Json<serde_json::Value> {
     let logs = state.event_log.lock().await;
     Json(serde_json::json!({
         "ok": true,
@@ -159,7 +173,9 @@ refresh(); setInterval(refresh, 4000);
     )
 }
 
-pub(crate) async fn topology_handler(AxumState(state): AxumState<SharedState>) -> Json<serde_json::Value> {
+pub(crate) async fn topology_handler(
+    AxumState(state): AxumState<SharedState>,
+) -> Json<serde_json::Value> {
     let topo = state.topology.lock().await;
     let (webrtc_addr, quic_addr, ws_addr, listen_addrs) = outward_topology_addrs(&topo, &state);
     let known = state.known_peers.lock().await;
@@ -192,7 +208,9 @@ pub(crate) async fn topology_handler(AxumState(state): AxumState<SharedState>) -
     }))
 }
 
-pub(crate) async fn peers_handler(AxumState(state): AxumState<SharedState>) -> Json<serde_json::Value> {
+pub(crate) async fn peers_handler(
+    AxumState(state): AxumState<SharedState>,
+) -> Json<serde_json::Value> {
     let peers = state.peers.lock().await;
     let list: Vec<&PeerInfo> = peers.values().collect();
     Json(serde_json::json!({ "peers": list, "count": list.len() }))
@@ -210,7 +228,10 @@ pub(crate) fn parse_nonce_hex(raw: &str) -> Result<[u8; 12], String> {
     Ok(nonce)
 }
 
-pub(crate) fn prune_browser_sessions(sessions: &mut HashMap<String, BrowserLayerSession>, now: u128) {
+pub(crate) fn prune_browser_sessions(
+    sessions: &mut HashMap<String, BrowserLayerSession>,
+    now: u128,
+) {
     sessions.retain(|_, session| session.expires_at_ms > now);
 }
 
@@ -247,7 +268,9 @@ pub(crate) async fn credits_tx_handler(
     }
 }
 
-pub(crate) async fn ledger_head_handler(AxumState(state): AxumState<SharedState>) -> Json<serde_json::Value> {
+pub(crate) async fn ledger_head_handler(
+    AxumState(state): AxumState<SharedState>,
+) -> Json<serde_json::Value> {
     let ledger = state.ledger.lock().await;
     Json(serde_json::json!({
         "ok": true,
@@ -255,7 +278,9 @@ pub(crate) async fn ledger_head_handler(AxumState(state): AxumState<SharedState>
     }))
 }
 
-pub(crate) async fn ledger_stats_handler(AxumState(state): AxumState<SharedState>) -> Json<serde_json::Value> {
+pub(crate) async fn ledger_stats_handler(
+    AxumState(state): AxumState<SharedState>,
+) -> Json<serde_json::Value> {
     let ledger = state.ledger.lock().await;
     Json(serde_json::json!({
         "ok": true,
@@ -287,6 +312,23 @@ pub(crate) async fn next_layer_handler(
         .unwrap_or(state.model_id.as_str())
         .to_string();
     let limit = query.limit.unwrap_or(3).clamp(1, 16);
+    let model_pair_compatible = shard_verifier::inference::is_model_pair_compatible(
+        model_id.as_str(),
+        state.model_id.as_str(),
+    );
+    if !model_pair_compatible {
+        return Json(serde_json::json!({
+            "ok": true,
+            "model_id": model_id,
+            "current_layer": query.current_layer,
+            "next_layer": query.current_layer.saturating_add(1),
+            "peers": Vec::<String>::new(),
+            "count": 0,
+            "model_pair_compatible": false,
+            "detail": "draft/verifier pair is not compatible for speculative scheduling",
+        }));
+    }
+
     let mut routes = state.layer_routes.lock().await;
     routes.prune_expired(now_ms());
     let peers = routes.find_next_layer_peers(&model_id, query.current_layer, limit);
@@ -346,6 +388,7 @@ pub(crate) async fn next_layer_handler(
         "next_layer": query.current_layer.saturating_add(1),
         "peers": selected,
         "count": selected.len(),
+        "model_pair_compatible": true,
     }))
 }
 
@@ -586,7 +629,10 @@ pub(crate) async fn signed_broadcast_work_handler(
 }
 
 #[tracing::instrument(skip(state, req), fields(id = %req.request_id))]
-pub(crate) async fn process_work_request(state: &SharedState, req: WorkRequest) -> Json<serde_json::Value> {
+pub(crate) async fn process_work_request(
+    state: &SharedState,
+    req: WorkRequest,
+) -> Json<serde_json::Value> {
     if let Err(detail) = validate_work_request(&req) {
         state.system_metrics.inc_task_failures();
         return Json(serde_json::json!({ "ok": false, "detail": detail }));
@@ -704,7 +750,12 @@ pub(crate) struct ScoutWorkQuery {
 }
 
 fn require_scout_id(query: &ScoutWorkQuery) -> Result<&str, Json<serde_json::Value>> {
-    match query.scout_id.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+    match query
+        .scout_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
         Some(id) => Ok(id),
         None => Err(Json(serde_json::json!({
             "ok": false,
@@ -1190,7 +1241,6 @@ pub(crate) struct ChatRequest {
     pub(crate) max_new_tokens: Option<u32>,
 }
 
-
 pub(crate) async fn latency_profile_handler(
     AxumState(state): AxumState<SharedState>,
 ) -> Json<serde_json::Value> {
@@ -1234,7 +1284,9 @@ pub(crate) async fn metrics_handler(AxumState(state): AxumState<SharedState>) ->
         .into_response()
 }
 
-pub(crate) async fn alerts_handler(AxumState(state): AxumState<SharedState>) -> Json<serde_json::Value> {
+pub(crate) async fn alerts_handler(
+    AxumState(state): AxumState<SharedState>,
+) -> Json<serde_json::Value> {
     let alerts = {
         let manager = state.alert_manager.lock().await;
         manager.recent_alerts.iter().cloned().collect::<Vec<_>>()
@@ -1702,9 +1754,8 @@ pub(crate) async fn metrics_summary_handler(
     let speculative_speedup_ratio = if counters.speculative_accepted_tokens_total == 0 {
         1.0
     } else {
-        1.0
-            + (counters.speculative_accepted_tokens_total as f64
-                / (counters.speculative_accepted_tokens_total + 1) as f64)
+        1.0 + (counters.speculative_accepted_tokens_total as f64
+            / (counters.speculative_accepted_tokens_total + 1) as f64)
     };
     let cost = estimate_cost(&CostEstimateInput {
         tokens_processed_total: counters.tokens_processed_total,
@@ -1796,14 +1847,15 @@ refresh(); setInterval(refresh, 5000);
     )
 }
 
-
 // ─── Bootstrap Discovery Handlers ─────────────────────────────────────────────
 
-pub(crate) async fn bootstrap_handler(AxumState(state): AxumState<SharedState>) -> Json<serde_json::Value> {
+pub(crate) async fn bootstrap_handler(
+    AxumState(state): AxumState<SharedState>,
+) -> Json<serde_json::Value> {
     let peers = state.peers.lock().await;
     let topo = state.topology.lock().await;
     let now = now_ms();
-    
+
     // Get stable peers that could be bootstraps
     let stable_peers: Vec<serde_json::Value> = peers
         .iter()
@@ -1811,13 +1863,21 @@ pub(crate) async fn bootstrap_handler(AxumState(state): AxumState<SharedState>) 
             let uptime_ms = now.saturating_sub(p.first_seen_at);
             let uptime_hours = uptime_ms / (1000 * 60 * 60);
             let total = p.successful_handshakes + p.handshake_failures;
-            let failure_rate = if total > 0 { p.handshake_failures as f32 / total as f32 } else { 1.0 };
+            let failure_rate = if total > 0 {
+                p.handshake_failures as f32 / total as f32
+            } else {
+                1.0
+            };
             // Stable if: >1 hour uptime, >3 successful handshakes, <10% failure rate
             uptime_hours >= 1 && p.successful_handshakes >= 3 && failure_rate < 0.1
         })
         .map(|(id, p)| {
             let total = p.successful_handshakes + p.handshake_failures;
-            let failure_rate = if total > 0 { p.handshake_failures as f32 / total as f32 } else { 0.0 };
+            let failure_rate = if total > 0 {
+                p.handshake_failures as f32 / total as f32
+            } else {
+                0.0
+            };
             let stability_score = (((1.0 - failure_rate) * 100.0) as u32).min(100);
             serde_json::json!({
                 "peer_id": id,
@@ -1827,11 +1887,11 @@ pub(crate) async fn bootstrap_handler(AxumState(state): AxumState<SharedState>) 
             })
         })
         .collect();
-    
+
     // Calculate if THIS node is stable enough to be a bootstrap
     let my_uptime_hours = (now - state.daemon_start) / (1000 * 60 * 60);
     let is_bootstrap = my_uptime_hours >= 1;
-    
+
     let registered = state.bootstrap_registry.lock().await;
     let persisted_bootstraps: Vec<serde_json::Value> = registered
         .values()
@@ -1882,6 +1942,42 @@ pub(crate) async fn scheduler_decisions_handler(
     }))
 }
 
+pub(crate) async fn model_rollout_status_handler(
+    AxumState(state): AxumState<SharedState>,
+) -> Json<serde_json::Value> {
+    let rollout = state.canary_rollout.lock().await;
+    Json(serde_json::json!({
+        "ok": true,
+        "rollout": rollout.snapshot(),
+    }))
+}
+
+pub(crate) async fn model_rollout_reset_handler(
+    AxumState(state): AxumState<SharedState>,
+    headers: HeaderMap,
+) -> Json<serde_json::Value> {
+    if let Some(admin_key) = state.admin_key.as_deref() {
+        let provided = headers
+            .get("x-shard-admin")
+            .and_then(|v| v.to_str().ok())
+            .map(str::trim)
+            .unwrap_or_default();
+        if provided != admin_key {
+            return Json(serde_json::json!({
+                "ok": false,
+                "detail": "admin key required for rollout reset",
+            }));
+        }
+    }
+
+    let mut rollout = state.canary_rollout.lock().await;
+    rollout.reset_rollback();
+    Json(serde_json::json!({
+        "ok": true,
+        "rollout": rollout.snapshot(),
+    }))
+}
+
 #[derive(Deserialize)]
 pub(crate) struct RegisterBootstrapRequest {
     pub peer_id: String,
@@ -1920,7 +2016,7 @@ pub(crate) async fn register_bootstrap_handler(
     let mut registry = state.bootstrap_registry.lock().await;
     registry.insert(req.peer_id.clone(), entry);
     save_bootstrap_registry(state.bootstrap_registry_path.as_path(), &registry).await;
-    
+
     Json(serde_json::json!({
         "ok": true,
         "message": "Bootstrap registration recorded",
@@ -1932,8 +2028,7 @@ pub(crate) async fn register_bootstrap_handler(
 mod tests {
     use super::{
         push_scheduler_decision_log, require_scout_id, should_route_long_context,
-        verify_spot_check_submission,
-        DraftSpotCheckProof, ScoutWorkQuery,
+        verify_spot_check_submission, DraftSpotCheckProof, ScoutWorkQuery,
     };
     use crate::SchedulerDecisionLog;
     use std::collections::VecDeque;
@@ -1957,9 +2052,9 @@ mod tests {
     #[test]
     fn spot_check_passes_for_correct_matmul() {
         let proof = DraftSpotCheckProof {
-            input_a: vec![1.0, 2.0, 3.0, 4.0],     // 2x2
-            weights_b: vec![1.0, 0.0, 0.0, 1.0],   // 2x2 identity
-            claimed_c: vec![1.0, 2.0, 3.0, 4.0],   // A * I
+            input_a: vec![1.0, 2.0, 3.0, 4.0],   // 2x2
+            weights_b: vec![1.0, 0.0, 0.0, 1.0], // 2x2 identity
+            claimed_c: vec![1.0, 2.0, 3.0, 4.0], // A * I
             m: 2,
             k: 2,
             n: 2,
@@ -1971,9 +2066,9 @@ mod tests {
     #[test]
     fn spot_check_rejects_tampered_matmul() {
         let proof = DraftSpotCheckProof {
-            input_a: vec![1.0, 2.0, 3.0, 4.0],       // 2x2
-            weights_b: vec![1.0, 0.0, 0.0, 1.0],     // identity
-            claimed_c: vec![1.0, 2.0, 3.0, 40.0],    // tampered last element
+            input_a: vec![1.0, 2.0, 3.0, 4.0],      // 2x2
+            weights_b: vec![1.0, 0.0, 0.0, 1.0],    // identity
+            claimed_c: vec![10.0, 20.0, 30.0, 40.0], // tampered all elements
             m: 2,
             k: 2,
             n: 2,
@@ -2009,5 +2104,17 @@ mod tests {
         assert!(!should_route_long_context(1024, 2048));
         assert!(!should_route_long_context(2048, 2048));
         assert!(should_route_long_context(2049, 2048));
+    }
+
+    #[test]
+    fn draft_verifier_pair_compatibility_guard() {
+        assert!(shard_verifier::inference::is_model_pair_compatible(
+            "shard-hybrid",
+            "default-model"
+        ));
+        assert!(!shard_verifier::inference::is_model_pair_compatible(
+            "legacy-draft-v0",
+            "verifier-v2"
+        ));
     }
 }

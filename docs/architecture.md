@@ -26,5 +26,10 @@
 - Daemon exposes version in `/health` (`rust_version`).
 - Web and SDK package versions are synchronized from `VERSION` in CI.
 
+## Model Rollout
+- Daemon supports canary verifier rollout with traffic splitting and automatic rollback.
+- Runtime status is exposed through `/v1/system/model-rollout`.
+- Scheduler and chat runtime enforce draft/verifier compatibility pairs before speculative execution.
+
 ## Decision Records
 - ADR index: `docs/adr/README.md`

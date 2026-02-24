@@ -54,3 +54,14 @@ All signed endpoints require:
 - `GET /v1/system/scheduler-decisions`
   - Returns recent next-layer scheduling decisions with candidate inputs and selected peers.
   - Includes load, latency, reliability, hardware, and identity scoring inputs used for decisioning.
+
+## Model Rollout Controls
+- `GET /v1/system/model-rollout`
+  - Returns canary rollout config, status, and canary performance counters.
+- `POST /v1/system/model-rollout/reset-rollback`
+  - Clears auto-rollback state and resets canary samples.
+  - Requires `X-Shard-Admin` if `SHARD_ADMIN_KEY` is configured.
+
+## Compatibility-Aware Scheduling
+- `/layers/next` includes `model_pair_compatible`.
+- Incompatible draft/verifier pairs return an empty peer set with a compatibility detail message.

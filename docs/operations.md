@@ -29,6 +29,7 @@
 ### Alert-to-Runbook Mapping
 - Ops alerts -> `docs/operations.md`
 - Security alerts -> `docs/security.md`
+- Model rollout controls -> `GET /v1/system/model-rollout`, `POST /v1/system/model-rollout/reset-rollback`
 
 ## Incident Handling
 1. Confirm health and metrics endpoints.

@@ -28,6 +28,60 @@ pub struct ModelCompatibility {
     pub supports_speculative: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModelCompatibilityPair {
+    pub draft_model: String,
+    pub verifier_model: String,
+    pub supports_speculative: bool,
+}
+
+pub fn compatibility_matrix() -> Vec<ModelCompatibilityPair> {
+    vec![
+        ModelCompatibilityPair {
+            draft_model: "shard-hybrid".to_string(),
+            verifier_model: "default-model".to_string(),
+            supports_speculative: true,
+        },
+        ModelCompatibilityPair {
+            draft_model: "shard-hybrid".to_string(),
+            verifier_model: "bitnet-1.58b".to_string(),
+            supports_speculative: true,
+        },
+        ModelCompatibilityPair {
+            draft_model: "llama-3.2-1b-draft".to_string(),
+            verifier_model: "bitnet-1.58b".to_string(),
+            supports_speculative: true,
+        },
+        ModelCompatibilityPair {
+            draft_model: "llama-3.2-1b-draft".to_string(),
+            verifier_model: "verifier-v2".to_string(),
+            supports_speculative: true,
+        },
+        ModelCompatibilityPair {
+            draft_model: "legacy-draft-v0".to_string(),
+            verifier_model: "verifier-v2".to_string(),
+            supports_speculative: false,
+        },
+    ]
+}
+
+pub fn is_model_pair_compatible(draft_model: &str, verifier_model: &str) -> bool {
+    let draft = draft_model.trim().to_ascii_lowercase();
+    let verifier = verifier_model.trim().to_ascii_lowercase();
+    if draft.is_empty() || verifier.is_empty() {
+        return false;
+    }
+    if draft == verifier {
+        return true;
+    }
+
+    compatibility_matrix().into_iter().any(|pair| {
+        pair.supports_speculative
+            && pair.draft_model.eq_ignore_ascii_case(draft.as_str())
+            && pair.verifier_model.eq_ignore_ascii_case(verifier.as_str())
+    })
+}
+
 pub fn check_model_compatibility(model_id: &str) -> ModelCompatibility {
     let supports_speculative = !model_id.trim().is_empty();
     ModelCompatibility {
@@ -234,12 +288,29 @@ impl VerifierModel for ShardEngine {
 
 #[cfg(test)]
 mod tests {
-    use super::check_model_compatibility;
+    use super::{check_model_compatibility, compatibility_matrix, is_model_pair_compatible};
 
     #[test]
     fn compatibility_reports_protocol_defaults() {
         let compat = check_model_compatibility("bitnet-1.58b");
         assert_eq!(compat.protocol_version, "v1");
         assert!(compat.supports_speculative);
+    }
+
+    #[test]
+    fn compatibility_matrix_contains_known_pairs() {
+        let matrix = compatibility_matrix();
+        assert!(matrix.iter().any(|pair| {
+            pair.draft_model == "shard-hybrid"
+                && pair.verifier_model == "bitnet-1.58b"
+                && pair.supports_speculative
+        }));
+    }
+
+    #[test]
+    fn model_pair_compatibility_enforced() {
+        assert!(is_model_pair_compatible("shard-hybrid", "bitnet-1.58b"));
+        assert!(!is_model_pair_compatible("legacy-draft-v0", "verifier-v2"));
+        assert!(is_model_pair_compatible("bitnet-1.58b", "bitnet-1.58b"));
     }
 }

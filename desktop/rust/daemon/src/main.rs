@@ -49,6 +49,7 @@ use serde::{Deserialize, Serialize};
 use shard_common::types::{WorkRequest, WorkResponse};
 use std::{
     collections::{HashMap, HashSet, VecDeque},
+    hash::{Hash, Hasher},
     net::{IpAddr, SocketAddr},
     path::{Path, PathBuf},
     sync::{
@@ -60,10 +61,10 @@ use std::{
 use tokio::sync::{mpsc, Mutex};
 use tower_http::cors::{Any, CorsLayer};
 
-pub mod telemetry_ws;
 pub mod api;
-pub mod scheduler;
 pub mod bootstrap_discovery;
+pub mod scheduler;
+pub mod telemetry_ws;
 use api::*;
 use scheduler::*;
 use shard_common::common::node_config::{NodeRole, NodeRuntimeConfig};
@@ -102,6 +103,231 @@ use shard_scheduler::scheduler::{
 
 // Maximum consecutive connection failures before removing a bootstrap peer
 const MAX_BOOTSTRAP_FAILURES: u32 = 3;
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub(crate) struct CanaryRolloutConfig {
+    enabled: bool,
+    canary_model_id: String,
+    traffic_percent: u8,
+    max_avg_latency_ms: u64,
+    min_acceptance_rate: f64,
+    max_reject_rate: f64,
+    min_samples: u64,
+}
+
+impl CanaryRolloutConfig {
+    fn from_env(default_model_id: &str) -> Self {
+        let enabled = std::env::var("SHARD_CANARY_ENABLED")
+            .ok()
+            .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
+            .unwrap_or(false);
+        let canary_model_id = std::env::var("SHARD_CANARY_MODEL_ID")
+            .ok()
+            .filter(|v| !v.trim().is_empty())
+            .unwrap_or_else(|| "verifier-v2".to_string());
+        let traffic_percent = std::env::var("SHARD_CANARY_TRAFFIC_PERCENT")
+            .ok()
+            .and_then(|v| v.parse::<u8>().ok())
+            .map(|v| v.min(100))
+            .unwrap_or(10);
+        let max_avg_latency_ms = std::env::var("SHARD_CANARY_MAX_AVG_LATENCY_MS")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .unwrap_or(2500);
+        let min_acceptance_rate = std::env::var("SHARD_CANARY_MIN_ACCEPTANCE_RATE")
+            .ok()
+            .and_then(|v| v.parse::<f64>().ok())
+            .map(|v| v.clamp(0.0, 1.0))
+            .unwrap_or(0.60);
+        let max_reject_rate = std::env::var("SHARD_CANARY_MAX_REJECT_RATE")
+            .ok()
+            .and_then(|v| v.parse::<f64>().ok())
+            .map(|v| v.clamp(0.0, 1.0))
+            .unwrap_or(0.40);
+        let min_samples = std::env::var("SHARD_CANARY_MIN_SAMPLES")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .unwrap_or(20);
+
+        Self {
+            enabled,
+            canary_model_id,
+            traffic_percent,
+            max_avg_latency_ms,
+            min_acceptance_rate,
+            max_reject_rate,
+            min_samples,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub(crate) struct CanaryRolloutStatus {
+    rollback_active: bool,
+    rollback_reason: Option<String>,
+    last_evaluated_ms: u128,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+pub(crate) struct CanaryRolloutStats {
+    canary_requests_total: u64,
+    canary_latency_sum_ms: u64,
+    canary_acceptance_samples: u64,
+    canary_acceptance_sum: f64,
+    canary_reject_sum: f64,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct CanaryRolloutController {
+    config: CanaryRolloutConfig,
+    status: CanaryRolloutStatus,
+    stats: CanaryRolloutStats,
+    stable_model_id: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub(crate) struct CanaryDecision {
+    pub(crate) use_canary: bool,
+    pub(crate) selected_model_id: String,
+    pub(crate) canary_eligible: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub(crate) struct ModelRolloutSnapshot {
+    stable_model_id: String,
+    config: CanaryRolloutConfig,
+    status: CanaryRolloutStatus,
+    stats: CanaryRolloutStats,
+}
+
+impl CanaryRolloutController {
+    fn new(stable_model_id: String, config: CanaryRolloutConfig) -> Self {
+        Self {
+            config,
+            status: CanaryRolloutStatus {
+                rollback_active: false,
+                rollback_reason: None,
+                last_evaluated_ms: 0,
+            },
+            stats: CanaryRolloutStats::default(),
+            stable_model_id,
+        }
+    }
+
+    pub(crate) fn decide(&self, request_id: &str, canary_eligible: bool) -> CanaryDecision {
+        if !self.config.enabled
+            || self.status.rollback_active
+            || !canary_eligible
+            || self.config.traffic_percent == 0
+        {
+            return CanaryDecision {
+                use_canary: false,
+                selected_model_id: self.stable_model_id.clone(),
+                canary_eligible,
+            };
+        }
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        request_id.hash(&mut hasher);
+        let bucket = (hasher.finish() % 100) as u8;
+        let use_canary = bucket < self.config.traffic_percent;
+        CanaryDecision {
+            use_canary,
+            selected_model_id: if use_canary {
+                self.config.canary_model_id.clone()
+            } else {
+                self.stable_model_id.clone()
+            },
+            canary_eligible,
+        }
+    }
+
+    pub(crate) fn canary_model_id(&self) -> &str {
+        self.config.canary_model_id.as_str()
+    }
+
+    pub(crate) fn snapshot(&self) -> ModelRolloutSnapshot {
+        ModelRolloutSnapshot {
+            stable_model_id: self.stable_model_id.clone(),
+            config: self.config.clone(),
+            status: self.status.clone(),
+            stats: self.stats.clone(),
+        }
+    }
+
+    pub(crate) fn record_request_outcome(
+        &mut self,
+        decision: &CanaryDecision,
+        latency_ms: u64,
+        acceptance_rate: Option<f64>,
+        reject_rate: Option<f64>,
+    ) {
+        if !decision.use_canary {
+            return;
+        }
+        self.stats.canary_requests_total = self.stats.canary_requests_total.saturating_add(1);
+        self.stats.canary_latency_sum_ms =
+            self.stats.canary_latency_sum_ms.saturating_add(latency_ms);
+        if let (Some(acc), Some(rej)) = (acceptance_rate, reject_rate) {
+            self.stats.canary_acceptance_samples =
+                self.stats.canary_acceptance_samples.saturating_add(1);
+            self.stats.canary_acceptance_sum += acc;
+            self.stats.canary_reject_sum += rej;
+        }
+        self.evaluate_auto_rollback();
+    }
+
+    fn evaluate_auto_rollback(&mut self) {
+        self.status.last_evaluated_ms = now_ms();
+        if self.status.rollback_active {
+            return;
+        }
+        if self.stats.canary_requests_total < self.config.min_samples {
+            return;
+        }
+        let avg_latency = if self.stats.canary_requests_total == 0 {
+            0.0
+        } else {
+            self.stats.canary_latency_sum_ms as f64 / self.stats.canary_requests_total as f64
+        };
+        if avg_latency > self.config.max_avg_latency_ms as f64 {
+            self.status.rollback_active = true;
+            self.status.rollback_reason = Some(format!(
+                "canary avg latency {:.1}ms exceeded threshold {}ms",
+                avg_latency, self.config.max_avg_latency_ms
+            ));
+            return;
+        }
+
+        if self.stats.canary_acceptance_samples >= self.config.min_samples {
+            let acceptance_rate =
+                self.stats.canary_acceptance_sum / self.stats.canary_acceptance_samples as f64;
+            let reject_rate =
+                self.stats.canary_reject_sum / self.stats.canary_acceptance_samples as f64;
+            if acceptance_rate < self.config.min_acceptance_rate {
+                self.status.rollback_active = true;
+                self.status.rollback_reason = Some(format!(
+                    "canary acceptance rate {:.3} below threshold {:.3}",
+                    acceptance_rate, self.config.min_acceptance_rate
+                ));
+                return;
+            }
+            if reject_rate > self.config.max_reject_rate {
+                self.status.rollback_active = true;
+                self.status.rollback_reason = Some(format!(
+                    "canary reject rate {:.3} above threshold {:.3}",
+                    reject_rate, self.config.max_reject_rate
+                ));
+            }
+        }
+    }
+
+    pub(crate) fn reset_rollback(&mut self) {
+        self.status.rollback_active = false;
+        self.status.rollback_reason = None;
+        self.status.last_evaluated_ms = now_ms();
+        self.stats = CanaryRolloutStats::default();
+    }
+}
 
 #[derive(Parser, Debug, Clone)]
 #[command(name = "shard-daemon", version, about = "Shard P2P Daemon")]
@@ -520,6 +746,7 @@ pub(crate) struct SharedState {
     bootstrap_registry: Arc<Mutex<HashMap<String, BootstrapRegistryEntry>>>,
     bootstrap_registry_path: PathBuf,
     scheduler_decisions: Arc<Mutex<VecDeque<SchedulerDecisionLog>>>,
+    canary_rollout: Arc<Mutex<CanaryRolloutController>>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -1452,10 +1679,7 @@ async fn load_bootstrap_registry(path: &Path) -> HashMap<String, BootstrapRegist
         .collect()
 }
 
-async fn save_bootstrap_registry(
-    path: &Path,
-    registry: &HashMap<String, BootstrapRegistryEntry>,
-) {
+async fn save_bootstrap_registry(path: &Path, registry: &HashMap<String, BootstrapRegistryEntry>) {
     let payload = PersistedBootstrapRegistry {
         entries: registry.values().cloned().collect(),
     };
@@ -1488,7 +1712,6 @@ fn should_accept_work(state: &SharedState) -> Result<(), String> {
     }
     Ok(())
 }
-
 
 fn create_router(state: SharedState) -> Router {
     let mut cors = CorsLayer::new()
@@ -1537,6 +1760,14 @@ fn create_router(state: SharedState) -> Router {
         .route(
             "/v1/system/scheduler-decisions",
             get(scheduler_decisions_handler),
+        )
+        .route(
+            "/v1/system/model-rollout",
+            get(model_rollout_status_handler),
+        )
+        .route(
+            "/v1/system/model-rollout/reset-rollback",
+            post(model_rollout_reset_handler),
         )
         .route(
             "/browser-layer/register",
@@ -1703,14 +1934,18 @@ async fn main() -> Result<()> {
     // If the production bootstrap peer changes in the future, update
     // this multiaddr and the corresponding docs in docs/ENVIRONMENT.md.
     let hardcoded_bootstrap = vec![
-        "/ip4/35.175.242.222/tcp/4001/p2p/12D3KooWConhJakwyGN72uZ1Jtxi3LFecN3cYKxEX3aNLDAo48by".to_string(),
+        "/ip4/35.175.242.222/tcp/4001/p2p/12D3KooWConhJakwyGN72uZ1Jtxi3LFecN3cYKxEX3aNLDAo48by"
+            .to_string(),
     ];
 
     // Fetch bootstrap peers from discovery URL if configured
     let url_bootstrap = if let Some(url) = &cli.bootstrap_url {
         match bootstrap_discovery::fetch_bootstrap_peers(url).await {
             Ok(peers) => {
-                tracing::info!(count = peers.len(), "Fetched bootstrap peers from discovery URL");
+                tracing::info!(
+                    count = peers.len(),
+                    "Fetched bootstrap peers from discovery URL"
+                );
                 peers.into_iter().map(|p| p.multiaddr).collect()
             }
             Err(e) => {
@@ -1738,6 +1973,7 @@ async fn main() -> Result<()> {
     let (browser_result_tx, mut browser_result_rx) = mpsc::channel::<ForwardPassActivation>(256);
     let (scout_draft_tx, scout_draft_rx) = mpsc::channel::<ScoutDraft>(64);
     let (ban_tx, mut ban_rx) = mpsc::channel::<(String, String)>(128);
+    let canary_rollout_cfg = CanaryRolloutConfig::from_env(cli.model_id.as_str());
 
     let node_identity = NodeIdentity::load_or_create(&identity_path)?;
     let node_wallet = node_identity.wallet_address();
@@ -1765,7 +2001,12 @@ async fn main() -> Result<()> {
     let admin_key = std::env::var("SHARD_ADMIN_KEY").ok();
     let require_api_key = std::env::var("SHARD_REQUIRE_API_KEY")
         .ok()
-        .map(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+        .map(|v| {
+            matches!(
+                v.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
         .unwrap_or(false);
 
     let initial_credit_nonce = loaded_ledger.head().height.saturating_add(1);
@@ -1845,7 +2086,9 @@ async fn main() -> Result<()> {
         private_mesh: Arc::new(Mutex::new(PrivateMeshRegistry::new())),
         alert_manager: Arc::new(Mutex::new(AlertManager::new())),
         api_keys: Arc::new(Mutex::new(initial_api_keys)),
-        rate_limiter: Arc::new(shard_gateway::rate_limiter::RateLimiter::new(shard_gateway::rate_limiter::RateLimitConfig::default())),
+        rate_limiter: Arc::new(shard_gateway::rate_limiter::RateLimiter::new(
+            shard_gateway::rate_limiter::RateLimitConfig::default(),
+        )),
         admin_key,
         require_api_key,
         signing_key: signing_key.clone(),
@@ -1862,6 +2105,10 @@ async fn main() -> Result<()> {
         bootstrap_registry: Arc::new(Mutex::new(loaded_bootstrap_registry)),
         bootstrap_registry_path,
         scheduler_decisions: Arc::new(Mutex::new(VecDeque::new())),
+        canary_rollout: Arc::new(Mutex::new(CanaryRolloutController::new(
+            cli.model_id.clone(),
+            canary_rollout_cfg,
+        ))),
     };
 
     #[cfg(target_os = "windows")]
@@ -2021,10 +2268,9 @@ async fn main() -> Result<()> {
             id_keys.public(),
         ));
         let ping = ping::Behaviour::new(ping::Config::new());
-        let mdns = libp2p::mdns::tokio::Behaviour::new(
-            libp2p::mdns::Config::default(),
-            local_peer_id,
-        ).map_err(|e| anyhow::anyhow!(e))?;
+        let mdns =
+            libp2p::mdns::tokio::Behaviour::new(libp2p::mdns::Config::default(), local_peer_id)
+                .map_err(|e| anyhow::anyhow!(e))?;
         ShardBehaviour {
             gossipsub,
             kad,
@@ -2059,7 +2305,7 @@ async fn main() -> Result<()> {
     let layer_announce_topic = IdentTopic::new("shard-layer-announcements");
     let auction_topic = IdentTopic::new("auction.prompt");
     let ban_topic = IdentTopic::new("shard-ban-list");
-    
+
     swarm.behaviour_mut().gossipsub.subscribe(&work_topic)?;
     swarm.behaviour_mut().gossipsub.subscribe(&result_topic)?;
     swarm.behaviour_mut().gossipsub.subscribe(&forward_topic)?;
@@ -2146,22 +2392,22 @@ async fn main() -> Result<()> {
             let client = reqwest::Client::new();
             loop {
                 tokio::time::sleep(Duration::from_secs(300)).await; // Check every 5 minutes
-                
+
                 let now = now_ms();
                 let now = now_ms();
                 let uptime_hours = (now - advertise_state.daemon_start) / (1000 * 60 * 60);
                 let uptime_hours_u64 = uptime_hours as u64;
-                
+
                 // Only advertise if stable enough
                 if uptime_hours_u64 < stability_threshold {
                     continue;
                 }
-                
+
                 // Get our advertised addresses
                 let topo = advertise_state.topology.lock().await;
                 let addrs = topo.listen_addrs.clone();
                 drop(topo);
-                
+
                 if let Some(multiaddr) = addrs.first() {
                     let registration = bootstrap_discovery::BootstrapRegistration {
                         peer_id: local_peer_id.clone(),
@@ -2170,8 +2416,11 @@ async fn main() -> Result<()> {
                         uptime_hours: uptime_hours_u64,
                         version: env!("CARGO_PKG_VERSION").to_string(),
                     };
-                    
-                    if let Err(e) = bootstrap_discovery::register_as_bootstrap(&advertise_url, &registration).await {
+
+                    if let Err(e) =
+                        bootstrap_discovery::register_as_bootstrap(&advertise_url, &registration)
+                            .await
+                    {
                         tracing::warn!({});
                     } else {
                         tracing::info!(peer_id = %local_peer_id, hours = uptime_hours, "Registered as bootstrap peer");
@@ -2484,7 +2733,7 @@ async fn main() -> Result<()> {
                 if work_req.created_at_ms.is_none() {
                     work_req.created_at_ms = Some(now_ms());
                 }
-                
+
                 let nonce = state.credit_nonce.fetch_add(1, Ordering::Relaxed);
                 let envelope = shard_common::common::signed_envelope::SignedEnvelope::sign(
                     work_req,
@@ -2679,9 +2928,9 @@ async fn main() -> Result<()> {
                                         tracing::warn!(%e, "received invalid Signed WorkRequest; dropping");
                                         continue;
                                     }
-                                    
+
                                     tracing::info!(id = %envelope.payload.request_id, signer = %envelope.signer_pubkey_hex, "received valid Signed WorkRequest via gossipsub");
-                                    
+
                                     // If we are acting as a Scout, pick up this work
                                     let mut queue = state.scout_work.lock().await;
                                     queue.push_back(envelope.payload);
@@ -2958,7 +3207,7 @@ async fn main() -> Result<()> {
                             id = %request.request_id,
                             "work request via req/resp -> publishing signed envelope to gossipsub"
                         );
-                        
+
                         let nonce = state.credit_nonce.fetch_add(1, Ordering::Relaxed);
                         let envelope = shard_common::common::signed_envelope::SignedEnvelope::sign(
                             request,
@@ -3201,7 +3450,7 @@ async fn main() -> Result<()> {
                                 if topo.public_api_addr.is_none() && !observed_addr.to_string().starts_with("/ip4/127.0.0.1") && !observed_addr.to_string().starts_with("/ip6/::1") {
                                     topo.public_api_addr = Some(format!("{}/p2p/{}", observed_addr, local_peer_id));
                                 }
-                                
+
                                 if !cli.relay_mode && cli.nat_traversal {
                                     // Check if the peer supports being a relay server
                                     let is_relay = info.protocols.iter().any(|p| p.as_ref() == "/libp2p/circuit/relay/0.2.0/hop");
@@ -3218,7 +3467,7 @@ async fn main() -> Result<()> {
                                                     full_relay_addr = full_relay_addr.with(libp2p::multiaddr::Protocol::P2p(peer_id));
                                                 }
                                                 let p2p_circuit_addr = full_relay_addr.with(libp2p::multiaddr::Protocol::P2pCircuit);
-                                                
+
                                                 tracing::info!(%peer_id, "Found relay server, attempting reservation: {}", p2p_circuit_addr);
                                                 let _ = swarm.listen_on(p2p_circuit_addr);
                                             }
@@ -3354,7 +3603,7 @@ async fn main() -> Result<()> {
 
                     SwarmEvent::OutgoingConnectionError { peer_id, error, .. } => {
                         tracing::warn!(?peer_id, %error, "outgoing connection error");
-                        
+
                         // Track bootstrap peer failures
                         if let Some(peer_id) = peer_id {
                             let mut known = state.known_peers.lock().await;
@@ -3380,9 +3629,9 @@ mod tests {
     use super::{
         accept_replay_nonce, load_bootstrap_registry, node_is_healthy, record_bootstrap_failure,
         save_bootstrap_registry, should_attempt_reconnect, should_reject_peer_connection,
-        unique_addrs, validate_work_request, BootstrapRegistryEntry, LatencyHistogram,
-        ScoutPenaltyBook, ScoutPenaltyUpdate, ScoutTimeoutTracker, SpeculativeConfig,
-        WorkRequest, MAX_BOOTSTRAP_FAILURES,
+        unique_addrs, validate_work_request, BootstrapRegistryEntry, CanaryRolloutConfig,
+        CanaryRolloutController, LatencyHistogram, ScoutPenaltyBook, ScoutPenaltyUpdate,
+        ScoutTimeoutTracker, SpeculativeConfig, WorkRequest, MAX_BOOTSTRAP_FAILURES,
     };
     use libp2p::{Multiaddr, PeerId};
     use std::collections::{HashMap, HashSet};
@@ -3621,7 +3870,11 @@ mod tests {
         let mut connected = HashSet::new();
         connected.insert(remote_peer.to_string());
 
-        assert!(!should_attempt_reconnect(&self_addr, &local_peer, &connected));
+        assert!(!should_attempt_reconnect(
+            &self_addr,
+            &local_peer,
+            &connected
+        ));
         assert!(!should_attempt_reconnect(
             &connected_addr,
             &local_peer,
@@ -3649,6 +3902,48 @@ mod tests {
         assert!(removed);
         assert!(known.is_empty());
         assert!(!failures.contains_key(&peer.to_string()));
+    }
+
+    #[test]
+    fn canary_rollout_hash_splits_deterministically() {
+        let cfg = CanaryRolloutConfig {
+            enabled: true,
+            canary_model_id: "verifier-v2".to_string(),
+            traffic_percent: 50,
+            max_avg_latency_ms: 2500,
+            min_acceptance_rate: 0.6,
+            max_reject_rate: 0.4,
+            min_samples: 10,
+        };
+        let controller = CanaryRolloutController::new("default-model".to_string(), cfg);
+        let decision_a = controller.decide("req-1", true);
+        let decision_b = controller.decide("req-1", true);
+        assert_eq!(decision_a.use_canary, decision_b.use_canary);
+    }
+
+    #[test]
+    fn canary_rollout_auto_rollback_on_latency_regression() {
+        let cfg = CanaryRolloutConfig {
+            enabled: true,
+            canary_model_id: "verifier-v2".to_string(),
+            traffic_percent: 100,
+            max_avg_latency_ms: 10,
+            min_acceptance_rate: 0.6,
+            max_reject_rate: 0.4,
+            min_samples: 3,
+        };
+        let mut controller = CanaryRolloutController::new("default-model".to_string(), cfg);
+        let decision = controller.decide("req-rollback", true);
+        for _ in 0..3 {
+            controller.record_request_outcome(&decision, 50, Some(0.9), Some(0.1));
+        }
+        let snapshot = controller.snapshot();
+        assert!(snapshot.status.rollback_active);
+        assert!(snapshot
+            .status
+            .rollback_reason
+            .unwrap_or_default()
+            .contains("latency"));
     }
 
     #[tokio::test]
