@@ -25,6 +25,13 @@
   - `draft_tokens` may be supplied directly, or
   - server tokenizes `draft_text` and must produce non-empty tokens
 - Runtime gate: `scout_id` must be PoW-verified
+- Optional fraud-proof field: `spot_check`
+  - Contains `input_a`, `weights_b`, `claimed_c`, `m`, `k`, `n`, optional `seed`
+  - Verifier enforces probabilistic matmul spot-check before accepting draft
+  - Runtime config:
+    - `SHARD_SPOTCHECK_SAMPLE_RATE`
+    - `SHARD_SPOTCHECK_TOLERANCE`
+    - `SHARD_SPOTCHECK_MIN_ROWS`
 
 ## Signed Envelope Endpoints
 - `POST /v1/signed/register`
@@ -36,4 +43,3 @@ All signed endpoints require:
 - valid signature
 - signer-payload identity match
 - strictly increasing nonce (replay protection)
-

@@ -774,6 +774,16 @@ pub(crate) async fn process_draft_submission(
         mark_node_failure(state, submission.scout_id.as_str()).await;
         return response;
     }
+    if let Some(spot_check) = submission.spot_check.as_ref() {
+        if let Err(detail) = verify_spot_check_submission(spot_check) {
+            state.system_metrics.inc_task_failures();
+            mark_node_failure(state, submission.scout_id.as_str()).await;
+            return Json(serde_json::json!({
+                "ok": false,
+                "detail": detail,
+            }));
+        }
+    }
 
     if submission.draft_tokens.is_empty() && !submission.draft_text.trim().is_empty() {
         let mut engine_guard = state.engine.lock().await;
@@ -848,6 +858,53 @@ pub(crate) async fn process_draft_submission(
     }
 
     Json(serde_json::json!({ "ok": true, "detail": "draft queued" }))
+}
+
+fn spot_check_config_from_env() -> shard_verifier::verification::spot_check::SpotCheckConfig {
+    let defaults = shard_verifier::verification::spot_check::SpotCheckConfig::default();
+    let sample_rate = std::env::var("SHARD_SPOTCHECK_SAMPLE_RATE")
+        .ok()
+        .and_then(|v| v.parse::<f32>().ok())
+        .map(|v| v.clamp(0.0, 1.0))
+        .unwrap_or(defaults.sample_rate);
+    let tolerance = std::env::var("SHARD_SPOTCHECK_TOLERANCE")
+        .ok()
+        .and_then(|v| v.parse::<f32>().ok())
+        .filter(|v| *v > 0.0)
+        .unwrap_or(defaults.tolerance);
+    let min_rows = std::env::var("SHARD_SPOTCHECK_MIN_ROWS")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .filter(|v| *v > 0)
+        .unwrap_or(defaults.min_rows);
+
+    shard_verifier::verification::spot_check::SpotCheckConfig {
+        sample_rate,
+        tolerance,
+        min_rows,
+    }
+}
+
+fn verify_spot_check_submission(spot_check: &DraftSpotCheckProof) -> Result<(), String> {
+    let config = spot_check_config_from_env();
+    let result = shard_verifier::verification::spot_check::verify_matmul(
+        &spot_check.input_a,
+        &spot_check.weights_b,
+        &spot_check.claimed_c,
+        spot_check.m,
+        spot_check.k,
+        spot_check.n,
+        &config,
+        spot_check.seed.unwrap_or(42),
+    );
+    if result.passed {
+        Ok(())
+    } else {
+        Err(format!(
+            "spot-check verification failed: max_deviation={} tolerance={} failed_rows={:?}",
+            result.max_deviation, result.tolerance, result.failed_rows
+        ))
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -1776,7 +1833,7 @@ pub(crate) async fn register_bootstrap_handler(
 
 #[cfg(test)]
 mod tests {
-    use super::{require_scout_id, ScoutWorkQuery};
+    use super::{require_scout_id, verify_spot_check_submission, DraftSpotCheckProof, ScoutWorkQuery};
 
     #[test]
     fn scout_work_requires_identity() {
@@ -1792,5 +1849,33 @@ mod tests {
             scout_id: Some("scout_123".to_string()),
         };
         assert_eq!(require_scout_id(&valid).ok(), Some("scout_123"));
+    }
+
+    #[test]
+    fn spot_check_passes_for_correct_matmul() {
+        let proof = DraftSpotCheckProof {
+            input_a: vec![1.0, 2.0, 3.0, 4.0],     // 2x2
+            weights_b: vec![1.0, 0.0, 0.0, 1.0],   // 2x2 identity
+            claimed_c: vec![1.0, 2.0, 3.0, 4.0],   // A * I
+            m: 2,
+            k: 2,
+            n: 2,
+            seed: Some(7),
+        };
+        assert!(verify_spot_check_submission(&proof).is_ok());
+    }
+
+    #[test]
+    fn spot_check_rejects_tampered_matmul() {
+        let proof = DraftSpotCheckProof {
+            input_a: vec![1.0, 2.0, 3.0, 4.0],       // 2x2
+            weights_b: vec![1.0, 0.0, 0.0, 1.0],     // identity
+            claimed_c: vec![1.0, 2.0, 3.0, 40.0],    // tampered last element
+            m: 2,
+            k: 2,
+            n: 2,
+            seed: Some(7),
+        };
+        assert!(verify_spot_check_submission(&proof).is_err());
     }
 }

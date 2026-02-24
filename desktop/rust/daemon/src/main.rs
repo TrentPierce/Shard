@@ -655,6 +655,20 @@ struct DraftResultSubmission {
     timestamp: Option<f64>,
     #[serde(default)]
     scout_mode: Option<String>,
+    #[serde(default)]
+    spot_check: Option<DraftSpotCheckProof>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct DraftSpotCheckProof {
+    input_a: Vec<f32>,
+    weights_b: Vec<f32>,
+    claimed_c: Vec<f32>,
+    m: usize,
+    k: usize,
+    n: usize,
+    #[serde(default)]
+    seed: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
