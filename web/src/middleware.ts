@@ -21,12 +21,11 @@ const buildConnectSources = () => {
 }
 
 export function middleware(request: NextRequest) {
-  const nonce = crypto.randomUUID().replace(/-/g, "")
   const isDev = process.env.NODE_ENV !== "production"
 
   const cspHeader = `
     default-src 'self';
-    script-src 'self' 'nonce-${nonce}' ${isDev ? "'unsafe-eval'" : ""} 'unsafe-inline' blob:;
+    script-src 'self' ${isDev ? "'unsafe-eval'" : ""} 'unsafe-inline' blob:;
     style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
     font-src 'self' data: https://fonts.gstatic.com;
     connect-src ${buildConnectSources()};
@@ -42,14 +41,7 @@ export function middleware(request: NextRequest) {
     .replace(/\s{2,}/g, " ")
     .trim()
 
-  const requestHeaders = new Headers(request.headers)
-  requestHeaders.set("x-nonce", nonce)
-
-  const response = NextResponse.next({
-    request: {
-      headers: requestHeaders,
-    },
-  })
+  const response = NextResponse.next()
 
   response.headers.set("Content-Security-Policy", cspHeader)
 
