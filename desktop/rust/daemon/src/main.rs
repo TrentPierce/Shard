@@ -1084,6 +1084,54 @@ fn extract_peer_id_from_multiaddr(addr: &Multiaddr) -> Option<PeerId> {
     None
 }
 
+fn should_attempt_reconnect(
+    addr: &Multiaddr,
+    local_peer_id: &PeerId,
+    connected: &HashSet<String>,
+) -> bool {
+    let is_self = addr.to_string().contains(&local_peer_id.to_string());
+    if is_self {
+        return false;
+    }
+    if let Some(peer_id) = extract_peer_id_from_multiaddr(addr) {
+        return !connected.contains(&peer_id.to_string());
+    }
+    false
+}
+
+fn record_bootstrap_failure(
+    known: &mut Vec<String>,
+    failures: &mut HashMap<String, u32>,
+    peer_id: &PeerId,
+) -> bool {
+    let peer_id_str = peer_id.to_string();
+    let is_bootstrap = known.iter().any(|addr| {
+        if let Ok(multiaddr) = addr.parse::<libp2p::Multiaddr>() {
+            extract_peer_id_from_multiaddr(&multiaddr) == Some(*peer_id)
+        } else {
+            false
+        }
+    });
+    if !is_bootstrap {
+        return false;
+    }
+
+    let count = failures.entry(peer_id_str.clone()).or_insert(0);
+    *count += 1;
+    if *count >= MAX_BOOTSTRAP_FAILURES {
+        known.retain(|addr| {
+            if let Ok(multiaddr) = addr.parse::<libp2p::Multiaddr>() {
+                extract_peer_id_from_multiaddr(&multiaddr) != Some(*peer_id)
+            } else {
+                true
+            }
+        });
+        failures.remove(&peer_id_str);
+        return true;
+    }
+    false
+}
+
 fn resolve_metrics_persistence(data: &Path) -> MetricsPersistence {
     match std::env::var("SHARD_METRICS_BACKEND")
         .unwrap_or_else(|_| "sqlite".to_string())
@@ -2264,17 +2312,7 @@ async fn main() -> Result<()> {
                 let connected: HashSet<String> = state.peers.lock().await.keys().cloned().collect();
                 for addr_str in known {
                     if let Ok(addr) = addr_str.parse::<Multiaddr>() {
-                        let peer_id_opt = extract_peer_id_from_multiaddr(&addr);
-                        let is_self = addr.to_string().contains(&local_peer_id.to_string());
-                        
-                        // Only dial if it's not us and not already connected
-                        let already_connected = if let Some(pid) = peer_id_opt {
-                            connected.contains(&pid.to_string())
-                        } else {
-                            false
-                        };
-
-                        if !is_self && !already_connected {
+                        if should_attempt_reconnect(&addr, &local_peer_id, &connected) {
                             if let Err(err) = swarm.dial(addr.clone()) {
                                 tracing::debug!(%addr, %err, "reconnect dial skipped/failed");
                             } else {
@@ -3231,34 +3269,13 @@ async fn main() -> Result<()> {
                         
                         // Track bootstrap peer failures
                         if let Some(peer_id) = peer_id {
-                            let peer_id_str = peer_id.to_string();
                             let mut known = state.known_peers.lock().await;
-                            let is_bootstrap = known.iter().any(|addr| {
-                                if let Ok(multiaddr) = addr.parse::<libp2p::Multiaddr>() {
-                                    extract_peer_id_from_multiaddr(&multiaddr) == Some(peer_id)
-                                } else {
-                                    false
-                                }
-                            });
-                            
-                            if is_bootstrap {
-                                let mut failures = state.bootstrap_failures.lock().await;
-                                let count = failures.entry(peer_id_str.clone()).or_insert(0);
-                                *count += 1;
+                            let mut failures = state.bootstrap_failures.lock().await;
+                            let removed = record_bootstrap_failure(&mut known, &mut failures, &peer_id);
+                            if removed {
+                                tracing::warn!(%peer_id, "bootstrap peer removed due to too many failures");
+                            } else if let Some(count) = failures.get(&peer_id.to_string()) {
                                 tracing::warn!(%peer_id, failures = *count, "bootstrap peer connection failure");
-                                
-                                if *count >= MAX_BOOTSTRAP_FAILURES {
-                                    // Remove this bootstrap peer from known_peers
-                                    known.retain(|addr| {
-                                        if let Ok(multiaddr) = addr.parse::<libp2p::Multiaddr>() {
-                                            extract_peer_id_from_multiaddr(&multiaddr) != Some(peer_id)
-                                        } else {
-                                            true
-                                        }
-                                    });
-                                    failures.remove(&peer_id_str);
-                                    tracing::warn!(%peer_id, "bootstrap peer removed due to too many failures");
-                                }
                             }
                         }
                     }
@@ -3273,10 +3290,12 @@ async fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        accept_replay_nonce, node_is_healthy, should_reject_peer_connection, unique_addrs,
-        validate_work_request, LatencyHistogram, ScoutPenaltyBook, ScoutPenaltyUpdate, WorkRequest,
+        accept_replay_nonce, node_is_healthy, record_bootstrap_failure, should_attempt_reconnect,
+        should_reject_peer_connection, unique_addrs, validate_work_request, LatencyHistogram,
+        ScoutPenaltyBook, ScoutPenaltyUpdate, WorkRequest, MAX_BOOTSTRAP_FAILURES,
     };
-    use std::collections::HashMap;
+    use libp2p::{Multiaddr, PeerId};
+    use std::collections::{HashMap, HashSet};
     use std::sync::Arc;
     use tokio::sync::Mutex;
 
@@ -3477,5 +3496,54 @@ mod tests {
     fn node_health_timeout_marks_stale_unhealthy() {
         assert!(node_is_healthy(10_000, 15_000, 5_000));
         assert!(!node_is_healthy(10_000, 20_001, 5_000));
+    }
+
+    #[test]
+    fn reconnect_logic_skips_self_and_connected_peers() {
+        let local_peer = PeerId::random();
+        let remote_peer = PeerId::random();
+        let disconnected_peer = PeerId::random();
+        let self_addr: Multiaddr = format!("/ip4/127.0.0.1/tcp/4001/p2p/{local_peer}")
+            .parse()
+            .unwrap();
+        let connected_addr: Multiaddr = format!("/ip4/127.0.0.1/tcp/4001/p2p/{remote_peer}")
+            .parse()
+            .unwrap();
+        let disconnected_addr: Multiaddr =
+            format!("/ip4/127.0.0.1/tcp/4001/p2p/{disconnected_peer}")
+                .parse()
+                .unwrap();
+
+        let mut connected = HashSet::new();
+        connected.insert(remote_peer.to_string());
+
+        assert!(!should_attempt_reconnect(&self_addr, &local_peer, &connected));
+        assert!(!should_attempt_reconnect(
+            &connected_addr,
+            &local_peer,
+            &connected
+        ));
+        assert!(should_attempt_reconnect(
+            &disconnected_addr,
+            &local_peer,
+            &connected
+        ));
+    }
+
+    #[test]
+    fn bootstrap_failures_remove_unhealthy_bootstrap_peer() {
+        let peer = PeerId::random();
+        let addr = format!("/ip4/127.0.0.1/tcp/4001/p2p/{peer}");
+        let mut known = vec![addr];
+        let mut failures = HashMap::new();
+        let mut removed = false;
+
+        for _ in 0..MAX_BOOTSTRAP_FAILURES {
+            removed = record_bootstrap_failure(&mut known, &mut failures, &peer);
+        }
+
+        assert!(removed);
+        assert!(known.is_empty());
+        assert!(!failures.contains_key(&peer.to_string()));
     }
 }
