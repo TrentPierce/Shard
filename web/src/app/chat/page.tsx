@@ -1,98 +1,107 @@
-'use client'
+"use client"
 
-import Header from "@/components/Header"
-import ChatPanel from "@/components/ChatPanel"
-import NetworkStatus from "@/components/NetworkStatus"
-import { useAppContext } from "@/lib/context"
+import { FormEvent, useMemo, useRef, useState } from "react"
+import { sendMessage, type ChatMessage } from "@/lib/api"
 
 export default function ChatPage() {
-    const { mode, topology, rustStatus, webLLMProgress, webLLMError } = useAppContext()
+  const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [input, setInput] = useState("")
+  const [streaming, setStreaming] = useState(false)
+  const endRef = useRef<HTMLDivElement>(null)
 
-    return (
-        <div className="chat-page-wrapper bg-grid">
-            <div className="hero-bg" style={{ opacity: 0.4 }}>
-                <div className="gradient-orb gradient-orb--primary" style={{ width: 600, height: 600, top: -200, right: -200 }} />
-                <div className="gradient-orb gradient-orb--secondary" style={{ width: 400, height: 400, bottom: -100, left: -100 }} />
-            </div>
+  const statusText = useMemo(() => (streaming ? "Routing through distributed mesh" : "Connected to Shard Network"), [streaming])
 
-            <Header />
-            
-            <main className="chat-main container">
-                <div className="chat-layout-grid">
-                    {/* Sidebar: Status & Swarm Info */}
-                    <aside className="chat-sidebar animate-fade-in">
-                        <NetworkStatus 
-                            mode={mode}
-                            topology={topology}
-                            rustStatus={rustStatus}
-                            webLLMProgress={webLLMProgress}
-                            webLLMError={webLLMError}
-                        />
-                    </aside>
+  const submit = async (event: FormEvent) => {
+    event.preventDefault()
+    const content = input.trim()
+    if (!content || streaming) return
 
-                    {/* Primary Chat Interface */}
-                    <section className="chat-container animate-fade-in-up">
-                        <div className="card chat-card-polishing">
-                            <ChatPanel mode={mode} />
-                        </div>
-                    </section>
-                </div>
-            </main>
+    const userMessage: ChatMessage = { role: "user", content, timestamp: Date.now() }
+    setMessages((prev) => [...prev, userMessage, { role: "assistant", content: "", timestamp: Date.now() }])
+    setInput("")
+    setStreaming(true)
 
-            <style jsx>{`
-                .chat-page-wrapper {
-                    height: calc(100vh - var(--header-height));
-                    display: flex;
-                    flex-direction: column;
-                    position: relative;
-                    overflow: hidden;
-                }
-                .chat-main {
-                    flex: 1;
-                    display: flex;
-                    padding: var(--space-md);
-                    position: relative;
-                    z-index: 1;
-                    overflow: hidden;
-                }
-                .chat-layout-grid {
-                    display: grid;
-                    grid-template-columns: 300px 1fr;
-                    gap: var(--space-lg);
-                    width: 100%;
-                    height: 100%;
-                }
-                .chat-sidebar {
-                    height: 100%;
-                    overflow-y: auto;
-                }
-                .chat-container {
-                    height: 100%;
-                    min-width: 0;
-                }
-                .chat-card-polishing {
-                    height: 100%;
-                    padding: 0;
-                    overflow: hidden;
-                    border-radius: var(--radius-xl);
-                    background: rgba(10, 10, 15, 0.8);
-                    backdrop-filter: blur(20px);
-                    border: 1px solid var(--border-hover);
-                    box-shadow: var(--shadow-lg);
-                }
-                @media (max-width: 1024px) {
-                    .chat-layout-grid {
-                        grid-template-columns: 1fr;
-                        max-height: none;
-                    }
-                    .chat-sidebar {
-                        display: none; /* Hide sidebar on mobile for cleaner chat */
-                    }
-                    .chat-main {
-                        padding: var(--space-md);
-                    }
-                }
-            `}</style>
+    try {
+      await sendMessage(
+        [...messages, userMessage],
+        (token) => {
+          setMessages((prev) => {
+            const next = [...prev]
+            const last = next[next.length - 1]
+            if (last?.role === "assistant") {
+              next[next.length - 1] = { ...last, content: `${last.content}${token}` }
+            }
+            return next
+          })
+          endRef.current?.scrollIntoView({ behavior: "smooth" })
+        },
+        () => setStreaming(false),
+      )
+    } catch {
+      setMessages((prev) => {
+        const next = [...prev]
+        const last = next[next.length - 1]
+        if (last?.role === "assistant") {
+          next[next.length - 1] = {
+            ...last,
+            content: "Unable to reach the Shard backend. Verify your node or API endpoint status.",
+          }
+        }
+        return next
+      })
+      setStreaming(false)
+    }
+  }
+
+  return (
+    <main id="main-content" className="h-[calc(100dvh-4rem)] py-4 sm:py-6">
+      <section className="relative flex h-full flex-col overflow-hidden rounded-2xl border border-ring bg-base-900 shadow-panel">
+        <div className="absolute right-4 top-4 flex items-center gap-2 rounded-full border border-ring bg-base-800/90 px-3 py-1 text-xs text-ink-100">
+          <span className="h-2.5 w-2.5 rounded-full bg-accent-400 animate-pulseSoft" />
+          {statusText}
         </div>
-    )
+
+        <div className="flex-1 space-y-4 overflow-y-auto px-4 pb-4 pt-14 sm:px-6">
+          {messages.length === 0 ? (
+            <div className="mx-auto mt-12 max-w-md rounded-xl border border-ring bg-base-800 p-4 text-center sm:mt-16">
+              <p className="text-sm text-ink-100">Ask anything and stream answers from the distributed inference mesh.</p>
+            </div>
+          ) : null}
+
+          {messages.map((message, index) => (
+            <article
+              key={`${message.timestamp}-${index}`}
+              className={`max-w-[85%] rounded-xl px-4 py-3 text-sm ${
+                message.role === "user"
+                  ? "ml-auto bg-accent-500 text-base-950"
+                  : "border border-ring bg-base-800 text-ink-100"
+              }`}
+            >
+              {message.content || "..."}
+            </article>
+          ))}
+          <div ref={endRef} />
+        </div>
+
+        <form onSubmit={submit} className="border-t border-ring bg-base-900 p-3 sm:p-4">
+          <div className="flex items-end gap-2">
+            <textarea
+              value={input}
+              onChange={(event) => setInput(event.target.value)}
+              placeholder="Type your prompt"
+              rows={1}
+              className="min-h-11 max-h-36 flex-1 resize-none rounded-xl border border-ring bg-base-800 px-3 py-2 text-sm text-ink-50 outline-none focus:border-accent-500"
+            />
+            <button
+              type="submit"
+              disabled={!input.trim() || streaming}
+              className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-xl bg-accent-500 px-4 py-2 text-sm font-medium text-base-950 transition hover:bg-accent-400 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Send
+            </button>
+          </div>
+        </form>
+      </section>
+    </main>
+  )
 }

@@ -1,0 +1,20 @@
+[package]
+name = "shard-gui"
+version = "0.6.1"
+edition = "2021"
+
+[dependencies]
+eframe = "0.29"
+egui = "0.29"
+tray-icon = "0.19"
+muda = "0.15"
+tokio = { workspace = true, features = ["full"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+rfd = "0.15"
+directories = "5"
+reqwest = { workspace = true, features = ["stream"] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+shard-common = { workspace = true }
