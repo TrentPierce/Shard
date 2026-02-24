@@ -22,7 +22,7 @@
   - signature authenticity
   - signer identity binding
   - monotonic nonce
+- Abuse-path tests include tampered signature bytes, malformed signature encoding, replayed nonces, and per-signer nonce isolation.
 
 ## Admin Controls
 - `POST /admin/api-keys` requires `X-Shard-Admin` matching `SHARD_ADMIN_KEY`.
-

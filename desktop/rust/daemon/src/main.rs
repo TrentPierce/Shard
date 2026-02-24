@@ -3583,6 +3583,19 @@ mod tests {
         assert!(accept_replay_nonce(&replay, &signer, 2).await);
     }
 
+    #[tokio::test]
+    async fn replay_nonce_is_monotonic_per_signer_and_isolated_across_signers() {
+        let replay = Arc::new(Mutex::new(HashMap::new()));
+        let signer_a = "signer-a".to_string();
+        let signer_b = "signer-b".to_string();
+
+        assert!(accept_replay_nonce(&replay, &signer_a, 10).await);
+        assert!(!accept_replay_nonce(&replay, &signer_a, 9).await);
+        assert!(!accept_replay_nonce(&replay, &signer_a, 10).await);
+        assert!(accept_replay_nonce(&replay, &signer_b, 10).await);
+        assert!(accept_replay_nonce(&replay, &signer_a, 11).await);
+    }
+
     #[test]
     fn node_health_timeout_marks_stale_unhealthy() {
         assert!(node_is_healthy(10_000, 15_000, 5_000));

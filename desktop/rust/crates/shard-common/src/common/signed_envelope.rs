@@ -371,4 +371,51 @@ mod tests {
         let envelope = SignedEnvelope::sign(payload, &signing, 1, 1234);
         assert!(envelope.verify().is_ok());
     }
+
+    #[test]
+    fn tampered_signature_fails_verification() {
+        let signing = key();
+        let payload = serde_json::json!({"job_id": "abc", "tokens": 8});
+        let mut envelope = SignedEnvelope::sign(payload, &signing, 1, now_ms());
+        let mut sig = hex::decode(envelope.signature_hex.clone()).expect("signature should decode");
+        sig[0] ^= 0xFF;
+        envelope.signature_hex = hex::encode(sig);
+        assert_eq!(
+            envelope.verify_signature().unwrap_err(),
+            EnvelopeRejection::InvalidSignature
+        );
+    }
+
+    #[test]
+    fn malformed_signature_hex_fails_verification() {
+        let signing = key();
+        let payload = serde_json::json!({"job_id": "abc", "tokens": 8});
+        let mut envelope = SignedEnvelope::sign(payload, &signing, 1, now_ms());
+        envelope.signature_hex = "not-hex".to_string();
+        assert_eq!(
+            envelope.verify_signature().unwrap_err(),
+            EnvelopeRejection::InvalidSignature
+        );
+    }
+
+    #[test]
+    fn replay_protection_is_scoped_per_signer() {
+        let signing_a = key();
+        let signing_b = key();
+        let now = now_ms();
+        let payload = serde_json::json!({"data": "scoped-nonce"});
+        let envelope_a = SignedEnvelope::sign(payload.clone(), &signing_a, 7, now);
+        let envelope_b = SignedEnvelope::sign(payload, &signing_b, 7, now);
+
+        let mut verifier = EnvelopeVerifier::with_defaults();
+        assert!(verifier.verify_full(&envelope_a).is_ok());
+        assert_eq!(
+            verifier.verify_full(&envelope_a).unwrap_err(),
+            EnvelopeRejection::ReplayedNonce
+        );
+        assert!(
+            verifier.verify_full(&envelope_b).is_ok(),
+            "same nonce must be accepted for a different signer"
+        );
+    }
 }
