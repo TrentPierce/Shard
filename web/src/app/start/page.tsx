@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import { useAppContext } from "@/lib/context"
 
 type Section = {
   id: "verifier" | "scout" | "api"
@@ -42,6 +43,7 @@ const sections: Section[] = [
 
 export default function StartPage() {
   const [active, setActive] = useState<Section["id"]>("verifier")
+  const { contributionStatus } = useAppContext()
 
   return (
     <main id="main-content" className="py-8 sm:py-10">
@@ -50,6 +52,15 @@ export default function StartPage() {
         <p className="mt-3 max-w-2xl text-sm text-ink-300 sm:text-base">
           Steps below come directly from the project README installation path: join as verifier, join as scout, then integrate the API.
         </p>
+        {contributionStatus ? (
+          <div className="mt-4 rounded-xl border border-ring bg-base-800 p-4">
+            <p className="text-xs uppercase tracking-[0.18em] text-accent-400">Browser Contribution Status</p>
+            <p className="mt-2 text-sm font-medium text-ink-50">
+              {contributionStatus.state === "contributing" ? "Contributing" : "Not Contributing"}
+            </p>
+            <p className="mt-1 text-sm text-ink-300">{contributionStatus.reason}</p>
+          </div>
+        ) : null}
 
         <div className="mt-6 hidden gap-2 md:flex">
           {sections.map((section) => (

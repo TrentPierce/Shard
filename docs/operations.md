@@ -33,9 +33,10 @@
 ## Incident Handling
 1. Confirm health and metrics endpoints.
 2. Check auth/PoW failure counters.
-3. Drain failing nodes from scheduling path.
-4. Roll back release if SLO breach persists.
-5. Record timeline and corrective actions.
+3. Check browser contribution telemetry event stream (`shard:contribution-status`) and session state for non-contributing reason codes.
+4. Drain failing nodes from scheduling path.
+5. Roll back release if SLO breach persists.
+6. Record timeline and corrective actions.
 
 ## Runbooks
 - Incident response: `docs/runbooks/incident-response.md`

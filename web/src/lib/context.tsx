@@ -15,10 +15,14 @@ import {
 import { PREFER_LOCAL_SHARD, apiUrl } from "@/lib/config"
 import {
     initWebLLM,
-    checkWebGPUSupport,
     type ModelProgress,
 } from "@/lib/webllm"
 import { startBrowserLayerHost } from "@/lib/layer-host"
+import { detectScoutCapability } from "@/lib/scout-capability"
+import {
+    setContributionStatus,
+    type ContributionStatus,
+} from "@/lib/contribution-status"
 
 export type NodeMode =
     | "loading"
@@ -35,6 +39,7 @@ interface AppContextType {
     rustStatus: RustStatus
     webLLMProgress: ModelProgress | null
     webLLMError: string | null
+    contributionStatus: ContributionStatus | null
     retryScout: () => void
 }
 
@@ -44,6 +49,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const [mode, setMode] = useState<NodeMode>("loading")
     const [webLLMProgress, setWebLLMProgress] = useState<ModelProgress | null>(null)
     const [webLLMError, setWebLLMError] = useState<string | null>(null)
+    const [contributionStatus, setContributionStatusState] = useState<ContributionStatus | null>(null)
     const [scoutRetryNonce, setScoutRetryNonce] = useState(0)
     const [healthStatus, setHealthStatus] = useState<"ok" | "degraded" | "unreachable">("degraded")
     const scoutBootedRef = useRef(false)
@@ -85,6 +91,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         scoutBootedRef.current = false
         setWebLLMError(null)
         setWebLLMProgress(null)
+        setContributionStatusState(
+            setContributionStatus("initializing", "Retrying browser scout startup")
+        )
         setScoutRetryNonce((prev) => prev + 1)
     }, [])
 
@@ -127,16 +136,28 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                     const probe = await probeLocalShard()
                     if (probe.available) {
                         setMode("local-shard")
+                        setContributionStatusState(
+                            setContributionStatus(
+                                "not_contributing",
+                                "Local verifier detected; browser scout disabled to avoid GPU contention."
+                            )
+                        )
                         return
                     }
                 }
 
                 setMode("scout-initializing")
-                const gpuStatus = await checkWebGPUSupport()
-
-                if (!gpuStatus.supported) {
-                    setWebLLMError(`WebGPU not available: ${gpuStatus.reason}`)
+                const capability = await detectScoutCapability()
+                if (capability.capability !== "webgpu") {
+                    const reason =
+                        capability.capability === "wasm"
+                            ? "WASM fallback detected; browser scout contribution is disabled in production mode."
+                            : `WebGPU not available: ${capability.reason ?? "unsupported browser capability"}`
+                    setWebLLMError(reason)
                     setMode("leech")
+                    setContributionStatusState(
+                        setContributionStatus("not_contributing", reason, capability.capability)
+                    )
                     return
                 }
 
@@ -144,11 +165,21 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                 setWebLLMProgress(null)
                 setWebLLMError(null)
                 setMode("scout")
+                setContributionStatusState(
+                    setContributionStatus("contributing", "WebGPU scout active and contribution loop started", capability.capability)
+                )
 
                 try {
                     stopScoutWorkerRef.current = await startScoutWorker()
                 } catch (e) {
                     console.error(e)
+                    setContributionStatusState(
+                        setContributionStatus(
+                            "degraded",
+                            "WebGPU is ready but scout work loop failed to start. Retry required.",
+                            capability.capability
+                        )
+                    )
                 }
 
                 try {
@@ -171,6 +202,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             } catch (error: any) {
                 setWebLLMError(error?.message ?? "Failed to initialize Scout")
                 setMode("leech")
+                setContributionStatusState(
+                    setContributionStatus(
+                        "degraded",
+                        error?.message ?? "Failed to initialize Scout"
+                    )
+                )
             }
         }
 
@@ -196,6 +233,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                 rustStatus,
                 webLLMProgress,
                 webLLMError,
+                contributionStatus,
                 retryScout,
             }}
         >

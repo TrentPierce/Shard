@@ -2,6 +2,10 @@
 
 import { useEffect, useMemo, useState } from "react"
 import { apiUrl } from "@/lib/config"
+import {
+  CONTRIBUTION_STATUS_EVENT,
+  type ContributionStatus,
+} from "@/lib/contribution-status"
 
 type HealthSnapshot = {
   rust_sidecar?: string
@@ -18,6 +22,8 @@ type AnalyticsSnapshot = {
   successfulChats: number
   failedChats: number
   avgLatencyMs: number
+  contributionTransitions: number
+  lastContributionState: string
 }
 
 const ANALYTICS_KEY = "shard-analytics-v1"
@@ -25,7 +31,14 @@ const SESSION_MARKER = "shard-session-active"
 
 function loadAnalytics(): AnalyticsSnapshot {
   if (typeof window === "undefined") {
-    return { sessions: 0, successfulChats: 0, failedChats: 0, avgLatencyMs: 0 }
+    return {
+      sessions: 0,
+      successfulChats: 0,
+      failedChats: 0,
+      avgLatencyMs: 0,
+      contributionTransitions: 0,
+      lastContributionState: "unknown",
+    }
   }
   try {
     const parsed = JSON.parse(localStorage.getItem(ANALYTICS_KEY) || "{}")
@@ -34,9 +47,18 @@ function loadAnalytics(): AnalyticsSnapshot {
       successfulChats: Number(parsed.successfulChats || 0),
       failedChats: Number(parsed.failedChats || 0),
       avgLatencyMs: Number(parsed.avgLatencyMs || 0),
+      contributionTransitions: Number(parsed.contributionTransitions || 0),
+      lastContributionState: String(parsed.lastContributionState || "unknown"),
     }
   } catch {
-    return { sessions: 0, successfulChats: 0, failedChats: 0, avgLatencyMs: 0 }
+    return {
+      sessions: 0,
+      successfulChats: 0,
+      failedChats: 0,
+      avgLatencyMs: 0,
+      contributionTransitions: 0,
+      lastContributionState: "unknown",
+    }
   }
 }
 
@@ -58,6 +80,27 @@ export function useProductSignals() {
         saveAnalytics(next)
         return next
       })
+    }
+  }, [])
+
+  useEffect(() => {
+    const onContributionStatus = (event: Event) => {
+      const detail = (event as CustomEvent<ContributionStatus>).detail
+      if (!detail?.state) return
+      setAnalytics((prev) => {
+        const next = {
+          ...prev,
+          contributionTransitions: prev.contributionTransitions + 1,
+          lastContributionState: detail.state,
+        }
+        saveAnalytics(next)
+        return next
+      })
+    }
+
+    window.addEventListener(CONTRIBUTION_STATUS_EVENT, onContributionStatus as EventListener)
+    return () => {
+      window.removeEventListener(CONTRIBUTION_STATUS_EVENT, onContributionStatus as EventListener)
     }
   }, [])
 
