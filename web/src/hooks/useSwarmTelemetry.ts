@@ -24,11 +24,16 @@ type SwarmTelemetrySnapshot = {
 }
 
 async function fetchRealTelemetry(): Promise<SwarmTelemetrySnapshot> {
-  // Fetch from the Next.js API proxy routes for global stats
-  const [healthRes, peersRes, topoRes] = await Promise.allSettled([
+  const localBase = "http://127.0.0.1:9091"
+
+  // Fetch both proxied backend data and local daemon data.
+  const [healthRes, peersRes, topoRes, localHealthRes, localPeersRes, localTopoRes] = await Promise.allSettled([
     fetch("/api/health", { cache: "no-store" }),
     fetch("/api/v1/system/peers", { cache: "no-store" }),
     fetch("/api/v1/system/topology", { cache: "no-store" }),
+    fetch(`${localBase}/health`, { cache: "no-store" }),
+    fetch(`${localBase}/v1/system/peers`, { cache: "no-store" }),
+    fetch(`${localBase}/v1/system/topology`, { cache: "no-store" }),
   ])
 
   // Helper to extract JSON from fulfilled results
@@ -43,16 +48,24 @@ async function fetchRealTelemetry(): Promise<SwarmTelemetrySnapshot> {
     return null
   }
 
-  const [health, peersData, topo] = await Promise.all([
+  const [proxyHealth, proxyPeersData, proxyTopo, localHealth, localPeersData, localTopo] = await Promise.all([
     getJson(healthRes),
     getJson(peersRes),
     getJson(topoRes),
+    getJson(localHealthRes),
+    getJson(localPeersRes),
+    getJson(localTopoRes),
   ])
 
   // If none of the endpoints responded, we're truly offline
-  if (!health && !peersData && !topo) {
+  if (!proxyHealth && !proxyPeersData && !proxyTopo && !localHealth && !localPeersData && !localTopo) {
     throw new Error("All API endpoints unreachable")
   }
+
+  // Prefer local daemon data when available on the user's machine.
+  const health = localHealth ?? proxyHealth
+  const peersData = localPeersData ?? proxyPeersData
+  const topo = localTopo ?? proxyTopo
 
   // Get peer count - handle both {peers: [...]} and {count: N} formats
   const peersList = peersData?.peers ?? []

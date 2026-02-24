@@ -7,7 +7,7 @@
  * - P2P networking via js-libp2p (browser Scout nodes)
  */
 
-import { apiUrl } from "./config"
+import { apiUrl, rustUrl } from "./config"
 import { getActiveEngine, generateDrafts } from "./scout-engine"
 import { getScoutId, pollForWork, submitDraft } from "./scout-draft"
 
@@ -82,7 +82,7 @@ export type ScoutSubmissionResult = {
  * Shard (double-dip prevention per the agents.md spec).
  */
 export async function probeLocalShard(): Promise<LocalShardProbe> {
-    const endpoint = apiUrl("/health")
+    const endpoint = rustUrl("/health")
     const LATENCY_THRESHOLD_MS = 2  // Same-machine detection threshold
     
     try {
@@ -114,12 +114,22 @@ export async function probeLocalShard(): Promise<LocalShardProbe> {
  * Fetch network topology.
  */
 export async function fetchTopology(): Promise<Topology> {
+    const degraded: Topology = { status: "degraded", shard_webrtc_multiaddr: null, shard_quic_multiaddr: null }
     try {
-        const res = await fetch(apiUrl("/v1/system/topology"))
-        if (!res.ok) return { status: "degraded", shard_webrtc_multiaddr: null, shard_quic_multiaddr: null }
+        const localRes = await fetch(rustUrl("/v1/system/topology"), { cache: "no-store" })
+        if (localRes.ok) {
+            return (await localRes.json()) as Topology
+        }
+    } catch {
+        // fall through to remote proxy
+    }
+
+    try {
+        const res = await fetch(apiUrl("/v1/system/topology"), { cache: "no-store" })
+        if (!res.ok) return degraded
         return (await res.json()) as Topology
     } catch {
-        return { status: "degraded", shard_webrtc_multiaddr: null, shard_quic_multiaddr: null }
+        return degraded
     }
 }
 
@@ -129,35 +139,39 @@ export async function fetchTopology(): Promise<Topology> {
 export async function heartbeatShard(
     shardAddr: string
 ): Promise<HandshakeResult> {
+    const healthEndpoints = [rustUrl("/health"), apiUrl("/health")]
+
+    for (const endpoint of healthEndpoints) {
+        try {
+            const started = performance.now()
+            const res = await fetch(endpoint, { method: "GET" })
+            const rttMs = performance.now() - started
+
+            if (!res.ok) {
+                continue
+            }
+
+            const payload = await res.json()
+            if (payload?.status === "ok") {
+                return {
+                    ok: true,
+                    detail: `PONG via ${shardAddr}`,
+                    rttMs,
+                }
+            }
+        } catch {
+            // try next endpoint
+        }
+    }
+
     try {
-        const started = performance.now()
         const res = await fetch(apiUrl("/health"), { method: "GET" })
-        const rttMs = performance.now() - started
-
-        if (!res.ok) {
-            return {
-                ok: false,
-                detail: `health check failed (${res.status}) for ${shardAddr}`,
-                rttMs,
-            }
-        }
-
-        const payload = await res.json()
-        if (payload?.status === "ok") {
-            return {
-                ok: true,
-                detail: `PONG via ${shardAddr}`,
-                rttMs,
-            }
-        }
-
         return {
             ok: false,
-            detail: `unexpected response for ${shardAddr}`,
-            rttMs,
+            detail: `health check failed (${res.status}) for ${shardAddr}`,
         }
-    } catch (err: any) {
-        return { ok: false, detail: `heartbeat failed: ${err?.message ?? err}` }
+    } catch {
+        return { ok: false, detail: `heartbeat failed for ${shardAddr}` }
     }
 }
 

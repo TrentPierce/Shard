@@ -26,9 +26,26 @@ export interface ChatCompletionRequest {
 }
 
 const API_KEY = process.env.NEXT_PUBLIC_SHARD_API_KEY?.trim() || ""
+const LOCAL_DAEMON_BASE = process.env.NEXT_PUBLIC_LOCAL_DAEMON_URL?.trim() || "http://127.0.0.1:9091"
 
 function authHeaders(): Record<string, string> {
     return API_KEY ? { "Authorization": `Bearer ${API_KEY}` } : {}
+}
+
+function localDaemonUrl(path: string): string {
+    const cleanPath = path.startsWith("/") ? path : `/${path}`
+    return `${LOCAL_DAEMON_BASE.replace(/\/$/, "")}${cleanPath}`
+}
+
+async function fetchWithLocalFallback(path: string, init: RequestInit): Promise<Response> {
+    const primary = apiUrl(path)
+    try {
+        const res = await fetch(primary, init)
+        if (res.ok) return res
+    } catch {
+        // fall through to local daemon
+    }
+    return fetch(localDaemonUrl(path), init)
 }
 
 // Generate a unique work ID for scout draft tracking
@@ -94,7 +111,6 @@ export async function sendMessage(
     inferenceMode: "standard" | "distributed" = "distributed"
 ): Promise<void> {
     const startedAt = performance.now()
-    const endpoint = apiUrl("/v1/chat/completions")
 
     // Build the prompt in the same format the server expects
     let prompt = "<|begin_of_text|>"
@@ -126,7 +142,7 @@ export async function sendMessage(
         max_tokens: 256,
     }
 
-    const res = await fetch(endpoint, {
+    const res = await fetchWithLocalFallback("/v1/chat/completions", {
         method: "POST",
         headers: { 
             "Content-Type": "application/json",
@@ -212,7 +228,7 @@ export async function sendMessageSync(
         max_tokens: 256,
     }
 
-    const res = await fetch(apiUrl("/v1/chat/completions"), {
+    const res = await fetchWithLocalFallback("/v1/chat/completions", {
         method: "POST",
         headers: { 
             "Content-Type": "application/json",
@@ -240,7 +256,9 @@ export async function checkHealth(): Promise<{
     bitnetLoaded: boolean
 }> {
     try {
-        const res = await fetch(apiUrl("/health"))
+        const res = await fetchWithLocalFallback("/health", {
+            method: "GET",
+        })
         if (!res.ok) return { ok: false, rustSidecar: "unreachable", bitnetLoaded: false }
         const data = await res.json()
         return {
