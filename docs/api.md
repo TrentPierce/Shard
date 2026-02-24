@@ -49,3 +49,8 @@ All signed endpoints require:
   - `known_bootstraps` (live stability view from connected peers)
   - `registered_bootstraps` (persisted registry)
 - `POST /v1/system/bootstrap` persists bootstrap candidates and survives daemon restarts.
+
+## Scheduler Audit
+- `GET /v1/system/scheduler-decisions`
+  - Returns recent next-layer scheduling decisions with candidate inputs and selected peers.
+  - Includes load, latency, reliability, hardware, and identity scoring inputs used for decisioning.

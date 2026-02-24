@@ -311,7 +311,30 @@ pub(crate) async fn next_layer_handler(
             }
         })
         .collect::<Vec<_>>();
-    let selected = weighted_select(scheduler_inputs, limit);
+    let selected = weighted_select(scheduler_inputs.clone(), limit);
+    record_scheduler_decision(
+        &state,
+        SchedulerDecisionLog {
+            timestamp_ms: now_ms(),
+            model_id: model_id.clone(),
+            current_layer: query.current_layer,
+            next_layer: query.current_layer.saturating_add(1),
+            candidate_peers: peers.clone(),
+            selected_peers: selected.clone(),
+            inputs: scheduler_inputs
+                .into_iter()
+                .map(|input| SchedulerDecisionInput {
+                    node_id: input.node_id,
+                    load: input.load,
+                    latency_ms: input.latency_ms,
+                    reliability_score: input.reliability_score,
+                    hardware_capability_score: input.hardware_capability_score,
+                    identity_reputation_score: input.identity_reputation_score,
+                })
+                .collect(),
+        },
+    )
+    .await;
 
     Json(serde_json::json!({
         "ok": true,
@@ -1826,6 +1849,32 @@ pub(crate) async fn bootstrap_handler(AxumState(state): AxumState<SharedState>) 
     }))
 }
 
+fn push_scheduler_decision_log(
+    decisions: &mut VecDeque<SchedulerDecisionLog>,
+    decision: SchedulerDecisionLog,
+) {
+    decisions.push_back(decision);
+    while decisions.len() > 500 {
+        decisions.pop_front();
+    }
+}
+
+pub(crate) async fn record_scheduler_decision(state: &SharedState, decision: SchedulerDecisionLog) {
+    let mut decisions = state.scheduler_decisions.lock().await;
+    push_scheduler_decision_log(&mut decisions, decision);
+}
+
+pub(crate) async fn scheduler_decisions_handler(
+    AxumState(state): AxumState<SharedState>,
+) -> Json<serde_json::Value> {
+    let decisions = state.scheduler_decisions.lock().await;
+    Json(serde_json::json!({
+        "ok": true,
+        "count": decisions.len(),
+        "decisions": decisions.iter().cloned().collect::<Vec<SchedulerDecisionLog>>(),
+    }))
+}
+
 #[derive(Deserialize)]
 pub(crate) struct RegisterBootstrapRequest {
     pub peer_id: String,
@@ -1874,7 +1923,12 @@ pub(crate) async fn register_bootstrap_handler(
 
 #[cfg(test)]
 mod tests {
-    use super::{require_scout_id, verify_spot_check_submission, DraftSpotCheckProof, ScoutWorkQuery};
+    use super::{
+        push_scheduler_decision_log, require_scout_id, verify_spot_check_submission,
+        DraftSpotCheckProof, ScoutWorkQuery,
+    };
+    use crate::SchedulerDecisionLog;
+    use std::collections::VecDeque;
 
     #[test]
     fn scout_work_requires_identity() {
@@ -1918,5 +1972,27 @@ mod tests {
             seed: Some(7),
         };
         assert!(verify_spot_check_submission(&proof).is_err());
+    }
+
+    #[test]
+    fn scheduler_decision_log_is_bounded() {
+        let mut decisions = VecDeque::new();
+        for index in 0..520 {
+            push_scheduler_decision_log(
+                &mut decisions,
+                SchedulerDecisionLog {
+                    timestamp_ms: index,
+                    model_id: "m".to_string(),
+                    current_layer: 1,
+                    next_layer: 2,
+                    candidate_peers: vec!["a".to_string()],
+                    selected_peers: vec!["a".to_string()],
+                    inputs: vec![],
+                },
+            );
+        }
+        assert_eq!(decisions.len(), 500);
+        assert_eq!(decisions.front().map(|d| d.timestamp_ms), Some(20));
+        assert_eq!(decisions.back().map(|d| d.timestamp_ms), Some(519));
     }
 }

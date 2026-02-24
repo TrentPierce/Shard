@@ -519,6 +519,7 @@ pub(crate) struct SharedState {
     bootstrap_failures: Arc<Mutex<HashMap<String, u32>>>,
     bootstrap_registry: Arc<Mutex<HashMap<String, BootstrapRegistryEntry>>>,
     bootstrap_registry_path: PathBuf,
+    scheduler_decisions: Arc<Mutex<VecDeque<SchedulerDecisionLog>>>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -754,6 +755,27 @@ struct PipelineDispatch {
     model_id: String,
     current_layer: u32,
     packet: ForwardPassActivation,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct SchedulerDecisionInput {
+    node_id: String,
+    load: f64,
+    latency_ms: f64,
+    reliability_score: f64,
+    hardware_capability_score: f64,
+    identity_reputation_score: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct SchedulerDecisionLog {
+    timestamp_ms: u128,
+    model_id: String,
+    current_layer: u32,
+    next_layer: u32,
+    candidate_peers: Vec<String>,
+    selected_peers: Vec<String>,
+    inputs: Vec<SchedulerDecisionInput>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1513,6 +1535,10 @@ fn create_router(state: SharedState) -> Router {
         .route("/ledger/export", get(ledger_export_handler))
         .route("/layers/next", get(next_layer_handler))
         .route(
+            "/v1/system/scheduler-decisions",
+            get(scheduler_decisions_handler),
+        )
+        .route(
             "/browser-layer/register",
             post(browser_layer_register_handler),
         )
@@ -1835,6 +1861,7 @@ async fn main() -> Result<()> {
         bootstrap_failures: Arc::new(Mutex::new(HashMap::new())),
         bootstrap_registry: Arc::new(Mutex::new(loaded_bootstrap_registry)),
         bootstrap_registry_path,
+        scheduler_decisions: Arc::new(Mutex::new(VecDeque::new())),
     };
 
     #[cfg(target_os = "windows")]
