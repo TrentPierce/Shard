@@ -5,11 +5,7 @@ import { useQuery } from "@tanstack/react-query"
 import {
     fetchTopology,
     probeLocalShard,
-    initP2P,
     startScoutWorker,
-    subscribeToWork,
-    subscribeToResults,
-    publishResult,
     type Topology,
 } from "@/lib/swarm"
 import { PREFER_LOCAL_SHARD, apiUrl } from "@/lib/config"
@@ -191,10 +187,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                 try {
                     const liveTopology = await fetchTopology()
                     const bootstrapPeers = getBootstrapPeersFromTopology(liveTopology)
-                    await initP2P({ emitSelf: false, bootstrapPeers: bootstrapPeers.length > 0 ? bootstrapPeers : undefined })
-                    subscribeToWork((work) => console.log("Work:", work.request_id))
-                    subscribeToResults((result) => {
-                        publishResult(result)
+                    const p2p = await import("@/lib/p2p")
+                    await p2p.initP2P({ emitSelf: false, bootstrapPeers: bootstrapPeers.length > 0 ? bootstrapPeers : undefined })
+                    p2p.subscribeToWork((work) => console.log("Work:", work.request_id))
+                    p2p.subscribeToResults((result) => {
+                        p2p.publishResult(result)
                     })
                 } catch (e) {
                     console.error(e)

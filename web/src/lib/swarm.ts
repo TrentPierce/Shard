@@ -12,23 +12,6 @@ import { getActiveEngine, generateDrafts } from "./scout-engine"
 import { getScoutId, pollForWork, submitDraft } from "./scout-draft"
 import { canUseLocalDaemonFallback } from "./runtime"
 
-// Re-export P2P functions for convenience
-export {
-    initP2P,
-    subscribeToWork,
-    subscribeToResults,
-    publishResult,
-    getPeerId,
-    getPeerCount,
-    isReady,
-    stopP2P,
-    type P2PConfig,
-    type WorkMessage,
-    type WorkResultMessage,
-    type WorkHandler,
-    type ResultHandler,
-} from "./p2p"
-
 // ─── Types ──────────────────────────────────────────────────────────────────
 
 export type LocalShardProbe = {
