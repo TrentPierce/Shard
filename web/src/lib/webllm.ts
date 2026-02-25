@@ -69,6 +69,14 @@ let engine: MLCEngineInterface | null = null
 let isLoading = false
 let currentModel: string = DRAFT_MODEL
 
+function preferDirectEngineOnThisPlatform(): boolean {
+    if (typeof navigator === "undefined") {
+        return false
+    }
+    const ua = navigator.userAgent.toLowerCase()
+    return ua.includes("windows")
+}
+
 function sanitizeDraftText(raw: string): string {
     if (!raw) {
         return ""
@@ -259,26 +267,41 @@ export async function initWebLLM(
         currentModel = model
 
         try {
-            // Preferred path: background worker engine.
-            const worker = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' })
-            engine = await CreateWebWorkerMLCEngine(
-                worker,
-                model,
-                {
-                    initProgressCallback: wrappedCallback,
-                    logLevel: "INFO",
-                },
-                {
-                    // Use a smaller context window for draft generation
-                    context_window_size: 2048,
-                }
-            )
+            if (preferDirectEngineOnThisPlatform()) {
+                // On Windows Chromium builds, worker bootstrap commonly throws
+                // GPUDevice.lost Illegal invocation/FFI binding errors.
+                // Direct engine avoids this noisy failure path.
+                engine = await CreateMLCEngine(
+                    model,
+                    {
+                        initProgressCallback: wrappedCallback,
+                        logLevel: "INFO",
+                    },
+                    {
+                        context_window_size: 2048,
+                    }
+                )
+            } else {
+                // Preferred path: background worker engine.
+                const worker = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' })
+                engine = await CreateWebWorkerMLCEngine(
+                    worker,
+                    model,
+                    {
+                        initProgressCallback: wrappedCallback,
+                        logLevel: "INFO",
+                    },
+                    {
+                        // Use a smaller context window for draft generation
+                        context_window_size: 2048,
+                    }
+                )
+            }
         } catch (workerError: any) {
             if (!isWorkerInitBug(workerError)) {
                 throw workerError
             }
             console.warn("[WebLLM] Worker init failed; retrying in direct-engine mode", workerError)
-            // Fallback path for Windows Chrome WebGPU binding issues.
             engine = await CreateMLCEngine(
                 model,
                 {
