@@ -6,7 +6,20 @@ import {
 
 export const dynamic = "force-dynamic"
 
-const TTFT_TIMEOUT_MS = 2000 // 2 second threshold for "Enterprise" stability
+function parseTimeoutMs(raw: string | undefined, fallback: number): number {
+  const parsed = Number.parseInt(raw ?? "", 10)
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback
+  return parsed
+}
+
+const PRIMARY_CHAT_TIMEOUT_MS = parseTimeoutMs(
+  process.env.SHARD_CHAT_PRIMARY_TIMEOUT_MS,
+  65000,
+)
+const FALLBACK_CHAT_TIMEOUT_MS = parseTimeoutMs(
+  process.env.SHARD_CHAT_FALLBACK_TIMEOUT_MS,
+  90000,
+)
 
 export async function GET() {
   return NextResponse.json({
@@ -33,45 +46,34 @@ export async function POST(request: NextRequest) {
       attempts.push(candidate)
       const isFallbackCandidate = !primaryCandidates.includes(candidate)
 
-      const controller = new AbortController()
-      const candidateRequest = fetch(candidate, {
-        method: "POST",
-        headers,
-        body: bodyText,
-        signal: controller.signal,
-        cache: "no-store",
-      })
-
-      const timeoutMs = isFallbackCandidate ? 60000 : TTFT_TIMEOUT_MS
-      const timeoutPromise = new Promise<null>((resolve) =>
-        setTimeout(() => resolve(null), timeoutMs),
-      )
-
-      let candidateResponse: Response | null = null
+      const timeoutMs = isFallbackCandidate
+        ? FALLBACK_CHAT_TIMEOUT_MS
+        : PRIMARY_CHAT_TIMEOUT_MS
       try {
-        candidateResponse = await Promise.race([candidateRequest, timeoutPromise])
+        const candidateResponse = await fetch(candidate, {
+          method: "POST",
+          headers,
+          body: bodyText,
+          signal: AbortSignal.timeout(timeoutMs),
+          cache: "no-store",
+        })
+
+        if (candidateResponse.ok) {
+          response = candidateResponse
+          backendUsed = candidate
+          usedFallback = isFallbackCandidate
+          break
+        }
+
+        if (candidateResponse.status < 500) {
+          response = candidateResponse
+          backendUsed = candidate
+          usedFallback = isFallbackCandidate
+          break
+        }
       } catch (error) {
-        console.error("[Enterprise Guard] Candidate fetch exception:", candidate, error)
-        candidateResponse = null
-      }
-
-      if (candidateResponse === null) {
-        controller.abort()
+        console.error("[Chat Proxy] Candidate fetch exception:", candidate, error)
         continue
-      }
-
-      if (candidateResponse.ok) {
-        response = candidateResponse
-        backendUsed = candidate
-        usedFallback = isFallbackCandidate
-        break
-      }
-
-      if (candidateResponse.status < 500) {
-        response = candidateResponse
-        backendUsed = candidate
-        usedFallback = isFallbackCandidate
-        break
       }
     }
 

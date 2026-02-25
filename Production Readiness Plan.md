@@ -251,4 +251,5 @@ Production Readiness Plan (Enterprise + Maintainability)
 
   - R0-T31 complete: daemon chat completion responses now emit non-zero `usage` token counts and increment runtime token counters on generated output.
   - R0-T32 complete: runtime readiness is now explicitly surfaced (`status`, `readiness_reason`, `ready_for_inference`) so nodes without loaded models are not presented as fully ready.
-  - R0-T34 partially complete: speculative path state handling is corrected to preserve verified draft progress; final closure requires live scout-backed benchmark evidence with non-zero speculative counters.
+  - R0-T34 partially complete: speculative path state handling is corrected to preserve verified draft progress; latest live runs show active scouts and offload signals but still zero speculative token counters, so closure requires additional runtime instrumentation/fixes in scout draft activation.
+  - R0-T38 partially complete: web chat proxy timeout guard was corrected to remove premature 2s abort behavior that generated hosted 502s under normal inference latency; closure requires production deploy and benchmark revalidation.

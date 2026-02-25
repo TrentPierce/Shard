@@ -320,6 +320,7 @@ Execution Backlog (Epics, Tickets, Acceptance Criteria, Sequencing)
   - TODO-RUNTIME-QUALITY-01: Add output-degeneration detector/recovery path for repeated-token loops (for example `endendend...`) in verifier output.
   - TODO-HEALTH-SEMANTICS-01: Split health into `ready`, `degraded`, and `unavailable` to avoid reporting `ok` when model runtime is not ready.
   - TODO-SCOUT-METRICS-01: Add scout submit-success counters and last-success timestamps to telemetry and dashboard.
+  - TODO-WEB-PROXY-01: Add explicit proxy-side SLI for `/api/v1/chat/completions` (5xx rate, timeout rate, and backend-attempt labels) and alert if health is `ok` while chat proxy 5xx exceeds 5% for 5 minutes.
 
   ## 10. Post-Readiness Remediation Backlog (2026-02-25)
 
@@ -419,4 +420,5 @@ Execution Backlog (Epics, Tickets, Acceptance Criteria, Sequencing)
 
   - R0-T31: `Done` (chat completion runtime now records real prompt/completion usage fields and increments `tokens_processed_total` in both streaming and non-streaming paths).
   - R0-T32: `Done` (health/status endpoints now expose readiness gating via `status`, `readiness_reason`, and `ready_for_inference`; nodes without loaded engines no longer report fully ready state).
-  - R0-T34: `Partial` (speculative verification path was hardened so accepted draft state is preserved instead of re-evaluating prompt from scratch, and speculative counters continue to update on verified drafts; pending live benchmark proof with active scouts to confirm non-zero speculative counters in production telemetry).
+  - R0-T34: `Partial` (speculative verification path was hardened so accepted draft state is preserved instead of re-evaluating prompt from scratch, and speculative counters continue to update on verified drafts; latest live run observed active scouts/offload with continued zero speculative token counters, so root-cause instrumentation in scout enqueue/dequeue/verify is still required for closure).
+  - R0-T38: `Partial` (web chat proxy timeout policy corrected to remove aggressive 2s primary aborts that caused hosted `/api/v1/chat/completions` 502 bursts under real inference latency; pending production deploy + post-deploy benchmark validation).

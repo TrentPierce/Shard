@@ -5,6 +5,8 @@
 - `SHARD_BACKEND_URL` / `NEXT_PUBLIC_SHARD_BACKEND_URL` (single backend fallback)
 - `SHARD_FALLBACK_URLS` (optional failover list for chat and API proxy)
 - `SHARD_FALLBACK_URL` (single fallback backend)
+- `SHARD_CHAT_PRIMARY_TIMEOUT_MS` (chat proxy timeout for primary backends; default `65000`)
+- `SHARD_CHAT_FALLBACK_TIMEOUT_MS` (chat proxy timeout for fallback backends; default `90000`)
 - `SHARD_REQUIRE_API_KEY` (`true|false`)
 - `SHARD_API_KEYS` (comma-separated)
 - `SHARD_ADMIN_KEY` (admin API key management endpoint)
