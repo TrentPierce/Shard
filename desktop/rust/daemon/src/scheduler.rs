@@ -342,6 +342,7 @@ pub(crate) async fn chat_completions_handler(
     if stream_mode {
         let stream = async_stream::stream! {
             let mut request_acceptance: Option<(f64, f64)> = None;
+            let mut completion_tokens_generated: u64 = 0;
             let mut engine_guard = state.engine.lock().await;
             if let Some(engine) = engine_guard.as_mut() {
                 if let Ok(mut tokens) = engine.tokenize(&prompt, 4096) {
@@ -352,6 +353,7 @@ pub(crate) async fn chat_completions_handler(
                     // Speculative decoding: try to get scout draft
                     let mut accepted_text = String::new();
                     let prompt_tokens = tokens.clone();
+                    let mut prompt_already_evaluated = false;
 
                     if use_speculative {
                         if let Some(ref config) = speculative_config {
@@ -381,6 +383,9 @@ pub(crate) async fn chat_completions_handler(
                                     accepted_count,
                                     rejected_count,
                                 ));
+                                completion_tokens_generated = completion_tokens_generated
+                                    .saturating_add(accepted_count);
+                                prompt_already_evaluated = true;
                                 state.system_metrics.inc_speculative_draft_tokens(draft_count);
                                 state.system_metrics.inc_speculative_accepted_tokens(accepted_count);
                                 state.system_metrics.inc_speculative_rejected_tokens(rejected_count);
@@ -442,7 +447,12 @@ pub(crate) async fn chat_completions_handler(
                         }
                     }
 
-                    if engine.eval(&tokens).is_ok() {
+                    let prompt_ready = if prompt_already_evaluated {
+                        true
+                    } else {
+                        engine.eval(&tokens).is_ok()
+                    };
+                    if prompt_ready {
                         let mut emitted = 0;
                         while emitted < max_tokens {
                             if let Ok(logits) = engine.get_logits(128256) {
@@ -458,6 +468,8 @@ pub(crate) async fn chat_completions_handler(
                                 if best_idx == 128001 || best_idx == 128009 {
                                     break;
                                 }
+                                completion_tokens_generated =
+                                    completion_tokens_generated.saturating_add(1);
 
                                 if let Ok(raw_piece) = engine.token_to_piece(best_idx as i32) {
                                     let piece = strip_control_tokens(raw_piece.as_str());
@@ -498,6 +510,10 @@ pub(crate) async fn chat_completions_handler(
             yield Ok(Event::default().data(final_chunk.to_string()));
             yield Ok(Event::default().data("[DONE]"));
 
+            state
+                .system_metrics
+                .inc_tokens_processed(completion_tokens_generated);
+
             let latency_ms = (now_ms().saturating_sub(request_started_ms)) as u64;
             let (acceptance_rate, reject_rate) = request_acceptance
                 .map(|v| (Some(v.0), Some(v.1)))
@@ -518,6 +534,8 @@ pub(crate) async fn chat_completions_handler(
         // Run synchronously but hold the lock
         let mut full_text = String::new();
         let mut request_acceptance: Option<(f64, f64)> = None;
+        let mut prompt_token_count: u64 = 0;
+        let mut completion_tokens_generated: u64 = 0;
         {
             let mut engine_guard = state.engine.lock().await;
             if let Some(engine) = engine_guard.as_mut() {
@@ -525,9 +543,11 @@ pub(crate) async fn chat_completions_handler(
                     if !tokens.is_empty() && tokens[0] == 128000 {
                         tokens.remove(0);
                     }
+                    prompt_token_count = tokens.len() as u64;
 
                     // Speculative decoding: try to get scout draft
                     let prompt_tokens = tokens.clone();
+                    let mut prompt_already_evaluated = false;
 
                     if use_speculative {
                         if let Some(ref config) = speculative_config {
@@ -563,6 +583,9 @@ pub(crate) async fn chat_completions_handler(
                                     accepted_count,
                                     rejected_count,
                                 ));
+                                completion_tokens_generated = completion_tokens_generated
+                                    .saturating_add(accepted_count);
+                                prompt_already_evaluated = true;
                                 state
                                     .system_metrics
                                     .inc_speculative_draft_tokens(draft_count);
@@ -630,7 +653,12 @@ pub(crate) async fn chat_completions_handler(
                         }
                     }
 
-                    if engine.eval(&tokens).is_ok() {
+                    let prompt_ready = if prompt_already_evaluated {
+                        true
+                    } else {
+                        engine.eval(&tokens).is_ok()
+                    };
+                    if prompt_ready {
                         let mut emitted = 0;
                         while emitted < max_tokens {
                             if let Ok(logits) = engine.get_logits(128256) {
@@ -646,6 +674,8 @@ pub(crate) async fn chat_completions_handler(
                                 if best_idx == 128001 || best_idx == 128009 {
                                     break;
                                 }
+                                completion_tokens_generated =
+                                    completion_tokens_generated.saturating_add(1);
 
                                 if let Ok(piece) = engine.token_to_piece(best_idx as i32) {
                                     let clean = strip_control_tokens(piece.as_str());
@@ -681,7 +711,12 @@ pub(crate) async fn chat_completions_handler(
             );
         }
 
+        state
+            .system_metrics
+            .inc_tokens_processed(completion_tokens_generated);
+
         let full_text = strip_control_tokens(full_text.as_str());
+        let total_tokens = prompt_token_count.saturating_add(completion_tokens_generated);
         Json(serde_json::json!({
             "id": request_id,
             "object": "chat.completion",
@@ -693,7 +728,11 @@ pub(crate) async fn chat_completions_handler(
                 "model_pair_compatible": model_pair_compatible,
             },
             "choices": [{"index": 0, "message": {"role": "assistant", "content": full_text}, "finish_reason": "stop"}],
-            "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+            "usage": {
+                "prompt_tokens": prompt_token_count,
+                "completion_tokens": completion_tokens_generated,
+                "total_tokens": total_tokens
+            }
         })).into_response()
     }
 }

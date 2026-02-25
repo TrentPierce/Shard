@@ -1,5 +1,21 @@
 use super::*;
 
+pub(crate) fn runtime_health_state(
+    engine_loaded: bool,
+    participation_enabled: bool,
+    contribute_enabled: bool,
+) -> (&'static str, &'static str, bool) {
+    if !engine_loaded {
+        ("degraded", "engine_unavailable", false)
+    } else if !participation_enabled {
+        ("degraded", "participation_disabled", false)
+    } else if !contribute_enabled {
+        ("degraded", "contribution_disabled", false)
+    } else {
+        ("ok", "ready", true)
+    }
+}
+
 // ─── HTTP Control-Plane Handlers ────────────────────────────────────────────
 
 pub(crate) async fn health_handler(
@@ -32,12 +48,20 @@ pub(crate) async fn health_handler(
         let rollout = state.canary_rollout.lock().await;
         rollout.snapshot()
     };
+    let participation_enabled = state.participation_enabled.load(Ordering::Relaxed);
     let engine_guard = state.engine.lock().await;
     let engine_loaded = engine_guard.is_some();
     drop(engine_guard);
+    let (status, readiness_reason, ready_for_inference) = runtime_health_state(
+        engine_loaded,
+        participation_enabled,
+        topo.contribute_enabled,
+    );
 
     Json(serde_json::json!({
-        "status": "ok",
+        "status": status,
+        "readiness_reason": readiness_reason,
+        "ready_for_inference": ready_for_inference,
         "rust_sidecar": "connected",
         "rust_version": env!("CARGO_PKG_VERSION"),
         "rust_uptime_ms": now_ms() - state.daemon_start,
@@ -112,16 +136,24 @@ pub(crate) async fn node_status_handler(
 ) -> Json<serde_json::Value> {
     let topo = state.topology.lock().await;
     let logs = state.event_log.lock().await;
+    let participation_enabled = state.participation_enabled.load(Ordering::Relaxed);
+    let engine_guard = state.engine.lock().await;
+    let engine_loaded = engine_guard.is_some();
+    drop(engine_guard);
+    let (_, readiness_reason, ready_for_inference) =
+        runtime_health_state(engine_loaded, participation_enabled, topo.contribute_enabled);
     Json(serde_json::json!({
         "ok": true,
         "node_role": state.node_role,
         "node_public_key": state.node_public_key,
-        "participation_enabled": state.participation_enabled.load(Ordering::Relaxed),
+        "participation_enabled": participation_enabled,
         "resource_policy": state.resource_policy,
         "current_load": state.current_load.load(Ordering::Relaxed),
         "capacity": state.capacity.load(Ordering::Relaxed),
         "latency_ms": state.avg_latency_ms.load(Ordering::Relaxed),
-        "health_status": if state.participation_enabled.load(Ordering::Relaxed) { "healthy" } else { "paused" },
+        "health_status": if ready_for_inference { "ready" } else { "degraded" },
+        "readiness_reason": readiness_reason,
+        "engine_loaded": engine_loaded,
         "peer_id": topo.local_peer_id,
         "recent_logs": logs.iter().cloned().collect::<Vec<String>>(),
     }))
@@ -2089,9 +2121,9 @@ pub(crate) async fn register_bootstrap_handler(
 #[cfg(test)]
 mod tests {
     use super::{
-        push_scheduler_decision_log, require_scout_id, sanitize_scout_draft_text,
-        should_route_long_context, verify_spot_check_submission, DraftSpotCheckProof,
-        ScoutWorkQuery,
+        push_scheduler_decision_log, require_scout_id, runtime_health_state,
+        sanitize_scout_draft_text, should_route_long_context, verify_spot_check_submission,
+        DraftSpotCheckProof, ScoutWorkQuery,
     };
     use crate::SchedulerDecisionLog;
     use std::collections::VecDeque;
@@ -2185,5 +2217,25 @@ mod tests {
     fn scout_draft_text_sanitization_stops_on_control_markers() {
         let raw = "Hello there<|eot_id|>user<|start_header_id|>assistant";
         assert_eq!(sanitize_scout_draft_text(raw), "Hello there");
+    }
+
+    #[test]
+    fn runtime_health_state_reflects_model_readiness() {
+        assert_eq!(
+            runtime_health_state(false, true, true),
+            ("degraded", "engine_unavailable", false)
+        );
+        assert_eq!(
+            runtime_health_state(true, false, true),
+            ("degraded", "participation_disabled", false)
+        );
+        assert_eq!(
+            runtime_health_state(true, true, false),
+            ("degraded", "contribution_disabled", false)
+        );
+        assert_eq!(
+            runtime_health_state(true, true, true),
+            ("ok", "ready", true)
+        );
     }
 }
