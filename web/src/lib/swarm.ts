@@ -347,9 +347,9 @@ export async function requestWork(): Promise<WorkRequest | null> {
     try {
         const polled = await pollForWork(getScoutId(), {
             // Keep polling tight so scouts can respond inside speculative timeout windows.
-            pollTimeoutMs: 900,
-            pollRetries: 0,
-            pollRetryBackoffMs: 150,
+            pollTimeoutMs: 3000,
+            pollRetries: 1,
+            pollRetryBackoffMs: 200,
         })
         if (!polled.work) {
             if (polled.transient_error) {

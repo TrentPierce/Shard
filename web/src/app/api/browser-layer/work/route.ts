@@ -16,7 +16,7 @@ export async function GET(request: NextRequest) {
     const { response, backend, attempts } = await fetchWithBackendFailover(path, {
       method: "GET",
       headers: forwardRequestHeaders(),
-      timeoutMs: 10_000,
+      timeoutMs: 20_000,
       failoverOnStatuses: [500, 502, 503, 504],
     })
     const data = await response.json().catch(() => ({}))
@@ -25,15 +25,18 @@ export async function GET(request: NextRequest) {
       { status: response.status },
     )
   } catch (error) {
+    // Keep browser scouts alive during transient backend issues.
+    // Returning an empty work response avoids hard-failing client loops.
     return NextResponse.json(
       {
-        ok: false,
-        detail: "Failed to fetch browser layer work",
+        ok: true,
+        status: "empty",
+        transient_error: true,
+        detail: "Backend temporarily unavailable; returning empty work",
         backend_candidates: candidates,
         error: String(error),
       },
-      { status: 502 },
+      { status: 200 },
     )
   }
 }
-
