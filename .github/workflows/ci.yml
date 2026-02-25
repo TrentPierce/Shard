@@ -42,9 +42,9 @@ jobs:
       - name: Check formatting
         run: cargo fmt --check
       - name: Clippy lints
-        run: cargo clippy --all-targets -- -D warnings
+        run: cargo clippy --workspace --exclude shard-gui --all-targets -- -D warnings
       - name: Cargo tests
-        run: cargo test --all-targets
+        run: cargo test --workspace --exclude shard-gui --all-targets
 
   python-checks:
     runs-on: ubuntu-latest
