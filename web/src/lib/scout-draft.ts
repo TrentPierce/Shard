@@ -46,6 +46,7 @@ const DEFAULT_CONFIG: ScoutConfig = {
 }
 
 const SCOUT_ID_KEY = "shard_scout_id"
+const SCOUT_SESSION_ID_KEY = "shard_scout_id_session"
 
 let scoutId: string | null = null
 let isSubmitting = false
@@ -216,10 +217,17 @@ async function ensurePowVerifiedForScout(scoutIdValue: string): Promise<boolean>
 export function getScoutId(): string {
   if (!scoutId) {
     if (typeof window !== "undefined") {
-      scoutId = localStorage.getItem(SCOUT_ID_KEY)
+      // Use a per-tab scout id to avoid PoW challenge collisions across tabs.
+      // Keeping this scoped to session storage also makes "active scouts" reflect
+      // real concurrent browser workers instead of one shared identity.
+      scoutId = sessionStorage.getItem(SCOUT_SESSION_ID_KEY)
       if (!scoutId) {
-        scoutId = `scout_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`
-        localStorage.setItem(SCOUT_ID_KEY, scoutId)
+        const seed =
+          localStorage.getItem(SCOUT_ID_KEY) ??
+          `scout_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`
+        localStorage.setItem(SCOUT_ID_KEY, seed)
+        scoutId = `${seed}_tab_${Math.random().toString(36).slice(2, 8)}`
+        sessionStorage.setItem(SCOUT_SESSION_ID_KEY, scoutId)
       }
     } else {
       scoutId = `scout_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`
