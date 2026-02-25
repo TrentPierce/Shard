@@ -9,7 +9,10 @@ export async function GET() {
 
   try {
     const started = performance.now()
-    const { response, backend, attempts } = await fetchWithBackendFailover("/health")
+    const { response, backend, attempts } = await fetchWithBackendFailover("/health", {
+      timeoutMs: 30_000,
+      failoverOnStatuses: [500, 502, 503, 504],
+    })
     const latencyMs = Math.round(performance.now() - started)
     const data = await response.json()
     return NextResponse.json(
@@ -19,12 +22,17 @@ export async function GET() {
   } catch (error) {
     return NextResponse.json(
       {
-        status: "unreachable",
+        status: "degraded",
+        readiness_reason: "backend_unreachable",
+        ready_for_inference: false,
+        active_browser_sessions: 0,
+        active_scouts: 0,
         error: "Failed to connect to backend",
         backend_candidates: candidates,
         details: String(error),
+        web_version: SHARD_VERSION,
       },
-      { status: 502 }
+      { status: 200 }
     )
   }
 }

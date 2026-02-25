@@ -9,13 +9,20 @@ export async function GET() {
   const candidates = shardBackendUrls("/metrics/summary")
 
   try {
-    const { response, backend, attempts } = await fetchWithBackendFailover("/metrics/summary")
+    const { response, backend, attempts } = await fetchWithBackendFailover("/metrics/summary", {
+      timeoutMs: 30_000,
+      failoverOnStatuses: [500, 502, 503, 504],
+    })
     const data = await response.json()
     return NextResponse.json({ ...data, backend, backend_attempts: attempts }, { status: response.status })
   } catch (error) {
     return NextResponse.json(
-      { tokens_verified_24h: 0, status: "degraded", backend_candidates: candidates, error: String(error) },
-      { status: 502 },
+      {
+        status: "degraded",
+        backend_candidates: candidates,
+        error: String(error),
+      },
+      { status: 200 },
     )
   }
 }
