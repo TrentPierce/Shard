@@ -230,6 +230,7 @@ export async function initSwarmWorker(
 export async function handleScoutWork(work: WorkRequest): Promise<ScoutSubmissionResult> {
     try {
         const engine = getActiveEngine()
+        const scoutMode: "webgpu" | "wasm" = engine?.mode === "webgpu" ? "webgpu" : "wasm"
         let draftText = ""
         if (!engine) {
             draftText = fallbackDraftFromPrompt(work.prompt_context, work.min_tokens)
@@ -258,10 +259,15 @@ export async function handleScoutWork(work: WorkRequest): Promise<ScoutSubmissio
             prompt_context: work.prompt_context,
             scout_id: scoutId,
             timestamp: Date.now() / 1000,
-            scout_mode: engine.mode,
+            scout_mode: scoutMode,
         }
 
+        void reportScoutClientEvent("submit_attempt", "handleScoutWork_before_submitDraftResult")
         const submissionResult = await submitDraftResult(result)
+        void reportScoutClientEvent(
+            submissionResult.success ? "submit_success" : "submit_network_error",
+            `handleScoutWork_after_submitDraftResult:${submissionResult.detail || "no_detail"}`
+        )
 
         return submissionResult
     } catch (error: any) {
@@ -278,18 +284,26 @@ export async function handleScoutWork(work: WorkRequest): Promise<ScoutSubmissio
  */
 async function submitDraftResult(result: WorkResult): Promise<ScoutSubmissionResult> {
     try {
+        void reportScoutClientEvent("submit_attempt", "handleScoutWork_pre_submit")
         const response = await submitDraft(result.work_id, result.draft_text, {
             promptContext: result.prompt_context,
-            timeoutMs: 5000,
-            maxRetries: 2,
+            // Browser scouts can need several seconds for PoW + HTTP + tokenization.
+            timeoutMs: 15000,
+            maxRetries: 1,
             retryBackoffMs: 250,
             maxQueueDepth: 16,
         })
+        if (response.ok) {
+            void reportScoutClientEvent("submit_success", "handleScoutWork_submit_ok")
+        } else {
+            void reportScoutClientEvent("submit_network_error", response.detail || "handleScoutWork_submit_failed")
+        }
         return {
             success: response.ok,
             detail: response.detail || (response.ok ? "Draft submitted successfully" : "Draft submission failed"),
         }
     } catch (error: any) {
+        void reportScoutClientEvent("submit_network_error", `handleScoutWork_submit_exception:${error?.message ?? error}`)
         return {
             success: false,
             detail: `Failed to submit draft: ${error?.message ?? error}`,

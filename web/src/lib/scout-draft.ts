@@ -348,15 +348,19 @@ export async function submitDraft(
   const { promptContext, ...config } = options
   const cfg = { ...DEFAULT_CONFIG, ...config }
   if (!workId.trim()) {
+    void reportScoutClientEvent("submit_network_error", "work_id_missing")
     return { ok: false, detail: "work_id is required" }
   }
   if (!draftText.trim()) {
+    void reportScoutClientEvent("submit_network_error", "draft_text_missing")
     return { ok: false, detail: "draft_text is required" }
   }
   if (queuedWorkIds.has(workId)) {
+    void reportScoutClientEvent("submit_network_error", "duplicate_work_id")
     return { ok: false, detail: "Duplicate work_id already queued" }
   }
   if (submissionQueue.length >= cfg.maxQueueDepth) {
+    void reportScoutClientEvent("submit_network_error", "queue_full")
     return { ok: false, detail: "Draft submission queue is full" }
   }
 
