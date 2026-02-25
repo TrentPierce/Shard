@@ -267,7 +267,7 @@ export async function handleScoutWork(work: WorkRequest): Promise<ScoutSubmissio
             void reportScoutClientEvent("fallback_draft_used", "engine_uninitialized")
         } else {
             try {
-                const draftResult = await generateDraftsWithTimeout(work.prompt_context, work.min_tokens, 1200)
+                const draftResult = await generateDraftsWithTimeout(work.prompt_context, work.min_tokens, 2500)
                 draftText = draftResult.text
                 if (!draftResult.success || !draftText?.trim()) {
                     draftText = fallbackDraftFromPrompt(work.prompt_context, work.min_tokens)
@@ -347,10 +347,10 @@ async function submitDraftResult(result: WorkResult): Promise<ScoutSubmissionRes
 export async function requestWork(): Promise<WorkRequest | null> {
     try {
         const polled = await pollForWork(getScoutId(), {
-            // Keep polling tight so scouts can respond inside speculative timeout windows.
-            pollTimeoutMs: 3000,
-            pollRetries: 1,
-            pollRetryBackoffMs: 200,
+            // Poll less aggressively so WAN scouts do not self-DOS the control plane.
+            pollTimeoutMs: 4500,
+            pollRetries: 2,
+            pollRetryBackoffMs: 400,
         })
         if (!polled.work) {
             if (polled.transient_error) {
@@ -379,8 +379,8 @@ export async function startScoutWorker(
     onRequest?: (work: WorkRequest) => void,
     onResult?: (result: ScoutSubmissionResult) => void
 ): Promise<() => void> {
-    const pollIntervalMs = 250
-    const maxBackoffMs = 10000
+    const pollIntervalMs = 900
+    const maxBackoffMs = 15000
     let stopped = false
     let timer: ReturnType<typeof setTimeout> | null = null
     let inFlight = false
@@ -416,7 +416,8 @@ export async function startScoutWorker(
             const backoff = consecutiveFailures > 0
                 ? Math.min(maxBackoffMs, pollIntervalMs * Math.pow(2, consecutiveFailures))
                 : pollIntervalMs
-            schedule(backoff)
+            const jitterMs = Math.floor(Math.random() * 250)
+            schedule(backoff + jitterMs)
         }
     }
 

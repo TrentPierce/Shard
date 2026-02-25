@@ -72,11 +72,16 @@ let p2pNode: Libp2p | null = null;
 let gossipsub: GossipSub | null = null;
 let isInitialized = false;
 let reconnectTimer: ReturnType<typeof setInterval> | null = null;
+let peerCountTimer: ReturnType<typeof setInterval> | null = null;
 let workHandler: WorkHandler | null = null;
 let resultHandler: ResultHandler | null = null;
+let bootstrapPeersSnapshot: string[] = [];
 
 const WORK_TOPIC = 'shard-work';
 const RESULT_TOPIC = 'shard-work-result';
+const DEFAULT_RECONNECT_INTERVAL_MS = 10000;
+const PERSISTED_BOOTSTRAP_KEY = 'shard:p2p:bootstrap:v1';
+const MAX_PERSISTED_BOOTSTRAPS = 32;
 
 // ─── Core Functions ────────────────────────────────────────────────────────
 
@@ -94,12 +99,20 @@ export async function initP2P(config: P2PConfig = {}): Promise<string> {
 
   try {
     // Prefer explicit topology-derived bootstrap peers; fallback only for local dev.
+    const envBootstrapPeers = String(process.env.NEXT_PUBLIC_BOOTSTRAP_PEERS ?? '')
+      .split(/[,\n ]+/)
+      .map((v) => v.trim())
+      .filter(Boolean);
     const fallbackLocalPeer = '/ip4/127.0.0.1/tcp/4101/ws';
-    const requestedPeers =
+    const requestedPeers = mergeBootstrapPeers(
       config.bootstrapPeers && config.bootstrapPeers.length > 0
         ? config.bootstrapPeers
-        : [fallbackLocalPeer];
+        : [...envBootstrapPeers, fallbackLocalPeer],
+      readPersistedBootstrapPeers()
+    );
     const bootstrapPeers = sanitizeBootstrapPeers(requestedPeers);
+    bootstrapPeersSnapshot = bootstrapPeers;
+    persistBootstrapPeers(bootstrapPeers);
     console.log('[p2p] Initializing with bootstrap peers:', bootstrapPeers);
 
     // Create libp2p node
@@ -163,12 +176,37 @@ export async function initP2P(config: P2PConfig = {}): Promise<string> {
     console.log('[p2p] Peer ID:', p2pNode.peerId.toString());
     console.log('[p2p] Multiaddrs:', p2pNode.getMultiaddrs().map(m => m.toString()));
 
+    p2pNode.addEventListener('peer:connect', (event: any) => {
+      const remoteAddr = extractRemoteAddr(event);
+      if (remoteAddr) {
+        persistBootstrapPeers([remoteAddr]);
+      }
+      console.log('[p2p] Peer connected:', event?.detail?.toString?.() ?? 'unknown');
+    });
+
+    p2pNode.addEventListener('peer:disconnect', (event: any) => {
+      const remoteAddr = extractRemoteAddr(event);
+      console.warn('[p2p] Peer disconnected:', event?.detail?.toString?.() ?? 'unknown', remoteAddr ?? '');
+    });
+
     // Log connection status periodically
-    setInterval(() => {
+    if (peerCountTimer) {
+      clearInterval(peerCountTimer);
+    }
+    peerCountTimer = setInterval(() => {
       if (!p2pNode) return;
       const peerCount = p2pNode.getPeers().length;
       console.log('[p2p] Connected peers:', peerCount);
     }, 30000);
+
+    const reconnectInterval = config.reconnectInterval ?? DEFAULT_RECONNECT_INTERVAL_MS;
+    if (reconnectTimer) {
+      clearInterval(reconnectTimer);
+    }
+    reconnectTimer = setInterval(() => {
+      void reconnectBootstrapPeers();
+    }, reconnectInterval);
+    void reconnectBootstrapPeers();
 
     return p2pNode.peerId.toString();
   } catch (error) {
@@ -200,6 +238,78 @@ function sanitizeBootstrapPeers(peers: string[]): string[] {
   }
 
   return Array.from(unique);
+}
+
+function mergeBootstrapPeers(primary: string[], secondary: string[]): string[] {
+  const out = new Set<string>();
+  for (const peer of [...primary, ...secondary]) {
+    const trimmed = String(peer || '').trim();
+    if (trimmed.length === 0) continue;
+    out.add(trimmed);
+  }
+  return Array.from(out);
+}
+
+function readPersistedBootstrapPeers(): string[] {
+  if (typeof window === 'undefined') {
+    return [];
+  }
+  try {
+    const raw = window.localStorage.getItem(PERSISTED_BOOTSTRAP_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map((v) => String(v)).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+function persistBootstrapPeers(peers: string[]): void {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  try {
+    const merged = mergeBootstrapPeers(readPersistedBootstrapPeers(), peers).slice(
+      0,
+      MAX_PERSISTED_BOOTSTRAPS
+    );
+    window.localStorage.setItem(PERSISTED_BOOTSTRAP_KEY, JSON.stringify(merged));
+  } catch {
+    // best-effort persistence
+  }
+}
+
+function extractRemoteAddr(event: any): string | null {
+  const addr = event?.detail?.remoteAddr ?? event?.detail?.connection?.remoteAddr;
+  if (!addr) return null;
+  try {
+    return typeof addr === 'string' ? addr : addr.toString();
+  } catch {
+    return null;
+  }
+}
+
+async function reconnectBootstrapPeers(): Promise<void> {
+  if (!p2pNode) return;
+  if (p2pNode.getPeers().length > 0) return;
+
+  const reconnectCandidates = sanitizeBootstrapPeers(
+    mergeBootstrapPeers(bootstrapPeersSnapshot, readPersistedBootstrapPeers())
+  );
+  if (reconnectCandidates.length === 0) {
+    return;
+  }
+
+  for (const peer of reconnectCandidates) {
+    try {
+      await p2pNode.dial(peer as any);
+      console.log('[p2p] Reconnected bootstrap peer:', peer);
+      persistBootstrapPeers([peer]);
+    } catch (error) {
+      console.warn('[p2p] Reconnect attempt failed:', peer, error);
+    }
+  }
 }
 
 /**
@@ -284,6 +394,10 @@ export async function stopP2P(): Promise<void> {
   if (reconnectTimer) {
     clearInterval(reconnectTimer);
     reconnectTimer = null;
+  }
+  if (peerCountTimer) {
+    clearInterval(peerCountTimer);
+    peerCountTimer = null;
   }
 
   if (p2pNode) {

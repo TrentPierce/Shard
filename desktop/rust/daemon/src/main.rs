@@ -1118,6 +1118,7 @@ struct ScoutPenaltyStatus {
 struct ScoutReputationEntry {
     recent: VecDeque<bool>,
     failure_count: u32,
+    consecutive_failures: u32,
     accepted_count: u32,
     latency_ms: u64,
     banned_until_ms: Option<u128>,
@@ -1130,9 +1131,11 @@ struct ScoutPenaltyBook {
 }
 
 impl ScoutPenaltyBook {
-    const WINDOW_SIZE: usize = 10;
-    const MIN_SAMPLES_FOR_BAN: usize = 5;
-    const SUCCESS_RATE_THRESHOLD: f32 = 0.55;
+    const WINDOW_SIZE: usize = 16;
+    const MIN_SAMPLES_FOR_BAN: usize = 8;
+    const MIN_CONSECUTIVE_FAILURES_FOR_BAN: u32 = 4;
+    const SUCCESS_RATE_THRESHOLD: f32 = 0.45;
+    const HIGH_LATENCY_MULTIPLIER: f64 = 2.5;
     const BAN_COOLDOWN_MS: u128 = 60_000;
 
     fn success_rate(entry: &ScoutReputationEntry) -> f32 {
@@ -1162,8 +1165,10 @@ impl ScoutPenaltyBook {
 
         if update.accepted {
             entry.accepted_count = entry.accepted_count.saturating_add(1);
+            entry.consecutive_failures = 0;
         } else {
             entry.failure_count = entry.failure_count.saturating_add(1);
+            entry.consecutive_failures = entry.consecutive_failures.saturating_add(1);
             if let Some(reason) = update.reason.as_ref() {
                 entry.last_reason = Some(reason.clone());
             }
@@ -1171,12 +1176,22 @@ impl ScoutPenaltyBook {
 
         let success_rate = Self::success_rate(entry);
         if entry.recent.len() >= Self::MIN_SAMPLES_FOR_BAN
+            && entry.consecutive_failures >= Self::MIN_CONSECUTIVE_FAILURES_FOR_BAN
             && success_rate < Self::SUCCESS_RATE_THRESHOLD
         {
             entry.banned_until_ms = Some(now + Self::BAN_COOLDOWN_MS);
+            entry.last_reason = Some(format!(
+                "Low success rate: {:.2} over {} samples",
+                success_rate,
+                entry.recent.len()
+            ));
         }
 
-        if !blackholed && global_p95 > 0 && entry.latency_ms > (global_p95 as f64 * 1.5) as u64 {
+        if !blackholed
+            && global_p95 > 0
+            && entry.latency_ms > (global_p95 as f64 * Self::HIGH_LATENCY_MULTIPLIER) as u64
+            && entry.consecutive_failures >= Self::MIN_CONSECUTIVE_FAILURES_FOR_BAN
+        {
             entry.banned_until_ms = Some(now + Self::BAN_COOLDOWN_MS);
             entry.last_reason = Some(format!(
                 "High latency: {}ms (P95: {}ms)",
@@ -3911,7 +3926,7 @@ mod tests {
         );
         assert!(!status.blackholed);
 
-        for _ in 0..5 {
+        for _ in 0..8 {
             status = penalties.apply_update(
                 ScoutPenaltyUpdate {
                     peer_id: peer_id.clone(),
@@ -4016,7 +4031,7 @@ mod tests {
             },
             0,
         );
-        for _ in 0..5 {
+        for _ in 0..8 {
             penalties.apply_update(
                 ScoutPenaltyUpdate {
                     peer_id: peer_id.clone(),
