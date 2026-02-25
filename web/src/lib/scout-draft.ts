@@ -50,6 +50,8 @@ const SCOUT_ID_KEY = "shard_scout_id"
 let scoutId: string | null = null
 let isSubmitting = false
 let activeSubmissionAbort: AbortController | null = null
+let powVerifiedUntilMs = 0
+let powVerificationInFlight: Promise<boolean> | null = null
 
 type QueueItem = {
   submission: DraftSubmission
@@ -63,6 +65,113 @@ let processingQueue = false
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+type PowChallengePayload = {
+  challenge_bytes_hex: string
+  difficulty: number
+}
+
+function getHardwareConcurrency(): number {
+  if (typeof navigator === "undefined") return 4
+  const raw = Number((navigator as any).hardwareConcurrency ?? 4)
+  if (!Number.isFinite(raw) || raw <= 0) return 4
+  return Math.max(1, Math.floor(raw))
+}
+
+function isMobileDevice(): boolean {
+  if (typeof navigator === "undefined") return false
+  const ua = navigator.userAgent.toLowerCase()
+  return /android|iphone|ipad|ipod|mobile|windows phone/.test(ua)
+}
+
+function solvePow(challengeHex: string, difficulty: number): Promise<{ nonce: number; hashHex: string }> {
+  return new Promise((resolve, reject) => {
+    try {
+      const worker = new Worker(new URL("./pow_solver.ts", import.meta.url), { type: "module" })
+      worker.onmessage = (event: MessageEvent<any>) => {
+        const payload = event.data ?? {}
+        if (payload.type === "solved") {
+          worker.terminate()
+          resolve({ nonce: payload.nonce, hashHex: payload.hashHex })
+          return
+        }
+        if (payload.type === "timeout") {
+          worker.terminate()
+          reject(new Error(`PoW solve timed out after ${payload.elapsedMs}ms`))
+        }
+      }
+      worker.onerror = (event) => {
+        worker.terminate()
+        reject(new Error(`PoW worker failed: ${event.message}`))
+      }
+      worker.postMessage({
+        challengeHex,
+        difficulty,
+        hardwareConcurrency: getHardwareConcurrency(),
+      })
+    } catch (error) {
+      reject(error)
+    }
+  })
+}
+
+async function ensurePowVerifiedForScout(scoutIdValue: string): Promise<boolean> {
+  const now = Date.now()
+  if (powVerifiedUntilMs > now) {
+    return true
+  }
+  if (powVerificationInFlight) {
+    return powVerificationInFlight
+  }
+
+  powVerificationInFlight = (async () => {
+    const challengeUrl = apiUrl(
+      `/v1/pow/challenge?peer_id=${encodeURIComponent(scoutIdValue)}&hardware_concurrency=${getHardwareConcurrency()}&is_mobile=${isMobileDevice()}`,
+    )
+    const challengeRes = await fetch(challengeUrl, {
+      method: "GET",
+      headers: { "Content-Type": "application/json" },
+    })
+    if (!challengeRes.ok) {
+      throw new Error(`PoW challenge failed (HTTP ${challengeRes.status})`)
+    }
+
+    const challengeJson = await challengeRes.json()
+    const challenge = challengeJson?.challenge as PowChallengePayload | undefined
+    if (!challenge?.challenge_bytes_hex || !challenge?.difficulty) {
+      throw new Error("PoW challenge payload is invalid")
+    }
+
+    const solved = await solvePow(challenge.challenge_bytes_hex, challenge.difficulty)
+    const verifyRes = await fetch(apiUrl("/v1/pow/verify"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        peer_id: scoutIdValue,
+        nonce: solved.nonce,
+        hash_hex: solved.hashHex,
+      }),
+    })
+    if (!verifyRes.ok) {
+      throw new Error(`PoW verify failed (HTTP ${verifyRes.status})`)
+    }
+
+    const verifyJson = await verifyRes.json()
+    if (!verifyJson?.ok) {
+      throw new Error("PoW solution rejected")
+    }
+
+    // Daemon default verification TTL is 1 hour.
+    powVerifiedUntilMs = Date.now() + 50 * 60 * 1000
+    return true
+  })()
+
+  try {
+    return await powVerificationInFlight
+  } finally {
+    powVerificationInFlight = null
+  }
 }
 
 export function getScoutId(): string {
@@ -95,6 +204,7 @@ async function submitDraftOnce(
   activeSubmissionAbort = controller
   const timeoutId = setTimeout(() => controller.abort(), cfg.timeoutMs)
   try {
+    await ensurePowVerifiedForScout(submission.scout_id)
     const response = await fetch(apiUrl("/v1/scout/draft"), {
       method: "POST",
       headers: {
@@ -246,6 +356,15 @@ export async function pollForWork(
   config: Partial<ScoutConfig> = {}
 ): Promise<WorkItem> {
   const cfg = { ...DEFAULT_CONFIG, ...config }
+  try {
+    await ensurePowVerifiedForScout(scoutIdValue)
+  } catch (error) {
+    return {
+      work: null,
+      transient_error: true,
+      detail: error instanceof Error ? error.message : "Failed to complete PoW verification",
+    }
+  }
   let attempt = 0
   while (attempt <= cfg.pollRetries) {
     const controller = new AbortController()
