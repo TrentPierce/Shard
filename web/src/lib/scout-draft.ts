@@ -79,6 +79,12 @@ function getHardwareConcurrency(): number {
   return Math.max(1, Math.floor(raw))
 }
 
+function getPowConcurrencyHint(): number {
+  // Browser JS PoW solving is materially slower than native threads.
+  // Keep a conservative hint so scouts can reliably obtain verification.
+  return Math.min(getHardwareConcurrency(), 3)
+}
+
 function isMobileDevice(): boolean {
   if (typeof navigator === "undefined") return false
   const ua = navigator.userAgent.toLowerCase()
@@ -127,7 +133,7 @@ async function ensurePowVerifiedForScout(scoutIdValue: string): Promise<boolean>
 
   powVerificationInFlight = (async () => {
     const challengeUrl = apiUrl(
-      `/v1/pow/challenge?peer_id=${encodeURIComponent(scoutIdValue)}&hardware_concurrency=${getHardwareConcurrency()}&is_mobile=${isMobileDevice()}`,
+      `/v1/pow/challenge?peer_id=${encodeURIComponent(scoutIdValue)}&hardware_concurrency=${getPowConcurrencyHint()}&is_mobile=${isMobileDevice()}`,
     )
     const challengeRes = await fetch(challengeUrl, {
       method: "GET",
