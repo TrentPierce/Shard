@@ -35,7 +35,7 @@
 ## Health Checks
 - Daemon health: `GET /health`
 - Metrics summary: `GET /metrics/summary`
-- Prometheus metrics: `GET /metrics/prometheus`
+- Prometheus metrics: `GET /metrics`
 
 ## Release Rule
 - Release version comes only from root `VERSION`.
