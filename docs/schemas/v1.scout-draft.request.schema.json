@@ -9,6 +9,7 @@
     "work_id": { "type": "string", "minLength": 1 },
     "scout_id": { "type": "string", "minLength": 1 },
     "draft_text": { "type": "string" },
+    "prompt_context": { "type": "string" },
     "draft_tokens": {
       "type": "array",
       "items": { "type": "integer" }
@@ -33,4 +34,3 @@
     }
   ]
 }
-

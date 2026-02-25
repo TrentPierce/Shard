@@ -862,10 +862,14 @@ pub(crate) async fn process_draft_submission(
         }
     }
 
+    submission.draft_text = sanitize_scout_draft_text(submission.draft_text.as_str());
+
     if submission.draft_tokens.is_empty() && !submission.draft_text.trim().is_empty() {
         let mut engine_guard = state.engine.lock().await;
         if let Some(engine) = engine_guard.as_mut() {
-            if let Ok(mut tokens) = engine.tokenize(submission.draft_text.as_str(), 256) {
+            if let Some(tokens) = tokenize_submission_draft(engine, &submission) {
+                submission.draft_tokens = tokens;
+            } else if let Ok(mut tokens) = engine.tokenize(submission.draft_text.as_str(), 256) {
                 if !tokens.is_empty() && tokens[0] == 128000 {
                     tokens.remove(0);
                 }
@@ -935,6 +939,50 @@ pub(crate) async fn process_draft_submission(
     }
 
     Json(serde_json::json!({ "ok": true, "detail": "draft queued" }))
+}
+
+fn sanitize_scout_draft_text(raw: &str) -> String {
+    let marker_idx = raw.find("<|").unwrap_or(raw.len());
+    raw[..marker_idx].replace('\0', "")
+}
+
+fn strip_optional_bos(tokens: &mut Vec<i32>) {
+    if !tokens.is_empty() && tokens[0] == 128000 {
+        tokens.remove(0);
+    }
+}
+
+fn tokenize_submission_draft(
+    engine: &mut impl shard_verifier::inference::VerifierModel,
+    submission: &DraftResultSubmission,
+) -> Option<Vec<i32>> {
+    let prompt = submission.prompt_context.as_deref()?.trim();
+    if prompt.is_empty() {
+        return None;
+    }
+
+    let mut prompt_tokens = engine.tokenize(prompt, 4096).ok()?;
+    strip_optional_bos(&mut prompt_tokens);
+
+    let combined_text = format!("{prompt}{}", submission.draft_text);
+    let mut combined_tokens = engine.tokenize(combined_text.as_str(), 4352).ok()?;
+    strip_optional_bos(&mut combined_tokens);
+
+    if combined_tokens.len() <= prompt_tokens.len() {
+        return None;
+    }
+    if !combined_tokens.starts_with(prompt_tokens.as_slice()) {
+        return None;
+    }
+
+    let mut continuation = combined_tokens[prompt_tokens.len()..].to_vec();
+    if continuation.len() > 256 {
+        continuation.truncate(256);
+    }
+    if continuation.is_empty() {
+        return None;
+    }
+    Some(continuation)
 }
 
 fn should_route_long_context(token_count: usize, threshold: usize) -> bool {
@@ -2027,8 +2075,9 @@ pub(crate) async fn register_bootstrap_handler(
 #[cfg(test)]
 mod tests {
     use super::{
-        push_scheduler_decision_log, require_scout_id, should_route_long_context,
-        verify_spot_check_submission, DraftSpotCheckProof, ScoutWorkQuery,
+        push_scheduler_decision_log, require_scout_id, sanitize_scout_draft_text,
+        should_route_long_context, verify_spot_check_submission, DraftSpotCheckProof,
+        ScoutWorkQuery,
     };
     use crate::SchedulerDecisionLog;
     use std::collections::VecDeque;
@@ -2116,5 +2165,11 @@ mod tests {
             "legacy-draft-v0",
             "verifier-v2"
         ));
+    }
+
+    #[test]
+    fn scout_draft_text_sanitization_stops_on_control_markers() {
+        let raw = "Hello there<|eot_id|>user<|start_header_id|>assistant";
+        assert_eq!(sanitize_scout_draft_text(raw), "Hello there");
     }
 }

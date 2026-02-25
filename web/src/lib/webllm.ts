@@ -59,8 +59,8 @@ const MOBILE_MEMORY_THRESHOLD = 4 * 1024 * 1024 * 1024
 // Default generation options for speculative decoding drafts
 const DEFAULT_DRAFT_OPTIONS: DraftGenerationOptions = {
     maxTokens: 10,
-    temperature: 0.8,
-    topP: 0.9,
+    temperature: 0,
+    topP: 1,
 }
 
 // ─── State ─────────────────────────────────────────────────────────────────
@@ -68,6 +68,17 @@ const DEFAULT_DRAFT_OPTIONS: DraftGenerationOptions = {
 let engine: MLCEngineInterface | null = null
 let isLoading = false
 let currentModel: string = DRAFT_MODEL
+
+function sanitizeDraftText(raw: string): string {
+    if (!raw) {
+        return ""
+    }
+
+    // Keep only direct assistant continuation before chat control markers.
+    const markerIdx = raw.indexOf("<|")
+    const text = markerIdx >= 0 ? raw.slice(0, markerIdx) : raw
+    return text.replace(/\u0000/g, "")
+}
 
 function isWorkerInitBug(error: unknown): boolean {
     const msg = String((error as any)?.message ?? error ?? "").toLowerCase()
@@ -326,9 +337,10 @@ export async function generateDraftTokens(
             max_tokens: opts.maxTokens,
             temperature: opts.temperature,
             top_p: opts.topP,
+            stop: ["<|eot_id|>", "<|start_header_id|>", "<|end_header_id|>"],
         })
 
-        const text = response.choices[0]?.text || ""
+        const text = sanitizeDraftText(response.choices[0]?.text || "")
 
         // Get the generated text - token extraction happens at the API layer
         // We return the text which will be tokenized by the Shard

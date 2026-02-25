@@ -895,6 +895,8 @@ struct DraftResultSubmission {
     scout_id: String,
     draft_text: String,
     #[serde(default)]
+    prompt_context: Option<String>,
+    #[serde(default)]
     draft_tokens: Vec<i32>,
     #[serde(default)]
     timestamp: Option<f64>,

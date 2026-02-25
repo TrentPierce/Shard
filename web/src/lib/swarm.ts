@@ -48,6 +48,7 @@ export type WorkRequest = {
 export type WorkResult = {
     work_id: string
     draft_text: string
+    prompt_context: string
     scout_id: string
     timestamp: number
     scout_mode: "webgpu" | "wasm"
@@ -237,6 +238,7 @@ export async function handleScoutWork(work: WorkRequest): Promise<ScoutSubmissio
         const result: WorkResult = {
             work_id: work.request_id,
             draft_text: draftResult.text,
+            prompt_context: work.prompt_context,
             scout_id: scoutId,
             timestamp: Date.now() / 1000,
             scout_mode: engine.mode,
@@ -259,6 +261,7 @@ export async function handleScoutWork(work: WorkRequest): Promise<ScoutSubmissio
 async function submitDraftResult(result: WorkResult): Promise<ScoutSubmissionResult> {
     try {
         const response = await submitDraft(result.work_id, result.draft_text, {
+            promptContext: result.prompt_context,
             timeoutMs: 1000,
             maxRetries: 2,
             retryBackoffMs: 250,

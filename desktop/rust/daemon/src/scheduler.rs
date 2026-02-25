@@ -19,28 +19,13 @@ pub(crate) fn auth_required(require_api_key: bool, route_private: bool) -> bool 
 }
 
 fn strip_control_tokens(raw: &str) -> String {
-    let mut output = String::with_capacity(raw.len());
-    let mut i = 0;
-    let bytes = raw.as_bytes();
-
-    while i < bytes.len() {
-        if bytes[i] == b'<' && (i + 1) < bytes.len() && bytes[i + 1] == b'|' {
-            if let Some(close_idx) = raw[i + 2..].find("|>") {
-                i += close_idx + 4;
-                continue;
-            }
-            break;
-        }
-
-        if let Some(ch) = raw[i..].chars().next() {
-            output.push(ch);
-            i += ch.len_utf8();
-        } else {
-            break;
-        }
+    // Truncate once model control markers begin to avoid leaking serialized
+    // chat-template headers back to end users.
+    if let Some(idx) = raw.find("<|") {
+        raw[..idx].to_string()
+    } else {
+        raw.to_string()
     }
-
-    output
 }
 
 fn model_pair_acceptance_rates(
@@ -767,7 +752,7 @@ mod tests {
     #[test]
     fn strips_control_tokens_from_output() {
         let noisy = "Sure, how about you?<|eot_id|>user<|eot_id|><|start_header_id|>assistant";
-        assert_eq!(strip_control_tokens(noisy), "Sure, how about you?userassistant");
+        assert_eq!(strip_control_tokens(noisy), "Sure, how about you?");
     }
 
     #[test]

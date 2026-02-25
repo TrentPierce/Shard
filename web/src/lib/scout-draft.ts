@@ -4,6 +4,7 @@ export interface DraftSubmission {
   work_id: string
   scout_id: string
   draft_text: string
+  prompt_context?: string
   timestamp?: number
 }
 
@@ -25,6 +26,10 @@ export interface ScoutConfig {
   pollTimeoutMs: number
   pollRetries: number
   pollRetryBackoffMs: number
+}
+
+export interface SubmitDraftOptions extends Partial<ScoutConfig> {
+  promptContext?: string
 }
 
 const DEFAULT_CONFIG: ScoutConfig = {
@@ -174,8 +179,9 @@ async function processSubmissionQueue(): Promise<void> {
 export async function submitDraft(
   workId: string,
   draftText: string,
-  config: Partial<ScoutConfig> = {}
+  options: SubmitDraftOptions = {}
 ): Promise<DraftResponse> {
+  const { promptContext, ...config } = options
   const cfg = { ...DEFAULT_CONFIG, ...config }
   if (!workId.trim()) {
     return { ok: false, detail: "work_id is required" }
@@ -194,6 +200,7 @@ export async function submitDraft(
     work_id: workId,
     scout_id: getScoutId(),
     draft_text: draftText,
+    prompt_context: promptContext,
     timestamp: Date.now() / 1000,
   }
 
@@ -308,7 +315,7 @@ export async function generateAndSubmitDraft(
       }
     }
 
-    const draftText = tokens.join(" ")
+    const draftText = tokens.join("")
     const response = await submitDraft(workId, draftText, config)
 
     return {
