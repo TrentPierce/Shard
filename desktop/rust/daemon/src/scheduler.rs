@@ -57,6 +57,35 @@ fn model_pair_acceptance_rates(
     )
 }
 
+fn enqueue_scout_work(queue: &mut std::collections::VecDeque<WorkRequest>, work: WorkRequest) {
+    queue.push_back(work);
+    while queue.len() > 1024 {
+        queue.pop_front();
+    }
+}
+
+async fn dispatch_scout_work(state: &SharedState, work: WorkRequest) {
+    {
+        let mut queue = state.scout_work.lock().await;
+        enqueue_scout_work(&mut queue, work.clone());
+    }
+
+    if let Err(e) = state.work_tx.send(work).await {
+        tracing::warn!("failed to broadcast work: {}", e);
+    }
+}
+
+fn scout_draft_from_work_response(response: &WorkResponse) -> ScoutDraft {
+    ScoutDraft {
+        work_id: response.request_id.clone(),
+        scout_id: response.peer_id.clone(),
+        draft_tokens: response.draft_tokens.clone(),
+        draft_text: response.draft_text.clone(),
+        timestamp_ms: response.created_at_ms.unwrap_or_else(now_ms),
+        latency_ms: response.latency_ms as u64,
+    }
+}
+
 // ─── Speculative Decoding Functions ────────────────────────────────────────
 
 /// Wait for a scout draft submission with timeout.
@@ -74,6 +103,14 @@ pub(crate) async fn wait_for_scout_draft(
             return None;
         }
 
+        // Fast path: a draft may already be recorded in idempotent results.
+        if let Some(existing) = {
+            let by_id = state.idempotent_results.lock().await;
+            by_id.get(work_id).cloned()
+        } {
+            return Some(scout_draft_from_work_response(&existing));
+        }
+
         // Check if there's a draft available
         let draft = {
             let mut rx_guard = state.scout_draft_rx.lock().await;
@@ -81,6 +118,20 @@ pub(crate) async fn wait_for_scout_draft(
                 match tokio::time::timeout(tokio::time::Duration::from_millis(100), rx.recv()).await
                 {
                     Ok(Some(draft)) if draft.work_id == work_id => Some(draft),
+                    Ok(Some(draft)) => {
+                        // Preserve non-matching drafts in the idempotent map so
+                        // the corresponding request can pick them up later.
+                        let mut by_id = state.idempotent_results.lock().await;
+                        by_id.entry(draft.work_id.clone()).or_insert_with(|| WorkResponse {
+                            request_id: draft.work_id.clone(),
+                            peer_id: draft.scout_id.clone(),
+                            draft_tokens: draft.draft_tokens.clone(),
+                            draft_text: draft.draft_text.clone(),
+                            latency_ms: draft.latency_ms as f32,
+                            created_at_ms: Some(draft.timestamp_ms),
+                        });
+                        None
+                    }
                     _ => None,
                 }
             } else {
@@ -326,20 +377,7 @@ pub(crate) async fn chat_completions_handler(
                                 min_tokens: config.draft_token_count as i32,
                                 created_at_ms: Some(now_ms()),
                             };
-
-                            {
-                                let mut queue = state.scout_work.lock().await;
-                                queue.push_back(work.clone());
-                                // Keep queue size in check
-                                while queue.len() > 1024 {
-                                    queue.pop_front();
-                                }
-                            }
-
-                            // Signal work availability (gossipsub)
-                            if let Err(e) = state.work_tx.send(work).await {
-                                tracing::warn!("failed to broadcast work: {}", e);
-                            }
+                            dispatch_scout_work(&state, work).await;
 
                             // Wait for scout draft with timeout
                             let draft_start = now_ms();
@@ -508,6 +546,14 @@ pub(crate) async fn chat_completions_handler(
 
                     if use_speculative {
                         if let Some(ref config) = speculative_config {
+                            let work = WorkRequest {
+                                request_id: request_id.clone(),
+                                prompt_context: prompt.clone(),
+                                min_tokens: config.draft_token_count as i32,
+                                created_at_ms: Some(now_ms()),
+                            };
+                            dispatch_scout_work(&state, work).await;
+
                             // Wait for scout draft with timeout
                             let draft_start = now_ms();
                             let draft =
@@ -670,9 +716,10 @@ pub(crate) async fn chat_completions_handler(
 #[cfg(test)]
 mod tests {
     use super::{
-        auth_required, model_pair_acceptance_rates, resolve_inference_mode, strip_control_tokens,
-        InferenceMode,
+        auth_required, enqueue_scout_work, model_pair_acceptance_rates, resolve_inference_mode,
+        strip_control_tokens, InferenceMode, WorkRequest,
     };
+    use std::collections::VecDeque;
 
     #[test]
     fn distributed_mode_maps_to_speculative() {
@@ -727,5 +774,24 @@ mod tests {
     fn strips_partial_control_token_tail() {
         let noisy = "Hello there<|end_header_id";
         assert_eq!(strip_control_tokens(noisy), "Hello there");
+    }
+
+    #[test]
+    fn scout_work_queue_is_bounded() {
+        let mut queue = VecDeque::new();
+        for idx in 0..1100 {
+            enqueue_scout_work(
+                &mut queue,
+                WorkRequest {
+                    request_id: format!("req-{idx}"),
+                    prompt_context: "p".to_string(),
+                    min_tokens: 8,
+                    created_at_ms: None,
+                },
+            );
+        }
+        assert_eq!(queue.len(), 1024);
+        assert_eq!(queue.front().map(|w| w.request_id.as_str()), Some("req-76"));
+        assert_eq!(queue.back().map(|w| w.request_id.as_str()), Some("req-1099"));
     }
 }
