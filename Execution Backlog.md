@@ -320,6 +320,7 @@ Execution Backlog (Epics, Tickets, Acceptance Criteria, Sequencing)
   - TODO-RUNTIME-QUALITY-01: Add output-degeneration detector/recovery path for repeated-token loops (for example `endendend...`) in verifier output.
   - TODO-HEALTH-SEMANTICS-01: Split health into `ready`, `degraded`, and `unavailable` to avoid reporting `ok` when model runtime is not ready.
   - TODO-SCOUT-METRICS-01: Add scout submit-success counters and last-success timestamps to telemetry and dashboard.
+  - TODO-SCOUT-INGRESS-02: Harden `/api/v1/scout/work` and `/api/v1/scout/draft` proxy resilience under sustained load (graceful degrade behavior, timeout/failover tuning, and explicit error semantics) so browser scouts do not churn on transient backend stalls.
   - TODO-WEB-PROXY-01: Add explicit proxy-side SLI for `/api/v1/chat/completions` (5xx rate, timeout rate, and backend-attempt labels) and alert if health is `ok` while chat proxy 5xx exceeds 5% for 5 minutes.
 
   ## 10. Post-Readiness Remediation Backlog (2026-02-25)
