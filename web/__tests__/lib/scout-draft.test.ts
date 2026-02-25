@@ -71,7 +71,8 @@ describe("scout-draft guardrails", () => {
 
     expect(response.ok).toBe(true)
     expect(response.retried).toBe(1)
-    expect(fetchMock).toHaveBeenCalledTimes(4)
+    // Includes challenge+verify+2 draft calls plus best-effort client telemetry calls.
+    expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(4)
   })
 
   it("rejects duplicate work ids while already queued", async () => {

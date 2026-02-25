@@ -39,6 +39,14 @@ pub struct SystemMetrics {
     speculative_wait_mismatched_work_id_total: AtomicU64,
     speculative_verify_attempts_total: AtomicU64,
     speculative_verify_zero_accept_total: AtomicU64,
+    scout_client_submit_attempts_total: AtomicU64,
+    scout_client_submit_success_total: AtomicU64,
+    scout_client_submit_http_failures_total: AtomicU64,
+    scout_client_submit_timeouts_total: AtomicU64,
+    scout_client_submit_pow_failures_total: AtomicU64,
+    scout_client_submit_network_failures_total: AtomicU64,
+    scout_client_generate_failures_total: AtomicU64,
+    scout_client_fallback_drafts_total: AtomicU64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -75,6 +83,14 @@ pub struct SystemMetricsSnapshot {
     pub speculative_wait_mismatched_work_id_total: u64,
     pub speculative_verify_attempts_total: u64,
     pub speculative_verify_zero_accept_total: u64,
+    pub scout_client_submit_attempts_total: u64,
+    pub scout_client_submit_success_total: u64,
+    pub scout_client_submit_http_failures_total: u64,
+    pub scout_client_submit_timeouts_total: u64,
+    pub scout_client_submit_pow_failures_total: u64,
+    pub scout_client_submit_network_failures_total: u64,
+    pub scout_client_generate_failures_total: u64,
+    pub scout_client_fallback_drafts_total: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -267,6 +283,46 @@ impl SystemMetrics {
             .fetch_add(1, Ordering::Relaxed);
     }
 
+    pub fn inc_scout_client_submit_attempt(&self) {
+        self.scout_client_submit_attempts_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn inc_scout_client_submit_success(&self) {
+        self.scout_client_submit_success_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn inc_scout_client_submit_http_failure(&self) {
+        self.scout_client_submit_http_failures_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn inc_scout_client_submit_timeout(&self) {
+        self.scout_client_submit_timeouts_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn inc_scout_client_submit_pow_failure(&self) {
+        self.scout_client_submit_pow_failures_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn inc_scout_client_submit_network_failure(&self) {
+        self.scout_client_submit_network_failures_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn inc_scout_client_generate_failure(&self) {
+        self.scout_client_generate_failures_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn inc_scout_client_fallback_draft(&self) {
+        self.scout_client_fallback_drafts_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
     pub fn render_prometheus(&self, sample: PrometheusSample) -> String {
         let draft_total = self.speculative_draft_tokens_total.load(Ordering::Relaxed);
         let accepted_total = self
@@ -453,6 +509,30 @@ impl SystemMetrics {
                 "# HELP shard_speculative_verify_zero_accept_total Verification attempts that accepted zero draft tokens.\n",
                 "# TYPE shard_speculative_verify_zero_accept_total counter\n",
                 "shard_speculative_verify_zero_accept_total {}\n",
+                "# HELP shard_scout_client_submit_attempts_total Browser scout submit attempts.\n",
+                "# TYPE shard_scout_client_submit_attempts_total counter\n",
+                "shard_scout_client_submit_attempts_total {}\n",
+                "# HELP shard_scout_client_submit_success_total Browser scout successful draft submissions.\n",
+                "# TYPE shard_scout_client_submit_success_total counter\n",
+                "shard_scout_client_submit_success_total {}\n",
+                "# HELP shard_scout_client_submit_http_failures_total Browser scout submission HTTP failures.\n",
+                "# TYPE shard_scout_client_submit_http_failures_total counter\n",
+                "shard_scout_client_submit_http_failures_total {}\n",
+                "# HELP shard_scout_client_submit_timeouts_total Browser scout submission timeouts.\n",
+                "# TYPE shard_scout_client_submit_timeouts_total counter\n",
+                "shard_scout_client_submit_timeouts_total {}\n",
+                "# HELP shard_scout_client_submit_pow_failures_total Browser scout PoW verification failures before submit.\n",
+                "# TYPE shard_scout_client_submit_pow_failures_total counter\n",
+                "shard_scout_client_submit_pow_failures_total {}\n",
+                "# HELP shard_scout_client_submit_network_failures_total Browser scout network/unknown submit failures.\n",
+                "# TYPE shard_scout_client_submit_network_failures_total counter\n",
+                "shard_scout_client_submit_network_failures_total {}\n",
+                "# HELP shard_scout_client_generate_failures_total Browser scout draft-generation failures.\n",
+                "# TYPE shard_scout_client_generate_failures_total counter\n",
+                "shard_scout_client_generate_failures_total {}\n",
+                "# HELP shard_scout_client_fallback_drafts_total Browser scout fallback draft generations used.\n",
+                "# TYPE shard_scout_client_fallback_drafts_total counter\n",
+                "shard_scout_client_fallback_drafts_total {}\n",
             ),
             self.scout_work_polls_total.load(Ordering::Relaxed),
             self.scout_work_assignments_total.load(Ordering::Relaxed),
@@ -477,6 +557,22 @@ impl SystemMetrics {
                 .load(Ordering::Relaxed),
             self.speculative_verify_attempts_total.load(Ordering::Relaxed),
             self.speculative_verify_zero_accept_total.load(Ordering::Relaxed),
+            self.scout_client_submit_attempts_total
+                .load(Ordering::Relaxed),
+            self.scout_client_submit_success_total
+                .load(Ordering::Relaxed),
+            self.scout_client_submit_http_failures_total
+                .load(Ordering::Relaxed),
+            self.scout_client_submit_timeouts_total
+                .load(Ordering::Relaxed),
+            self.scout_client_submit_pow_failures_total
+                .load(Ordering::Relaxed),
+            self.scout_client_submit_network_failures_total
+                .load(Ordering::Relaxed),
+            self.scout_client_generate_failures_total
+                .load(Ordering::Relaxed),
+            self.scout_client_fallback_drafts_total
+                .load(Ordering::Relaxed),
         ));
         output
     }
@@ -559,6 +655,30 @@ impl SystemMetrics {
             speculative_verify_zero_accept_total: self
                 .speculative_verify_zero_accept_total
                 .load(Ordering::Relaxed),
+            scout_client_submit_attempts_total: self
+                .scout_client_submit_attempts_total
+                .load(Ordering::Relaxed),
+            scout_client_submit_success_total: self
+                .scout_client_submit_success_total
+                .load(Ordering::Relaxed),
+            scout_client_submit_http_failures_total: self
+                .scout_client_submit_http_failures_total
+                .load(Ordering::Relaxed),
+            scout_client_submit_timeouts_total: self
+                .scout_client_submit_timeouts_total
+                .load(Ordering::Relaxed),
+            scout_client_submit_pow_failures_total: self
+                .scout_client_submit_pow_failures_total
+                .load(Ordering::Relaxed),
+            scout_client_submit_network_failures_total: self
+                .scout_client_submit_network_failures_total
+                .load(Ordering::Relaxed),
+            scout_client_generate_failures_total: self
+                .scout_client_generate_failures_total
+                .load(Ordering::Relaxed),
+            scout_client_fallback_drafts_total: self
+                .scout_client_fallback_drafts_total
+                .load(Ordering::Relaxed),
         }
     }
 }
@@ -596,6 +716,14 @@ mod tests {
         metrics.inc_speculative_wait_mismatched_work_id();
         metrics.inc_speculative_verify_attempt();
         metrics.inc_speculative_verify_zero_accept();
+        metrics.inc_scout_client_submit_attempt();
+        metrics.inc_scout_client_submit_success();
+        metrics.inc_scout_client_submit_http_failure();
+        metrics.inc_scout_client_submit_timeout();
+        metrics.inc_scout_client_submit_pow_failure();
+        metrics.inc_scout_client_submit_network_failure();
+        metrics.inc_scout_client_generate_failure();
+        metrics.inc_scout_client_fallback_draft();
 
         let snap = metrics.snapshot();
         assert_eq!(snap.tokens_processed_total, 12);
@@ -624,5 +752,13 @@ mod tests {
         assert_eq!(snap.speculative_wait_mismatched_work_id_total, 1);
         assert_eq!(snap.speculative_verify_attempts_total, 1);
         assert_eq!(snap.speculative_verify_zero_accept_total, 1);
+        assert_eq!(snap.scout_client_submit_attempts_total, 1);
+        assert_eq!(snap.scout_client_submit_success_total, 1);
+        assert_eq!(snap.scout_client_submit_http_failures_total, 1);
+        assert_eq!(snap.scout_client_submit_timeouts_total, 1);
+        assert_eq!(snap.scout_client_submit_pow_failures_total, 1);
+        assert_eq!(snap.scout_client_submit_network_failures_total, 1);
+        assert_eq!(snap.scout_client_generate_failures_total, 1);
+        assert_eq!(snap.scout_client_fallback_drafts_total, 1);
     }
 }

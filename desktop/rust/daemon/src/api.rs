@@ -795,6 +795,14 @@ pub(crate) struct ScoutWorkQuery {
     scout_id: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+pub(crate) struct ScoutClientEvent {
+    scout_id: String,
+    event: String,
+    detail: Option<String>,
+    status: Option<u16>,
+}
+
 fn require_scout_id(query: &ScoutWorkQuery) -> Result<&str, Json<serde_json::Value>> {
     match query
         .scout_id
@@ -808,6 +816,45 @@ fn require_scout_id(query: &ScoutWorkQuery) -> Result<&str, Json<serde_json::Val
             "detail": "scout_id is required",
         }))),
     }
+}
+
+pub(crate) async fn scout_client_event_handler(
+    AxumState(state): AxumState<SharedState>,
+    Json(event): Json<ScoutClientEvent>,
+) -> Json<serde_json::Value> {
+    let scout_id = event.scout_id.trim();
+    if scout_id.is_empty() {
+        return Json(serde_json::json!({
+            "ok": false,
+            "detail": "scout_id is required",
+        }));
+    }
+
+    match event.event.as_str() {
+        "submit_attempt" => state.system_metrics.inc_scout_client_submit_attempt(),
+        "submit_success" => state.system_metrics.inc_scout_client_submit_success(),
+        "submit_http_error" => state.system_metrics.inc_scout_client_submit_http_failure(),
+        "submit_timeout" => state.system_metrics.inc_scout_client_submit_timeout(),
+        "submit_pow_failure" => state.system_metrics.inc_scout_client_submit_pow_failure(),
+        "submit_network_error" => state.system_metrics.inc_scout_client_submit_network_failure(),
+        "generate_failure" => state.system_metrics.inc_scout_client_generate_failure(),
+        "fallback_draft_used" => state.system_metrics.inc_scout_client_fallback_draft(),
+        _ => {
+            tracing::debug!(
+                scout_id = %scout_id,
+                event = %event.event,
+                detail = ?event.detail,
+                status = ?event.status,
+                "ignored unknown scout client event"
+            );
+            return Json(serde_json::json!({
+                "ok": false,
+                "detail": "unknown event",
+            }));
+        }
+    }
+
+    Json(serde_json::json!({ "ok": true }))
 }
 
 pub(crate) async fn ensure_pow_verified(
@@ -2008,6 +2055,38 @@ pub(crate) async fn metrics_summary_handler(
     payload.insert(
         "speculative_verify_zero_accept_total".to_string(),
         serde_json::json!(counters.speculative_verify_zero_accept_total),
+    );
+    payload.insert(
+        "scout_client_submit_attempts_total".to_string(),
+        serde_json::json!(counters.scout_client_submit_attempts_total),
+    );
+    payload.insert(
+        "scout_client_submit_success_total".to_string(),
+        serde_json::json!(counters.scout_client_submit_success_total),
+    );
+    payload.insert(
+        "scout_client_submit_http_failures_total".to_string(),
+        serde_json::json!(counters.scout_client_submit_http_failures_total),
+    );
+    payload.insert(
+        "scout_client_submit_timeouts_total".to_string(),
+        serde_json::json!(counters.scout_client_submit_timeouts_total),
+    );
+    payload.insert(
+        "scout_client_submit_pow_failures_total".to_string(),
+        serde_json::json!(counters.scout_client_submit_pow_failures_total),
+    );
+    payload.insert(
+        "scout_client_submit_network_failures_total".to_string(),
+        serde_json::json!(counters.scout_client_submit_network_failures_total),
+    );
+    payload.insert(
+        "scout_client_generate_failures_total".to_string(),
+        serde_json::json!(counters.scout_client_generate_failures_total),
+    );
+    payload.insert(
+        "scout_client_fallback_drafts_total".to_string(),
+        serde_json::json!(counters.scout_client_fallback_drafts_total),
     );
     payload.insert(
         "tokens_processed_total".to_string(),

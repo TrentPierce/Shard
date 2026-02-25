@@ -63,8 +63,41 @@ const submissionQueue: QueueItem[] = []
 const queuedWorkIds = new Set<string>()
 let processingQueue = false
 
+type ScoutClientEventName =
+  | "submit_attempt"
+  | "submit_success"
+  | "submit_http_error"
+  | "submit_timeout"
+  | "submit_pow_failure"
+  | "submit_network_error"
+  | "generate_failure"
+  | "fallback_draft_used"
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+export async function reportScoutClientEvent(
+  event: ScoutClientEventName,
+  detail?: string,
+  status?: number,
+  scoutIdValue?: string,
+): Promise<void> {
+  try {
+    await fetch(apiUrl("/v1/scout/client-event"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      keepalive: true,
+      body: JSON.stringify({
+        scout_id: scoutIdValue ?? getScoutId(),
+        event,
+        detail: detail?.slice(0, 300),
+        status,
+      }),
+    })
+  } catch {
+    // Best-effort telemetry only.
+  }
 }
 
 type PowChallengePayload = {
@@ -210,6 +243,7 @@ async function submitDraftOnce(
   activeSubmissionAbort = controller
   const timeoutId = setTimeout(() => controller.abort(), cfg.timeoutMs)
   try {
+    await reportScoutClientEvent("submit_attempt", undefined, undefined, submission.scout_id)
     await ensurePowVerifiedForScout(submission.scout_id)
     const response = await fetch(apiUrl("/v1/scout/draft"), {
       method: "POST",
@@ -223,6 +257,12 @@ async function submitDraftOnce(
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({ detail: "Unknown error" }))
+      await reportScoutClientEvent(
+        "submit_http_error",
+        error.detail || `HTTP ${response.status}`,
+        response.status,
+        submission.scout_id,
+      )
       return {
         ok: false,
         detail: error.detail || `HTTP ${response.status}`,
@@ -231,6 +271,7 @@ async function submitDraftOnce(
     }
 
     const result = (await response.json()) as DraftResponse
+    await reportScoutClientEvent("submit_success", undefined, response.status, submission.scout_id)
     return {
       ...result,
       status: response.status,
@@ -238,14 +279,21 @@ async function submitDraftOnce(
   } catch (error) {
     clearTimeout(timeoutId)
     if (error instanceof Error && error.name === "AbortError") {
+      void reportScoutClientEvent("submit_timeout", `timeout ${cfg.timeoutMs}ms`, undefined, submission.scout_id)
       return {
         ok: false,
         detail: `Timeout: verifier did not respond within ${cfg.timeoutMs}ms`,
       }
     }
+    const detail = error instanceof Error ? error.message : "Unknown error submitting draft"
+    if (detail.toLowerCase().includes("pow")) {
+      void reportScoutClientEvent("submit_pow_failure", detail, undefined, submission.scout_id)
+    } else {
+      void reportScoutClientEvent("submit_network_error", detail, undefined, submission.scout_id)
+    }
     return {
       ok: false,
-      detail: error instanceof Error ? error.message : "Unknown error submitting draft",
+      detail,
     }
   } finally {
     activeSubmissionAbort = null

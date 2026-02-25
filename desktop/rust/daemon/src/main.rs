@@ -1880,6 +1880,7 @@ fn create_router(state: SharedState) -> Router {
         .route("/v1/scout/work", get(pop_work_handler))
         .route("/submit-draft", post(submit_draft_handler))
         .route("/v1/scout/draft", post(submit_draft_handler))
+        .route("/v1/scout/client-event", post(scout_client_event_handler))
         .route("/v1/pow/challenge", get(pow_challenge_handler))
         .route("/v1/pow/verify", post(pow_verify_handler))
         .route("/signed/submit-draft", post(signed_submit_draft_handler))

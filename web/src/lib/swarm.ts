@@ -9,7 +9,7 @@
 
 import { apiUrl, rustUrl } from "./config"
 import { getActiveEngine, generateDrafts } from "./scout-engine"
-import { getScoutId, pollForWork, submitDraft } from "./scout-draft"
+import { getScoutId, pollForWork, reportScoutClientEvent, submitDraft } from "./scout-draft"
 import { canUseLocalDaemonFallback } from "./runtime"
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -233,15 +233,20 @@ export async function handleScoutWork(work: WorkRequest): Promise<ScoutSubmissio
         let draftText = ""
         if (!engine) {
             draftText = fallbackDraftFromPrompt(work.prompt_context, work.min_tokens)
+            void reportScoutClientEvent("fallback_draft_used", "engine_uninitialized")
         } else {
             try {
                 const draftResult = await generateDrafts(work.prompt_context, { maxTokens: work.min_tokens })
                 draftText = draftResult.text
                 if (!draftResult.success || !draftText?.trim()) {
                     draftText = fallbackDraftFromPrompt(work.prompt_context, work.min_tokens)
+                    void reportScoutClientEvent("generate_failure", draftResult.error || "empty_draft_result")
+                    void reportScoutClientEvent("fallback_draft_used", "empty_or_failed_generation")
                 }
             } catch {
                 draftText = fallbackDraftFromPrompt(work.prompt_context, work.min_tokens)
+                void reportScoutClientEvent("generate_failure", "generateDrafts_threw")
+                void reportScoutClientEvent("fallback_draft_used", "exception_in_generation")
             }
         }
 
@@ -260,6 +265,7 @@ export async function handleScoutWork(work: WorkRequest): Promise<ScoutSubmissio
 
         return submissionResult
     } catch (error: any) {
+        void reportScoutClientEvent("generate_failure", `handleScoutWork_failed:${error?.message ?? error}`)
         return {
             success: false,
             detail: `Scout work handling failed: ${error?.message ?? error}`,
