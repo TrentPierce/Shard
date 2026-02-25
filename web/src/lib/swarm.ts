@@ -73,6 +73,35 @@ function fallbackDraftFromPrompt(prompt: string, maxTokens: number): string {
     return tail.length > 0 ? `${tail} ` : "the "
 }
 
+async function generateDraftsWithTimeout(
+    prompt: string,
+    maxTokens: number,
+    timeoutMs: number
+): Promise<{ success: boolean; text: string; error?: string }> {
+    try {
+        return await Promise.race([
+            generateDrafts(prompt, { maxTokens }),
+            new Promise<{ success: boolean; text: string; error?: string }>((resolve) =>
+                setTimeout(
+                    () =>
+                        resolve({
+                            success: false,
+                            text: "",
+                            error: `generation_timeout_${timeoutMs}ms`,
+                        }),
+                    timeoutMs
+                )
+            ),
+        ])
+    } catch (error: any) {
+        return {
+            success: false,
+            text: "",
+            error: error?.message ?? "generateDrafts_threw",
+        }
+    }
+}
+
 // ─── Functions ──────────────────────────────────────────────────────────────
 
 /**
@@ -237,7 +266,7 @@ export async function handleScoutWork(work: WorkRequest): Promise<ScoutSubmissio
             void reportScoutClientEvent("fallback_draft_used", "engine_uninitialized")
         } else {
             try {
-                const draftResult = await generateDrafts(work.prompt_context, { maxTokens: work.min_tokens })
+                const draftResult = await generateDraftsWithTimeout(work.prompt_context, work.min_tokens, 1200)
                 draftText = draftResult.text
                 if (!draftResult.success || !draftText?.trim()) {
                     draftText = fallbackDraftFromPrompt(work.prompt_context, work.min_tokens)
