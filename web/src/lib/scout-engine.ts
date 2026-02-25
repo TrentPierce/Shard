@@ -46,13 +46,21 @@ class WasmScoutEngine implements ScoutEngine {
 
     async generate(prompt: string, options?: any) {
         if (!this.initialized) throw new Error("WASM Engine not initialized")
-        
-        // Placeholder: Return empty drafts or heuristic
-        // Real impl would use onnxruntime-web or similar
+
+        const maxTokens = Math.max(1, Math.min(Number(options?.maxTokens ?? 4), 16))
+        const words = prompt
+            .replace(/<\|[^>]+?\|>/g, " ")
+            .replace(/\s+/g, " ")
+            .trim()
+            .split(" ")
+            .filter(Boolean)
+        const tail = words.slice(-maxTokens)
+        const text = tail.join(" ").trim()
+
         return {
-            tokens: [], // Verifier handles empty drafts gracefully (no speculative gain)
-            text: "",
-            success: true
+            tokens: [],
+            text: text.length > 0 ? `${text} ` : "the ",
+            success: true,
         }
     }
 

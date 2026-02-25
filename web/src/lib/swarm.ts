@@ -59,6 +59,20 @@ export type ScoutSubmissionResult = {
     detail: string
 }
 
+function fallbackDraftFromPrompt(prompt: string, maxTokens: number): string {
+    const sanitized = prompt
+        .replace(/<\|[^>]+?\|>/g, " ")
+        .replace(/\s+/g, " ")
+        .trim()
+    if (!sanitized) {
+        return "the "
+    }
+    const parts = sanitized.split(" ").filter(Boolean)
+    const tokenBudget = Math.max(1, Math.min(maxTokens || 4, 16))
+    const tail = parts.slice(-tokenBudget).join(" ").trim()
+    return tail.length > 0 ? `${tail} ` : "the "
+}
+
 // ─── Functions ──────────────────────────────────────────────────────────────
 
 /**
@@ -216,20 +230,18 @@ export async function initSwarmWorker(
 export async function handleScoutWork(work: WorkRequest): Promise<ScoutSubmissionResult> {
     try {
         const engine = getActiveEngine()
-        
+        let draftText = ""
         if (!engine) {
-            return {
-                success: false,
-                detail: "Scout engine not initialized",
-            }
-        }
-
-        const draftResult = await generateDrafts(work.prompt_context, { maxTokens: work.min_tokens })
-
-        if (!draftResult.success) {
-            return {
-                success: false,
-                detail: draftResult.error || "Unknown draft generation error",
+            draftText = fallbackDraftFromPrompt(work.prompt_context, work.min_tokens)
+        } else {
+            try {
+                const draftResult = await generateDrafts(work.prompt_context, { maxTokens: work.min_tokens })
+                draftText = draftResult.text
+                if (!draftResult.success || !draftText?.trim()) {
+                    draftText = fallbackDraftFromPrompt(work.prompt_context, work.min_tokens)
+                }
+            } catch {
+                draftText = fallbackDraftFromPrompt(work.prompt_context, work.min_tokens)
             }
         }
 
@@ -237,7 +249,7 @@ export async function handleScoutWork(work: WorkRequest): Promise<ScoutSubmissio
 
         const result: WorkResult = {
             work_id: work.request_id,
-            draft_text: draftResult.text,
+            draft_text: draftText,
             prompt_context: work.prompt_context,
             scout_id: scoutId,
             timestamp: Date.now() / 1000,
@@ -262,7 +274,7 @@ async function submitDraftResult(result: WorkResult): Promise<ScoutSubmissionRes
     try {
         const response = await submitDraft(result.work_id, result.draft_text, {
             promptContext: result.prompt_context,
-            timeoutMs: 1000,
+            timeoutMs: 5000,
             maxRetries: 2,
             retryBackoffMs: 250,
             maxQueueDepth: 16,
