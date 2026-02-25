@@ -659,6 +659,16 @@ struct PeerInfo {
     pub connection_failures: u32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TransportKind {
+    Tcp,
+    Websocket,
+    Quic,
+    Webrtc,
+    Relay,
+    Unknown,
+}
+
 #[derive(Clone)]
 pub(crate) struct SharedState {
     topology: Arc<Mutex<TopologyState>>,
@@ -1370,9 +1380,51 @@ fn extract_peer_id_from_multiaddr(addr: &Multiaddr) -> Option<PeerId> {
 }
 
 fn peer_id_from_addr_str(addr: &str) -> Option<String> {
-    addr.parse::<Multiaddr>()
-        .ok()
-        .and_then(|multiaddr| extract_peer_id_from_multiaddr(&multiaddr).map(|peer| peer.to_string()))
+    addr.parse::<Multiaddr>().ok().and_then(|multiaddr| {
+        extract_peer_id_from_multiaddr(&multiaddr).map(|peer| peer.to_string())
+    })
+}
+
+fn transport_kind_from_text(raw: &str) -> TransportKind {
+    let text = raw.to_ascii_lowercase();
+    if text.contains("/p2p-circuit") || text.contains("circuit") || text.contains("relay") {
+        return TransportKind::Relay;
+    }
+    if text.contains("/webrtc-direct") || text.contains("webrtc") {
+        return TransportKind::Webrtc;
+    }
+    if text.contains("/quic-v1") || text.contains("quic") {
+        return TransportKind::Quic;
+    }
+    if text.contains("/ws") || text.contains("websocket") {
+        return TransportKind::Websocket;
+    }
+    if text.contains("/tcp/") || text.contains(" tcp ") {
+        return TransportKind::Tcp;
+    }
+    TransportKind::Unknown
+}
+
+fn record_transport_success(metrics: &SystemMetrics, kind: TransportKind) {
+    match kind {
+        TransportKind::Tcp => metrics.inc_transport_tcp_success(),
+        TransportKind::Websocket => metrics.inc_transport_websocket_success(),
+        TransportKind::Quic => metrics.inc_transport_quic_success(),
+        TransportKind::Webrtc => metrics.inc_transport_webrtc_success(),
+        TransportKind::Relay => metrics.inc_transport_relay_success(),
+        TransportKind::Unknown => {}
+    }
+}
+
+fn record_transport_failure(metrics: &SystemMetrics, kind: TransportKind) {
+    match kind {
+        TransportKind::Tcp => metrics.inc_transport_tcp_failure(),
+        TransportKind::Websocket => metrics.inc_transport_websocket_failure(),
+        TransportKind::Quic => metrics.inc_transport_quic_failure(),
+        TransportKind::Webrtc => metrics.inc_transport_webrtc_failure(),
+        TransportKind::Relay => metrics.inc_transport_relay_failure(),
+        TransportKind::Unknown => {}
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1390,9 +1442,7 @@ fn parse_hardcoded_bootstrap_mode(raw: Option<String>) -> HardcodedBootstrapMode
         .as_str()
     {
         "always" => HardcodedBootstrapMode::Always,
-        "disabled" | "disable" | "off" | "false" | "none" => {
-            HardcodedBootstrapMode::Disabled
-        }
+        "disabled" | "disable" | "off" | "false" | "none" => HardcodedBootstrapMode::Disabled,
         _ => HardcodedBootstrapMode::Fallback,
     }
 }
@@ -2056,9 +2106,8 @@ async fn main() -> Result<()> {
     bootstrap_sources.extend(persisted);
     bootstrap_sources.extend(url_bootstrap);
 
-    let hardcoded_mode = parse_hardcoded_bootstrap_mode(
-        std::env::var("SHARD_HARDCODED_BOOTSTRAP_MODE").ok(),
-    );
+    let hardcoded_mode =
+        parse_hardcoded_bootstrap_mode(std::env::var("SHARD_HARDCODED_BOOTSTRAP_MODE").ok());
     let include_hardcoded =
         should_include_hardcoded_bootstrap(hardcoded_mode, !bootstrap_sources.is_empty());
     if include_hardcoded {
@@ -3693,6 +3742,8 @@ async fn main() -> Result<()> {
 
                         tracing::info!(%peer_id, "peer connected");
                         let remote_addr = endpoint.get_remote_address().to_string();
+                        let transport_kind = transport_kind_from_text(remote_addr.as_str());
+                        record_transport_success(&state.system_metrics, transport_kind);
 
                         {
                             let mut peers = state.peers.lock().await;
@@ -3734,6 +3785,9 @@ async fn main() -> Result<()> {
                     SwarmEvent::OutgoingConnectionError { peer_id, error, .. } => {
                         tracing::warn!(?peer_id, "outgoing connection error");
                         tracing::debug!(?peer_id, %error, "outgoing connection error details");
+                        let error_text = error.to_string();
+                        let transport_kind = transport_kind_from_text(error_text.as_str());
+                        record_transport_failure(&state.system_metrics, transport_kind);
 
                         // Track bootstrap peer failures
                         if let Some(peer_id) = peer_id {
@@ -3762,10 +3816,10 @@ mod tests {
         load_bootstrap_registry, node_is_healthy, parse_hardcoded_bootstrap_mode,
         peer_id_from_addr_str, record_bootstrap_failure, save_bootstrap_registry,
         should_attempt_reconnect, should_include_hardcoded_bootstrap,
-        should_reject_peer_connection, unique_addrs, validate_work_request,
-        BootstrapRegistryEntry, CanaryRolloutConfig, CanaryRolloutController,
-        HardcodedBootstrapMode, LatencyHistogram, ScoutPenaltyBook, ScoutPenaltyUpdate,
-        ScoutTimeoutTracker, SpeculativeConfig, WorkRequest, MAX_BOOTSTRAP_FAILURES,
+        should_reject_peer_connection, unique_addrs, validate_work_request, BootstrapRegistryEntry,
+        CanaryRolloutConfig, CanaryRolloutController, HardcodedBootstrapMode, LatencyHistogram,
+        ScoutPenaltyBook, ScoutPenaltyUpdate, ScoutTimeoutTracker, SpeculativeConfig, WorkRequest,
+        MAX_BOOTSTRAP_FAILURES,
     };
     use libp2p::{Multiaddr, PeerId};
     use std::collections::{HashMap, HashSet};

@@ -47,6 +47,16 @@ pub struct SystemMetrics {
     scout_client_submit_network_failures_total: AtomicU64,
     scout_client_generate_failures_total: AtomicU64,
     scout_client_fallback_drafts_total: AtomicU64,
+    transport_tcp_success_total: AtomicU64,
+    transport_tcp_failure_total: AtomicU64,
+    transport_websocket_success_total: AtomicU64,
+    transport_websocket_failure_total: AtomicU64,
+    transport_quic_success_total: AtomicU64,
+    transport_quic_failure_total: AtomicU64,
+    transport_webrtc_success_total: AtomicU64,
+    transport_webrtc_failure_total: AtomicU64,
+    transport_relay_success_total: AtomicU64,
+    transport_relay_failure_total: AtomicU64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -91,6 +101,16 @@ pub struct SystemMetricsSnapshot {
     pub scout_client_submit_network_failures_total: u64,
     pub scout_client_generate_failures_total: u64,
     pub scout_client_fallback_drafts_total: u64,
+    pub transport_tcp_success_total: u64,
+    pub transport_tcp_failure_total: u64,
+    pub transport_websocket_success_total: u64,
+    pub transport_websocket_failure_total: u64,
+    pub transport_quic_success_total: u64,
+    pub transport_quic_failure_total: u64,
+    pub transport_webrtc_success_total: u64,
+    pub transport_webrtc_failure_total: u64,
+    pub transport_relay_success_total: u64,
+    pub transport_relay_failure_total: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -323,6 +343,56 @@ impl SystemMetrics {
             .fetch_add(1, Ordering::Relaxed);
     }
 
+    pub fn inc_transport_tcp_success(&self) {
+        self.transport_tcp_success_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn inc_transport_tcp_failure(&self) {
+        self.transport_tcp_failure_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn inc_transport_websocket_success(&self) {
+        self.transport_websocket_success_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn inc_transport_websocket_failure(&self) {
+        self.transport_websocket_failure_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn inc_transport_quic_success(&self) {
+        self.transport_quic_success_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn inc_transport_quic_failure(&self) {
+        self.transport_quic_failure_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn inc_transport_webrtc_success(&self) {
+        self.transport_webrtc_success_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn inc_transport_webrtc_failure(&self) {
+        self.transport_webrtc_failure_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn inc_transport_relay_success(&self) {
+        self.transport_relay_success_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn inc_transport_relay_failure(&self) {
+        self.transport_relay_failure_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
     pub fn render_prometheus(&self, sample: PrometheusSample) -> String {
         let draft_total = self.speculative_draft_tokens_total.load(Ordering::Relaxed);
         let accepted_total = self
@@ -533,6 +603,36 @@ impl SystemMetrics {
                 "# HELP shard_scout_client_fallback_drafts_total Browser scout fallback draft generations used.\n",
                 "# TYPE shard_scout_client_fallback_drafts_total counter\n",
                 "shard_scout_client_fallback_drafts_total {}\n",
+                "# HELP shard_transport_tcp_success_total Successful TCP transport connection establishments.\n",
+                "# TYPE shard_transport_tcp_success_total counter\n",
+                "shard_transport_tcp_success_total {}\n",
+                "# HELP shard_transport_tcp_failure_total Failed TCP transport connection attempts.\n",
+                "# TYPE shard_transport_tcp_failure_total counter\n",
+                "shard_transport_tcp_failure_total {}\n",
+                "# HELP shard_transport_websocket_success_total Successful WebSocket transport connection establishments.\n",
+                "# TYPE shard_transport_websocket_success_total counter\n",
+                "shard_transport_websocket_success_total {}\n",
+                "# HELP shard_transport_websocket_failure_total Failed WebSocket transport connection attempts.\n",
+                "# TYPE shard_transport_websocket_failure_total counter\n",
+                "shard_transport_websocket_failure_total {}\n",
+                "# HELP shard_transport_quic_success_total Successful QUIC transport connection establishments.\n",
+                "# TYPE shard_transport_quic_success_total counter\n",
+                "shard_transport_quic_success_total {}\n",
+                "# HELP shard_transport_quic_failure_total Failed QUIC transport connection attempts.\n",
+                "# TYPE shard_transport_quic_failure_total counter\n",
+                "shard_transport_quic_failure_total {}\n",
+                "# HELP shard_transport_webrtc_success_total Successful WebRTC transport connection establishments.\n",
+                "# TYPE shard_transport_webrtc_success_total counter\n",
+                "shard_transport_webrtc_success_total {}\n",
+                "# HELP shard_transport_webrtc_failure_total Failed WebRTC transport connection attempts.\n",
+                "# TYPE shard_transport_webrtc_failure_total counter\n",
+                "shard_transport_webrtc_failure_total {}\n",
+                "# HELP shard_transport_relay_success_total Successful relay/circuit transport connection establishments.\n",
+                "# TYPE shard_transport_relay_success_total counter\n",
+                "shard_transport_relay_success_total {}\n",
+                "# HELP shard_transport_relay_failure_total Failed relay/circuit transport connection attempts.\n",
+                "# TYPE shard_transport_relay_failure_total counter\n",
+                "shard_transport_relay_failure_total {}\n",
             ),
             self.scout_work_polls_total.load(Ordering::Relaxed),
             self.scout_work_assignments_total.load(Ordering::Relaxed),
@@ -573,6 +673,18 @@ impl SystemMetrics {
                 .load(Ordering::Relaxed),
             self.scout_client_fallback_drafts_total
                 .load(Ordering::Relaxed),
+            self.transport_tcp_success_total.load(Ordering::Relaxed),
+            self.transport_tcp_failure_total.load(Ordering::Relaxed),
+            self.transport_websocket_success_total
+                .load(Ordering::Relaxed),
+            self.transport_websocket_failure_total
+                .load(Ordering::Relaxed),
+            self.transport_quic_success_total.load(Ordering::Relaxed),
+            self.transport_quic_failure_total.load(Ordering::Relaxed),
+            self.transport_webrtc_success_total.load(Ordering::Relaxed),
+            self.transport_webrtc_failure_total.load(Ordering::Relaxed),
+            self.transport_relay_success_total.load(Ordering::Relaxed),
+            self.transport_relay_failure_total.load(Ordering::Relaxed),
         ));
         output
     }
@@ -607,30 +719,22 @@ impl SystemMetrics {
                 .speculative_rejected_tokens_total
                 .load(Ordering::Relaxed),
             scout_work_polls_total: self.scout_work_polls_total.load(Ordering::Relaxed),
-            scout_work_assignments_total: self
-                .scout_work_assignments_total
-                .load(Ordering::Relaxed),
-            scout_work_empty_polls_total: self
-                .scout_work_empty_polls_total
-                .load(Ordering::Relaxed),
+            scout_work_assignments_total: self.scout_work_assignments_total.load(Ordering::Relaxed),
+            scout_work_empty_polls_total: self.scout_work_empty_polls_total.load(Ordering::Relaxed),
             scout_draft_submissions_total: self
                 .scout_draft_submissions_total
                 .load(Ordering::Relaxed),
             scout_draft_reject_missing_identity_total: self
                 .scout_draft_reject_missing_identity_total
                 .load(Ordering::Relaxed),
-            scout_draft_reject_pow_total: self
-                .scout_draft_reject_pow_total
-                .load(Ordering::Relaxed),
+            scout_draft_reject_pow_total: self.scout_draft_reject_pow_total.load(Ordering::Relaxed),
             scout_draft_reject_spotcheck_total: self
                 .scout_draft_reject_spotcheck_total
                 .load(Ordering::Relaxed),
             scout_draft_reject_empty_tokens_total: self
                 .scout_draft_reject_empty_tokens_total
                 .load(Ordering::Relaxed),
-            scout_draft_duplicates_total: self
-                .scout_draft_duplicates_total
-                .load(Ordering::Relaxed),
+            scout_draft_duplicates_total: self.scout_draft_duplicates_total.load(Ordering::Relaxed),
             scout_draft_channel_enqueued_total: self
                 .scout_draft_channel_enqueued_total
                 .load(Ordering::Relaxed),
@@ -640,9 +744,7 @@ impl SystemMetrics {
             speculative_wait_requests_total: self
                 .speculative_wait_requests_total
                 .load(Ordering::Relaxed),
-            speculative_wait_hits_total: self
-                .speculative_wait_hits_total
-                .load(Ordering::Relaxed),
+            speculative_wait_hits_total: self.speculative_wait_hits_total.load(Ordering::Relaxed),
             speculative_wait_timeouts_total: self
                 .speculative_wait_timeouts_total
                 .load(Ordering::Relaxed),
@@ -678,6 +780,28 @@ impl SystemMetrics {
                 .load(Ordering::Relaxed),
             scout_client_fallback_drafts_total: self
                 .scout_client_fallback_drafts_total
+                .load(Ordering::Relaxed),
+            transport_tcp_success_total: self.transport_tcp_success_total.load(Ordering::Relaxed),
+            transport_tcp_failure_total: self.transport_tcp_failure_total.load(Ordering::Relaxed),
+            transport_websocket_success_total: self
+                .transport_websocket_success_total
+                .load(Ordering::Relaxed),
+            transport_websocket_failure_total: self
+                .transport_websocket_failure_total
+                .load(Ordering::Relaxed),
+            transport_quic_success_total: self.transport_quic_success_total.load(Ordering::Relaxed),
+            transport_quic_failure_total: self.transport_quic_failure_total.load(Ordering::Relaxed),
+            transport_webrtc_success_total: self
+                .transport_webrtc_success_total
+                .load(Ordering::Relaxed),
+            transport_webrtc_failure_total: self
+                .transport_webrtc_failure_total
+                .load(Ordering::Relaxed),
+            transport_relay_success_total: self
+                .transport_relay_success_total
+                .load(Ordering::Relaxed),
+            transport_relay_failure_total: self
+                .transport_relay_failure_total
                 .load(Ordering::Relaxed),
         }
     }
@@ -724,6 +848,16 @@ mod tests {
         metrics.inc_scout_client_submit_network_failure();
         metrics.inc_scout_client_generate_failure();
         metrics.inc_scout_client_fallback_draft();
+        metrics.inc_transport_tcp_success();
+        metrics.inc_transport_tcp_failure();
+        metrics.inc_transport_websocket_success();
+        metrics.inc_transport_websocket_failure();
+        metrics.inc_transport_quic_success();
+        metrics.inc_transport_quic_failure();
+        metrics.inc_transport_webrtc_success();
+        metrics.inc_transport_webrtc_failure();
+        metrics.inc_transport_relay_success();
+        metrics.inc_transport_relay_failure();
 
         let snap = metrics.snapshot();
         assert_eq!(snap.tokens_processed_total, 12);
@@ -760,5 +894,15 @@ mod tests {
         assert_eq!(snap.scout_client_submit_network_failures_total, 1);
         assert_eq!(snap.scout_client_generate_failures_total, 1);
         assert_eq!(snap.scout_client_fallback_drafts_total, 1);
+        assert_eq!(snap.transport_tcp_success_total, 1);
+        assert_eq!(snap.transport_tcp_failure_total, 1);
+        assert_eq!(snap.transport_websocket_success_total, 1);
+        assert_eq!(snap.transport_websocket_failure_total, 1);
+        assert_eq!(snap.transport_quic_success_total, 1);
+        assert_eq!(snap.transport_quic_failure_total, 1);
+        assert_eq!(snap.transport_webrtc_success_total, 1);
+        assert_eq!(snap.transport_webrtc_failure_total, 1);
+        assert_eq!(snap.transport_relay_success_total, 1);
+        assert_eq!(snap.transport_relay_failure_total, 1);
     }
 }

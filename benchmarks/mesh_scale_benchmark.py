@@ -14,8 +14,8 @@ import csv
 import hashlib
 import json
 import math
-import os
 import random
+import re
 import statistics
 import subprocess
 import time
@@ -50,6 +50,7 @@ def safe_get_json(url: str, timeout_s: float = 10.0) -> dict[str, Any]:
     response.raise_for_status()
     return response.json()
 
+
 def safe_get_json_retry(
     url: str,
     timeout_s: float = 10.0,
@@ -66,6 +67,7 @@ def safe_get_json_retry(
                 time.sleep(backoff_s * (attempt + 1))
     raise RuntimeError(f"Failed to fetch JSON from {url}") from last_error
 
+
 def safe_get_json_optional(
     url: str,
     timeout_s: float = 10.0,
@@ -75,6 +77,7 @@ def safe_get_json_optional(
         return safe_get_json_retry(url, timeout_s=timeout_s, retries=retries)
     except Exception as exc:  # noqa: BLE001
         return {"status": "unavailable", "error": str(exc), "url": url}
+
 
 def get_metrics_summary(base_url: str) -> dict[str, Any]:
     candidates = [
@@ -139,6 +142,174 @@ def count_output_tokens(payload: dict[str, Any]) -> int:
     return len(text.split())
 
 
+def classify_error(status_code: int, error: str) -> str:
+    err = (error or "").lower()
+    if not err and 200 <= status_code < 400:
+        return "none"
+    if status_code == 0 and "timed out" in err:
+        return "connection_timeout"
+    if status_code == 0 and ("failed to establish" in err or "connection" in err):
+        return "connection_failure"
+    if status_code == 0 and ("name or service not known" in err or "dns" in err):
+        return "dns_failure"
+    if status_code == 408:
+        return "inference_timeout"
+    if status_code == 429:
+        return "rate_limited"
+    if status_code == 502:
+        return "bad_gateway"
+    if status_code == 503:
+        return "service_unavailable"
+    if status_code == 504:
+        return "gateway_timeout"
+    if 500 <= status_code < 600:
+        return "server_error"
+    if 400 <= status_code < 500:
+        return "client_error"
+    if status_code >= 400:
+        return "http_error"
+    if err:
+        return "network_error"
+    return "unknown"
+
+
+def parse_sse_data_line(line: str) -> dict[str, Any] | None:
+    line = line.strip()
+    if not line.startswith("data:"):
+        return None
+    payload = line[5:].strip()
+    if not payload or payload == "[DONE]":
+        return None
+    try:
+        return json.loads(payload)
+    except json.JSONDecodeError:
+        return None
+
+
+def run_one_request_stream(
+    base_url: str,
+    inference_mode: str,
+    prompt: str,
+    timeout_s: float,
+    max_tokens: int,
+) -> dict[str, Any]:
+    request_id = str(uuid.uuid4())
+    body = {
+        "model": "shard-hybrid",
+        "messages": [{"role": "user", "content": prompt}],
+        "stream": True,
+        "max_tokens": max_tokens,
+    }
+    headers = {
+        "Content-Type": "application/json",
+        "X-Shard-Inference-Mode": inference_mode,
+    }
+    started = time.perf_counter()
+    success = False
+    status_code = 0
+    output_tokens = 0
+    error = ""
+    ttft_ms: float | None = None
+    inter_token_latency_ms: float | None = None
+    token_ts: list[float] = []
+    try:
+        with requests.post(
+            f"{base_url}/v1/chat/completions",
+            json=body,
+            headers=headers,
+            timeout=timeout_s,
+            stream=True,
+        ) as response:
+            status_code = response.status_code
+            response.raise_for_status()
+            for raw_line in response.iter_lines(decode_unicode=True):
+                if not raw_line:
+                    continue
+                item = parse_sse_data_line(raw_line)
+                if not isinstance(item, dict):
+                    continue
+                choices = item.get("choices")
+                if not isinstance(choices, list) or not choices:
+                    continue
+                choice0 = choices[0] if isinstance(choices[0], dict) else {}
+                delta = choice0.get("delta") if isinstance(choice0, dict) else None
+                content = delta.get("content") if isinstance(delta, dict) else None
+                if isinstance(content, str) and content:
+                    now = time.perf_counter()
+                    token_ts.append(now)
+                    output_tokens += max(1, len(re.findall(r"\S+", content)))
+            success = True
+    except Exception as exc:  # noqa: BLE001
+        error = str(exc)
+
+    if token_ts:
+        ttft_ms = (token_ts[0] - started) * 1000.0
+        if len(token_ts) >= 2:
+            gaps = [(token_ts[i] - token_ts[i - 1]) * 1000.0 for i in range(1, len(token_ts))]
+            inter_token_latency_ms = statistics.fmean(gaps)
+
+    elapsed_ms = (time.perf_counter() - started) * 1000.0
+    return {
+        "request_id": request_id,
+        "latency_ms": elapsed_ms,
+        "ttft_ms": ttft_ms,
+        "inter_token_latency_ms": inter_token_latency_ms,
+        "success": success,
+        "status_code": status_code,
+        "output_tokens": output_tokens,
+        "error": error,
+        "error_class": classify_error(status_code, error),
+        "transport_mode": "stream_sse",
+    }
+
+
+def infer_transport_family(addr: str) -> str:
+    lower = addr.lower()
+    if "/webrtc-direct" in lower:
+        return "webrtc_direct"
+    if "/quic-v1" in lower:
+        return "quic"
+    if "/ws" in lower:
+        return "websocket_tcp"
+    if "/tcp/" in lower:
+        return "tcp"
+    if "/p2p-circuit" in lower:
+        return "relay_circuit"
+    return "other"
+
+
+def collect_transport_observation(base_url: str) -> dict[str, Any]:
+    peers = safe_get_json_optional(f"{base_url}/v1/system/peers", retries=1)
+    topology = safe_get_json_optional(f"{base_url}/v1/system/topology", retries=1)
+
+    protocol_counts: dict[str, int] = {}
+    peer_count = 0
+    for peer in peers.get("peers", []) if isinstance(peers, dict) else []:
+        if not isinstance(peer, dict):
+            continue
+        addrs = peer.get("addrs")
+        if not isinstance(addrs, list):
+            continue
+        peer_count += 1
+        for addr in addrs:
+            if not isinstance(addr, str):
+                continue
+            fam = infer_transport_family(addr)
+            protocol_counts[fam] = protocol_counts.get(fam, 0) + 1
+
+    local_protocol_addrs: dict[str, str] = {}
+    if isinstance(topology, dict):
+        for key in ("shard_webrtc_multiaddr", "shard_quic_multiaddr", "shard_ws_multiaddr"):
+            value = topology.get(key)
+            if isinstance(value, str) and value:
+                local_protocol_addrs[key] = value
+
+    return {
+        "peer_count": peer_count,
+        "observed_addr_counts": protocol_counts,
+        "local_topology_addrs": local_protocol_addrs,
+    }
+
 def run_one_request(
     base_url: str,
     inference_mode: str,
@@ -180,10 +351,14 @@ def run_one_request(
     return {
         "request_id": request_id,
         "latency_ms": elapsed_ms,
+        "ttft_ms": None,
+        "inter_token_latency_ms": None,
         "success": success,
         "status_code": status_code,
         "output_tokens": output_tokens,
         "error": error,
+        "error_class": classify_error(status_code, error),
+        "transport_mode": "json",
     }
 
 
@@ -197,12 +372,15 @@ def benchmark_scenario(
     request_timeout_s: float,
     prompt: str,
     max_tokens: int,
+    collect_latency_breakdown: bool,
 ) -> dict[str, Any]:
     metrics_before = get_metrics_summary(scenario.base_url)
     health_before = safe_get_json_optional(f"{scenario.base_url}/health")
+    transport_before = collect_transport_observation(scenario.base_url)
 
+    request_fn = run_one_request_stream if collect_latency_breakdown else run_one_request
     for _ in range(max(0, warmup_requests)):
-        run_one_request(
+        request_fn(
             scenario.base_url,
             inference_mode,
             prompt,
@@ -215,7 +393,7 @@ def benchmark_scenario(
     with concurrent.futures.ThreadPoolExecutor(max_workers=concurrency) as executor:
         futures = [
             executor.submit(
-                run_one_request,
+                request_fn,
                 scenario.base_url,
                 inference_mode,
                 prompt,
@@ -230,11 +408,23 @@ def benchmark_scenario(
 
     metrics_after = get_metrics_summary(scenario.base_url)
     health_after = safe_get_json_optional(f"{scenario.base_url}/health")
+    transport_after = collect_transport_observation(scenario.base_url)
 
     successes = [e for e in events if e["success"]]
     failures = [e for e in events if not e["success"]]
     latencies = [float(e["latency_ms"]) for e in successes]
+    ttft = [float(e["ttft_ms"]) for e in successes if e.get("ttft_ms") is not None]
+    inter_token = [
+        float(e["inter_token_latency_ms"])
+        for e in successes
+        if e.get("inter_token_latency_ms") is not None
+    ]
     output_tokens = sum(int(e["output_tokens"]) for e in successes)
+
+    error_distribution: dict[str, int] = {}
+    for event in failures:
+        klass = str(event.get("error_class") or "unknown")
+        error_distribution[klass] = error_distribution.get(klass, 0) + 1
 
     accepted_before = int(metrics_before.get("speculative_accepted_tokens_total", 0))
     accepted_after = int(metrics_after.get("speculative_accepted_tokens_total", 0))
@@ -274,6 +464,15 @@ def benchmark_scenario(
         "latency_p50_ms": percentile(latencies, 0.50),
         "latency_p95_ms": percentile(latencies, 0.95),
         "latency_p99_ms": percentile(latencies, 0.99),
+        "latency_breakdown": {
+            "ttft_avg_ms": statistics.fmean(ttft) if ttft else None,
+            "ttft_p95_ms": percentile(ttft, 0.95) if ttft else None,
+            "inter_token_avg_ms": statistics.fmean(inter_token) if inter_token else None,
+            "inter_token_p95_ms": percentile(inter_token, 0.95) if inter_token else None,
+            "ttft_samples": len(ttft),
+            "inter_token_samples": len(inter_token),
+        },
+        "error_distribution": error_distribution,
         "metrics_delta": {
             "speculative_draft_tokens_total": delta_drafts,
             "speculative_accepted_tokens_total": delta_accepted,
@@ -286,7 +485,104 @@ def benchmark_scenario(
                 int(metrics_after.get("verification_fallback_total", 0))
                 - int(metrics_before.get("verification_fallback_total", 0)),
             ),
+            "scout_draft_submissions_total_delta": max(
+                0,
+                int(metrics_after.get("scout_draft_submissions_total", 0))
+                - int(metrics_before.get("scout_draft_submissions_total", 0)),
+            ),
+            "scout_draft_reject_pow_total_delta": max(
+                0,
+                int(metrics_after.get("scout_draft_reject_pow_total", 0))
+                - int(metrics_before.get("scout_draft_reject_pow_total", 0)),
+            ),
+            "scout_draft_reject_spotcheck_total_delta": max(
+                0,
+                int(metrics_after.get("scout_draft_reject_spotcheck_total", 0))
+                - int(metrics_before.get("scout_draft_reject_spotcheck_total", 0)),
+            ),
+            "scout_draft_reject_empty_tokens_total_delta": max(
+                0,
+                int(metrics_after.get("scout_draft_reject_empty_tokens_total", 0))
+                - int(metrics_before.get("scout_draft_reject_empty_tokens_total", 0)),
+            ),
+            "scout_client_submit_attempts_total_delta": max(
+                0,
+                int(metrics_after.get("scout_client_submit_attempts_total", 0))
+                - int(metrics_before.get("scout_client_submit_attempts_total", 0)),
+            ),
+            "scout_client_submit_success_total_delta": max(
+                0,
+                int(metrics_after.get("scout_client_submit_success_total", 0))
+                - int(metrics_before.get("scout_client_submit_success_total", 0)),
+            ),
+            "scout_client_submit_http_failures_total_delta": max(
+                0,
+                int(metrics_after.get("scout_client_submit_http_failures_total", 0))
+                - int(metrics_before.get("scout_client_submit_http_failures_total", 0)),
+            ),
+            "scout_client_submit_network_failures_total_delta": max(
+                0,
+                int(metrics_after.get("scout_client_submit_network_failures_total", 0))
+                - int(metrics_before.get("scout_client_submit_network_failures_total", 0)),
+            ),
+            "scout_client_submit_timeouts_total_delta": max(
+                0,
+                int(metrics_after.get("scout_client_submit_timeouts_total", 0))
+                - int(metrics_before.get("scout_client_submit_timeouts_total", 0)),
+            ),
+            "transport_tcp_success_total_delta": max(
+                0,
+                int(metrics_after.get("transport_tcp_success_total", 0))
+                - int(metrics_before.get("transport_tcp_success_total", 0)),
+            ),
+            "transport_tcp_failure_total_delta": max(
+                0,
+                int(metrics_after.get("transport_tcp_failure_total", 0))
+                - int(metrics_before.get("transport_tcp_failure_total", 0)),
+            ),
+            "transport_websocket_success_total_delta": max(
+                0,
+                int(metrics_after.get("transport_websocket_success_total", 0))
+                - int(metrics_before.get("transport_websocket_success_total", 0)),
+            ),
+            "transport_websocket_failure_total_delta": max(
+                0,
+                int(metrics_after.get("transport_websocket_failure_total", 0))
+                - int(metrics_before.get("transport_websocket_failure_total", 0)),
+            ),
+            "transport_quic_success_total_delta": max(
+                0,
+                int(metrics_after.get("transport_quic_success_total", 0))
+                - int(metrics_before.get("transport_quic_success_total", 0)),
+            ),
+            "transport_quic_failure_total_delta": max(
+                0,
+                int(metrics_after.get("transport_quic_failure_total", 0))
+                - int(metrics_before.get("transport_quic_failure_total", 0)),
+            ),
+            "transport_webrtc_success_total_delta": max(
+                0,
+                int(metrics_after.get("transport_webrtc_success_total", 0))
+                - int(metrics_before.get("transport_webrtc_success_total", 0)),
+            ),
+            "transport_webrtc_failure_total_delta": max(
+                0,
+                int(metrics_after.get("transport_webrtc_failure_total", 0))
+                - int(metrics_before.get("transport_webrtc_failure_total", 0)),
+            ),
+            "transport_relay_success_total_delta": max(
+                0,
+                int(metrics_after.get("transport_relay_success_total", 0))
+                - int(metrics_before.get("transport_relay_success_total", 0)),
+            ),
+            "transport_relay_failure_total_delta": max(
+                0,
+                int(metrics_after.get("transport_relay_failure_total", 0))
+                - int(metrics_before.get("transport_relay_failure_total", 0)),
+            ),
         },
+        "transport_observation_before": transport_before,
+        "transport_observation_after": transport_after,
         "health_before": health_before,
         "health_after": health_after,
         "metrics_before": metrics_before,
@@ -307,7 +603,10 @@ def write_csv(path: Path, run_results: list[dict[str, Any]]) -> None:
                 "success",
                 "status_code",
                 "latency_ms",
+                "ttft_ms",
+                "inter_token_latency_ms",
                 "output_tokens",
+                "error_class",
                 "error",
             ]
         )
@@ -322,10 +621,50 @@ def write_csv(path: Path, run_results: list[dict[str, Any]]) -> None:
                         event["success"],
                         event["status_code"],
                         f"{event['latency_ms']:.3f}",
+                        f"{event['ttft_ms']:.3f}" if event.get("ttft_ms") is not None else "",
+                        (
+                            f"{event['inter_token_latency_ms']:.3f}"
+                            if event.get("inter_token_latency_ms") is not None
+                            else ""
+                        ),
                         event["output_tokens"],
+                        event.get("error_class", ""),
                         event["error"],
                     ]
                 )
+
+def merge_error_distributions(runs: list[dict[str, Any]]) -> dict[str, int]:
+    merged: dict[str, int] = {}
+    for run in runs:
+        dist = run.get("error_distribution", {})
+        if not isinstance(dist, dict):
+            continue
+        for key, value in dist.items():
+            merged[str(key)] = merged.get(str(key), 0) + int(value)
+    return merged
+
+
+def merge_transport_deltas(runs: list[dict[str, Any]]) -> dict[str, int]:
+    keys = [
+        "transport_tcp_success_total_delta",
+        "transport_tcp_failure_total_delta",
+        "transport_websocket_success_total_delta",
+        "transport_websocket_failure_total_delta",
+        "transport_quic_success_total_delta",
+        "transport_quic_failure_total_delta",
+        "transport_webrtc_success_total_delta",
+        "transport_webrtc_failure_total_delta",
+        "transport_relay_success_total_delta",
+        "transport_relay_failure_total_delta",
+    ]
+    merged = {k: 0 for k in keys}
+    for run in runs:
+        delta = run.get("metrics_delta", {})
+        if not isinstance(delta, dict):
+            continue
+        for key in keys:
+            merged[key] += int(delta.get(key, 0))
+    return merged
 
 
 def summarize(run_results: list[dict[str, Any]]) -> dict[str, Any]:
@@ -339,6 +678,16 @@ def summarize(run_results: list[dict[str, Any]]) -> dict[str, Any]:
         tokps = [float(r["output_tokens_per_second"]) for r in runs]
         p95 = [float(r["latency_p95_ms"]) for r in runs]
         success_rates = [float(r["success_rate"]) for r in runs]
+        ttft_samples = [
+            float(r["latency_breakdown"]["ttft_avg_ms"])
+            for r in runs
+            if r["latency_breakdown"]["ttft_avg_ms"] is not None
+        ]
+        inter_token_samples = [
+            float(r["latency_breakdown"]["inter_token_avg_ms"])
+            for r in runs
+            if r["latency_breakdown"]["inter_token_avg_ms"] is not None
+        ]
         acceptance_rates = [
             r["metrics_delta"]["measured_acceptance_rate"]
             for r in runs
@@ -364,6 +713,10 @@ def summarize(run_results: list[dict[str, Any]]) -> dict[str, Any]:
                 "output_tokens_per_second_ci95_low": tok_ci_low,
                 "output_tokens_per_second_ci95_high": tok_ci_high,
                 "latency_p95_ms_mean": statistics.fmean(p95),
+                "ttft_avg_ms_mean": statistics.fmean(ttft_samples) if ttft_samples else None,
+                "inter_token_avg_ms_mean": (
+                    statistics.fmean(inter_token_samples) if inter_token_samples else None
+                ),
                 "success_rate_mean": statistics.fmean(success_rates),
                 "measured_acceptance_rate_mean": (
                     statistics.fmean(acceptance_rates) if acceptance_rates else None
@@ -371,6 +724,8 @@ def summarize(run_results: list[dict[str, Any]]) -> dict[str, Any]:
                 "measured_reject_rate_mean": (
                     statistics.fmean(reject_rates) if reject_rates else None
                 ),
+                "error_distribution": merge_error_distributions(runs),
+                "transport_deltas": merge_transport_deltas(runs),
             }
         )
 
@@ -391,10 +746,7 @@ def sha256_file(path: Path) -> str:
 
 def git_commit() -> str:
     try:
-        return (
-            subprocess.check_output(["git", "rev-parse", "HEAD"], text=True)
-            .strip()
-        )
+        return subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
     except Exception:  # noqa: BLE001
         return "unknown"
 
@@ -410,20 +762,23 @@ def write_markdown_report(
         f"- Timestamp (UTC): `{meta['timestamp_utc']}`",
         f"- Git commit: `{meta['git_commit']}`",
         f"- Inference mode: `{meta['inference_mode']}`",
+        f"- Latency breakdown mode: `{'stream TTFT/inter-token' if meta['collect_latency_breakdown'] else 'request-only latency'}`",
         f"- Runs per scenario: `{meta['runs_per_scenario']}`",
         f"- Requests per run: `{meta['requests_per_run']}`",
         f"- Concurrency: `{meta['concurrency']}`",
         "",
         "## Methodology",
-        "- Live HTTP requests to `/v1/chat/completions` with `stream=false`.",
+        "- Live HTTP requests to `/v1/chat/completions`.",
+        "- Optional stream mode (`--collect-latency-breakdown`) measures TTFT and inter-token latency.",
         "- Metrics deltas captured from `/metrics/summary` before/after each run.",
+        "- Transport observations sampled from `/v1/system/peers` and `/v1/system/topology`.",
         "- No synthetic acceptance/savings values are generated by this tool.",
         "- Scenario order is randomized each cycle to reduce warm-cache bias.",
         "",
         "## Scenario Summary",
         "",
-        "| Scenario | Nodes | TPS Mean | TPS 95% CI | Token/s Mean | Token/s 95% CI | p95 Latency (ms) | Success Rate | Acceptance | Reject |",
-        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+        "| Scenario | Nodes | TPS Mean | TPS 95% CI | Token/s Mean | Token/s 95% CI | p95 Latency (ms) | TTFT Avg (ms) | Inter-token Avg (ms) | Success Rate | Acceptance | Reject |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for item in summary["scenarios"]:
         acc = (
@@ -436,9 +791,15 @@ def write_markdown_report(
             if item["measured_reject_rate_mean"] is not None
             else "n/a"
         )
+        ttft = f"{item['ttft_avg_ms_mean']:.2f}" if item["ttft_avg_ms_mean"] is not None else "n/a"
+        inter_token = (
+            f"{item['inter_token_avg_ms_mean']:.2f}"
+            if item["inter_token_avg_ms_mean"] is not None
+            else "n/a"
+        )
         lines.append(
             "| {scenario} | {node_count} | {tps:.3f} | [{lo:.3f}, {hi:.3f}] | "
-            "{tokps:.3f} | [{tok_lo:.3f}, {tok_hi:.3f}] | {p95:.2f} | {succ:.4f} | {acc} | {rej} |".format(
+            "{tokps:.3f} | [{tok_lo:.3f}, {tok_hi:.3f}] | {p95:.2f} | {ttft} | {inter_token} | {succ:.4f} | {acc} | {rej} |".format(
                 scenario=item["scenario"],
                 node_count=item["node_count"],
                 tps=item["throughput_rps_mean"],
@@ -448,11 +809,21 @@ def write_markdown_report(
                 tok_lo=item["output_tokens_per_second_ci95_low"],
                 tok_hi=item["output_tokens_per_second_ci95_high"],
                 p95=item["latency_p95_ms_mean"],
+                ttft=ttft,
+                inter_token=inter_token,
                 succ=item["success_rate_mean"],
                 acc=acc,
                 rej=rej,
             )
         )
+        if item.get("error_distribution"):
+            lines.append(
+                f"  - `{item['scenario']}` failure distribution: `{json.dumps(item['error_distribution'], sort_keys=True)}`"
+            )
+        if item.get("transport_deltas"):
+            lines.append(
+                f"  - `{item['scenario']}` transport deltas: `{json.dumps(item['transport_deltas'], sort_keys=True)}`"
+            )
 
     lines.extend(
         [
@@ -464,7 +835,6 @@ def write_markdown_report(
         ]
     )
     path.write_text("\n".join(lines), encoding="utf-8")
-
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run real mesh-scale benchmarks")
@@ -479,6 +849,11 @@ def main() -> None:
     parser.add_argument("--prompt", default=DEFAULT_PROMPT)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--max-tokens", type=int, default=48)
+    parser.add_argument(
+        "--collect-latency-breakdown",
+        action="store_true",
+        help="Use stream requests to measure TTFT and inter-token latency",
+    )
     args = parser.parse_args()
 
     random.seed(args.seed)
@@ -504,13 +879,20 @@ def main() -> None:
                 request_timeout_s=args.request_timeout_s,
                 prompt=args.prompt,
                 max_tokens=args.max_tokens,
+                collect_latency_breakdown=args.collect_latency_breakdown,
             )
             run_results.append(result)
+            ttft_str = (
+                f" ttft={result['latency_breakdown']['ttft_avg_ms']:.1f}ms"
+                if result["latency_breakdown"]["ttft_avg_ms"] is not None
+                else ""
+            )
             print(
                 f"[{scenario.name} run {run_index}] "
                 f"success={result['success_count']}/{result['requests_total']} "
                 f"tps={result['throughput_rps']:.3f} "
                 f"p95={result['latency_p95_ms']:.1f}ms"
+                f"{ttft_str}"
             )
 
     raw_json = run_dir / "raw-runs.json"
@@ -534,6 +916,7 @@ def main() -> None:
         "request_timeout_s": args.request_timeout_s,
         "inference_mode": args.inference_mode,
         "max_tokens": args.max_tokens,
+        "collect_latency_breakdown": args.collect_latency_breakdown,
     }
     metadata_json = run_dir / "metadata.json"
     metadata_json.write_text(json.dumps(meta, indent=2), encoding="utf-8")

@@ -34,7 +34,8 @@ python benchmarks/mesh_scale_benchmark.py \
   --scenarios-json benchmarks/scenarios.example.json \
   --runs-per-scenario 7 \
   --requests-per-run 60 \
-  --concurrency 12
+  --concurrency 12 \
+  --collect-latency-breakdown
 ```
 
 ## Option B: Automated Local 1/3/5 Node Pipeline
@@ -70,7 +71,10 @@ Each run writes to `benchmarks/results/mesh-scale-<timestamp>/`:
 Key proof points:
 - Throughput scaling by node count (`throughput_rps_mean`)
 - Latency behavior (`latency_p95_ms_mean`)
+- Latency breakdown (`ttft_avg_ms_mean`, `inter_token_avg_ms_mean`)
 - Reliability (`success_rate_mean`)
 - Speculative effectiveness (`measured_acceptance_rate_mean`, `measured_reject_rate_mean`)
+- Failure causes (`error_distribution`)
+- Transport stability (`transport_*_success_total_delta`, `transport_*_failure_total_delta`)
 
 Only claim improvements that are visible in repeated-run means and confidence intervals.

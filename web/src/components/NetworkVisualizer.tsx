@@ -65,7 +65,7 @@ export default function NetworkVisualizer({ pitchMode = false, onToast }: Networ
     })
     
     setNodePositions(initialPositions)
-  }, [graphData.nodes.length, dimensions])
+  }, [graphData.nodes, dimensions])
 
   // Handle resize
   useEffect(() => {

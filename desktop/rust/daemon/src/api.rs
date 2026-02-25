@@ -140,8 +140,11 @@ pub(crate) async fn node_status_handler(
     let engine_guard = state.engine.lock().await;
     let engine_loaded = engine_guard.is_some();
     drop(engine_guard);
-    let (_, readiness_reason, ready_for_inference) =
-        runtime_health_state(engine_loaded, participation_enabled, topo.contribute_enabled);
+    let (_, readiness_reason, ready_for_inference) = runtime_health_state(
+        engine_loaded,
+        participation_enabled,
+        topo.contribute_enabled,
+    );
     Json(serde_json::json!({
         "ok": true,
         "node_role": state.node_role,
@@ -848,7 +851,9 @@ pub(crate) async fn scout_client_event_handler(
         "submit_http_error" => state.system_metrics.inc_scout_client_submit_http_failure(),
         "submit_timeout" => state.system_metrics.inc_scout_client_submit_timeout(),
         "submit_pow_failure" => state.system_metrics.inc_scout_client_submit_pow_failure(),
-        "submit_network_error" => state.system_metrics.inc_scout_client_submit_network_failure(),
+        "submit_network_error" => state
+            .system_metrics
+            .inc_scout_client_submit_network_failure(),
         "generate_failure" => state.system_metrics.inc_scout_client_generate_failure(),
         "fallback_draft_used" => state.system_metrics.inc_scout_client_fallback_draft(),
         _ => {
@@ -1062,16 +1067,35 @@ pub(crate) async fn process_draft_submission(
         latency_ms: response.latency_ms as u64,
     };
 
-    if let Err(e) = state.scout_draft_tx.send(draft_for_channel).await {
-        state
-            .system_metrics
-            .inc_scout_draft_channel_enqueue_failure();
-        tracing::warn!("failed to send scout draft to channel: {}", e);
-    } else {
-        state.system_metrics.inc_scout_draft_channel_enqueued();
+    match state.scout_draft_tx.try_send(draft_for_channel) {
+        Ok(_) => {
+            state.system_metrics.inc_scout_draft_channel_enqueued();
+            Json(serde_json::json!({ "ok": true, "detail": "draft queued" }))
+        }
+        Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+            state
+                .system_metrics
+                .inc_scout_draft_channel_enqueue_failure();
+            state.system_metrics.inc_task_failures();
+            tracing::warn!("scout draft channel full; shedding draft submission");
+            Json(serde_json::json!({
+                "ok": false,
+                "transient_error": true,
+                "detail": "scout draft channel is saturated; retry shortly",
+            }))
+        }
+        Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+            state
+                .system_metrics
+                .inc_scout_draft_channel_enqueue_failure();
+            state.system_metrics.inc_task_failures();
+            tracing::warn!("scout draft channel closed; unable to enqueue draft");
+            Json(serde_json::json!({
+                "ok": false,
+                "detail": "scout draft channel unavailable",
+            }))
+        }
     }
-
-    Json(serde_json::json!({ "ok": true, "detail": "draft queued" }))
 }
 
 fn sanitize_scout_draft_text(raw: &str) -> String {
@@ -1947,12 +1971,22 @@ pub(crate) async fn metrics_summary_handler(
 
     let mut payload = serde_json::Map::new();
     payload.insert("active_nodes".to_string(), serde_json::json!(active_nodes));
-    payload.insert("healthy_nodes".to_string(), serde_json::json!(healthy_nodes));
-    payload.insert("unhealthy_nodes".to_string(), serde_json::json!(unhealthy_nodes));
+    payload.insert(
+        "healthy_nodes".to_string(),
+        serde_json::json!(healthy_nodes),
+    );
+    payload.insert(
+        "unhealthy_nodes".to_string(),
+        serde_json::json!(unhealthy_nodes),
+    );
     payload.insert("queue_depth".to_string(), serde_json::json!(queue_depth));
     payload.insert(
         "node_identity_status".to_string(),
-        serde_json::json!(if unhealthy_nodes == 0 { "ok" } else { "degraded" }),
+        serde_json::json!(if unhealthy_nodes == 0 {
+            "ok"
+        } else {
+            "degraded"
+        }),
     );
     payload.insert(
         "average_latency_ms".to_string(),
@@ -2109,6 +2143,46 @@ pub(crate) async fn metrics_summary_handler(
         serde_json::json!(counters.scout_client_fallback_drafts_total),
     );
     payload.insert(
+        "transport_tcp_success_total".to_string(),
+        serde_json::json!(counters.transport_tcp_success_total),
+    );
+    payload.insert(
+        "transport_tcp_failure_total".to_string(),
+        serde_json::json!(counters.transport_tcp_failure_total),
+    );
+    payload.insert(
+        "transport_websocket_success_total".to_string(),
+        serde_json::json!(counters.transport_websocket_success_total),
+    );
+    payload.insert(
+        "transport_websocket_failure_total".to_string(),
+        serde_json::json!(counters.transport_websocket_failure_total),
+    );
+    payload.insert(
+        "transport_quic_success_total".to_string(),
+        serde_json::json!(counters.transport_quic_success_total),
+    );
+    payload.insert(
+        "transport_quic_failure_total".to_string(),
+        serde_json::json!(counters.transport_quic_failure_total),
+    );
+    payload.insert(
+        "transport_webrtc_success_total".to_string(),
+        serde_json::json!(counters.transport_webrtc_success_total),
+    );
+    payload.insert(
+        "transport_webrtc_failure_total".to_string(),
+        serde_json::json!(counters.transport_webrtc_failure_total),
+    );
+    payload.insert(
+        "transport_relay_success_total".to_string(),
+        serde_json::json!(counters.transport_relay_success_total),
+    );
+    payload.insert(
+        "transport_relay_failure_total".to_string(),
+        serde_json::json!(counters.transport_relay_failure_total),
+    );
+    payload.insert(
         "tokens_processed_total".to_string(),
         serde_json::json!(counters.tokens_processed_total),
     );
@@ -2134,8 +2208,13 @@ pub(crate) async fn metrics_summary_handler(
     );
     payload.insert(
         "nodes".to_string(),
-        serde_json::to_value(reports.values().cloned().collect::<Vec<NodeMetricSnapshot>>())
-            .unwrap_or_else(|_| serde_json::Value::Array(Vec::new())),
+        serde_json::to_value(
+            reports
+                .values()
+                .cloned()
+                .collect::<Vec<NodeMetricSnapshot>>(),
+        )
+        .unwrap_or_else(|_| serde_json::Value::Array(Vec::new())),
     );
     Json(serde_json::Value::Object(payload))
 }

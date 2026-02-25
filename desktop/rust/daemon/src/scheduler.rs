@@ -127,14 +127,16 @@ pub(crate) async fn wait_for_scout_draft(
                         // Preserve non-matching drafts in the idempotent map so
                         // the corresponding request can pick them up later.
                         let mut by_id = state.idempotent_results.lock().await;
-                        by_id.entry(draft.work_id.clone()).or_insert_with(|| WorkResponse {
-                            request_id: draft.work_id.clone(),
-                            peer_id: draft.scout_id.clone(),
-                            draft_tokens: draft.draft_tokens.clone(),
-                            draft_text: draft.draft_text.clone(),
-                            latency_ms: draft.latency_ms as f32,
-                            created_at_ms: Some(draft.timestamp_ms),
-                        });
+                        by_id
+                            .entry(draft.work_id.clone())
+                            .or_insert_with(|| WorkResponse {
+                                request_id: draft.work_id.clone(),
+                                peer_id: draft.scout_id.clone(),
+                                draft_tokens: draft.draft_tokens.clone(),
+                                draft_text: draft.draft_text.clone(),
+                                latency_ms: draft.latency_ms as f32,
+                                created_at_ms: Some(draft.timestamp_ms),
+                            });
                         None
                     }
                     _ => None,
@@ -612,8 +614,8 @@ pub(crate) async fn chat_completions_handler(
                                     accepted_count,
                                     rejected_count,
                                 ));
-                                completion_tokens_generated = completion_tokens_generated
-                                    .saturating_add(accepted_count);
+                                completion_tokens_generated =
+                                    completion_tokens_generated.saturating_add(accepted_count);
                                 prompt_already_evaluated = true;
                                 state
                                     .system_metrics
@@ -845,6 +847,9 @@ mod tests {
         }
         assert_eq!(queue.len(), 1024);
         assert_eq!(queue.front().map(|w| w.request_id.as_str()), Some("req-76"));
-        assert_eq!(queue.back().map(|w| w.request_id.as_str()), Some("req-1099"));
+        assert_eq!(
+            queue.back().map(|w| w.request_id.as_str()),
+            Some("req-1099")
+        );
     }
 }
