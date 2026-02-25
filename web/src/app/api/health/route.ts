@@ -14,10 +14,28 @@ export async function GET() {
       failoverOnStatuses: [500, 502, 503, 504],
     })
     const latencyMs = Math.round(performance.now() - started)
-    const data = await response.json()
+    const data = await response.json().catch(() => ({}))
+    if (!response.ok) {
+      return NextResponse.json(
+        {
+          status: "degraded",
+          readiness_reason: "backend_non_ok",
+          ready_for_inference: false,
+          active_browser_sessions: 0,
+          active_scouts: 0,
+          backend_status: response.status,
+          backend,
+          backend_attempts: attempts,
+          latency_ms: latencyMs,
+          web_version: SHARD_VERSION,
+          ...data,
+        },
+        { status: 200 },
+      )
+    }
     return NextResponse.json(
       { ...data, backend, backend_attempts: attempts, latency_ms: latencyMs, web_version: SHARD_VERSION },
-      { status: response.status }
+      { status: 200 },
     )
   } catch (error) {
     return NextResponse.json(

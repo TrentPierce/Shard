@@ -12,7 +12,21 @@ export async function GET() {
       failoverOnStatuses: [500, 502, 503, 504],
     })
     const data = await response.json()
-    return NextResponse.json({ ...data, backend, backend_attempts: attempts }, { status: response.status })
+    if (!response.ok) {
+      return NextResponse.json(
+        {
+          peers: [],
+          count: 0,
+          status: "degraded",
+          backend_status: response.status,
+          backend,
+          backend_attempts: attempts,
+          ...data,
+        },
+        { status: 200 },
+      )
+    }
+    return NextResponse.json({ ...data, backend, backend_attempts: attempts }, { status: 200 })
   } catch (error) {
     return NextResponse.json(
       { peers: [], count: 0, status: "degraded", backend_candidates: candidates, error: String(error) },

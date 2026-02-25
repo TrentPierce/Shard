@@ -16,25 +16,39 @@ export async function GET(request: NextRequest) {
     const { response, backend, attempts } = await fetchWithBackendFailover(path, {
       method: "GET",
       headers: forwardRequestHeaders(),
-      timeoutMs: 10_000,
+      timeoutMs: 20_000,
       failoverOnStatuses: [500, 502, 503, 504],
     })
     const data = await response.json().catch(() => ({}))
-    return NextResponse.json(
-      { ...data, backend, backend_attempts: attempts },
-      { status: response.status },
-    )
+    if (!response.ok) {
+      return NextResponse.json(
+        {
+          work: null,
+          ok: true,
+          transient_error: true,
+          detail: "Backend returned non-OK while polling scout work",
+          backend_status: response.status,
+          backend,
+          backend_attempts: attempts,
+          ...data,
+        },
+        { status: 200 },
+      )
+    }
+    return NextResponse.json({ ...data, backend, backend_attempts: attempts }, { status: 200 })
   } catch (error) {
+    // Keep scout polling loops alive during transient backend failures.
+    // Returning empty work (200) prevents clients from entering hard-failure paths.
     return NextResponse.json(
       {
         work: null,
+        ok: true,
         transient_error: true,
-        detail: "Failed to fetch scout work from backend",
+        detail: "Backend temporarily unavailable; returning empty work",
         backend_candidates: candidates,
         error: String(error),
       },
-      { status: 502 },
+      { status: 200 },
     )
   }
 }
-

@@ -28,6 +28,7 @@ export type Topology = {
     shard_quic_multiaddr?: string | null
     shard_ws_multiaddr?: string | null
     listen_addrs?: string[]
+    bootstrap_peers?: string[]
     scout_count?: number
     shard_count?: number
 }

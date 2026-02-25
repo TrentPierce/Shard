@@ -108,7 +108,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }, [])
 
     const getBootstrapPeersFromTopology = useCallback((topo: Topology | null): string[] => {
-        if (!topo) return []
+        const envBootstrapPeers = String(process.env.NEXT_PUBLIC_BOOTSTRAP_PEERS ?? "")
+            .split(/[,\n ]+/)
+            .map((s) => s.trim())
+            .filter(Boolean)
+        if (!topo) return envBootstrapPeers
         const candidates: string[] = []
         const peerId = topo.shard_peer_id ?? ""
         const addWithPeerId = (addr: string | null | undefined) => {
@@ -124,13 +128,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         addWithPeerId(topo.shard_ws_multiaddr)
         addWithPeerId(topo.shard_quic_multiaddr ?? null)
         for (const listenAddr of topo.listen_addrs ?? []) addWithPeerId(listenAddr)
+        for (const bootstrapPeer of topo.bootstrap_peers ?? []) addWithPeerId(bootstrapPeer)
+        for (const bootstrapPeer of envBootstrapPeers) addWithPeerId(bootstrapPeer)
 
         const isHttps = typeof window !== "undefined" && window.location.protocol === "https:"
-        return candidates.filter((addr) => {
+        const filtered = candidates.filter((addr) => {
             if (!isHttps) return true
             const insecureWs = addr.startsWith("ws://") || addr.includes("/ws/") || addr.endsWith("/ws")
             return !insecureWs || addr.startsWith("wss://") || addr.includes("/wss/")
         })
+        return filtered
     }, [])
 
     useEffect(() => {

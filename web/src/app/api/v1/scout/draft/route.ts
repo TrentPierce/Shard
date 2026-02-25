@@ -17,24 +17,37 @@ export async function POST(request: NextRequest) {
       method: "POST",
       headers: forwardRequestHeaders(),
       body,
-      timeoutMs: 15_000,
+      timeoutMs: 20_000,
       failoverOnStatuses: [500, 502, 503, 504],
     })
     const data = await response.json().catch(() => ({}))
-    return NextResponse.json(
-      { ...data, backend, backend_attempts: attempts },
-      { status: response.status },
-    )
+    if (!response.ok) {
+      return NextResponse.json(
+        {
+          ok: false,
+          transient_error: true,
+          detail: "Backend returned non-OK during draft submit",
+          backend_status: response.status,
+          backend,
+          backend_attempts: attempts,
+          ...data,
+        },
+        { status: 200 },
+      )
+    }
+    return NextResponse.json({ ...data, backend, backend_attempts: attempts }, { status: 200 })
   } catch (error) {
+    // Preserve scout loop stability across short backend stalls.
+    // Returning 200 + ok:false keeps client retry logic in control.
     return NextResponse.json(
       {
         ok: false,
-        detail: "Failed to submit scout draft to backend",
+        transient_error: true,
+        detail: "Backend temporarily unavailable; draft not accepted",
         backend_candidates: candidates,
         error: String(error),
       },
-      { status: 502 },
+      { status: 200 },
     )
   }
 }
-

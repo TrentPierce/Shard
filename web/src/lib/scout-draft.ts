@@ -279,7 +279,12 @@ async function submitDraftOnce(
     }
 
     const result = (await response.json()) as DraftResponse
-    await reportScoutClientEvent("submit_success", undefined, response.status, submission.scout_id)
+    if (result.ok) {
+      await reportScoutClientEvent("submit_success", undefined, response.status, submission.scout_id)
+    } else {
+      const detail = result.detail || "Draft rejected by verifier/backend"
+      await reportScoutClientEvent("submit_http_error", detail, response.status, submission.scout_id)
+    }
     return {
       ...result,
       status: response.status,
