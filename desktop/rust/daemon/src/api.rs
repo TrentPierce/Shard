@@ -13,7 +13,19 @@ pub(crate) async fn health_handler(
     let capacity = state.capacity.load(Ordering::Relaxed);
     let load = state.current_load.load(Ordering::Relaxed);
     let latency_ms = state.avg_latency_ms.load(Ordering::Relaxed);
-    let scout_count = browser_sessions.len();
+    let browser_scout_count = browser_sessions.len();
+    let recent_scout_submitters = {
+        let results = state.results.lock().await;
+        let cutoff = now_ms().saturating_sub(5 * 60 * 1000);
+        let mut unique = std::collections::HashSet::new();
+        for entry in results.iter() {
+            if entry.created_at_ms.unwrap_or(0) >= cutoff {
+                unique.insert(entry.peer_id.clone());
+            }
+        }
+        unique.len()
+    };
+    let scout_count = browser_scout_count.max(recent_scout_submitters);
     let model_compat =
         shard_verifier::inference::check_model_compatibility(state.model_id.as_str());
     let rollout_snapshot = {
@@ -33,6 +45,8 @@ pub(crate) async fn health_handler(
         "connected_peers": peers.len(),
         "verified_peers": verified_count,
         "active_scouts": scout_count,
+        "active_browser_sessions": browser_scout_count,
+        "recent_scout_submitters": recent_scout_submitters,
         "known_peers": known.len(),
         "uptime_ms": now_ms() - state.daemon_start,
         "listen_addrs": topo.listen_addrs,

@@ -1,4 +1,4 @@
-import { rustUrl } from "./config"
+import { apiUrl } from "./config"
 import { xorStreamTransformHex } from "./activation-obfuscation"
 
 type BrowserLayerRegisterResponse = {
@@ -124,7 +124,7 @@ async function processWork(
     outputHex
   )
 
-  await fetch(rustUrl("/browser-layer/submit"), {
+  await fetch(apiUrl("/browser-layer/submit"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -155,7 +155,7 @@ export async function startBrowserLayerHost(options?: {
   }
 
   const profile = await profileWebGPU()
-  const register = await fetch(rustUrl("/browser-layer/register"), {
+  const register = await fetch(apiUrl("/browser-layer/register"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -178,7 +178,7 @@ export async function startBrowserLayerHost(options?: {
     while (!stopped) {
       try {
         const res = await fetch(
-          rustUrl(`/browser-layer/work?session_id=${encodeURIComponent(session.session_id)}`)
+          apiUrl(`/browser-layer/work?session_id=${encodeURIComponent(session.session_id)}`)
         )
         if (!res.ok) {
           await new Promise((resolve) => setTimeout(resolve, 500))

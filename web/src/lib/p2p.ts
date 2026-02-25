@@ -16,6 +16,7 @@ import { webSockets } from '@libp2p/websockets';
 import { noise } from '@chainsafe/libp2p-noise';
 import { yamux } from '@chainsafe/libp2p-yamux';
 import { mplex } from '@libp2p/mplex';
+import { identify } from '@libp2p/identify';
 import { gossipsub as createGossipSub } from '@chainsafe/libp2p-gossipsub';
 import { bootstrap } from '@libp2p/bootstrap';
 import type { Libp2p } from 'libp2p';
@@ -128,6 +129,7 @@ export async function initP2P(config: P2PConfig = {}): Promise<string> {
 
       // Services
       services: {
+        identify: identify(),
         pubsub: createGossipSub({
           emitSelf: config.emitSelf ?? false,
           fallbackToFloodsub: true,
