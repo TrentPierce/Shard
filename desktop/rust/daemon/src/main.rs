@@ -784,7 +784,9 @@ impl Default for SpeculativeConfig {
             scout_timeout_ms: std::env::var("SHARD_SCOUT_TIMEOUT_MS")
                 .ok()
                 .and_then(|v| v.parse().ok())
-                .unwrap_or(400),
+                // Browser scouts poll work over HTTP; 400ms is too short for
+                // realistic poll + draft + submit round-trips.
+                .unwrap_or(2500),
             scout_cooldown_ms: 60000,
             max_consecutive_timeouts: 3,
             draft_token_count: 4,

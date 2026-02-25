@@ -285,9 +285,10 @@ async function submitDraftResult(result: WorkResult): Promise<ScoutSubmissionRes
 export async function requestWork(): Promise<WorkRequest | null> {
     try {
         const polled = await pollForWork(getScoutId(), {
-            pollTimeoutMs: 1500,
-            pollRetries: 2,
-            pollRetryBackoffMs: 300,
+            // Keep polling tight so scouts can respond inside speculative timeout windows.
+            pollTimeoutMs: 900,
+            pollRetries: 0,
+            pollRetryBackoffMs: 150,
         })
         if (!polled.work) {
             if (polled.transient_error) {
@@ -316,7 +317,7 @@ export async function startScoutWorker(
     onRequest?: (work: WorkRequest) => void,
     onResult?: (result: ScoutSubmissionResult) => void
 ): Promise<() => void> {
-    const pollIntervalMs = 2000
+    const pollIntervalMs = 250
     const maxBackoffMs = 10000
     let stopped = false
     let timer: ReturnType<typeof setTimeout> | null = null
