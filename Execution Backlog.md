@@ -311,3 +311,112 @@ Execution Backlog (Epics, Tickets, Acceptance Criteria, Sequencing)
 
   - P2-T29: `Done` (canary verifier rollout controller added with request traffic-splitting, runtime status endpoint, and auto-rollback on latency/quality threshold regressions)
   - P2-T30: `Done` (published draft/verifier compatibility matrix and enforced compatibility checks in scheduler/chat and layer scheduling paths)
+
+  ## 9. Post-Readiness TODO Queue (Tracked Follow-Ups)
+
+  - TODO-NET-BOOTSTRAP-01: Replace stale hardcoded bootstrap peers in defaults with a live bootstrap-registry seed set and TTL-based pruning to prevent repeated dial failures when peer identities rotate.
+  - TODO-WEB-METRICS-01: Investigate and fix `Total tokens generated` remaining at zero on hosted dashboard by tracing metric source alignment between daemon counters and web aggregation pipeline.
+  - TODO-OBS-TOKENS-01: Add alert when request success is non-zero but token counters remain zero for >5 minutes.
+  - TODO-RUNTIME-QUALITY-01: Add output-degeneration detector/recovery path for repeated-token loops (for example `endendend...`) in verifier output.
+  - TODO-HEALTH-SEMANTICS-01: Split health into `ready`, `degraded`, and `unavailable` to avoid reporting `ok` when model runtime is not ready.
+  - TODO-SCOUT-METRICS-01: Add scout submit-success counters and last-success timestamps to telemetry and dashboard.
+
+  ## 10. Post-Readiness Remediation Backlog (2026-02-25)
+
+  ## E11 Runtime Correctness and Token Accounting
+
+  1. R0-T31 Restore token accounting truth in daemon usage and metrics surfaces.
+
+  - Owner: Backend Lead
+  - Complexity: M
+  - Depends on: none
+  - Acceptance: Successful completions increment `tokens_processed_total`; `usage.total_tokens` is non-zero for non-empty completions; hosted `Total tokens generated` mirrors backend counters.
+
+  2. R0-T32 Enforce model-ready contribution gate and reject false healthy state.
+
+  - Owner: Backend Lead + SRE
+  - Complexity: M
+  - Depends on: none
+  - Acceptance: Nodes with unloaded engine/model do not advertise ready contribution; `/health` and UI show explicit non-ready reason.
+
+  3. R0-T33 Add output-quality guardrail for repetitive degeneration and fallback policy.
+
+  - Owner: ML Infra + Backend Lead
+  - Complexity: M
+  - Depends on: R0-T32
+  - Acceptance: Repetition detector triggers fallback/reset path; regression test covers repeated-token failure mode.
+
+  ## E12 Speculative Activation and Proof
+
+  1. R0-T34 Reactivate speculative draft/verify path with non-zero measured counters.
+
+  - Owner: Backend Lead + ML Infra
+  - Complexity: L
+  - Depends on: R0-T31
+  - Acceptance: Distributed benchmark shows non-zero `speculative_draft_tokens_total` and non-null measured acceptance/reject rates.
+
+  2. R0-T35 Add CI integration gate for speculative counter activation.
+
+  - Owner: QA Lead + Backend Lead
+  - Complexity: M
+  - Depends on: R0-T34
+  - Acceptance: CI fails if distributed test run produces zero draft counters without explicit fallback reason.
+
+  ## E13 Mesh Reliability and Discovery Stability
+
+  1. R1-T36 Replace static bootstrap defaults with registry-seeded dynamic bootstrap set.
+
+  - Owner: Networking Lead
+  - Complexity: M
+  - Depends on: none
+  - Acceptance: Bootstrap defaults refresh from registry and remove stale peers automatically using TTL pruning.
+
+  2. R1-T37 Harden bootstrap failover to preserve connectivity after single-node outage.
+
+  - Owner: Networking Lead + SRE
+  - Complexity: M
+  - Depends on: R1-T36
+  - Acceptance: Churn test verifies mesh remains connected when original bootstrap node is offline.
+
+  ## E14 Production Performance and Operability
+
+  1. R0-T38 Fix EC2 inference reliability/latency regression under benchmark load.
+
+  - Owner: Backend Lead + SRE
+  - Complexity: L
+  - Depends on: R0-T32
+  - Acceptance: Benchmark profile reaches >=95% success rate and p95 latency <=5s on EC2 endpoint for non-stream requests.
+
+  2. R1-T39 Add health-state semantics (`ready`, `degraded`, `unavailable`) end-to-end.
+
+  - Owner: Backend Lead + Web Lead
+  - Complexity: M
+  - Depends on: R0-T38
+  - Acceptance: Health endpoints and dashboard show consistent tri-state readiness with reason codes.
+
+  3. R1-T40 Expand observability and alerting for scout throughput and zero-token drift.
+
+  - Owner: SRE Lead + Web Lead
+  - Complexity: M
+  - Depends on: R0-T31, R0-T34
+  - Acceptance: Dashboards include scout submit rate/success and token drift alarms; runbooks linked to alerts.
+
+  ## 11. Sequenced Remediation Plan
+
+  1. Block G (Immediate): R0-T31, R0-T32, R0-T34
+
+  - Goal: Restore truthful runtime metrics and speculative activation.
+
+  2. Block H (Stability): R0-T33, R0-T35, R0-T38
+
+  - Goal: Improve output quality and endpoint reliability with CI enforcement.
+
+  3. Block I (Resilience + Ops): R1-T36, R1-T37, R1-T39, R1-T40
+
+  - Goal: Decentralized continuity, readiness semantics, and operational visibility.
+
+  ## 12. Remediation Execution Status (2026-02-25)
+
+  - R0-T31: `Done` (chat completion runtime now records real prompt/completion usage fields and increments `tokens_processed_total` in both streaming and non-streaming paths).
+  - R0-T32: `Done` (health/status endpoints now expose readiness gating via `status`, `readiness_reason`, and `ready_for_inference`; nodes without loaded engines no longer report fully ready state).
+  - R0-T34: `Partial` (speculative verification path was hardened so accepted draft state is preserved instead of re-evaluating prompt from scratch, and speculative counters continue to update on verified drafts; pending live benchmark proof with active scouts to confirm non-zero speculative counters in production telemetry).

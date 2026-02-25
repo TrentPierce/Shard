@@ -219,3 +219,36 @@ Production Readiness Plan (Enterprise + Maintainability)
   - Model rollout framework completed: canary traffic splitting with auto-rollback thresholds and operational reset endpoint now active in daemon runtime.
   - Compatibility governance completed: published draft/verifier matrix is now enforced by scheduler compatibility checks and surfaced in upgrade docs.
   - Web production UX hotfix completed: hosted mobile clients now avoid unsafe localhost fallback paths, chat degrades to non-stream completions when SSE streams are unavailable, and telemetry dashboards show backend truth instead of synthetic simulation defaults.
+
+  ## 9. Post-Readiness Remediation Focus (2026-02-25)
+
+  1. Runtime metrics correctness first:
+
+  - Fix token accounting so runtime usage fields and aggregate counters represent real generated tokens.
+  - Prevent false healthy/contributing state when model runtime is unavailable.
+
+  2. Speculative proof before scaling claims:
+
+  - Reactivate draft/verify flow so distributed mode emits non-zero speculative counters.
+  - Add CI gate that fails when distributed runs show zero draft counters without explicit fallback reason.
+
+  3. Reliability before benchmark storytelling:
+
+  - Reduce EC2 endpoint timeout and success-rate regressions under benchmark concurrency.
+  - Add readiness states (`ready`, `degraded`, `unavailable`) so operations reflects actual serving ability.
+
+  4. Decentralization hardening:
+
+  - Move bootstrap defaults to registry-seeded and TTL-pruned sources.
+  - Validate mesh continuity under single-node outages without central dependency.
+
+  5. Observability closure:
+
+  - Add alerting for zero-token drift despite successful requests.
+  - Track scout submit success and liveness as first-class SLI signals.
+
+  ## 10. Remediation Progress (2026-02-25)
+
+  - R0-T31 complete: daemon chat completion responses now emit non-zero `usage` token counts and increment runtime token counters on generated output.
+  - R0-T32 complete: runtime readiness is now explicitly surfaced (`status`, `readiness_reason`, `ready_for_inference`) so nodes without loaded models are not presented as fully ready.
+  - R0-T34 partially complete: speculative path state handling is corrected to preserve verified draft progress; final closure requires live scout-backed benchmark evidence with non-zero speculative counters.
