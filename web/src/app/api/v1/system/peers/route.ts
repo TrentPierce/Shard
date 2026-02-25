@@ -7,13 +7,16 @@ export async function GET() {
   const candidates = shardBackendUrls("/v1/system/peers")
 
   try {
-    const { response, backend, attempts } = await fetchWithBackendFailover("/v1/system/peers")
+    const { response, backend, attempts } = await fetchWithBackendFailover("/v1/system/peers", {
+      timeoutMs: 30_000,
+      failoverOnStatuses: [500, 502, 503, 504],
+    })
     const data = await response.json()
     return NextResponse.json({ ...data, backend, backend_attempts: attempts }, { status: response.status })
   } catch (error) {
     return NextResponse.json(
-      { peers: [], status: "degraded", backend_candidates: candidates, error: String(error) },
-      { status: 502 },
+      { peers: [], count: 0, status: "degraded", backend_candidates: candidates, error: String(error) },
+      { status: 200 },
     )
   }
 }
