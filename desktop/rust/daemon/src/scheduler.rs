@@ -105,11 +105,25 @@ pub(crate) async fn wait_for_scout_draft(
             if let Some(rx) = rx_guard.as_mut() {
                 match tokio::time::timeout(tokio::time::Duration::from_millis(100), rx.recv()).await
                 {
-                    Ok(Some(draft)) if draft.work_id == work_id => Some(draft),
+                    Ok(Some(draft)) if draft.work_id == work_id => {
+                        tracing::debug!(
+                            expected_work_id = %work_id,
+                            received_work_id = %draft.work_id,
+                            scout_id = %draft.scout_id,
+                            "matched scout draft for speculative wait"
+                        );
+                        Some(draft)
+                    }
                     Ok(Some(draft)) => {
                         state
                             .system_metrics
                             .inc_speculative_wait_mismatched_work_id();
+                        tracing::debug!(
+                            expected_work_id = %work_id,
+                            received_work_id = %draft.work_id,
+                            scout_id = %draft.scout_id,
+                            "mismatched scout draft during speculative wait"
+                        );
                         // Preserve non-matching drafts in the idempotent map so
                         // the corresponding request can pick them up later.
                         let mut by_id = state.idempotent_results.lock().await;
