@@ -79,11 +79,13 @@ pub(crate) async fn wait_for_scout_draft(
     work_id: &str,
     timeout_ms: u64,
 ) -> Option<ScoutDraft> {
+    state.system_metrics.inc_speculative_wait_request();
     let start = now_ms();
     let timeout_deadline = start + timeout_ms as u128;
 
     loop {
         if now_ms() >= timeout_deadline {
+            state.system_metrics.inc_speculative_wait_timeout();
             tracing::debug!("scout draft timeout for work_id: {}", work_id);
             return None;
         }
@@ -93,6 +95,7 @@ pub(crate) async fn wait_for_scout_draft(
             let by_id = state.idempotent_results.lock().await;
             by_id.get(work_id).cloned()
         } {
+            state.system_metrics.inc_speculative_wait_hit();
             return Some(scout_draft_from_work_response(&existing));
         }
 
@@ -104,6 +107,9 @@ pub(crate) async fn wait_for_scout_draft(
                 {
                     Ok(Some(draft)) if draft.work_id == work_id => Some(draft),
                     Ok(Some(draft)) => {
+                        state
+                            .system_metrics
+                            .inc_speculative_wait_mismatched_work_id();
                         // Preserve non-matching drafts in the idempotent map so
                         // the corresponding request can pick them up later.
                         let mut by_id = state.idempotent_results.lock().await;
@@ -125,6 +131,7 @@ pub(crate) async fn wait_for_scout_draft(
         };
 
         if draft.is_some() {
+            state.system_metrics.inc_speculative_wait_hit();
             return draft;
         }
 
@@ -374,10 +381,14 @@ pub(crate) async fn chat_completions_handler(
                                 // Record the measured latency
                                 draft.latency_ms = draft_latency;
                                 // Verify the draft against our model
+                                state.system_metrics.inc_speculative_verify_attempt();
                                 let result = verify_draft_tokens(engine, &prompt_tokens, &draft.draft_tokens).await;
                                 let accepted_count = result.accepted_tokens.len() as u64;
                                 let draft_count = draft.draft_tokens.len() as u64;
                                 let rejected_count = draft_count.saturating_sub(accepted_count);
+                                if draft_count > 0 && accepted_count == 0 {
+                                    state.system_metrics.inc_speculative_verify_zero_accept();
+                                }
                                 request_acceptance = Some(model_pair_acceptance_rates(
                                     draft_count,
                                     accepted_count,
@@ -569,6 +580,7 @@ pub(crate) async fn chat_completions_handler(
                                 // Record the measured latency
                                 draft.latency_ms = draft_latency;
                                 // Verify the draft against our model
+                                state.system_metrics.inc_speculative_verify_attempt();
                                 let result = verify_draft_tokens(
                                     engine,
                                     &prompt_tokens,
@@ -578,6 +590,9 @@ pub(crate) async fn chat_completions_handler(
                                 let accepted_count = result.accepted_tokens.len() as u64;
                                 let draft_count = draft.draft_tokens.len() as u64;
                                 let rejected_count = draft_count.saturating_sub(accepted_count);
+                                if draft_count > 0 && accepted_count == 0 {
+                                    state.system_metrics.inc_speculative_verify_zero_accept();
+                                }
                                 request_acceptance = Some(model_pair_acceptance_rates(
                                     draft_count,
                                     accepted_count,

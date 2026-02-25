@@ -838,10 +838,17 @@ pub(crate) async fn pop_work_handler(
     if let Err(response) = ensure_pow_verified(&state, scout_id).await {
         return response;
     }
+    state.system_metrics.inc_scout_work_poll();
     let mut queue = state.scout_work.lock().await;
     match queue.pop_front() {
-        Some(work) => Json(serde_json::json!({ "work": work })),
-        None => Json(serde_json::json!({ "work": null })),
+        Some(work) => {
+            state.system_metrics.inc_scout_work_assignment();
+            Json(serde_json::json!({ "work": work }))
+        }
+        None => {
+            state.system_metrics.inc_scout_work_empty_poll();
+            Json(serde_json::json!({ "work": null }))
+        }
     }
 }
 
@@ -882,8 +889,12 @@ pub(crate) async fn process_draft_submission(
     state: &SharedState,
     mut submission: DraftResultSubmission,
 ) -> Json<serde_json::Value> {
+    state.system_metrics.inc_scout_draft_submission();
     if submission.work_id.trim().is_empty() || submission.scout_id.trim().is_empty() {
         state.system_metrics.inc_task_failures();
+        state
+            .system_metrics
+            .inc_scout_draft_reject_missing_identity();
         if !submission.scout_id.trim().is_empty() {
             mark_node_failure(state, submission.scout_id.as_str()).await;
         }
@@ -894,12 +905,14 @@ pub(crate) async fn process_draft_submission(
     }
     if let Err(response) = ensure_pow_verified(state, submission.scout_id.as_str()).await {
         state.system_metrics.inc_task_failures();
+        state.system_metrics.inc_scout_draft_reject_pow();
         mark_node_failure(state, submission.scout_id.as_str()).await;
         return response;
     }
     if let Some(spot_check) = submission.spot_check.as_ref() {
         if let Err(detail) = verify_spot_check_submission(spot_check) {
             state.system_metrics.inc_task_failures();
+            state.system_metrics.inc_scout_draft_reject_spotcheck();
             mark_node_failure(state, submission.scout_id.as_str()).await;
             return Json(serde_json::json!({
                 "ok": false,
@@ -925,6 +938,7 @@ pub(crate) async fn process_draft_submission(
     }
     if submission.draft_tokens.is_empty() {
         state.system_metrics.inc_task_failures();
+        state.system_metrics.inc_scout_draft_reject_empty_tokens();
         mark_node_failure(state, submission.scout_id.as_str()).await;
         return Json(serde_json::json!({
             "ok": false,
@@ -949,6 +963,7 @@ pub(crate) async fn process_draft_submission(
     {
         let mut by_id = state.idempotent_results.lock().await;
         if by_id.contains_key(response.request_id.as_str()) {
+            state.system_metrics.inc_scout_draft_duplicate();
             mark_node_success(state, response.peer_id.as_str(), 0.0).await;
             return Json(serde_json::json!({
                 "ok": true,
@@ -981,7 +996,12 @@ pub(crate) async fn process_draft_submission(
     };
 
     if let Err(e) = state.scout_draft_tx.send(draft_for_channel).await {
+        state
+            .system_metrics
+            .inc_scout_draft_channel_enqueue_failure();
         tracing::warn!("failed to send scout draft to channel: {}", e);
+    } else {
+        state.system_metrics.inc_scout_draft_channel_enqueued();
     }
 
     Json(serde_json::json!({ "ok": true, "detail": "draft queued" }))
@@ -1858,35 +1878,167 @@ pub(crate) async fn metrics_summary_handler(
         cloud_gpu_usd_per_million_tokens: 4.0,
     });
 
-    Json(serde_json::json!({
-        "active_nodes": active_nodes,
-        "healthy_nodes": healthy_nodes,
-        "unhealthy_nodes": unhealthy_nodes,
-        "queue_depth": queue_depth,
-        "node_identity_status": if unhealthy_nodes == 0 { "ok" } else { "degraded" },
-        "average_latency_ms": state.avg_latency_ms.load(Ordering::Relaxed),
-        "p95_latency_ms": p.p90_ms,
-        "p99_latency_ms": p.p99_ms,
-        "offload_percentage_estimate": offload_percentage,
-        "verification_rate": verification_rate,
-        "estimated_gpu_savings_percent": cost.estimated_savings_percent,
-        "equivalent_cloud_gpu_cost_usd": cost.equivalent_cloud_gpu_cost_usd,
-        "estimated_gpu_savings_usd": cost.estimated_savings_usd,
-        "authentication_failure_rate": auth_failure_rate,
-        "speculative_draft_tokens_total": counters.speculative_draft_tokens_total,
-        "speculative_accepted_tokens_total": counters.speculative_accepted_tokens_total,
-        "speculative_rejected_tokens_total": counters.speculative_rejected_tokens_total,
-        "speculative_acceptance_rate": speculative_acceptance_rate,
-        "speculative_reject_rate": speculative_reject_rate,
-        "speculative_speedup_ratio": speculative_speedup_ratio,
-        "tokens_processed_total": counters.tokens_processed_total,
-        "tokens_offloaded_to_scouts_total": counters.tokens_offloaded_to_scouts_total,
-        "verification_fallback_total": counters.verification_fallback_total,
-        "task_failures_total": counters.task_failures_total,
-        "signature_verification_failures_total": counters.signature_verification_failures_total,
-        "node_identity_auth_failures_total": counters.node_identity_auth_failures_total,
-        "nodes": reports.values().cloned().collect::<Vec<NodeMetricSnapshot>>(),
-    }))
+    let mut payload = serde_json::Map::new();
+    payload.insert("active_nodes".to_string(), serde_json::json!(active_nodes));
+    payload.insert("healthy_nodes".to_string(), serde_json::json!(healthy_nodes));
+    payload.insert("unhealthy_nodes".to_string(), serde_json::json!(unhealthy_nodes));
+    payload.insert("queue_depth".to_string(), serde_json::json!(queue_depth));
+    payload.insert(
+        "node_identity_status".to_string(),
+        serde_json::json!(if unhealthy_nodes == 0 { "ok" } else { "degraded" }),
+    );
+    payload.insert(
+        "average_latency_ms".to_string(),
+        serde_json::json!(state.avg_latency_ms.load(Ordering::Relaxed)),
+    );
+    payload.insert("p95_latency_ms".to_string(), serde_json::json!(p.p90_ms));
+    payload.insert("p99_latency_ms".to_string(), serde_json::json!(p.p99_ms));
+    payload.insert(
+        "offload_percentage_estimate".to_string(),
+        serde_json::json!(offload_percentage),
+    );
+    payload.insert(
+        "verification_rate".to_string(),
+        serde_json::json!(verification_rate),
+    );
+    payload.insert(
+        "estimated_gpu_savings_percent".to_string(),
+        serde_json::json!(cost.estimated_savings_percent),
+    );
+    payload.insert(
+        "equivalent_cloud_gpu_cost_usd".to_string(),
+        serde_json::json!(cost.equivalent_cloud_gpu_cost_usd),
+    );
+    payload.insert(
+        "estimated_gpu_savings_usd".to_string(),
+        serde_json::json!(cost.estimated_savings_usd),
+    );
+    payload.insert(
+        "authentication_failure_rate".to_string(),
+        serde_json::json!(auth_failure_rate),
+    );
+    payload.insert(
+        "speculative_draft_tokens_total".to_string(),
+        serde_json::json!(counters.speculative_draft_tokens_total),
+    );
+    payload.insert(
+        "speculative_accepted_tokens_total".to_string(),
+        serde_json::json!(counters.speculative_accepted_tokens_total),
+    );
+    payload.insert(
+        "speculative_rejected_tokens_total".to_string(),
+        serde_json::json!(counters.speculative_rejected_tokens_total),
+    );
+    payload.insert(
+        "speculative_acceptance_rate".to_string(),
+        serde_json::json!(speculative_acceptance_rate),
+    );
+    payload.insert(
+        "speculative_reject_rate".to_string(),
+        serde_json::json!(speculative_reject_rate),
+    );
+    payload.insert(
+        "speculative_speedup_ratio".to_string(),
+        serde_json::json!(speculative_speedup_ratio),
+    );
+    payload.insert(
+        "scout_work_polls_total".to_string(),
+        serde_json::json!(counters.scout_work_polls_total),
+    );
+    payload.insert(
+        "scout_work_assignments_total".to_string(),
+        serde_json::json!(counters.scout_work_assignments_total),
+    );
+    payload.insert(
+        "scout_work_empty_polls_total".to_string(),
+        serde_json::json!(counters.scout_work_empty_polls_total),
+    );
+    payload.insert(
+        "scout_draft_submissions_total".to_string(),
+        serde_json::json!(counters.scout_draft_submissions_total),
+    );
+    payload.insert(
+        "scout_draft_reject_missing_identity_total".to_string(),
+        serde_json::json!(counters.scout_draft_reject_missing_identity_total),
+    );
+    payload.insert(
+        "scout_draft_reject_pow_total".to_string(),
+        serde_json::json!(counters.scout_draft_reject_pow_total),
+    );
+    payload.insert(
+        "scout_draft_reject_spotcheck_total".to_string(),
+        serde_json::json!(counters.scout_draft_reject_spotcheck_total),
+    );
+    payload.insert(
+        "scout_draft_reject_empty_tokens_total".to_string(),
+        serde_json::json!(counters.scout_draft_reject_empty_tokens_total),
+    );
+    payload.insert(
+        "scout_draft_duplicates_total".to_string(),
+        serde_json::json!(counters.scout_draft_duplicates_total),
+    );
+    payload.insert(
+        "scout_draft_channel_enqueued_total".to_string(),
+        serde_json::json!(counters.scout_draft_channel_enqueued_total),
+    );
+    payload.insert(
+        "scout_draft_channel_enqueue_failures_total".to_string(),
+        serde_json::json!(counters.scout_draft_channel_enqueue_failures_total),
+    );
+    payload.insert(
+        "speculative_wait_requests_total".to_string(),
+        serde_json::json!(counters.speculative_wait_requests_total),
+    );
+    payload.insert(
+        "speculative_wait_hits_total".to_string(),
+        serde_json::json!(counters.speculative_wait_hits_total),
+    );
+    payload.insert(
+        "speculative_wait_timeouts_total".to_string(),
+        serde_json::json!(counters.speculative_wait_timeouts_total),
+    );
+    payload.insert(
+        "speculative_wait_mismatched_work_id_total".to_string(),
+        serde_json::json!(counters.speculative_wait_mismatched_work_id_total),
+    );
+    payload.insert(
+        "speculative_verify_attempts_total".to_string(),
+        serde_json::json!(counters.speculative_verify_attempts_total),
+    );
+    payload.insert(
+        "speculative_verify_zero_accept_total".to_string(),
+        serde_json::json!(counters.speculative_verify_zero_accept_total),
+    );
+    payload.insert(
+        "tokens_processed_total".to_string(),
+        serde_json::json!(counters.tokens_processed_total),
+    );
+    payload.insert(
+        "tokens_offloaded_to_scouts_total".to_string(),
+        serde_json::json!(counters.tokens_offloaded_to_scouts_total),
+    );
+    payload.insert(
+        "verification_fallback_total".to_string(),
+        serde_json::json!(counters.verification_fallback_total),
+    );
+    payload.insert(
+        "task_failures_total".to_string(),
+        serde_json::json!(counters.task_failures_total),
+    );
+    payload.insert(
+        "signature_verification_failures_total".to_string(),
+        serde_json::json!(counters.signature_verification_failures_total),
+    );
+    payload.insert(
+        "node_identity_auth_failures_total".to_string(),
+        serde_json::json!(counters.node_identity_auth_failures_total),
+    );
+    payload.insert(
+        "nodes".to_string(),
+        serde_json::to_value(reports.values().cloned().collect::<Vec<NodeMetricSnapshot>>())
+            .unwrap_or_else(|_| serde_json::Value::Array(Vec::new())),
+    );
+    Json(serde_json::Value::Object(payload))
 }
 
 pub(crate) async fn dashboard_handler() -> Html<&'static str> {

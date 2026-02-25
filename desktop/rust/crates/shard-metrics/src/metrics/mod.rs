@@ -22,6 +22,23 @@ pub struct SystemMetrics {
     speculative_draft_tokens_total: AtomicU64,
     speculative_accepted_tokens_total: AtomicU64,
     speculative_rejected_tokens_total: AtomicU64,
+    scout_work_polls_total: AtomicU64,
+    scout_work_assignments_total: AtomicU64,
+    scout_work_empty_polls_total: AtomicU64,
+    scout_draft_submissions_total: AtomicU64,
+    scout_draft_reject_missing_identity_total: AtomicU64,
+    scout_draft_reject_pow_total: AtomicU64,
+    scout_draft_reject_spotcheck_total: AtomicU64,
+    scout_draft_reject_empty_tokens_total: AtomicU64,
+    scout_draft_duplicates_total: AtomicU64,
+    scout_draft_channel_enqueued_total: AtomicU64,
+    scout_draft_channel_enqueue_failures_total: AtomicU64,
+    speculative_wait_requests_total: AtomicU64,
+    speculative_wait_hits_total: AtomicU64,
+    speculative_wait_timeouts_total: AtomicU64,
+    speculative_wait_mismatched_work_id_total: AtomicU64,
+    speculative_verify_attempts_total: AtomicU64,
+    speculative_verify_zero_accept_total: AtomicU64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -41,6 +58,23 @@ pub struct SystemMetricsSnapshot {
     pub speculative_draft_tokens_total: u64,
     pub speculative_accepted_tokens_total: u64,
     pub speculative_rejected_tokens_total: u64,
+    pub scout_work_polls_total: u64,
+    pub scout_work_assignments_total: u64,
+    pub scout_work_empty_polls_total: u64,
+    pub scout_draft_submissions_total: u64,
+    pub scout_draft_reject_missing_identity_total: u64,
+    pub scout_draft_reject_pow_total: u64,
+    pub scout_draft_reject_spotcheck_total: u64,
+    pub scout_draft_reject_empty_tokens_total: u64,
+    pub scout_draft_duplicates_total: u64,
+    pub scout_draft_channel_enqueued_total: u64,
+    pub scout_draft_channel_enqueue_failures_total: u64,
+    pub speculative_wait_requests_total: u64,
+    pub speculative_wait_hits_total: u64,
+    pub speculative_wait_timeouts_total: u64,
+    pub speculative_wait_mismatched_work_id_total: u64,
+    pub speculative_verify_attempts_total: u64,
+    pub speculative_verify_zero_accept_total: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -149,6 +183,90 @@ impl SystemMetrics {
             .fetch_add(value, Ordering::Relaxed);
     }
 
+    pub fn inc_scout_work_poll(&self) {
+        self.scout_work_polls_total.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn inc_scout_work_assignment(&self) {
+        self.scout_work_assignments_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn inc_scout_work_empty_poll(&self) {
+        self.scout_work_empty_polls_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn inc_scout_draft_submission(&self) {
+        self.scout_draft_submissions_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn inc_scout_draft_reject_missing_identity(&self) {
+        self.scout_draft_reject_missing_identity_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn inc_scout_draft_reject_pow(&self) {
+        self.scout_draft_reject_pow_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn inc_scout_draft_reject_spotcheck(&self) {
+        self.scout_draft_reject_spotcheck_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn inc_scout_draft_reject_empty_tokens(&self) {
+        self.scout_draft_reject_empty_tokens_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn inc_scout_draft_duplicate(&self) {
+        self.scout_draft_duplicates_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn inc_scout_draft_channel_enqueued(&self) {
+        self.scout_draft_channel_enqueued_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn inc_scout_draft_channel_enqueue_failure(&self) {
+        self.scout_draft_channel_enqueue_failures_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn inc_speculative_wait_request(&self) {
+        self.speculative_wait_requests_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn inc_speculative_wait_hit(&self) {
+        self.speculative_wait_hits_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn inc_speculative_wait_timeout(&self) {
+        self.speculative_wait_timeouts_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn inc_speculative_wait_mismatched_work_id(&self) {
+        self.speculative_wait_mismatched_work_id_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn inc_speculative_verify_attempt(&self) {
+        self.speculative_verify_attempts_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn inc_speculative_verify_zero_accept(&self) {
+        self.speculative_verify_zero_accept_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
     pub fn render_prometheus(&self, sample: PrometheusSample) -> String {
         let draft_total = self.speculative_draft_tokens_total.load(Ordering::Relaxed);
         let accepted_total = self
@@ -173,7 +291,7 @@ impl SystemMetrics {
             1.0 + (accepted_total as f64 / (accepted_total + 1) as f64)
         };
 
-        format!(
+        let mut output = format!(
             concat!(
                 "# HELP shard_tokens_processed_total Total tokens processed.\n",
                 "# TYPE shard_tokens_processed_total counter\n",
@@ -281,7 +399,86 @@ impl SystemMetrics {
             acceptance_rate,
             reject_rate,
             speedup_ratio,
-        )
+        );
+        output.push_str(&format!(
+            concat!(
+                "# HELP shard_scout_work_polls_total Scout work polling requests.\n",
+                "# TYPE shard_scout_work_polls_total counter\n",
+                "shard_scout_work_polls_total {}\n",
+                "# HELP shard_scout_work_assignments_total Scout work assignments returned.\n",
+                "# TYPE shard_scout_work_assignments_total counter\n",
+                "shard_scout_work_assignments_total {}\n",
+                "# HELP shard_scout_work_empty_polls_total Scout work polls with empty queue.\n",
+                "# TYPE shard_scout_work_empty_polls_total counter\n",
+                "shard_scout_work_empty_polls_total {}\n",
+                "# HELP shard_scout_draft_submissions_total Draft submissions received.\n",
+                "# TYPE shard_scout_draft_submissions_total counter\n",
+                "shard_scout_draft_submissions_total {}\n",
+                "# HELP shard_scout_draft_reject_missing_identity_total Draft rejects due to missing scout/work identity.\n",
+                "# TYPE shard_scout_draft_reject_missing_identity_total counter\n",
+                "shard_scout_draft_reject_missing_identity_total {}\n",
+                "# HELP shard_scout_draft_reject_pow_total Draft rejects due to failed PoW verification.\n",
+                "# TYPE shard_scout_draft_reject_pow_total counter\n",
+                "shard_scout_draft_reject_pow_total {}\n",
+                "# HELP shard_scout_draft_reject_spotcheck_total Draft rejects due to invalid spot-check proof.\n",
+                "# TYPE shard_scout_draft_reject_spotcheck_total counter\n",
+                "shard_scout_draft_reject_spotcheck_total {}\n",
+                "# HELP shard_scout_draft_reject_empty_tokens_total Draft rejects due to empty/untokenizable draft payload.\n",
+                "# TYPE shard_scout_draft_reject_empty_tokens_total counter\n",
+                "shard_scout_draft_reject_empty_tokens_total {}\n",
+                "# HELP shard_scout_draft_duplicates_total Duplicate draft submissions ignored by idempotency map.\n",
+                "# TYPE shard_scout_draft_duplicates_total counter\n",
+                "shard_scout_draft_duplicates_total {}\n",
+                "# HELP shard_scout_draft_channel_enqueued_total Drafts successfully enqueued to the synchronous verification channel.\n",
+                "# TYPE shard_scout_draft_channel_enqueued_total counter\n",
+                "shard_scout_draft_channel_enqueued_total {}\n",
+                "# HELP shard_scout_draft_channel_enqueue_failures_total Draft channel enqueue failures.\n",
+                "# TYPE shard_scout_draft_channel_enqueue_failures_total counter\n",
+                "shard_scout_draft_channel_enqueue_failures_total {}\n",
+                "# HELP shard_speculative_wait_requests_total Speculative waits started for scout drafts.\n",
+                "# TYPE shard_speculative_wait_requests_total counter\n",
+                "shard_speculative_wait_requests_total {}\n",
+                "# HELP shard_speculative_wait_hits_total Speculative waits that found a matching draft.\n",
+                "# TYPE shard_speculative_wait_hits_total counter\n",
+                "shard_speculative_wait_hits_total {}\n",
+                "# HELP shard_speculative_wait_timeouts_total Speculative waits that timed out.\n",
+                "# TYPE shard_speculative_wait_timeouts_total counter\n",
+                "shard_speculative_wait_timeouts_total {}\n",
+                "# HELP shard_speculative_wait_mismatched_work_id_total Non-matching drafts encountered while waiting for a specific work_id.\n",
+                "# TYPE shard_speculative_wait_mismatched_work_id_total counter\n",
+                "shard_speculative_wait_mismatched_work_id_total {}\n",
+                "# HELP shard_speculative_verify_attempts_total Draft verification attempts executed.\n",
+                "# TYPE shard_speculative_verify_attempts_total counter\n",
+                "shard_speculative_verify_attempts_total {}\n",
+                "# HELP shard_speculative_verify_zero_accept_total Verification attempts that accepted zero draft tokens.\n",
+                "# TYPE shard_speculative_verify_zero_accept_total counter\n",
+                "shard_speculative_verify_zero_accept_total {}\n",
+            ),
+            self.scout_work_polls_total.load(Ordering::Relaxed),
+            self.scout_work_assignments_total.load(Ordering::Relaxed),
+            self.scout_work_empty_polls_total.load(Ordering::Relaxed),
+            self.scout_draft_submissions_total.load(Ordering::Relaxed),
+            self.scout_draft_reject_missing_identity_total
+                .load(Ordering::Relaxed),
+            self.scout_draft_reject_pow_total.load(Ordering::Relaxed),
+            self.scout_draft_reject_spotcheck_total
+                .load(Ordering::Relaxed),
+            self.scout_draft_reject_empty_tokens_total
+                .load(Ordering::Relaxed),
+            self.scout_draft_duplicates_total.load(Ordering::Relaxed),
+            self.scout_draft_channel_enqueued_total
+                .load(Ordering::Relaxed),
+            self.scout_draft_channel_enqueue_failures_total
+                .load(Ordering::Relaxed),
+            self.speculative_wait_requests_total.load(Ordering::Relaxed),
+            self.speculative_wait_hits_total.load(Ordering::Relaxed),
+            self.speculative_wait_timeouts_total.load(Ordering::Relaxed),
+            self.speculative_wait_mismatched_work_id_total
+                .load(Ordering::Relaxed),
+            self.speculative_verify_attempts_total.load(Ordering::Relaxed),
+            self.speculative_verify_zero_accept_total.load(Ordering::Relaxed),
+        ));
+        output
     }
 
     pub fn snapshot(&self) -> SystemMetricsSnapshot {
@@ -313,6 +510,55 @@ impl SystemMetrics {
             speculative_rejected_tokens_total: self
                 .speculative_rejected_tokens_total
                 .load(Ordering::Relaxed),
+            scout_work_polls_total: self.scout_work_polls_total.load(Ordering::Relaxed),
+            scout_work_assignments_total: self
+                .scout_work_assignments_total
+                .load(Ordering::Relaxed),
+            scout_work_empty_polls_total: self
+                .scout_work_empty_polls_total
+                .load(Ordering::Relaxed),
+            scout_draft_submissions_total: self
+                .scout_draft_submissions_total
+                .load(Ordering::Relaxed),
+            scout_draft_reject_missing_identity_total: self
+                .scout_draft_reject_missing_identity_total
+                .load(Ordering::Relaxed),
+            scout_draft_reject_pow_total: self
+                .scout_draft_reject_pow_total
+                .load(Ordering::Relaxed),
+            scout_draft_reject_spotcheck_total: self
+                .scout_draft_reject_spotcheck_total
+                .load(Ordering::Relaxed),
+            scout_draft_reject_empty_tokens_total: self
+                .scout_draft_reject_empty_tokens_total
+                .load(Ordering::Relaxed),
+            scout_draft_duplicates_total: self
+                .scout_draft_duplicates_total
+                .load(Ordering::Relaxed),
+            scout_draft_channel_enqueued_total: self
+                .scout_draft_channel_enqueued_total
+                .load(Ordering::Relaxed),
+            scout_draft_channel_enqueue_failures_total: self
+                .scout_draft_channel_enqueue_failures_total
+                .load(Ordering::Relaxed),
+            speculative_wait_requests_total: self
+                .speculative_wait_requests_total
+                .load(Ordering::Relaxed),
+            speculative_wait_hits_total: self
+                .speculative_wait_hits_total
+                .load(Ordering::Relaxed),
+            speculative_wait_timeouts_total: self
+                .speculative_wait_timeouts_total
+                .load(Ordering::Relaxed),
+            speculative_wait_mismatched_work_id_total: self
+                .speculative_wait_mismatched_work_id_total
+                .load(Ordering::Relaxed),
+            speculative_verify_attempts_total: self
+                .speculative_verify_attempts_total
+                .load(Ordering::Relaxed),
+            speculative_verify_zero_accept_total: self
+                .speculative_verify_zero_accept_total
+                .load(Ordering::Relaxed),
         }
     }
 }
@@ -333,6 +579,23 @@ mod tests {
         metrics.inc_speculative_draft_tokens(10);
         metrics.inc_speculative_accepted_tokens(7);
         metrics.inc_speculative_rejected_tokens(3);
+        metrics.inc_scout_work_poll();
+        metrics.inc_scout_work_assignment();
+        metrics.inc_scout_work_empty_poll();
+        metrics.inc_scout_draft_submission();
+        metrics.inc_scout_draft_reject_missing_identity();
+        metrics.inc_scout_draft_reject_pow();
+        metrics.inc_scout_draft_reject_spotcheck();
+        metrics.inc_scout_draft_reject_empty_tokens();
+        metrics.inc_scout_draft_duplicate();
+        metrics.inc_scout_draft_channel_enqueued();
+        metrics.inc_scout_draft_channel_enqueue_failure();
+        metrics.inc_speculative_wait_request();
+        metrics.inc_speculative_wait_hit();
+        metrics.inc_speculative_wait_timeout();
+        metrics.inc_speculative_wait_mismatched_work_id();
+        metrics.inc_speculative_verify_attempt();
+        metrics.inc_speculative_verify_zero_accept();
 
         let snap = metrics.snapshot();
         assert_eq!(snap.tokens_processed_total, 12);
@@ -344,5 +607,22 @@ mod tests {
         assert_eq!(snap.speculative_draft_tokens_total, 10);
         assert_eq!(snap.speculative_accepted_tokens_total, 7);
         assert_eq!(snap.speculative_rejected_tokens_total, 3);
+        assert_eq!(snap.scout_work_polls_total, 1);
+        assert_eq!(snap.scout_work_assignments_total, 1);
+        assert_eq!(snap.scout_work_empty_polls_total, 1);
+        assert_eq!(snap.scout_draft_submissions_total, 1);
+        assert_eq!(snap.scout_draft_reject_missing_identity_total, 1);
+        assert_eq!(snap.scout_draft_reject_pow_total, 1);
+        assert_eq!(snap.scout_draft_reject_spotcheck_total, 1);
+        assert_eq!(snap.scout_draft_reject_empty_tokens_total, 1);
+        assert_eq!(snap.scout_draft_duplicates_total, 1);
+        assert_eq!(snap.scout_draft_channel_enqueued_total, 1);
+        assert_eq!(snap.scout_draft_channel_enqueue_failures_total, 1);
+        assert_eq!(snap.speculative_wait_requests_total, 1);
+        assert_eq!(snap.speculative_wait_hits_total, 1);
+        assert_eq!(snap.speculative_wait_timeouts_total, 1);
+        assert_eq!(snap.speculative_wait_mismatched_work_id_total, 1);
+        assert_eq!(snap.speculative_verify_attempts_total, 1);
+        assert_eq!(snap.speculative_verify_zero_accept_total, 1);
     }
 }
