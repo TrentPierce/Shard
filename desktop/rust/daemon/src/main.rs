@@ -787,7 +787,7 @@ impl Default for SpeculativeConfig {
                 // Browser scouts poll work over HTTP and may need PoW + queueing +
                 // submission retries. Keep default high enough to avoid dropping
                 // valid drafts as late mismatches.
-                .unwrap_or(15000),
+                .unwrap_or(30000),
             scout_cooldown_ms: 60000,
             max_consecutive_timeouts: 3,
             draft_token_count: 4,

@@ -263,6 +263,18 @@ pub(crate) async fn peers_handler(
 }
 
 const BROWSER_SESSION_TTL_MS: u128 = 5 * 60 * 1000;
+const DEFAULT_SCOUT_WORK_MAX_AGE_MS: u128 = 15_000;
+
+fn scout_work_max_age_ms() -> u128 {
+    static MAX_AGE_MS: std::sync::OnceLock<u128> = std::sync::OnceLock::new();
+    *MAX_AGE_MS.get_or_init(|| {
+        std::env::var("SHARD_SCOUT_WORK_MAX_AGE_MS")
+            .ok()
+            .and_then(|value| value.parse::<u128>().ok())
+            .filter(|value| *value >= 1_000)
+            .unwrap_or(DEFAULT_SCOUT_WORK_MAX_AGE_MS)
+    })
+}
 
 pub(crate) fn parse_nonce_hex(raw: &str) -> Result<[u8; 12], String> {
     let bytes = hex::decode(raw).map_err(|e| format!("invalid nonce hex: {e}"))?;
@@ -887,16 +899,24 @@ pub(crate) async fn pop_work_handler(
     }
     state.system_metrics.inc_scout_work_poll();
     let mut queue = state.scout_work.lock().await;
-    match queue.pop_front() {
-        Some(work) => {
+    let now = now_ms();
+    let max_age_ms = scout_work_max_age_ms();
+    while let Some(work) = queue.pop_back() {
+        let created_at_ms = work.created_at_ms.unwrap_or(now);
+        let age_ms = now.saturating_sub(created_at_ms);
+        if age_ms <= max_age_ms {
             state.system_metrics.inc_scout_work_assignment();
-            Json(serde_json::json!({ "work": work }))
+            return Json(serde_json::json!({ "work": work }));
         }
-        None => {
-            state.system_metrics.inc_scout_work_empty_poll();
-            Json(serde_json::json!({ "work": null }))
-        }
+        tracing::debug!(
+            request_id = %work.request_id,
+            age_ms,
+            max_age_ms,
+            "dropping stale scout work item"
+        );
     }
+    state.system_metrics.inc_scout_work_empty_poll();
+    Json(serde_json::json!({ "work": null }))
 }
 
 pub(crate) async fn submit_draft_handler(
