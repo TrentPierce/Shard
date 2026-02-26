@@ -143,7 +143,36 @@ fn scout_draft_from_work_response(response: &WorkResponse) -> ScoutDraft {
     }
 }
 
-// ─── Speculative Decoding Functions ────────────────────────────────────────
+// â”€â”€â”€ Speculative Decoding Functions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+async fn pop_mailbox_draft(state: &SharedState, work_id: &str) -> Option<ScoutDraft> {
+    let mut mailbox = state.scout_draft_mailbox.lock().await;
+    let draft = mailbox.get_mut(work_id).and_then(|queue| queue.pop_front());
+    if mailbox
+        .get(work_id)
+        .map(|queue| queue.is_empty())
+        .unwrap_or(false)
+    {
+        mailbox.remove(work_id);
+    }
+    draft
+}
+
+async fn get_or_create_draft_notifier(
+    state: &SharedState,
+    work_id: &str,
+) -> Arc<tokio::sync::Notify> {
+    let mut notifiers = state.scout_draft_notifiers.lock().await;
+    notifiers
+        .entry(work_id.to_string())
+        .or_insert_with(|| Arc::new(tokio::sync::Notify::new()))
+        .clone()
+}
+
+async fn clear_draft_notifier(state: &SharedState, work_id: &str) {
+    let mut notifiers = state.scout_draft_notifiers.lock().await;
+    notifiers.remove(work_id);
+}
 
 /// Wait for a scout draft submission with timeout.
 pub(crate) async fn wait_for_scout_draft(
@@ -159,72 +188,33 @@ pub(crate) async fn wait_for_scout_draft(
         if now_ms() >= timeout_deadline {
             state.system_metrics.inc_speculative_wait_timeout();
             tracing::debug!("scout draft timeout for work_id: {}", work_id);
+            clear_draft_notifier(state, work_id).await;
             return None;
         }
 
-        // Fast path: a draft may already be recorded in idempotent results.
         if let Some(existing) = {
             let mut by_id = state.idempotent_results.lock().await;
             by_id.remove(work_id)
         } {
             state.system_metrics.inc_speculative_wait_hit();
+            clear_draft_notifier(state, work_id).await;
             return Some(scout_draft_from_work_response(&existing));
         }
 
-        // Check if there's a draft available
-        let draft = {
-            let mut rx_guard = state.scout_draft_rx.lock().await;
-            if let Some(rx) = rx_guard.as_mut() {
-                match tokio::time::timeout(tokio::time::Duration::from_millis(100), rx.recv()).await
-                {
-                    Ok(Some(draft)) if draft.work_id == work_id => {
-                        tracing::debug!(
-                            expected_work_id = %work_id,
-                            received_work_id = %draft.work_id,
-                            scout_id = %draft.scout_id,
-                            "matched scout draft for speculative wait"
-                        );
-                        Some(draft)
-                    }
-                    Ok(Some(draft)) => {
-                        state
-                            .system_metrics
-                            .inc_speculative_wait_mismatched_work_id();
-                        tracing::debug!(
-                            expected_work_id = %work_id,
-                            received_work_id = %draft.work_id,
-                            scout_id = %draft.scout_id,
-                            "mismatched scout draft during speculative wait"
-                        );
-                        // Preserve non-matching drafts in the idempotent map so
-                        // the corresponding request can pick them up later.
-                        let mut by_id = state.idempotent_results.lock().await;
-                        by_id
-                            .entry(draft.work_id.clone())
-                            .or_insert_with(|| WorkResponse {
-                                request_id: draft.work_id.clone(),
-                                peer_id: draft.scout_id.clone(),
-                                draft_tokens: draft.draft_tokens.clone(),
-                                draft_text: draft.draft_text.clone(),
-                                latency_ms: draft.latency_ms as f32,
-                                created_at_ms: Some(draft.timestamp_ms),
-                            });
-                        None
-                    }
-                    _ => None,
-                }
-            } else {
-                None
-            }
-        };
-
-        if draft.is_some() {
+        if let Some(draft) = pop_mailbox_draft(state, work_id).await {
             state.system_metrics.inc_speculative_wait_hit();
-            return draft;
+            clear_draft_notifier(state, work_id).await;
+            return Some(draft);
         }
 
-        // Small yield to prevent busy loop
-        tokio::task::yield_now().await;
+        let notifier = get_or_create_draft_notifier(state, work_id).await;
+        let remaining_ms = timeout_deadline.saturating_sub(now_ms()) as u64;
+        let wait_ms = remaining_ms.clamp(50, 1000);
+        let _ = tokio::time::timeout(
+            tokio::time::Duration::from_millis(wait_ms),
+            notifier.notified(),
+        )
+        .await;
     }
 }
 

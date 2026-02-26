@@ -58,7 +58,7 @@ use std::{
     },
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{mpsc, Mutex, Notify};
 use tower_http::cors::{Any, CorsLayer};
 
 pub mod api;
@@ -746,6 +746,10 @@ pub(crate) struct SharedState {
     /// Channel for receiving scout draft submissions
     scout_draft_tx: mpsc::Sender<ScoutDraft>,
     scout_draft_rx: Arc<Mutex<Option<mpsc::Receiver<ScoutDraft>>>>,
+    /// Per-work mailbox for deterministic draft handoff to verifier waiters.
+    scout_draft_mailbox: Arc<Mutex<HashMap<String, VecDeque<ScoutDraft>>>>,
+    /// Per-work notifiers used by waiters to wake when matching drafts arrive.
+    scout_draft_notifiers: Arc<Mutex<HashMap<String, Arc<Notify>>>>,
     /// Channel for announcing bans to the network
     ban_tx: mpsc::Sender<(String, String)>,
     /// Timeout tracker for speculative decoding
@@ -797,7 +801,7 @@ impl Default for SpeculativeConfig {
                 // Browser scouts poll work over HTTP and may need PoW + queueing +
                 // submission retries. Keep default high enough to avoid dropping
                 // valid drafts as late mismatches.
-                .unwrap_or(30000),
+                .unwrap_or(90_000),
             scout_cooldown_ms: 60000,
             max_consecutive_timeouts: 3,
             draft_token_count: 4,
@@ -2269,6 +2273,8 @@ async fn main() -> Result<()> {
         })),
         scout_draft_tx,
         scout_draft_rx: Arc::new(Mutex::new(Some(scout_draft_rx))),
+        scout_draft_mailbox: Arc::new(Mutex::new(HashMap::new())),
+        scout_draft_notifiers: Arc::new(Mutex::new(HashMap::new())),
         ban_tx,
         scout_timeout_tracker: Arc::new(Mutex::new(ScoutTimeoutTracker::new())),
         bootstrap_failures: Arc::new(Mutex::new(HashMap::new())),

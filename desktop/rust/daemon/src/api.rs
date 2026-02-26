@@ -1069,6 +1069,26 @@ pub(crate) async fn process_draft_submission(
         latency_ms: response.latency_ms as u64,
     };
 
+    {
+        let mut mailbox = state.scout_draft_mailbox.lock().await;
+        let queue = mailbox
+            .entry(draft_for_channel.work_id.clone())
+            .or_insert_with(std::collections::VecDeque::new);
+        queue.push_back(draft_for_channel.clone());
+        while queue.len() > 8 {
+            queue.pop_front();
+        }
+    }
+
+    {
+        let mut notifiers = state.scout_draft_notifiers.lock().await;
+        let notify = notifiers
+            .entry(draft_for_channel.work_id.clone())
+            .or_insert_with(|| Arc::new(tokio::sync::Notify::new()))
+            .clone();
+        notify.notify_waiters();
+    }
+
     match state.scout_draft_tx.try_send(draft_for_channel) {
         Ok(_) => {
             state.system_metrics.inc_scout_draft_channel_enqueued();
@@ -1078,23 +1098,20 @@ pub(crate) async fn process_draft_submission(
             state
                 .system_metrics
                 .inc_scout_draft_channel_enqueue_failure();
-            state.system_metrics.inc_task_failures();
-            tracing::warn!("scout draft channel full; shedding draft submission");
+            tracing::warn!("scout draft channel full; using mailbox fallback");
             Json(serde_json::json!({
-                "ok": false,
-                "transient_error": true,
-                "detail": "scout draft channel is saturated; retry shortly",
+                "ok": true,
+                "detail": "draft queued (mailbox fallback; channel saturated)",
             }))
         }
         Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
             state
                 .system_metrics
                 .inc_scout_draft_channel_enqueue_failure();
-            state.system_metrics.inc_task_failures();
-            tracing::warn!("scout draft channel closed; unable to enqueue draft");
+            tracing::warn!("scout draft channel closed; using mailbox fallback");
             Json(serde_json::json!({
-                "ok": false,
-                "detail": "scout draft channel unavailable",
+                "ok": true,
+                "detail": "draft queued (mailbox fallback; channel unavailable)",
             }))
         }
     }
