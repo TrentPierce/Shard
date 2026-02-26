@@ -155,41 +155,72 @@ export async function startBrowserLayerHost(options?: {
   }
 
   const profile = await profileWebGPU()
-  const register = await fetch(apiUrl("/browser-layer/register"), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model_id: options?.modelId ?? "default-model",
-      layer_start: options?.layerStart ?? 0,
-      layer_end: options?.layerEnd ?? 1,
-      profile,
-    }),
-  })
-  if (!register.ok) {
-    throw new Error(`browser layer registration failed (${register.status})`)
+  const registerSession = async (): Promise<BrowserLayerRegisterResponse> => {
+    const register = await fetch(apiUrl("/browser-layer/register"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model_id: options?.modelId ?? "default-model",
+        layer_start: options?.layerStart ?? 0,
+        layer_end: options?.layerEnd ?? 1,
+        profile,
+      }),
+    })
+    if (!register.ok) {
+      throw new Error(`browser layer registration failed (${register.status})`)
+    }
+    const session = (await register.json()) as BrowserLayerRegisterResponse
+    if (!session.ok) {
+      throw new Error("browser layer registration rejected")
+    }
+    return session
   }
-  const session = (await register.json()) as BrowserLayerRegisterResponse
-  if (!session.ok) {
-    throw new Error("browser layer registration rejected")
-  }
+
+  let session = await registerSession()
 
   let stopped = false
   const loop = async () => {
+    let consecutiveFailures = 0
     while (!stopped) {
       try {
         const res = await fetch(
           apiUrl(`/browser-layer/work?session_id=${encodeURIComponent(session.session_id)}`)
         )
         if (!res.ok) {
+          consecutiveFailures += 1
           await new Promise((resolve) => setTimeout(resolve, 500))
+          if (consecutiveFailures >= 5) {
+            session = await registerSession()
+            consecutiveFailures = 0
+          }
           continue
         }
         const payload = (await res.json()) as BrowserLayerWorkResponse
+        if (!payload.ok) {
+          const detail = (payload as any).detail as string | undefined
+          if (detail?.toLowerCase().includes("invalid session_id")) {
+            session = await registerSession()
+            consecutiveFailures = 0
+            continue
+          }
+          consecutiveFailures += 1
+          await new Promise((resolve) => setTimeout(resolve, 500))
+          continue
+        }
+        consecutiveFailures = 0
         if (payload.ok && payload.work) {
           await processWork(payload.work, session.obfuscation_key_hex)
           continue
         }
       } catch {
+        consecutiveFailures += 1
+        if (consecutiveFailures >= 5) {
+          try {
+            session = await registerSession()
+            consecutiveFailures = 0
+          } catch {
+          }
+        }
       }
       await new Promise((resolve) => setTimeout(resolve, 250))
     }
