@@ -60,18 +60,11 @@ export type ScoutSubmissionResult = {
     detail: string
 }
 
-function fallbackDraftFromPrompt(prompt: string, maxTokens: number): string {
-    const sanitized = prompt
-        .replace(/<\|[^>]+?\|>/g, " ")
-        .replace(/\s+/g, " ")
-        .trim()
-    if (!sanitized) {
-        return "the "
-    }
-    const parts = sanitized.split(" ").filter(Boolean)
-    const tokenBudget = Math.max(1, Math.min(maxTokens || 4, 16))
-    const tail = parts.slice(-tokenBudget).join(" ").trim()
-    return tail.length > 0 ? `${tail} ` : "the "
+function fallbackDraftFromPrompt(_prompt: string, _maxTokens: number): string {
+    // No real inference available — return empty to skip draft submission.
+    // The previous echo-back approach (returning tail words of the prompt)
+    // always failed verification and wasted verifier compute.
+    return ""
 }
 
 async function generateDraftsWithTimeout(
@@ -113,17 +106,17 @@ async function generateDraftsWithTimeout(
 export async function probeLocalShard(): Promise<LocalShardProbe> {
     const endpoint = rustUrl("/health")
     const LATENCY_THRESHOLD_MS = 2  // Same-machine detection threshold
-    
+
     try {
         const startTime = performance.now()
         const res = await fetch(endpoint, { method: "GET" })
         const rttMs = performance.now() - startTime
-        
+
         if (!res.ok) return { available: false, endpoint }
-        
+
         const json = await res.json()
         const isHealthy = Boolean(json?.status === "ok")
-        
+
         if (isHealthy && rttMs < LATENCY_THRESHOLD_MS) {
             console.log(
                 `[Double-Dip Guard] Local Shard detected at ${endpoint} ` +
@@ -132,7 +125,7 @@ export async function probeLocalShard(): Promise<LocalShardProbe> {
             )
             return { available: true, endpoint }
         }
-        
+
         return { available: isHealthy, endpoint }
     } catch {
         return { available: false, endpoint }
@@ -282,6 +275,12 @@ export async function handleScoutWork(work: WorkRequest): Promise<ScoutSubmissio
         }
 
         const scoutId = getScoutId()
+        if (!draftText.trim()) {
+            return {
+                success: false,
+                detail: "No usable draft produced; submission skipped",
+            }
+        }
 
         const result: WorkResult = {
             work_id: work.request_id,
@@ -358,7 +357,7 @@ export async function requestWork(): Promise<WorkRequest | null> {
             }
             return null
         }
-        
+
         // Transform backend response to local type
         return {
             request_id: polled.work.request_id,

@@ -47,20 +47,14 @@ class WasmScoutEngine implements ScoutEngine {
     async generate(prompt: string, options?: any) {
         if (!this.initialized) throw new Error("WASM Engine not initialized")
 
-        const maxTokens = Math.max(1, Math.min(Number(options?.maxTokens ?? 4), 16))
-        const words = prompt
-            .replace(/<\|[^>]+?\|>/g, " ")
-            .replace(/\s+/g, " ")
-            .trim()
-            .split(" ")
-            .filter(Boolean)
-        const tail = words.slice(-maxTokens)
-        const text = tail.join(" ").trim()
-
+        // WASM fallback does not have real inference capability.
+        // Return failure so the caller can skip draft submission rather
+        // than sending garbage echo-back text that always fails verification.
         return {
             tokens: [],
-            text: text.length > 0 ? `${text} ` : "the ",
-            success: true,
+            text: "",
+            success: false,
+            error: "WASM fallback does not support real inference; draft skipped",
         }
     }
 
@@ -75,7 +69,7 @@ export async function initScoutEngine(
     progressCallback?: (progress: number, text: string) => void
 ): Promise<ScoutCapabilityResult> {
     const report = await detectScoutCapability()
-    
+
     if (report.capability === "webgpu") {
         activeEngine = new WebGPUScoutEngine()
     } else if (report.capability === "wasm") {

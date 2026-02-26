@@ -34,8 +34,8 @@ export interface SubmitDraftOptions extends Partial<ScoutConfig> {
 
 const DEFAULT_CONFIG: ScoutConfig = {
   maxDraftTokens: 4,
-  temperature: 0.8,
-  topP: 0.9,
+  temperature: 0,   // Greedy decoding — maximize match with verifier's argmax
+  topP: 1,
   timeoutMs: 15000,
   maxRetries: 2,
   retryBackoffMs: 250,

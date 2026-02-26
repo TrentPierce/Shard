@@ -1025,6 +1025,34 @@ pub(crate) async fn process_draft_submission(
 
     submission.draft_text = sanitize_scout_draft_text(submission.draft_text.as_str());
 
+    // Detect garbage echo-back drafts: if the draft text is a verbatim suffix of
+    // the prompt context, it means the scout just echoed back the prompt tail
+    // (WASM fallback or uninitialized engine). These always fail verification.
+    if let Some(ref prompt_ctx) = submission.prompt_context {
+        let clean_prompt = prompt_ctx
+            .replace(|c: char| c == '\0', "")
+            .trim()
+            .to_string();
+        let clean_draft = submission.draft_text.trim();
+        if !clean_prompt.is_empty()
+            && !clean_draft.is_empty()
+            && clean_prompt.ends_with(clean_draft)
+        {
+            tracing::warn!(
+                work_id = %submission.work_id,
+                scout_id = %submission.scout_id,
+                draft_len = clean_draft.len(),
+                "rejecting echo-back garbage draft (draft is a suffix of prompt)"
+            );
+            state.system_metrics.inc_task_failures();
+            mark_node_failure(state, submission.scout_id.as_str()).await;
+            return Json(serde_json::json!({
+                "ok": false,
+                "detail": "draft rejected: echo-back of prompt tail detected",
+            }));
+        }
+    }
+
     if submission.draft_tokens.is_empty() && !submission.draft_text.trim().is_empty() {
         let mut engine_guard = state.engine.lock().await;
         if let Some(engine) = engine_guard.as_mut() {
@@ -1160,12 +1188,19 @@ fn tokenize_submission_draft(
     engine: &mut impl shard_verifier::inference::VerifierModel,
     submission: &DraftResultSubmission,
 ) -> Option<Vec<i32>> {
-    let prompt = submission.prompt_context.as_deref()?.trim();
+    let prompt_raw = submission.prompt_context.as_deref()?;
+    if prompt_raw.trim().is_empty() {
+        return None;
+    }
+    // Preserve whitespace exactly as provided to the scout.
+    // Trimming here changes token boundaries and can force systematic
+    // first-token mismatches during verifier comparison.
+    let prompt = prompt_raw.replace('\0', "");
     if prompt.is_empty() {
         return None;
     }
 
-    let mut prompt_tokens = engine.tokenize(prompt, 4096).ok()?;
+    let mut prompt_tokens = engine.tokenize(prompt.as_str(), 4096).ok()?;
     strip_optional_bos(&mut prompt_tokens);
 
     let combined_text = format!("{prompt}{}", submission.draft_text);

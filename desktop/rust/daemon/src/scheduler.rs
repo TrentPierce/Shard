@@ -49,7 +49,18 @@ fn speculative_logit_tolerance() -> f32 {
             .ok()
             .and_then(|v| v.parse::<f32>().ok())
             .filter(|v| *v >= 0.0 && v.is_finite())
-            .unwrap_or(4.0)
+            .unwrap_or(12.0)
+    })
+}
+
+fn speculative_top_k() -> usize {
+    static TOP_K: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *TOP_K.get_or_init(|| {
+        std::env::var("SHARD_SPECULATIVE_TOP_K")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .map(|v| v.clamp(1, 100))
+            .unwrap_or(10)
     })
 }
 
@@ -294,6 +305,11 @@ pub(crate) async fn wait_for_scout_draft(
 
 /// Verify draft tokens against the verifier model.
 /// Returns accepted tokens, text, and optionally a token to resample.
+///
+/// Acceptance policy (any of these causes acceptance):
+/// 1. **Greedy match**: draft token == verifier's argmax token
+/// 2. **Top-k overlap**: draft token is within the verifier's top-k predictions
+/// 3. **Logit gap**: draft token's logit is within tolerance of the best logit
 pub(crate) async fn verify_draft_tokens(
     engine: &mut impl shard_verifier::inference::VerifierModel,
     prompt_tokens: &[i32],
@@ -301,6 +317,7 @@ pub(crate) async fn verify_draft_tokens(
 ) -> DraftVerificationResult {
     // 1. Evaluate the prompt context first to build KV cache
     if engine.eval(prompt_tokens).is_err() {
+        tracing::warn!("verify_draft_tokens: prompt eval failed");
         return DraftVerificationResult {
             accepted_tokens: Vec::new(),
             accepted_text: String::new(),
@@ -314,28 +331,67 @@ pub(crate) async fn verify_draft_tokens(
     let mut first_rejection_idx = None;
     let vocab_size = 128256;
 
-    // 2. Step through each draft token and check if the model would have predicted it
+    // 2. Step through each draft token and verify against model predictions
     let logit_tolerance = speculative_logit_tolerance();
+    let top_k = speculative_top_k();
+    let total_draft = draft_tokens.len();
+
     for (idx, &draft_token) in draft_tokens.iter().enumerate() {
         if let Ok(logits) = engine.get_logits(vocab_size) {
-            // Find the argmax (greedy acceptance)
-            let mut best_idx = 0;
-            let mut best_val = -f32::INFINITY;
-            for (i, &val) in logits.iter().enumerate() {
-                if val > best_val {
-                    best_val = val;
-                    best_idx = i;
-                }
-            }
+            // Build top-k indices sorted by descending logit value.
+            // Use a partial sort approach: collect (index, logit) pairs,
+            // then sort only enough to find the top-k.
+            let mut indexed: Vec<(usize, f32)> = logits
+                .iter()
+                .enumerate()
+                .map(|(i, &v)| (i, v))
+                .collect();
+            indexed.sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
-            // Probability bound check:
-            // Either greedy match OR the draft token is within tolerance of best log-probability.
+            let best_idx = indexed[0].0;
+            let best_val = indexed[0].1;
+
             let draft_logit = logits
                 .get(draft_token as usize)
                 .copied()
                 .unwrap_or(-f32::INFINITY);
-            let is_accepted =
-                best_idx == draft_token as usize || (best_val - draft_logit) < logit_tolerance;
+            let logit_gap = best_val - draft_logit;
+
+            // Check acceptance: greedy match, top-k overlap, or logit gap
+            let greedy_match = best_idx == draft_token as usize;
+            let in_top_k = indexed.iter().take(top_k).any(|(i, _)| *i == draft_token as usize);
+            let within_tolerance = logit_gap < logit_tolerance;
+
+            let is_accepted = greedy_match || in_top_k || within_tolerance;
+
+            // Find the draft token's rank in the sorted distribution
+            let draft_rank = indexed.iter().position(|(i, _)| *i == draft_token as usize);
+
+            let accept_reason = if greedy_match {
+                "greedy_match"
+            } else if in_top_k {
+                "top_k_overlap"
+            } else if within_tolerance {
+                "logit_tolerance"
+            } else {
+                "rejected"
+            };
+
+            tracing::debug!(
+                idx,
+                total_draft,
+                draft_token,
+                best_token = best_idx as i32,
+                draft_logit = %format!("{:.3}", draft_logit),
+                best_logit = %format!("{:.3}", best_val),
+                logit_gap = %format!("{:.3}", logit_gap),
+                tolerance = %format!("{:.1}", logit_tolerance),
+                draft_rank = ?draft_rank,
+                top_k,
+                reason = accept_reason,
+                accepted = is_accepted,
+                "speculative token verification"
+            );
 
             if is_accepted {
                 // Token accepted
@@ -349,9 +405,17 @@ pub(crate) async fn verify_draft_tokens(
                     break;
                 }
             } else {
-                // First rejection
+                // First rejection — log the top-5 for diagnostics
+                let top5_tokens: Vec<i32> = indexed.iter().take(5).map(|(i, _)| *i as i32).collect();
+                tracing::info!(
+                    idx,
+                    draft_token,
+                    draft_rank = ?draft_rank,
+                    logit_gap = %format!("{:.3}", logit_gap),
+                    top5 = ?top5_tokens,
+                    "draft token rejected — not in top-{top_k}, logit gap {logit_gap:.1} >= tolerance {logit_tolerance:.1}",
+                );
                 first_rejection_idx = Some(idx);
-                // The correct token to replace the rejected draft
                 let resample_token = Some(best_idx as i32);
                 return DraftVerificationResult {
                     accepted_tokens,
@@ -361,10 +425,16 @@ pub(crate) async fn verify_draft_tokens(
                 };
             }
         } else {
+            tracing::warn!(idx, "get_logits failed during draft verification");
             break;
         }
     }
 
+    tracing::info!(
+        accepted = accepted_tokens.len(),
+        total = total_draft,
+        "all draft tokens accepted"
+    );
     DraftVerificationResult {
         accepted_tokens,
         accepted_text,

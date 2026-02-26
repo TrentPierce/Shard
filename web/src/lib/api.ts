@@ -112,11 +112,12 @@ async function trySubmitDraft(prompt: string, workId: string): Promise<boolean> 
     }
 
     try {
-        // Generate draft tokens using WebLLM
+        // Generate draft tokens using WebLLM with greedy decoding
+        // to maximize acceptance by the verifier (which checks argmax).
         const draftResult = await generateDraftTokens(prompt, {
             maxTokens: 4, // K=4 draft tokens for speculative decoding
-            temperature: 0.8,
-            topP: 0.9,
+            temperature: 0,  // Greedy — maximize match with verifier's argmax
+            topP: 1,
         })
 
         if (!draftResult.success || !draftResult.text) {
@@ -126,7 +127,8 @@ async function trySubmitDraft(prompt: string, workId: string): Promise<boolean> 
 
         // Submit to verifier
         const submitResult = await submitDraft(workId, draftResult.text, {
-            timeoutMs: 800, // Match server's SHARD_SCOUT_TIMEOUT_MS
+            timeoutMs: 45000, // Allow WAN + PoW + tokenization roundtrip
+            maxRetries: 0,
         })
 
         if (submitResult.ok) {
@@ -191,7 +193,7 @@ export async function sendMessage(
 
     const res = await fetchWithLocalFallback("/v1/chat/completions", {
         method: "POST",
-        headers: { 
+        headers: {
             "Content-Type": "application/json",
             "X-Shard-Inference-Mode": inferenceMode,
             ...authHeaders(),
@@ -287,7 +289,7 @@ export async function sendMessageSync(
 
     const res = await fetchWithLocalFallback("/v1/chat/completions", {
         method: "POST",
-        headers: { 
+        headers: {
             "Content-Type": "application/json",
             ...authHeaders(),
         },

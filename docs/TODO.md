@@ -9,3 +9,4 @@
 - [ ] Add dashboard card for `total tokens generated` wired to authoritative backend counter.
 - [ ] Add benchmark automation job that exports TTFT/inter-token/protocol-success/error-distribution artifacts per run.
 - [ ] Add CI matrix gate that validates scout reconnect behavior under synthetic bootstrap outages.
+- [ ] Persist scout participation without manual refresh: if a scout tab stays open, it must auto-reconnect across shard daemon restarts/deploys and resume contribution state/work loop automatically.

@@ -18,14 +18,12 @@ describe("swarm handleScoutWork", () => {
     jest.clearAllMocks()
   })
 
-  it("submits fallback draft when engine is unavailable", async () => {
+  it("skips submission when engine is unavailable and no real draft can be produced", async () => {
     const { getActiveEngine } = await import("@/lib/scout-engine")
     const { getScoutId, submitDraft, reportScoutClientEvent } = await import("@/lib/scout-draft")
 
     ;(getActiveEngine as jest.Mock).mockReturnValue(null)
     ;(getScoutId as jest.Mock).mockReturnValue("scout-test")
-    ;(submitDraft as jest.Mock).mockResolvedValue({ ok: true, detail: "accepted" })
-
     const { handleScoutWork } = await import("@/lib/swarm")
 
     const result = await handleScoutWork({
@@ -34,12 +32,9 @@ describe("swarm handleScoutWork", () => {
       min_tokens: 4,
     })
 
-    expect(result.success).toBe(true)
-    expect(submitDraft).toHaveBeenCalledWith(
-      "work-123",
-      expect.any(String),
-      expect.objectContaining({ promptContext: "Hello world" })
-    )
+    expect(result.success).toBe(false)
+    expect(result.detail).toContain("No usable draft produced")
+    expect(submitDraft).not.toHaveBeenCalled()
     expect(reportScoutClientEvent).toHaveBeenCalledWith("fallback_draft_used", "engine_uninitialized")
   })
 })
