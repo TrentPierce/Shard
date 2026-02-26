@@ -11,6 +11,7 @@
 - `SHARD_API_KEYS` (comma-separated)
 - `SHARD_ADMIN_KEY` (admin API key management endpoint)
 - `SHARD_SCOUT_TIMEOUT_MS`
+- `SHARD_SCOUT_WORK_QUEUE_MAX` (optional queue cap for scout work fan-out; default `1024`, clamp `64..4096`)
 - `SHARD_HEARTBEAT_TIMEOUT_MS`
 - `SHARD_ALLOW_PRIVATE_BOOTSTRAP` (`true|false`, default `false`; allows dialing private/loopback bootstrap multiaddrs)
 - `SHARD_HARDCODED_BOOTSTRAP_MODE` (`fallback|always|disabled`, default `fallback`; `fallback` only uses built-in bootstrap when no user/bootstrap-url/persisted peers exist)

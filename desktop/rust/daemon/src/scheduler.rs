@@ -42,9 +42,20 @@ fn model_pair_acceptance_rates(
     )
 }
 
+const DEFAULT_SCOUT_WORK_QUEUE_MAX: usize = 1024;
+
+fn scout_work_queue_max() -> usize {
+    std::env::var("SHARD_SCOUT_WORK_QUEUE_MAX")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .map(|v| v.clamp(64, 4096))
+        .unwrap_or(DEFAULT_SCOUT_WORK_QUEUE_MAX)
+}
+
 fn enqueue_scout_work(queue: &mut std::collections::VecDeque<WorkRequest>, work: WorkRequest) {
+    let max_len = scout_work_queue_max();
     queue.push_back(work);
-    while queue.len() > 1024 {
+    while queue.len() > max_len {
         queue.pop_front();
     }
 }
@@ -55,9 +66,70 @@ async fn dispatch_scout_work(state: &SharedState, work: WorkRequest) {
         enqueue_scout_work(&mut queue, work.clone());
     }
 
-    if let Err(e) = state.work_tx.send(work).await {
-        tracing::warn!("failed to broadcast work: {}", e);
+    match state.work_tx.try_send(work) {
+        Ok(_) => {}
+        Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+            tracing::warn!("work publish channel saturated; dropping scout broadcast");
+        }
+        Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+            tracing::warn!("work publish channel closed; unable to broadcast");
+        }
     }
+}
+
+fn compute_effective_scout_timeout_ms(
+    base_timeout_ms: u64,
+    active_scouts: usize,
+    queue_depth: usize,
+) -> u64 {
+    if active_scouts == 0 {
+        return 0;
+    }
+    let bounded_base = base_timeout_ms.clamp(1200, 12000);
+    if queue_depth > 768 {
+        return bounded_base.min(2500);
+    }
+    if active_scouts <= 1 {
+        return bounded_base.min(3500);
+    }
+    if active_scouts <= 3 {
+        return bounded_base.min(7000);
+    }
+    bounded_base
+}
+
+async fn estimate_active_scouts(state: &SharedState) -> usize {
+    let browser_sessions = state.browser_sessions.lock().await;
+    let browser_count = browser_sessions.len();
+    drop(browser_sessions);
+
+    let recent_submitters = {
+        let results = state.results.lock().await;
+        let cutoff = now_ms().saturating_sub(3 * 60 * 1000);
+        let mut unique = std::collections::HashSet::new();
+        for entry in results.iter() {
+            if entry.created_at_ms.unwrap_or(0) >= cutoff {
+                unique.insert(entry.peer_id.clone());
+            }
+        }
+        unique.len()
+    };
+
+    browser_count.max(recent_submitters)
+}
+
+async fn effective_speculative_timeout_ms(state: &SharedState, config: &SpeculativeConfig) -> u64 {
+    let active_scouts = estimate_active_scouts(state).await;
+    let queue_depth = {
+        let queue = state.scout_work.lock().await;
+        queue.len()
+    };
+    let timeout_ms =
+        compute_effective_scout_timeout_ms(config.scout_timeout_ms, active_scouts, queue_depth);
+    if timeout_ms == 0 {
+        tracing::debug!("speculative dispatch skipped: no active scouts");
+    }
+    timeout_ms
 }
 
 fn scout_draft_from_work_response(response: &WorkResponse) -> ScoutDraft {
@@ -387,13 +459,19 @@ pub(crate) async fn chat_completions_handler(
                                 min_tokens: config.draft_token_count as i32,
                                 created_at_ms: Some(now_ms()),
                             };
-                            dispatch_scout_work(&state, work).await;
+                            let scout_timeout_ms =
+                                effective_speculative_timeout_ms(&state, config).await;
+                            if scout_timeout_ms == 0 {
+                                tracing::debug!("skipping speculative dispatch with zero effective timeout");
+                            } else {
+                                dispatch_scout_work(&state, work).await;
 
-                            // Wait for scout draft with timeout
-                            let draft_start = now_ms();
-                            let draft = wait_for_scout_draft(&state, &request_id, config.scout_timeout_ms).await;
-                            let draft_latency = (now_ms() - draft_start) as u64;
-                            if let Some(mut draft) = draft {
+                                // Wait for scout draft with adaptive timeout
+                                let draft_start = now_ms();
+                                let draft =
+                                    wait_for_scout_draft(&state, &request_id, scout_timeout_ms).await;
+                                let draft_latency = (now_ms() - draft_start) as u64;
+                                if let Some(mut draft) = draft {
                                 // Record the measured latency
                                 draft.latency_ms = draft_latency;
                                 // Verify the draft against our model
@@ -461,14 +539,15 @@ pub(crate) async fn chat_completions_handler(
                                     }
                                 }
 
-                                // Record success
-                                let mut tracker = state.scout_timeout_tracker.lock().await;
-                                tracker.record_success();
-                            } else {
-                                // Handle timeout
-                                let in_cooldown = handle_scout_timeout(&state, config).await;
-                                if in_cooldown {
-                                    tracing::info!("scout in cooldown, using local generation");
+                                    // Record success
+                                    let mut tracker = state.scout_timeout_tracker.lock().await;
+                                    tracker.record_success();
+                                } else {
+                                    // Handle timeout
+                                    let in_cooldown = handle_scout_timeout(&state, config).await;
+                                    if in_cooldown {
+                                        tracing::info!("scout in cooldown, using local generation");
+                                    }
                                 }
                             }
                         }
@@ -584,101 +663,110 @@ pub(crate) async fn chat_completions_handler(
                                 min_tokens: config.draft_token_count as i32,
                                 created_at_ms: Some(now_ms()),
                             };
-                            dispatch_scout_work(&state, work).await;
-
-                            // Wait for scout draft with timeout
-                            let draft_start = now_ms();
-                            let draft =
-                                wait_for_scout_draft(&state, &request_id, config.scout_timeout_ms)
-                                    .await;
-                            let draft_latency = (now_ms() - draft_start) as u64;
-                            if let Some(mut draft) = draft {
-                                // Record the measured latency
-                                draft.latency_ms = draft_latency;
-                                // Verify the draft against our model
-                                state.system_metrics.inc_speculative_verify_attempt();
-                                let result = verify_draft_tokens(
-                                    engine,
-                                    &prompt_tokens,
-                                    &draft.draft_tokens,
-                                )
-                                .await;
-                                let accepted_count = result.accepted_tokens.len() as u64;
-                                let draft_count = draft.draft_tokens.len() as u64;
-                                let rejected_count = draft_count.saturating_sub(accepted_count);
-                                if draft_count > 0 && accepted_count == 0 {
-                                    state.system_metrics.inc_speculative_verify_zero_accept();
-                                }
-                                request_acceptance = Some(model_pair_acceptance_rates(
-                                    draft_count,
-                                    accepted_count,
-                                    rejected_count,
-                                ));
-                                completion_tokens_generated =
-                                    completion_tokens_generated.saturating_add(accepted_count);
-                                prompt_already_evaluated = true;
-                                state
-                                    .system_metrics
-                                    .inc_speculative_draft_tokens(draft_count);
-                                state
-                                    .system_metrics
-                                    .inc_speculative_accepted_tokens(accepted_count);
-                                state
-                                    .system_metrics
-                                    .inc_speculative_rejected_tokens(rejected_count);
-
-                                if !result.accepted_tokens.is_empty() {
-                                    let mut ledger = state.ledger.lock().await;
-                                    let receipt = LedgerState::sign_poc_receipt(
-                                        &state.signing_key,
-                                        &draft.work_id,
-                                        &draft.scout_id,
-                                        result.accepted_tokens.len() as u32,
-                                        now_ms(),
-                                    );
-                                    let _ = ledger.apply_poc_receipt(receipt);
-                                }
-
-                                {
-                                    let p95 = state.gossipsub_latency_hist.percentiles().p95_ms;
-                                    let mut penalties = state.scout_penalties.lock().await;
-                                    let status = penalties.apply_update(
-                                        ScoutPenaltyUpdate {
-                                            peer_id: draft.scout_id.clone(),
-                                            accepted: result.first_rejection_idx.is_none(),
-                                            probability_bound: 0.0,
-                                            latency_ms: Some(draft.latency_ms),
-                                            reason: result
-                                                .first_rejection_idx
-                                                .map(|idx| format!("Rejected at token {}", idx)),
-                                        },
-                                        p95,
-                                    );
-
-                                    if status.blackholed {
-                                        let _ = state.ban_tx.try_send((
-                                            draft.scout_id.clone(),
-                                            status.last_reason.unwrap_or_else(|| {
-                                                "Repeated verification failure".to_string()
-                                            }),
-                                        ));
-                                    }
-                                }
-
-                                // Add accepted tokens to output
-                                if !result.accepted_text.is_empty() {
-                                    let clean = strip_control_tokens(result.accepted_text.as_str());
-                                    full_text.push_str(clean.as_str());
-                                }
-
-                                // Record success
-                                let mut tracker = state.scout_timeout_tracker.lock().await;
-                                tracker.record_success();
+                            let scout_timeout_ms =
+                                effective_speculative_timeout_ms(&state, config).await;
+                            if scout_timeout_ms == 0 {
+                                tracing::debug!(
+                                    "skipping speculative dispatch with zero effective timeout"
+                                );
                             } else {
-                                // Handle timeout
-                                let in_cooldown = handle_scout_timeout(&state, config).await;
-                                if in_cooldown {
-                                    tracing::info!("scout in cooldown, using local generation");
+                                dispatch_scout_work(&state, work).await;
+
+                                // Wait for scout draft with adaptive timeout
+                                let draft_start = now_ms();
+                                let draft =
+                                    wait_for_scout_draft(&state, &request_id, scout_timeout_ms)
+                                        .await;
+                                let draft_latency = (now_ms() - draft_start) as u64;
+                                if let Some(mut draft) = draft {
+                                    // Record the measured latency
+                                    draft.latency_ms = draft_latency;
+                                    // Verify the draft against our model
+                                    state.system_metrics.inc_speculative_verify_attempt();
+                                    let result = verify_draft_tokens(
+                                        engine,
+                                        &prompt_tokens,
+                                        &draft.draft_tokens,
+                                    )
+                                    .await;
+                                    let accepted_count = result.accepted_tokens.len() as u64;
+                                    let draft_count = draft.draft_tokens.len() as u64;
+                                    let rejected_count = draft_count.saturating_sub(accepted_count);
+                                    if draft_count > 0 && accepted_count == 0 {
+                                        state.system_metrics.inc_speculative_verify_zero_accept();
+                                    }
+                                    request_acceptance = Some(model_pair_acceptance_rates(
+                                        draft_count,
+                                        accepted_count,
+                                        rejected_count,
+                                    ));
+                                    completion_tokens_generated =
+                                        completion_tokens_generated.saturating_add(accepted_count);
+                                    prompt_already_evaluated = true;
+                                    state
+                                        .system_metrics
+                                        .inc_speculative_draft_tokens(draft_count);
+                                    state
+                                        .system_metrics
+                                        .inc_speculative_accepted_tokens(accepted_count);
+                                    state
+                                        .system_metrics
+                                        .inc_speculative_rejected_tokens(rejected_count);
+
+                                    if !result.accepted_tokens.is_empty() {
+                                        let mut ledger = state.ledger.lock().await;
+                                        let receipt = LedgerState::sign_poc_receipt(
+                                            &state.signing_key,
+                                            &draft.work_id,
+                                            &draft.scout_id,
+                                            result.accepted_tokens.len() as u32,
+                                            now_ms(),
+                                        );
+                                        let _ = ledger.apply_poc_receipt(receipt);
+                                    }
+
+                                    {
+                                        let p95 = state.gossipsub_latency_hist.percentiles().p95_ms;
+                                        let mut penalties = state.scout_penalties.lock().await;
+                                        let status = penalties.apply_update(
+                                            ScoutPenaltyUpdate {
+                                                peer_id: draft.scout_id.clone(),
+                                                accepted: result.first_rejection_idx.is_none(),
+                                                probability_bound: 0.0,
+                                                latency_ms: Some(draft.latency_ms),
+                                                reason: result.first_rejection_idx.map(|idx| {
+                                                    format!("Rejected at token {}", idx)
+                                                }),
+                                            },
+                                            p95,
+                                        );
+
+                                        if status.blackholed {
+                                            let _ = state.ban_tx.try_send((
+                                                draft.scout_id.clone(),
+                                                status.last_reason.unwrap_or_else(|| {
+                                                    "Repeated verification failure".to_string()
+                                                }),
+                                            ));
+                                        }
+                                    }
+
+                                    // Add accepted tokens to output
+                                    if !result.accepted_text.is_empty() {
+                                        let clean =
+                                            strip_control_tokens(result.accepted_text.as_str());
+                                        full_text.push_str(clean.as_str());
+                                    }
+
+                                    // Record success
+                                    let mut tracker = state.scout_timeout_tracker.lock().await;
+                                    tracker.record_success();
+                                } else {
+                                    // Handle timeout
+                                    let in_cooldown = handle_scout_timeout(&state, config).await;
+                                    if in_cooldown {
+                                        tracing::info!("scout in cooldown, using local generation");
+                                    }
                                 }
                             }
                         }
@@ -771,8 +859,9 @@ pub(crate) async fn chat_completions_handler(
 #[cfg(test)]
 mod tests {
     use super::{
-        auth_required, enqueue_scout_work, model_pair_acceptance_rates, resolve_inference_mode,
-        strip_control_tokens, InferenceMode, WorkRequest,
+        auth_required, compute_effective_scout_timeout_ms, enqueue_scout_work,
+        model_pair_acceptance_rates, resolve_inference_mode, strip_control_tokens, InferenceMode,
+        WorkRequest,
     };
     use std::collections::VecDeque;
 
@@ -851,5 +940,13 @@ mod tests {
             queue.back().map(|w| w.request_id.as_str()),
             Some("req-1099")
         );
+    }
+
+    #[test]
+    fn adaptive_timeout_short_circuits_without_active_scouts() {
+        assert_eq!(compute_effective_scout_timeout_ms(30_000, 0, 0), 0);
+        assert_eq!(compute_effective_scout_timeout_ms(30_000, 1, 0), 3500);
+        assert_eq!(compute_effective_scout_timeout_ms(30_000, 2, 0), 7000);
+        assert_eq!(compute_effective_scout_timeout_ms(30_000, 8, 900), 2500);
     }
 }

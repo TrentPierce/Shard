@@ -318,6 +318,7 @@ Execution Backlog (Epics, Tickets, Acceptance Criteria, Sequencing)
   - TODO-NET-BOOTSTRAP-02: `Done (2026-02-25)` Browser libp2p now persists last-known-good bootstrap peers and runs periodic reconnect attempts when peer count drops to zero.
   - TODO-NET-REPUTATION-01: `Done (2026-02-25)` Scout penalty policy now requires sustained failure patterns (longer window + consecutive failures) before blackholing to reduce false-positive bans under WAN jitter.
   - TODO-NET-POLLING-01: `Done (2026-02-25)` Browser scout polling backoff/timeout tuned to reduce control-plane load spikes and transient 502 cascades during bursty scout traffic.
+  - TODO-NET-SCHEDULER-01: `Done (2026-02-25)` Scheduler now uses adaptive speculative wait timeout and skips speculative dispatch when no active scouts are available; scout work publish path is non-blocking to prevent queue backpressure from inflating request latency tails.
   - TODO-WEB-METRICS-01: Investigate and fix `Total tokens generated` remaining at zero on hosted dashboard by tracing metric source alignment between daemon counters and web aggregation pipeline.
   - TODO-OBS-TOKENS-01: Add alert when request success is non-zero but token counters remain zero for >5 minutes.
   - TODO-RUNTIME-QUALITY-01: Add output-degeneration detector/recovery path for repeated-token loops (for example `endendend...`) in verifier output.
