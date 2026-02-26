@@ -341,12 +341,11 @@ pub(crate) async fn verify_draft_tokens(
             // Build top-k indices sorted by descending logit value.
             // Use a partial sort approach: collect (index, logit) pairs,
             // then sort only enough to find the top-k.
-            let mut indexed: Vec<(usize, f32)> = logits
-                .iter()
-                .enumerate()
-                .map(|(i, &v)| (i, v))
-                .collect();
-            indexed.sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+            let mut indexed: Vec<(usize, f32)> =
+                logits.iter().enumerate().map(|(i, &v)| (i, v)).collect();
+            indexed.sort_unstable_by(|a, b| {
+                b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal)
+            });
 
             let best_idx = indexed[0].0;
             let best_val = indexed[0].1;
@@ -359,7 +358,10 @@ pub(crate) async fn verify_draft_tokens(
 
             // Check acceptance: greedy match, top-k overlap, or logit gap
             let greedy_match = best_idx == draft_token as usize;
-            let in_top_k = indexed.iter().take(top_k).any(|(i, _)| *i == draft_token as usize);
+            let in_top_k = indexed
+                .iter()
+                .take(top_k)
+                .any(|(i, _)| *i == draft_token as usize);
             let within_tolerance = logit_gap < logit_tolerance;
 
             let is_accepted = greedy_match || in_top_k || within_tolerance;
@@ -406,7 +408,8 @@ pub(crate) async fn verify_draft_tokens(
                 }
             } else {
                 // First rejection — log the top-5 for diagnostics
-                let top5_tokens: Vec<i32> = indexed.iter().take(5).map(|(i, _)| *i as i32).collect();
+                let top5_tokens: Vec<i32> =
+                    indexed.iter().take(5).map(|(i, _)| *i as i32).collect();
                 tracing::info!(
                     idx,
                     draft_token,
@@ -778,83 +781,78 @@ pub(crate) async fn chat_completions_handler(
 
                     if use_speculative {
                         if let Some(draft) = speculative_draft.take() {
-                                    // Verify the draft against our model
-                                    state.system_metrics.inc_speculative_verify_attempt();
-                                    let result = verify_draft_tokens(
-                                        engine,
-                                        &prompt_tokens,
-                                        &draft.draft_tokens,
-                                    )
+                            // Verify the draft against our model
+                            state.system_metrics.inc_speculative_verify_attempt();
+                            let result =
+                                verify_draft_tokens(engine, &prompt_tokens, &draft.draft_tokens)
                                     .await;
-                                    let accepted_count = result.accepted_tokens.len() as u64;
-                                    let draft_count = draft.draft_tokens.len() as u64;
-                                    let rejected_count = draft_count.saturating_sub(accepted_count);
-                                    if draft_count > 0 && accepted_count == 0 {
-                                        state.system_metrics.inc_speculative_verify_zero_accept();
-                                    }
-                                    request_acceptance = Some(model_pair_acceptance_rates(
-                                        draft_count,
-                                        accepted_count,
-                                        rejected_count,
+                            let accepted_count = result.accepted_tokens.len() as u64;
+                            let draft_count = draft.draft_tokens.len() as u64;
+                            let rejected_count = draft_count.saturating_sub(accepted_count);
+                            if draft_count > 0 && accepted_count == 0 {
+                                state.system_metrics.inc_speculative_verify_zero_accept();
+                            }
+                            request_acceptance = Some(model_pair_acceptance_rates(
+                                draft_count,
+                                accepted_count,
+                                rejected_count,
+                            ));
+                            completion_tokens_generated =
+                                completion_tokens_generated.saturating_add(accepted_count);
+                            prompt_already_evaluated = true;
+                            state
+                                .system_metrics
+                                .inc_speculative_draft_tokens(draft_count);
+                            state
+                                .system_metrics
+                                .inc_speculative_accepted_tokens(accepted_count);
+                            state
+                                .system_metrics
+                                .inc_speculative_rejected_tokens(rejected_count);
+
+                            if !result.accepted_tokens.is_empty() {
+                                let mut ledger = state.ledger.lock().await;
+                                let receipt = LedgerState::sign_poc_receipt(
+                                    &state.signing_key,
+                                    &draft.work_id,
+                                    &draft.scout_id,
+                                    result.accepted_tokens.len() as u32,
+                                    now_ms(),
+                                );
+                                let _ = ledger.apply_poc_receipt(receipt);
+                            }
+
+                            {
+                                let p95 = state.gossipsub_latency_hist.percentiles().p95_ms;
+                                let mut penalties = state.scout_penalties.lock().await;
+                                let status = penalties.apply_update(
+                                    ScoutPenaltyUpdate {
+                                        peer_id: draft.scout_id.clone(),
+                                        accepted: result.first_rejection_idx.is_none(),
+                                        probability_bound: 0.0,
+                                        latency_ms: Some(draft.latency_ms),
+                                        reason: result
+                                            .first_rejection_idx
+                                            .map(|idx| format!("Rejected at token {}", idx)),
+                                    },
+                                    p95,
+                                );
+
+                                if status.blackholed {
+                                    let _ = state.ban_tx.try_send((
+                                        draft.scout_id.clone(),
+                                        status.last_reason.unwrap_or_else(|| {
+                                            "Repeated verification failure".to_string()
+                                        }),
                                     ));
-                                    completion_tokens_generated =
-                                        completion_tokens_generated.saturating_add(accepted_count);
-                                    prompt_already_evaluated = true;
-                                    state
-                                        .system_metrics
-                                        .inc_speculative_draft_tokens(draft_count);
-                                    state
-                                        .system_metrics
-                                        .inc_speculative_accepted_tokens(accepted_count);
-                                    state
-                                        .system_metrics
-                                        .inc_speculative_rejected_tokens(rejected_count);
+                                }
+                            }
 
-                                    if !result.accepted_tokens.is_empty() {
-                                        let mut ledger = state.ledger.lock().await;
-                                        let receipt = LedgerState::sign_poc_receipt(
-                                            &state.signing_key,
-                                            &draft.work_id,
-                                            &draft.scout_id,
-                                            result.accepted_tokens.len() as u32,
-                                            now_ms(),
-                                        );
-                                        let _ = ledger.apply_poc_receipt(receipt);
-                                    }
-
-                                    {
-                                        let p95 = state.gossipsub_latency_hist.percentiles().p95_ms;
-                                        let mut penalties = state.scout_penalties.lock().await;
-                                        let status = penalties.apply_update(
-                                            ScoutPenaltyUpdate {
-                                                peer_id: draft.scout_id.clone(),
-                                                accepted: result.first_rejection_idx.is_none(),
-                                                probability_bound: 0.0,
-                                                latency_ms: Some(draft.latency_ms),
-                                                reason: result.first_rejection_idx.map(|idx| {
-                                                    format!("Rejected at token {}", idx)
-                                                }),
-                                            },
-                                            p95,
-                                        );
-
-                                        if status.blackholed {
-                                            let _ = state.ban_tx.try_send((
-                                                draft.scout_id.clone(),
-                                                status.last_reason.unwrap_or_else(|| {
-                                                    "Repeated verification failure".to_string()
-                                                }),
-                                            ));
-                                        }
-                                    }
-
-                                    // Add accepted tokens to output
-                                    if !result.accepted_text.is_empty() {
-                                        let clean =
-                                            strip_control_tokens(result.accepted_text.as_str());
-                                        full_text.push_str(clean.as_str());
-                                    }
-
+                            // Add accepted tokens to output
+                            if !result.accepted_text.is_empty() {
+                                let clean = strip_control_tokens(result.accepted_text.as_str());
+                                full_text.push_str(clean.as_str());
+                            }
                         }
                     }
 

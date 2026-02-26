@@ -978,7 +978,9 @@ pub(crate) async fn process_draft_submission(
             .map(|issued_at| now_ms().saturating_sub(issued_at) as u64)
     };
     if pending_age_ms.is_none() {
-        state.system_metrics.inc_speculative_wait_mismatched_work_id();
+        state
+            .system_metrics
+            .inc_speculative_wait_mismatched_work_id();
         tracing::warn!(
             work_id = %submission.work_id,
             scout_id = %submission.scout_id,
