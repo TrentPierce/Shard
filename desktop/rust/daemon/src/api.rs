@@ -1032,7 +1032,7 @@ pub(crate) async fn process_draft_submission(
     // (WASM fallback or uninitialized engine). These always fail verification.
     if let Some(ref prompt_ctx) = submission.prompt_context {
         let clean_prompt = prompt_ctx
-            .replace(|c: char| c == '\0', "")
+            .replace('\0', "")
             .trim()
             .to_string();
         let clean_draft = submission.draft_text.trim();
