@@ -266,7 +266,7 @@ pub(crate) async fn peers_handler(
 }
 
 const BROWSER_SESSION_TTL_MS: u128 = 5 * 60 * 1000;
-const DEFAULT_SCOUT_WORK_MAX_AGE_MS: u128 = 15_000;
+const DEFAULT_SCOUT_WORK_MAX_AGE_MS: u128 = 180_000;
 
 fn scout_work_max_age_ms() -> u128 {
     static MAX_AGE_MS: std::sync::OnceLock<u128> = std::sync::OnceLock::new();

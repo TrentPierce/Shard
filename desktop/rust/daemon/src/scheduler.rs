@@ -85,17 +85,18 @@ fn compute_effective_scout_timeout_ms(
     if active_scouts == 0 {
         return 0;
     }
-    let bounded_base = base_timeout_ms.clamp(3000, 45_000);
+    // WAN browser scouts can have high TTFT; allow longer waits by default.
+    let bounded_base = base_timeout_ms.clamp(5_000, 120_000);
     if queue_depth > 768 {
-        return bounded_base.min(12_000);
-    }
-    if active_scouts <= 1 {
         return bounded_base.min(20_000);
     }
-    if active_scouts <= 3 {
-        return bounded_base.min(30_000);
+    if active_scouts <= 1 {
+        return bounded_base.min(90_000);
     }
-    bounded_base
+    if active_scouts <= 3 {
+        return bounded_base.min(75_000);
+    }
+    bounded_base.min(60_000)
 }
 
 async fn estimate_active_scouts(state: &SharedState) -> usize {
