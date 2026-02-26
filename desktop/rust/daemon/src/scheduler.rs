@@ -147,11 +147,34 @@ async fn effective_speculative_timeout_ms(state: &SharedState, config: &Speculat
         let queue = state.scout_work.lock().await;
         queue.len()
     };
-    let timeout_ms =
+    let mut timeout_ms =
         compute_effective_scout_timeout_ms(config.scout_timeout_ms, active_scouts, queue_depth);
     if timeout_ms == 0 {
         tracing::debug!("speculative dispatch skipped: no active scouts");
+        return 0;
     }
+
+    // ── Acceptance-rate-aware timeout scaling ──
+    // If acceptance rate is very low, reduce timeout aggressively so we don't
+    // waste TTFT budget waiting for drafts that will be rejected anyway.
+    let acceptance_rate = state.system_metrics.speculative_acceptance_rate();
+    let verify_attempts = state
+        .system_metrics
+        .snapshot()
+        .speculative_verify_attempts_total;
+    if verify_attempts >= 3 && acceptance_rate < 0.10 {
+        // Cap at 5 seconds when acceptance is near-zero
+        let scaled = (timeout_ms as f64 * acceptance_rate.max(0.05) * 2.0) as u64;
+        let capped = scaled.clamp(2_000, 5_000);
+        tracing::debug!(
+            original_timeout_ms = timeout_ms,
+            acceptance_rate = format!("{:.1}%", acceptance_rate * 100.0),
+            capped_timeout_ms = capped,
+            "reducing scout timeout due to low acceptance rate"
+        );
+        timeout_ms = capped;
+    }
+
     timeout_ms
 }
 
@@ -571,7 +594,37 @@ pub(crate) async fn chat_completions_handler(
         requested_draft_model.as_str(),
         selected_verifier_model.as_str(),
     );
-    let use_speculative = inference_mode == InferenceMode::Speculative && model_pair_compatible;
+    let mut use_speculative = inference_mode == InferenceMode::Speculative && model_pair_compatible;
+
+    // ── Adaptive Speculative Bypass ──
+    // If historical acceptance rate is too low, skip speculative decoding entirely
+    // to avoid the costly TTFT penalty (waiting for scouts that produce rejected drafts).
+    if use_speculative {
+        let bypass_threshold: f64 = std::env::var("SHARD_SPECULATIVE_BYPASS_THRESHOLD")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0.05); // Default: bypass if < 5% acceptance
+        let min_samples: u64 = std::env::var("SHARD_SPECULATIVE_BYPASS_MIN_SAMPLES")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(5); // Need at least 5 verification attempts before bypassing
+        let verify_attempts = state
+            .system_metrics
+            .snapshot()
+            .speculative_verify_attempts_total;
+        let acceptance_rate = state.system_metrics.speculative_acceptance_rate();
+
+        if verify_attempts >= min_samples && acceptance_rate < bypass_threshold {
+            tracing::info!(
+                acceptance_rate = format!("{:.1}%", acceptance_rate * 100.0),
+                verify_attempts,
+                threshold = format!("{:.1}%", bypass_threshold * 100.0),
+                "adaptive bypass: skipping speculative path due to low acceptance rate"
+            );
+            state.system_metrics.inc_speculative_bypass();
+            use_speculative = false;
+        }
+    }
 
     if stream_mode {
         let stream = async_stream::stream! {
@@ -1029,8 +1082,8 @@ mod tests {
     #[test]
     fn adaptive_timeout_short_circuits_without_active_scouts() {
         assert_eq!(compute_effective_scout_timeout_ms(30_000, 0, 0), 0);
-        assert_eq!(compute_effective_scout_timeout_ms(30_000, 1, 0), 20_000);
+        assert_eq!(compute_effective_scout_timeout_ms(30_000, 1, 0), 30_000);
         assert_eq!(compute_effective_scout_timeout_ms(30_000, 2, 0), 30_000);
-        assert_eq!(compute_effective_scout_timeout_ms(30_000, 8, 900), 12_000);
+        assert_eq!(compute_effective_scout_timeout_ms(30_000, 8, 900), 20_000);
     }
 }

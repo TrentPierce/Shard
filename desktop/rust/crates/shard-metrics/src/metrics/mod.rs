@@ -57,6 +57,7 @@ pub struct SystemMetrics {
     transport_webrtc_failure_total: AtomicU64,
     transport_relay_success_total: AtomicU64,
     transport_relay_failure_total: AtomicU64,
+    speculative_bypass_total: AtomicU64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -111,6 +112,7 @@ pub struct SystemMetricsSnapshot {
     pub transport_webrtc_failure_total: u64,
     pub transport_relay_success_total: u64,
     pub transport_relay_failure_total: u64,
+    pub speculative_bypass_total: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -391,6 +393,31 @@ impl SystemMetrics {
     pub fn inc_transport_relay_failure(&self) {
         self.transport_relay_failure_total
             .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn inc_speculative_bypass(&self) {
+        self.speculative_bypass_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Compute the live speculative draft token acceptance rate.
+    /// Returns a value between 0.0 and 1.0.
+    /// Returns 1.0 if no verification attempts have been made yet (optimistic)
+    /// so that speculative decoding is always tried initially.
+    pub fn speculative_acceptance_rate(&self) -> f64 {
+        let attempts = self
+            .speculative_verify_attempts_total
+            .load(Ordering::Relaxed);
+        if attempts == 0 {
+            return 1.0; // No data yet — be optimistic
+        }
+        let zero_accepts = self
+            .speculative_verify_zero_accept_total
+            .load(Ordering::Relaxed);
+        // Rate = 1.0 - (zero_accept_verifications / total_verifications)
+        // This is the fraction of verification rounds that accepted at least one token.
+        let acceptance_round_rate = 1.0 - (zero_accepts as f64 / attempts as f64);
+        acceptance_round_rate.clamp(0.0, 1.0)
     }
 
     pub fn render_prometheus(&self, sample: PrometheusSample) -> String {
@@ -803,6 +830,7 @@ impl SystemMetrics {
             transport_relay_failure_total: self
                 .transport_relay_failure_total
                 .load(Ordering::Relaxed),
+            speculative_bypass_total: self.speculative_bypass_total.load(Ordering::Relaxed),
         }
     }
 }

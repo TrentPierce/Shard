@@ -134,10 +134,10 @@ export async function initP2P(config: P2PConfig = {}): Promise<string> {
       // Peer discovery
       peerDiscovery: bootstrapPeers.length > 0
         ? [
-            bootstrap({
-              list: bootstrapPeers,
-            }),
-          ]
+          bootstrap({
+            list: bootstrapPeers,
+          }),
+        ]
         : [],
 
       // Services
@@ -292,7 +292,11 @@ function extractRemoteAddr(event: any): string | null {
 
 async function reconnectBootstrapPeers(): Promise<void> {
   if (!p2pNode) return;
-  if (p2pNode.getPeers().length > 0) return;
+  // Maintain at least MIN_MESH_PEERS connections for redundancy.
+  // Previously stopped reconnecting at 1 peer, which left the node
+  // vulnerable to single-peer failure.
+  const MIN_MESH_PEERS = 2;
+  if (p2pNode.getPeers().length >= MIN_MESH_PEERS) return;
 
   const reconnectCandidates = sanitizeBootstrapPeers(
     mergeBootstrapPeers(bootstrapPeersSnapshot, readPersistedBootstrapPeers())
