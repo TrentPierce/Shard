@@ -1031,10 +1031,7 @@ pub(crate) async fn process_draft_submission(
     // the prompt context, it means the scout just echoed back the prompt tail
     // (WASM fallback or uninitialized engine). These always fail verification.
     if let Some(ref prompt_ctx) = submission.prompt_context {
-        let clean_prompt = prompt_ctx
-            .replace('\0', "")
-            .trim()
-            .to_string();
+        let clean_prompt = prompt_ctx.replace('\0', "").trim().to_string();
         let clean_draft = submission.draft_text.trim();
         if !clean_prompt.is_empty()
             && !clean_draft.is_empty()
