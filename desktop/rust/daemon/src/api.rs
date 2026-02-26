@@ -906,11 +906,17 @@ pub(crate) async fn pop_work_handler(
     let mut queue = state.scout_work.lock().await;
     let now = now_ms();
     let max_age_ms = scout_work_max_age_ms();
-    while let Some(work) = queue.pop_back() {
+    while let Some(work) = queue.pop_front() {
         let created_at_ms = work.created_at_ms.unwrap_or(now);
         let age_ms = now.saturating_sub(created_at_ms);
         if age_ms <= max_age_ms {
             state.system_metrics.inc_scout_work_assignment();
+            tracing::debug!(
+                request_id = %work.request_id,
+                age_ms,
+                queue_depth = queue.len(),
+                "assigned scout work item"
+            );
             return Json(serde_json::json!({ "work": work }));
         }
         tracing::debug!(
@@ -964,6 +970,28 @@ pub(crate) async fn process_draft_submission(
     submission.work_id = submission.work_id.trim().to_string();
     submission.scout_id = submission.scout_id.trim().to_string();
     state.system_metrics.inc_scout_draft_submission();
+    let pending_age_ms = {
+        let pending = state.speculative_pending.lock().await;
+        pending
+            .get(submission.work_id.as_str())
+            .copied()
+            .map(|issued_at| now_ms().saturating_sub(issued_at) as u64)
+    };
+    if pending_age_ms.is_none() {
+        state.system_metrics.inc_speculative_wait_mismatched_work_id();
+        tracing::warn!(
+            work_id = %submission.work_id,
+            scout_id = %submission.scout_id,
+            "received scout draft for non-pending work_id"
+        );
+    } else if let Some(age_ms) = pending_age_ms {
+        tracing::debug!(
+            work_id = %submission.work_id,
+            scout_id = %submission.scout_id,
+            age_ms,
+            "received scout draft for pending work_id"
+        );
+    }
     if submission.work_id.trim().is_empty() || submission.scout_id.trim().is_empty() {
         state.system_metrics.inc_task_failures();
         state

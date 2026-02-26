@@ -318,8 +318,8 @@ async function submitDraftResult(result: WorkResult): Promise<ScoutSubmissionRes
         const response = await submitDraft(result.work_id, result.draft_text, {
             promptContext: result.prompt_context,
             // Browser scouts can need several seconds for PoW + HTTP + tokenization.
-            timeoutMs: 15000,
-            maxRetries: 1,
+            timeoutMs: 45000,
+            maxRetries: 0,
             retryBackoffMs: 250,
             maxQueueDepth: 16,
         })

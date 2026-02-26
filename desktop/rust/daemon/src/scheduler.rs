@@ -182,13 +182,29 @@ pub(crate) async fn wait_for_scout_draft(
     timeout_ms: u64,
 ) -> Option<ScoutDraft> {
     state.system_metrics.inc_speculative_wait_request();
+    {
+        let mut pending = state.speculative_pending.lock().await;
+        pending.insert(work_id.to_string(), now_ms());
+    }
     let start = now_ms();
     let timeout_deadline = start + timeout_ms as u128;
 
     loop {
         if now_ms() >= timeout_deadline {
             state.system_metrics.inc_speculative_wait_timeout();
-            tracing::debug!("scout draft timeout for work_id: {}", work_id);
+            let age_ms = {
+                let mut pending = state.speculative_pending.lock().await;
+                pending
+                    .remove(work_id)
+                    .map(|issued| now_ms().saturating_sub(issued) as u64)
+                    .unwrap_or(timeout_ms)
+            };
+            tracing::warn!(
+                work_id = %work_id,
+                timeout_ms,
+                wait_age_ms = age_ms,
+                "scout draft timeout"
+            );
             clear_draft_notifier(state, work_id).await;
             return None;
         }
@@ -198,12 +214,20 @@ pub(crate) async fn wait_for_scout_draft(
             by_id.remove(work_id)
         } {
             state.system_metrics.inc_speculative_wait_hit();
+            {
+                let mut pending = state.speculative_pending.lock().await;
+                pending.remove(work_id);
+            }
             clear_draft_notifier(state, work_id).await;
             return Some(scout_draft_from_work_response(&existing));
         }
 
         if let Some(draft) = pop_mailbox_draft(state, work_id).await {
             state.system_metrics.inc_speculative_wait_hit();
+            {
+                let mut pending = state.speculative_pending.lock().await;
+                pending.remove(work_id);
+            }
             clear_draft_notifier(state, work_id).await;
             return Some(draft);
         }

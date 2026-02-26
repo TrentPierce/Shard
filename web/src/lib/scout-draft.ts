@@ -36,7 +36,7 @@ const DEFAULT_CONFIG: ScoutConfig = {
   maxDraftTokens: 4,
   temperature: 0.8,
   topP: 0.9,
-  timeoutMs: 800,
+  timeoutMs: 15000,
   maxRetries: 2,
   retryBackoffMs: 250,
   maxQueueDepth: 16,

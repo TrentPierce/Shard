@@ -750,6 +750,8 @@ pub(crate) struct SharedState {
     scout_draft_mailbox: Arc<Mutex<HashMap<String, VecDeque<ScoutDraft>>>>,
     /// Per-work notifiers used by waiters to wake when matching drafts arrive.
     scout_draft_notifiers: Arc<Mutex<HashMap<String, Arc<Notify>>>>,
+    /// Pending speculative requests keyed by work/request id with issue timestamp.
+    speculative_pending: Arc<Mutex<HashMap<String, u128>>>,
     /// Channel for announcing bans to the network
     ban_tx: mpsc::Sender<(String, String)>,
     /// Timeout tracker for speculative decoding
@@ -2275,6 +2277,7 @@ async fn main() -> Result<()> {
         scout_draft_rx: Arc::new(Mutex::new(Some(scout_draft_rx))),
         scout_draft_mailbox: Arc::new(Mutex::new(HashMap::new())),
         scout_draft_notifiers: Arc::new(Mutex::new(HashMap::new())),
+        speculative_pending: Arc::new(Mutex::new(HashMap::new())),
         ban_tx,
         scout_timeout_tracker: Arc::new(Mutex::new(ScoutTimeoutTracker::new())),
         bootstrap_failures: Arc::new(Mutex::new(HashMap::new())),
