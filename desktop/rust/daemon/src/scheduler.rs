@@ -42,6 +42,17 @@ fn model_pair_acceptance_rates(
     )
 }
 
+fn speculative_logit_tolerance() -> f32 {
+    static TOL: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
+    *TOL.get_or_init(|| {
+        std::env::var("SHARD_SPECULATIVE_LOGIT_TOLERANCE")
+            .ok()
+            .and_then(|v| v.parse::<f32>().ok())
+            .filter(|v| *v >= 0.0 && v.is_finite())
+            .unwrap_or(4.0)
+    })
+}
+
 const DEFAULT_SCOUT_WORK_QUEUE_MAX: usize = 1024;
 
 fn scout_work_queue_max() -> usize {
@@ -304,6 +315,7 @@ pub(crate) async fn verify_draft_tokens(
     let vocab_size = 128256;
 
     // 2. Step through each draft token and check if the model would have predicted it
+    let logit_tolerance = speculative_logit_tolerance();
     for (idx, &draft_token) in draft_tokens.iter().enumerate() {
         if let Ok(logits) = engine.get_logits(vocab_size) {
             // Find the argmax (greedy acceptance)
@@ -317,12 +329,13 @@ pub(crate) async fn verify_draft_tokens(
             }
 
             // Probability bound check:
-            // Either greedy match OR the draft token is within 1.0 log-probability of the best
+            // Either greedy match OR the draft token is within tolerance of best log-probability.
             let draft_logit = logits
                 .get(draft_token as usize)
                 .copied()
                 .unwrap_or(-f32::INFINITY);
-            let is_accepted = best_idx == draft_token as usize || (best_val - draft_logit) < 1.0;
+            let is_accepted =
+                best_idx == draft_token as usize || (best_val - draft_logit) < logit_tolerance;
 
             if is_accepted {
                 // Token accepted
