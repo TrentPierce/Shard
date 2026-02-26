@@ -1,0 +1,5 @@
+# Local benchmark artifacts
+results/
+__pycache__/
+scenarios.live.*.json
+*.tmp.json

@@ -66,7 +66,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const stopScoutWorkerRef = useRef<(() => void) | null>(null)
     const stopLayerHostRef = useRef<(() => void) | null>(null)
 
-    const { data: topology, refetch: refetchTopologyData } = useQuery({
+    const { data: topology } = useQuery({
         queryKey: ["topology"],
         queryFn: fetchTopology,
         refetchInterval: 10000,
@@ -147,8 +147,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             scoutBootedRef.current = true
 
             try {
-                await refetchTopologyData()
-
                 if (PREFER_LOCAL_SHARD) {
                     const probe = await probeLocalShard()
                     if (probe.available) {
@@ -241,11 +239,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         }
 
         boot()
+    }, [scoutRetryNonce, getBootstrapPeersFromTopology])
+
+    useEffect(() => {
         return () => {
             stopScoutWorkerRef.current?.()
             stopLayerHostRef.current?.()
         }
-    }, [scoutRetryNonce, getBootstrapPeersFromTopology, refetchTopologyData])
+    }, [])
 
     const rustStatus: RustStatus =
         healthStatus === "ok" && topology?.status === "ok"
