@@ -47,11 +47,15 @@ export type DraftGenerationOptions = {
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
-// Small model suitable for draft generation (Llama-3.2-1B-Instruct is ideal)
-const DRAFT_MODEL = "Llama-3.2-1B-Instruct-q4f32_1-MLC"
+// Keep scout draft model aligned with verifier family to maximize acceptance.
+const DRAFT_MODEL = "TinyLlama-1.1B-Chat-v1.0-q4f32_1-MLC"
 
-// Nano model for mobile devices (highly quantized for 4GB RAM limit)
-const NANO_MODEL = "Llama-3.2-1B-Instruct-q4f16_0-MLC"
+// Lower-memory TinyLlama variant for mobile devices.
+const NANO_MODEL = "TinyLlama-1.1B-Chat-v1.0-q4f16_1-MLC"
+
+// Compatibility fallback if TinyLlama artifacts fail to load on a specific browser build.
+const FALLBACK_DRAFT_MODEL = "Llama-3.2-1B-Instruct-q4f32_1-MLC"
+const FALLBACK_NANO_MODEL = "Llama-3.2-1B-Instruct-q4f16_1-MLC"
 
 // Mobile device memory threshold (4GB in bytes)
 const MOBILE_MEMORY_THRESHOLD = 4 * 1024 * 1024 * 1024
@@ -160,6 +164,10 @@ export function isMobileDevice(): boolean {
  * @returns The model ID to use for this device
  */
 export function getModelForDevice(): string {
+    const override = process.env.NEXT_PUBLIC_SCOUT_MODEL?.trim()
+    if (override) {
+        return override
+    }
     if (isMobileDevice()) {
         console.log("[WebLLM] Mobile device detected, using Nano model:", NANO_MODEL)
         return NANO_MODEL
@@ -266,52 +274,60 @@ export async function initWebLLM(
         const model = getModelForDevice()
         currentModel = model
 
-        try {
-            if (preferDirectEngineOnThisPlatform()) {
-                // On Windows Chromium builds, worker bootstrap commonly throws
-                // GPUDevice.lost Illegal invocation/FFI binding errors.
-                // Direct engine avoids this noisy failure path.
-                engine = await CreateMLCEngine(
-                    model,
-                    {
-                        initProgressCallback: wrappedCallback,
-                        logLevel: "INFO",
-                    },
-                    {
-                        context_window_size: 2048,
-                    }
-                )
-            } else {
-                // Preferred path: background worker engine.
-                const worker = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' })
-                engine = await CreateWebWorkerMLCEngine(
-                    worker,
-                    model,
-                    {
-                        initProgressCallback: wrappedCallback,
-                        logLevel: "INFO",
-                    },
-                    {
-                        // Use a smaller context window for draft generation
-                        context_window_size: 2048,
-                    }
-                )
-            }
-        } catch (workerError: any) {
-            if (!isWorkerInitBug(workerError)) {
-                throw workerError
-            }
-            console.warn("[WebLLM] Worker init failed; retrying in direct-engine mode", workerError)
-            engine = await CreateMLCEngine(
-                model,
-                {
-                    initProgressCallback: wrappedCallback,
-                    logLevel: "INFO",
-                },
-                {
-                    context_window_size: 2048,
+        const loadModel = async (modelId: string): Promise<MLCEngineInterface> => {
+            try {
+                if (preferDirectEngineOnThisPlatform()) {
+                    return await CreateMLCEngine(
+                        modelId,
+                        {
+                            initProgressCallback: wrappedCallback,
+                            logLevel: "INFO",
+                        },
+                        {
+                            context_window_size: 2048,
+                        }
+                    )
                 }
-            )
+                const worker = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' })
+                return await CreateWebWorkerMLCEngine(
+                    worker,
+                    modelId,
+                    {
+                        initProgressCallback: wrappedCallback,
+                        logLevel: "INFO",
+                    },
+                    {
+                        context_window_size: 2048,
+                    }
+                )
+            } catch (workerError: any) {
+                if (!isWorkerInitBug(workerError)) {
+                    throw workerError
+                }
+                console.warn("[WebLLM] Worker init failed; retrying in direct-engine mode", workerError)
+                return await CreateMLCEngine(
+                    modelId,
+                    {
+                        initProgressCallback: wrappedCallback,
+                        logLevel: "INFO",
+                    },
+                    {
+                        context_window_size: 2048,
+                    }
+                )
+            }
+        }
+
+        try {
+            engine = await loadModel(model)
+        } catch (modelError) {
+            const fallbackModel = isMobileDevice() ? FALLBACK_NANO_MODEL : FALLBACK_DRAFT_MODEL
+            if (model === fallbackModel) {
+                throw modelError
+            }
+            console.warn(`[WebLLM] Failed to load ${model}; falling back to ${fallbackModel}`, modelError)
+            engine = await loadModel(fallbackModel)
+            currentModel = fallbackModel
         }
 
         isLoading = false
