@@ -133,6 +133,44 @@ async fn effective_speculative_timeout_ms(state: &SharedState, config: &Speculat
     timeout_ms
 }
 
+async fn fetch_speculative_draft(
+    state: &SharedState,
+    request_id: &str,
+    prompt: &str,
+    config: &SpeculativeConfig,
+) -> Option<ScoutDraft> {
+    let work = WorkRequest {
+        request_id: request_id.to_string(),
+        prompt_context: prompt.to_string(),
+        min_tokens: config.draft_token_count as i32,
+        created_at_ms: Some(now_ms()),
+    };
+
+    let scout_timeout_ms = effective_speculative_timeout_ms(state, config).await;
+    if scout_timeout_ms == 0 {
+        tracing::debug!("skipping speculative dispatch with zero effective timeout");
+        return None;
+    }
+
+    dispatch_scout_work(state, work).await;
+
+    let draft_start = now_ms();
+    let draft = wait_for_scout_draft(state, request_id, scout_timeout_ms).await;
+    let draft_latency = (now_ms() - draft_start) as u64;
+    if let Some(mut draft) = draft {
+        draft.latency_ms = draft_latency;
+        let mut tracker = state.scout_timeout_tracker.lock().await;
+        tracker.record_success();
+        Some(draft)
+    } else {
+        let in_cooldown = handle_scout_timeout(state, config).await;
+        if in_cooldown {
+            tracing::info!("scout in cooldown, using local generation");
+        }
+        None
+    }
+}
+
 fn scout_draft_from_work_response(response: &WorkResponse) -> ScoutDraft {
     ScoutDraft {
         work_id: response.request_id.clone(),
@@ -453,6 +491,15 @@ pub(crate) async fn chat_completions_handler(
         let stream = async_stream::stream! {
             let mut request_acceptance: Option<(f64, f64)> = None;
             let mut completion_tokens_generated: u64 = 0;
+            let mut speculative_draft = if use_speculative {
+                if let Some(ref config) = speculative_config {
+                    fetch_speculative_draft(&state, &request_id, &prompt, config).await
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
             let mut engine_guard = state.engine.lock().await;
             if let Some(engine) = engine_guard.as_mut() {
                 if let Ok(mut tokens) = engine.tokenize(&prompt, 4096) {
@@ -466,29 +513,7 @@ pub(crate) async fn chat_completions_handler(
                     let mut prompt_already_evaluated = false;
 
                     if use_speculative {
-                        if let Some(ref config) = speculative_config {
-                            // Dispatch work to scouts
-                            let work = WorkRequest {
-                                request_id: request_id.clone(),
-                                prompt_context: prompt.clone(),
-                                min_tokens: config.draft_token_count as i32,
-                                created_at_ms: Some(now_ms()),
-                            };
-                            let scout_timeout_ms =
-                                effective_speculative_timeout_ms(&state, config).await;
-                            if scout_timeout_ms == 0 {
-                                tracing::debug!("skipping speculative dispatch with zero effective timeout");
-                            } else {
-                                dispatch_scout_work(&state, work).await;
-
-                                // Wait for scout draft with adaptive timeout
-                                let draft_start = now_ms();
-                                let draft =
-                                    wait_for_scout_draft(&state, &request_id, scout_timeout_ms).await;
-                                let draft_latency = (now_ms() - draft_start) as u64;
-                                if let Some(mut draft) = draft {
-                                // Record the measured latency
-                                draft.latency_ms = draft_latency;
+                        if let Some(draft) = speculative_draft.take() {
                                 // Verify the draft against our model
                                 state.system_metrics.inc_speculative_verify_attempt();
                                 let result = verify_draft_tokens(engine, &prompt_tokens, &draft.draft_tokens).await;
@@ -554,17 +579,6 @@ pub(crate) async fn chat_completions_handler(
                                     }
                                 }
 
-                                    // Record success
-                                    let mut tracker = state.scout_timeout_tracker.lock().await;
-                                    tracker.record_success();
-                                } else {
-                                    // Handle timeout
-                                    let in_cooldown = handle_scout_timeout(&state, config).await;
-                                    if in_cooldown {
-                                        tracing::info!("scout in cooldown, using local generation");
-                                    }
-                                }
-                            }
                         }
                     }
 
@@ -657,6 +671,15 @@ pub(crate) async fn chat_completions_handler(
         let mut request_acceptance: Option<(f64, f64)> = None;
         let mut prompt_token_count: u64 = 0;
         let mut completion_tokens_generated: u64 = 0;
+        let mut speculative_draft = if use_speculative {
+            if let Some(ref config) = speculative_config {
+                fetch_speculative_draft(&state, &request_id, &prompt, config).await
+            } else {
+                None
+            }
+        } else {
+            None
+        };
         {
             let mut engine_guard = state.engine.lock().await;
             if let Some(engine) = engine_guard.as_mut() {
@@ -671,31 +694,7 @@ pub(crate) async fn chat_completions_handler(
                     let mut prompt_already_evaluated = false;
 
                     if use_speculative {
-                        if let Some(ref config) = speculative_config {
-                            let work = WorkRequest {
-                                request_id: request_id.clone(),
-                                prompt_context: prompt.clone(),
-                                min_tokens: config.draft_token_count as i32,
-                                created_at_ms: Some(now_ms()),
-                            };
-                            let scout_timeout_ms =
-                                effective_speculative_timeout_ms(&state, config).await;
-                            if scout_timeout_ms == 0 {
-                                tracing::debug!(
-                                    "skipping speculative dispatch with zero effective timeout"
-                                );
-                            } else {
-                                dispatch_scout_work(&state, work).await;
-
-                                // Wait for scout draft with adaptive timeout
-                                let draft_start = now_ms();
-                                let draft =
-                                    wait_for_scout_draft(&state, &request_id, scout_timeout_ms)
-                                        .await;
-                                let draft_latency = (now_ms() - draft_start) as u64;
-                                if let Some(mut draft) = draft {
-                                    // Record the measured latency
-                                    draft.latency_ms = draft_latency;
+                        if let Some(draft) = speculative_draft.take() {
                                     // Verify the draft against our model
                                     state.system_metrics.inc_speculative_verify_attempt();
                                     let result = verify_draft_tokens(
@@ -773,17 +772,6 @@ pub(crate) async fn chat_completions_handler(
                                         full_text.push_str(clean.as_str());
                                     }
 
-                                    // Record success
-                                    let mut tracker = state.scout_timeout_tracker.lock().await;
-                                    tracker.record_success();
-                                } else {
-                                    // Handle timeout
-                                    let in_cooldown = handle_scout_timeout(&state, config).await;
-                                    if in_cooldown {
-                                        tracing::info!("scout in cooldown, using local generation");
-                                    }
-                                }
-                            }
                         }
                     }
 
