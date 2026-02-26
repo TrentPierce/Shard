@@ -961,6 +961,8 @@ pub(crate) async fn process_draft_submission(
     state: &SharedState,
     mut submission: DraftResultSubmission,
 ) -> Json<serde_json::Value> {
+    submission.work_id = submission.work_id.trim().to_string();
+    submission.scout_id = submission.scout_id.trim().to_string();
     state.system_metrics.inc_scout_draft_submission();
     if submission.work_id.trim().is_empty() || submission.scout_id.trim().is_empty() {
         state.system_metrics.inc_task_failures();

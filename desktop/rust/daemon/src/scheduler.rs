@@ -85,15 +85,15 @@ fn compute_effective_scout_timeout_ms(
     if active_scouts == 0 {
         return 0;
     }
-    let bounded_base = base_timeout_ms.clamp(1200, 12000);
+    let bounded_base = base_timeout_ms.clamp(3000, 45_000);
     if queue_depth > 768 {
-        return bounded_base.min(2500);
+        return bounded_base.min(12_000);
     }
     if active_scouts <= 1 {
-        return bounded_base.min(3500);
+        return bounded_base.min(20_000);
     }
     if active_scouts <= 3 {
-        return bounded_base.min(7000);
+        return bounded_base.min(30_000);
     }
     bounded_base
 }
@@ -164,8 +164,8 @@ pub(crate) async fn wait_for_scout_draft(
 
         // Fast path: a draft may already be recorded in idempotent results.
         if let Some(existing) = {
-            let by_id = state.idempotent_results.lock().await;
-            by_id.get(work_id).cloned()
+            let mut by_id = state.idempotent_results.lock().await;
+            by_id.remove(work_id)
         } {
             state.system_metrics.inc_speculative_wait_hit();
             return Some(scout_draft_from_work_response(&existing));
@@ -413,7 +413,7 @@ pub(crate) async fn chat_completions_handler(
     }
     prompt.push_str("<|start_header_id|>assistant<|end_header_id|>\n\n");
 
-    let request_id = format!("req-{}", now_ms());
+    let request_id = format!("req-{}", uuid::Uuid::new_v4());
     let request_started_ms = now_ms();
     let requested_draft_model = req
         .model
@@ -945,8 +945,8 @@ mod tests {
     #[test]
     fn adaptive_timeout_short_circuits_without_active_scouts() {
         assert_eq!(compute_effective_scout_timeout_ms(30_000, 0, 0), 0);
-        assert_eq!(compute_effective_scout_timeout_ms(30_000, 1, 0), 3500);
-        assert_eq!(compute_effective_scout_timeout_ms(30_000, 2, 0), 7000);
-        assert_eq!(compute_effective_scout_timeout_ms(30_000, 8, 900), 2500);
+        assert_eq!(compute_effective_scout_timeout_ms(30_000, 1, 0), 20_000);
+        assert_eq!(compute_effective_scout_timeout_ms(30_000, 2, 0), 30_000);
+        assert_eq!(compute_effective_scout_timeout_ms(30_000, 8, 900), 12_000);
     }
 }
