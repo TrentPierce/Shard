@@ -1419,15 +1419,17 @@ async fn ensure_data_dir() -> Result<std::path::PathBuf> {
             let fallback = std::env::current_dir()
                 .unwrap_or_else(|_| std::path::PathBuf::from("."))
                 .join(".shard-data");
-            tokio::fs::create_dir_all(&fallback).await.map_err(|fallback_error| {
-                anyhow::anyhow!(
-                    "failed to initialize data dir at {} ({}) and fallback {} ({})",
-                    primary.display(),
-                    primary_error,
-                    fallback.display(),
-                    fallback_error
-                )
-            })?;
+            tokio::fs::create_dir_all(&fallback)
+                .await
+                .map_err(|fallback_error| {
+                    anyhow::anyhow!(
+                        "failed to initialize data dir at {} ({}) and fallback {} ({})",
+                        primary.display(),
+                        primary_error,
+                        fallback.display(),
+                        fallback_error
+                    )
+                })?;
             tracing::warn!(
                 primary = %primary.display(),
                 fallback = %fallback.display(),
