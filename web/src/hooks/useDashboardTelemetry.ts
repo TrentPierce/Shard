@@ -32,7 +32,10 @@ export function useDashboardTelemetry(): DashboardTelemetry {
   }, [isConnected, telemetry.globalTflops, telemetry.throughputHistory, lastKnownTps])
 
   const totalTokensGenerated = useMemo(() => {
-    const liveTotal = telemetry.contributors.reduce((acc, item) => acc + item.tokensProcessed, 0)
+    const liveTotal = Math.max(
+      telemetry.totalTokensGenerated,
+      telemetry.contributors.reduce((acc, item) => acc + item.tokensProcessed, 0),
+    )
 
     if (liveTotal > 0) {
       liveTotalRef.current = liveTotal
@@ -42,7 +45,7 @@ export function useDashboardTelemetry(): DashboardTelemetry {
     const base = liveTotalRef.current
 
     return base > 0 ? base + tokensPerSecond * 8 : 0
-  }, [telemetry.contributors, tokensPerSecond])
+  }, [telemetry.contributors, telemetry.totalTokensGenerated, tokensPerSecond])
 
   return {
     verifierNodes: telemetry.shardCount,

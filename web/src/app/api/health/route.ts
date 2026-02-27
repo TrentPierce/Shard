@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { fetchWithBackendFailover, shardBackendUrls } from "@/lib/server/shard-backend"
+import { deriveHealthState, healthStateToLegacyStatus } from "@/lib/server/health-state"
 import { SHARD_VERSION } from "@/lib/version"
 
 export const dynamic = "force-dynamic"
@@ -64,11 +65,13 @@ export async function GET() {
     const data = await response.json().catch(() => ({}))
     updateActivitySnapshot(data)
     const cached = readFreshActivitySnapshot()
+    const healthState = deriveHealthState(data, response.ok)
 
     if (!response.ok) {
       return NextResponse.json(
         {
-          status: "degraded",
+          status: healthStateToLegacyStatus(healthState),
+          health_state: healthState,
           readiness_reason: "backend_non_ok",
           ready_for_inference: false,
           active_browser_sessions: cached?.active_browser_sessions ?? 0,
@@ -89,14 +92,24 @@ export async function GET() {
     }
 
     return NextResponse.json(
-      { ...data, backend, backend_attempts: attempts, latency_ms: latencyMs, web_version: SHARD_VERSION },
+      {
+        ...data,
+        status: data?.status ?? healthStateToLegacyStatus(healthState),
+        health_state: healthState,
+        backend,
+        backend_attempts: attempts,
+        latency_ms: latencyMs,
+        web_version: SHARD_VERSION,
+      },
       { status: 200 },
     )
   } catch (error) {
     const cached = readFreshActivitySnapshot()
+    const healthState = deriveHealthState(null, false)
     return NextResponse.json(
       {
-        status: "degraded",
+        status: healthStateToLegacyStatus(healthState),
+        health_state: healthState,
         readiness_reason: "backend_unreachable",
         ready_for_inference: false,
         active_browser_sessions: cached?.active_browser_sessions ?? 0,

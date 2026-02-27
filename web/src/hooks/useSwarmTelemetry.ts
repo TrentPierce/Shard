@@ -16,11 +16,13 @@ type ThroughputSample = {
 }
 
 type SwarmTelemetrySnapshot = {
+  healthState: "ready" | "degraded" | "unavailable"
   globalTflops: number
   scoutCount: number
   shardCount: number
   throughputHistory: ThroughputSample[]
   contributors: Contributor[]
+  totalTokensGenerated: number
 }
 
 async function fetchRealTelemetry(): Promise<SwarmTelemetrySnapshot> {
@@ -34,25 +36,37 @@ async function fetchRealTelemetry(): Promise<SwarmTelemetrySnapshot> {
     }
   }
 
-  const [proxyHealth, proxyPeersData, proxyTopo] = await Promise.all([
+  const [proxyHealth, proxyPeersData, proxyTopo, proxyMetrics] = await Promise.all([
     fetchJson("/api/health"),
     fetchJson("/api/v1/system/peers"),
     fetchJson("/api/v1/system/topology"),
+    fetchJson("/api/v1/metrics/summary"),
   ])
 
   let localHealth: any | null = null
   let localPeersData: any | null = null
   let localTopo: any | null = null
+  let localMetrics: any | null = null
 
   if (canUseLocalDaemonFallback()) {
-    ;[localHealth, localPeersData, localTopo] = await Promise.all([
+    ;[localHealth, localPeersData, localTopo, localMetrics] = await Promise.all([
       fetchJson(localDaemonUrl("/health")),
       fetchJson(localDaemonUrl("/v1/system/peers")),
       fetchJson(localDaemonUrl("/v1/system/topology")),
+      fetchJson(localDaemonUrl("/metrics/summary")),
     ])
   }
 
-  if (!proxyHealth && !proxyPeersData && !proxyTopo && !localHealth && !localPeersData && !localTopo) {
+  if (
+    !proxyHealth &&
+    !proxyPeersData &&
+    !proxyTopo &&
+    !proxyMetrics &&
+    !localHealth &&
+    !localPeersData &&
+    !localTopo &&
+    !localMetrics
+  ) {
     throw new Error("All API endpoints unreachable")
   }
 
@@ -60,6 +74,14 @@ async function fetchRealTelemetry(): Promise<SwarmTelemetrySnapshot> {
   const health = localHealth ?? proxyHealth
   const peersData = localPeersData ?? proxyPeersData
   const topo = localTopo ?? proxyTopo
+  const metrics = localMetrics ?? proxyMetrics
+  const rawHealthState = String(health?.health_state ?? health?.status ?? "").toLowerCase()
+  const healthState: "ready" | "degraded" | "unavailable" =
+    rawHealthState === "ready" || rawHealthState === "ok"
+      ? "ready"
+      : rawHealthState === "unavailable"
+      ? "unavailable"
+      : "degraded"
 
   // Get peer count - handle both {peers: [...]} and {count: N} formats
   const peersList = peersData?.peers ?? []
@@ -96,6 +118,12 @@ async function fetchRealTelemetry(): Promise<SwarmTelemetrySnapshot> {
     ? (capacity * scoutCount * 0.1 * (1 - load / Math.max(capacity, 1)))
     : 0
   const globalTflops = Math.round((baseTflops + scoutTflops) * 100) / 100
+  const tokensProcessedTotal = Math.max(0, Number(metrics?.tokens_processed_total ?? 0) || 0)
+  const tokensOffloadedToScoutsTotal = Math.max(
+    0,
+    Number(metrics?.tokens_offloaded_to_scouts_total ?? 0) || 0,
+  )
+  const totalTokensGenerated = tokensProcessedTotal + tokensOffloadedToScoutsTotal
 
   // Build contributor list: start with the Shard node itself
   const contributors: Contributor[] = []
@@ -105,7 +133,7 @@ async function fetchRealTelemetry(): Promise<SwarmTelemetrySnapshot> {
     contributors.push({
       id: localPeerId.slice(0, 16),
       role: "Shard",
-      tokensProcessed: 0, // TODO: Real token tracking
+      tokensProcessed: tokensProcessedTotal,
       efficiency: bitnetLoaded ? 95 : 50,
     })
   }
@@ -128,16 +156,20 @@ async function fetchRealTelemetry(): Promise<SwarmTelemetrySnapshot> {
     shardCount,
     throughputHistory: [],
     contributors,
+    totalTokensGenerated,
+    healthState,
   }
 }
 
 export function useSwarmTelemetry() {
   const [telemetry, setTelemetry] = useState<SwarmTelemetrySnapshot>({
+    healthState: "unavailable",
     globalTflops: 0,
     scoutCount: 0,
     shardCount: 0,
     throughputHistory: [],
-    contributors: []
+    contributors: [],
+    totalTokensGenerated: 0,
   })
   const [isConnected, setIsConnected] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
@@ -166,13 +198,15 @@ export function useSwarmTelemetry() {
           : contributorsRef.current
 
         setTelemetry({
+          healthState: data.healthState,
           globalTflops: data.globalTflops,
           scoutCount: data.scoutCount,
           shardCount: data.shardCount,
           throughputHistory: historyRef.current,
-          contributors: contributorsRef.current
+          contributors: contributorsRef.current,
+          totalTokensGenerated: data.totalTokensGenerated,
         })
-        setIsConnected(true)
+        setIsConnected(data.healthState !== "unavailable")
       } catch (e) {
         console.error("Telemetry poll failed:", e)
         if (!isUnmounted) {
@@ -204,8 +238,12 @@ export function useSwarmTelemetry() {
   }, [])
 
   const statusLabel = useMemo(
-    () => (isConnected ? "LIVE" : "OFFLINE"),
-    [isConnected],
+    () => {
+      if (telemetry.healthState === "ready") return "READY"
+      if (telemetry.healthState === "degraded") return "DEGRADED"
+      return "OFFLINE"
+    },
+    [telemetry.healthState],
   )
 
   return { telemetry, isConnected, isLoading, statusLabel }
