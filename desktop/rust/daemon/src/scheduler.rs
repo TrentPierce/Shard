@@ -98,11 +98,8 @@ async fn dispatch_scout_work(state: &SharedState, work: WorkRequest) {
             // This avoids losing speculative opportunities during short bursts.
             let work_tx = state.work_tx.clone();
             tokio::spawn(async move {
-                match tokio::time::timeout(
-                    std::time::Duration::from_millis(25),
-                    work_tx.send(work),
-                )
-                .await
+                match tokio::time::timeout(std::time::Duration::from_millis(25), work_tx.send(work))
+                    .await
                 {
                     Ok(Ok(())) => {
                         tracing::debug!("work publish channel recovered via fallback send");
@@ -111,9 +108,7 @@ async fn dispatch_scout_work(state: &SharedState, work: WorkRequest) {
                         tracing::warn!("work publish channel closed during fallback send");
                     }
                     Err(_) => {
-                        tracing::warn!(
-                            "work publish channel saturated; fallback send timed out"
-                        );
+                        tracing::warn!("work publish channel saturated; fallback send timed out");
                     }
                 }
             });
