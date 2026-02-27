@@ -329,6 +329,7 @@ Execution Backlog (Epics, Tickets, Acceptance Criteria, Sequencing)
   - TODO-SCOUT-INGRESS-02: `Done (2026-02-25)` Hardened `/api/v1/scout/work` and `/api/v1/scout/draft` proxy resilience under sustained load (graceful degrade behavior, timeout/failover tuning, and explicit error semantics) so browser scouts do not churn on transient backend stalls.
   - TODO-SCOUT-INGRESS-03: `Done (2026-02-27)` Added proxy-side backend cooldown/load-shedding for scout work/draft routes to avoid failure amplification and request storms when backend is already degraded.
   - TODO-WEB-PROXY-01: Add explicit proxy-side SLI for `/api/v1/chat/completions` (5xx rate, timeout rate, and backend-attempt labels) and alert if health is `ok` while chat proxy 5xx exceeds 5% for 5 minutes.
+  - TODO-MODEL-ALIGN-01: `Done (2026-02-27)` Default scout and verifier model IDs are now aligned on `meta-llama/Llama-3.2-1B`; runtime compatibility logic normalizes legacy aliases (`shard-hybrid`, `default-model`, `llama-3.2-1b-draft`) to preserve backward compatibility while enforcing a single canonical model identity.
 
   ## 10. Post-Readiness Remediation Backlog (2026-02-25)
 
