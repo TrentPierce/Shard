@@ -116,7 +116,8 @@ impl LedgerState {
 
     pub fn export_range(&self, from_height: u64, limit: usize) -> LedgerExport {
         let start = from_height.saturating_sub(1) as usize;
-        if start >= (self.tx_log.len() + self.receipts.len()) || limit == 0 {
+        let total_entries = self.tx_log.len() + self.receipts.len();
+        if start >= total_entries || limit == 0 {
             return LedgerExport {
                 from_height,
                 end_height: from_height.saturating_sub(1),
@@ -126,16 +127,36 @@ impl LedgerState {
             };
         }
 
-        // Very basic export for now
-        let end_exclusive = (start + limit).min(self.tx_log.len());
-        let txs = self.tx_log[start..end_exclusive].to_vec();
+        let end_exclusive = (start + limit).min(total_entries);
+
+        let tx_start = start.min(self.tx_log.len());
+        let tx_end = end_exclusive.min(self.tx_log.len());
+        let txs = if tx_start < tx_end {
+            self.tx_log[tx_start..tx_end].to_vec()
+        } else {
+            Vec::new()
+        };
+
+        let receipt_base = self.tx_log.len();
+        let receipts_start = start.saturating_sub(receipt_base);
+        let receipts_end = end_exclusive
+            .saturating_sub(receipt_base)
+            .min(self.receipts.len());
+        let receipts = if receipts_start < receipts_end {
+            self.receipts[receipts_start..receipts_end].to_vec()
+        } else {
+            Vec::new()
+        };
+
+        let returned_count = txs.len() + receipts.len();
+        let end_height = from_height + returned_count.saturating_sub(1) as u64;
 
         LedgerExport {
             from_height,
-            end_height: end_exclusive as u64,
-            has_more: end_exclusive < self.tx_log.len(),
+            end_height,
+            has_more: end_exclusive < total_entries,
             txs,
-            receipts: Vec::new(),
+            receipts,
         }
     }
 
@@ -387,4 +408,53 @@ fn signing_payload(
     format!(
         "{tx_id}|{from_wallet}|{to_wallet}|{amount}|{request_id}|{step_id}|{nonce}|{created_at_ms}|{signer_pubkey_hex}"
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{LedgerState, ProofOfComputeReceipt};
+    use ed25519_dalek::SigningKey;
+
+    fn sample_receipt(id: usize) -> ProofOfComputeReceipt {
+        ProofOfComputeReceipt {
+            receipt_id: format!("receipt-{id}"),
+            work_id: format!("work-{id}"),
+            scout_id: format!("scout-{id}"),
+            verifier_id: "00".repeat(32),
+            token_count: 4,
+            timestamp_ms: id as u128,
+            verifier_signature_hex: "11".repeat(64),
+        }
+    }
+
+    #[test]
+    fn export_range_receipts_only_does_not_panic() {
+        let mut ledger = LedgerState::default();
+        ledger.receipts.push(sample_receipt(1));
+        ledger.receipts.push(sample_receipt(2));
+
+        let export = ledger.export_range(2, 4);
+        assert_eq!(export.from_height, 2);
+        assert_eq!(export.end_height, 2);
+        assert!(export.txs.is_empty());
+        assert_eq!(export.receipts.len(), 1);
+        assert_eq!(export.receipts[0].receipt_id, "receipt-2");
+    }
+
+    #[test]
+    fn export_range_spans_txs_and_receipts() {
+        let mut ledger = LedgerState::default();
+        let signer = SigningKey::from_bytes(&[7u8; 32]);
+        let tx = LedgerState::sign_reward_tx(
+            &signer, "wallet-a", "wallet-b", 5, "req-1", "step-1", 1, 1000,
+        );
+        ledger.tx_log.push(tx);
+        ledger.receipts.push(sample_receipt(1));
+
+        let export = ledger.export_range(1, 2);
+        assert_eq!(export.txs.len(), 1);
+        assert_eq!(export.receipts.len(), 1);
+        assert_eq!(export.end_height, 2);
+        assert!(!export.has_more);
+    }
 }
