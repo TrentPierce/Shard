@@ -14,6 +14,7 @@ import {
     type ModelProgress,
 } from "@/lib/webllm"
 import { startBrowserLayerHost } from "@/lib/layer-host"
+import { DEFAULT_MODEL_ID } from "@/lib/model"
 import { detectScoutCapability } from "@/lib/scout-capability"
 import {
     setContributionStatus,
@@ -211,7 +212,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                 }
 
                 try {
-                    stopLayerHostRef.current = await startBrowserLayerHost({ modelId: "default-model", layerStart: 0, layerEnd: 1 })
+                    stopLayerHostRef.current = await startBrowserLayerHost({ modelId: DEFAULT_MODEL_ID, layerStart: 0, layerEnd: 1 })
                 } catch (e) {
                     console.warn(e)
                 }

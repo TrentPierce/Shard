@@ -1,4 +1,5 @@
 import { apiUrl } from "./config"
+import { DEFAULT_MODEL_ID } from "./model"
 import { xorStreamTransformHex } from "./activation-obfuscation"
 
 type BrowserLayerRegisterResponse = {
@@ -160,7 +161,7 @@ export async function startBrowserLayerHost(options?: {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        model_id: options?.modelId ?? "default-model",
+        model_id: options?.modelId ?? DEFAULT_MODEL_ID,
         layer_start: options?.layerStart ?? 0,
         layer_end: options?.layerEnd ?? 1,
         profile,

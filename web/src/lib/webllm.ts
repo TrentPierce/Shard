@@ -48,14 +48,14 @@ export type DraftGenerationOptions = {
 // ─── Constants ──────────────────────────────────────────────────────────────
 
 // Keep scout draft model aligned with verifier family to maximize acceptance.
-const DRAFT_MODEL = "TinyLlama-1.1B-Chat-v1.0-q4f32_1-MLC"
+const DRAFT_MODEL = "Llama-3.2-1B-Instruct-q4f32_1-MLC"
 
-// Lower-memory TinyLlama variant for mobile devices.
-const NANO_MODEL = "TinyLlama-1.1B-Chat-v1.0-q4f16_1-MLC"
+// Lower-memory Llama variant for mobile devices.
+const NANO_MODEL = "Llama-3.2-1B-Instruct-q4f16_1-MLC"
 
-// Compatibility fallback if TinyLlama artifacts fail to load on a specific browser build.
-const FALLBACK_DRAFT_MODEL = "Llama-3.2-1B-Instruct-q4f32_1-MLC"
-const FALLBACK_NANO_MODEL = "Llama-3.2-1B-Instruct-q4f16_1-MLC"
+// Compatibility fallback if Llama artifacts fail to load on a specific browser build.
+const FALLBACK_DRAFT_MODEL = "TinyLlama-1.1B-Chat-v1.0-q4f32_1-MLC"
+const FALLBACK_NANO_MODEL = "TinyLlama-1.1B-Chat-v1.0-q4f16_1-MLC"
 
 // Mobile device memory threshold (4GB in bytes)
 const MOBILE_MEMORY_THRESHOLD = 4 * 1024 * 1024 * 1024

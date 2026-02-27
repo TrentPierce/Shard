@@ -24,7 +24,7 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
     const [inferenceMode, setInferenceMode] = useState<"standard" | "distributed">("distributed")
     const [opsSummary, setOpsSummary] = useState<{ active_nodes?: number }>({})
 
-    const modelLabel = topology?.model_id ?? "TinyLlama-1.1B"
+    const modelLabel = topology?.model_id ?? "meta-llama/Llama-3.2-1B"
 
     const scrollToBottom = () => {
         messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })

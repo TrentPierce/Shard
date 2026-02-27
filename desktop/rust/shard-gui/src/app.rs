@@ -131,13 +131,13 @@ impl ShardApp {
             return false;
         };
 
-        let default_model_filename = "tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf";
+        let default_model_filename = "Llama-3.2-1B-Instruct-Q4_K_M.gguf";
         let model_path = models_dir.join(default_model_filename);
 
         if !model_path.exists() {
             if !self.is_downloading {
                 self.start_download(
-                    "https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/resolve/main/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf",
+                    "https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q4_K_M.gguf",
                     model_path.clone()
                 );
             }
@@ -208,7 +208,7 @@ impl ShardApp {
 
         if self.is_downloading {
             ui.vertical_centered(|ui| {
-                ui.label("Downloading default model (Core Llama 1.1B)...");
+                ui.label("Downloading default model (Llama-3.2-1B)...");
                 if let Some(p) = self.download_progress {
                     ui.add(egui::ProgressBar::new(p).show_percentage());
                 } else {
@@ -223,7 +223,7 @@ impl ShardApp {
                 let model_path = proj_dirs
                     .data_dir()
                     .join("models")
-                    .join("tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf");
+                    .join("Llama-3.2-1B-Instruct-Q4_K_M.gguf");
                 if model_path.exists() {
                     self.is_downloading = false;
                     self.status = "Idle".to_string();

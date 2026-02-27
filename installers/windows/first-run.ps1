@@ -26,7 +26,7 @@ function Download-ModelIfRequested {
         return "Model missing (download skipped)"
     }
 
-    $modelUrl = "https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/resolve/main/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf"
+    $modelUrl = "https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q4_K_M.gguf"
     try {
         Invoke-WebRequest -Uri $modelUrl -OutFile $ModelPath
         return "Model downloaded"

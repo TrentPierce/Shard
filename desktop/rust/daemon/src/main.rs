@@ -404,7 +404,7 @@ struct Cli {
     nat_traversal: bool,
 
     /// Hosted model identifier for layer routing announcements.
-    #[arg(long, default_value = "default-model")]
+    #[arg(long, default_value = "meta-llama/Llama-3.2-1B")]
     model_id: String,
 
     /// First transformer layer hosted by this node.
@@ -4591,7 +4591,7 @@ mod tests {
             max_reject_rate: 0.4,
             min_samples: 10,
         };
-        let controller = CanaryRolloutController::new("default-model".to_string(), cfg);
+        let controller = CanaryRolloutController::new("meta-llama/Llama-3.2-1B".to_string(), cfg);
         let decision_a = controller.decide("req-1", true);
         let decision_b = controller.decide("req-1", true);
         assert_eq!(decision_a.use_canary, decision_b.use_canary);
@@ -4608,7 +4608,8 @@ mod tests {
             max_reject_rate: 0.4,
             min_samples: 3,
         };
-        let mut controller = CanaryRolloutController::new("default-model".to_string(), cfg);
+        let mut controller =
+            CanaryRolloutController::new("meta-llama/Llama-3.2-1B".to_string(), cfg);
         let decision = controller.decide("req-rollback", true);
         for _ in 0..3 {
             controller.record_request_outcome(&decision, 50, Some(0.9), Some(0.1));

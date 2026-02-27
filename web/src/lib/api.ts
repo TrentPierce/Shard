@@ -6,6 +6,7 @@
  */
 
 import { apiUrl } from "./config"
+import { DEFAULT_MODEL_ID } from "./model"
 import { generateDraftTokens, isWebLLMReady } from "./webllm"
 import { submitDraft } from "./scout-draft"
 import { canUseLocalDaemonFallback, localDaemonUrl } from "./runtime"
@@ -71,7 +72,7 @@ async function sendMessageNonStreaming(
     onToken: (token: string) => void
 ): Promise<void> {
     const body: ChatCompletionRequest = {
-        model: "shard-hybrid",
+        model: DEFAULT_MODEL_ID,
         messages: history.map((m) => ({ role: m.role, content: m.content })),
         stream: false,
         max_tokens: 256,
@@ -185,7 +186,7 @@ export async function sendMessage(
     }
 
     const body: ChatCompletionRequest = {
-        model: "shard-hybrid",
+        model: DEFAULT_MODEL_ID,
         messages: history.map((m) => ({ role: m.role, content: m.content })),
         stream: true,
         max_tokens: 256,
@@ -281,7 +282,7 @@ export async function sendMessageSync(
     history: ChatMessage[]
 ): Promise<string> {
     const body: ChatCompletionRequest = {
-        model: "shard-hybrid",
+        model: DEFAULT_MODEL_ID,
         messages: history.map((m) => ({ role: m.role, content: m.content })),
         stream: false,
         max_tokens: 256,

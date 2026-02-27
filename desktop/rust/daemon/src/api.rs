@@ -2615,6 +2615,10 @@ mod tests {
     #[test]
     fn draft_verifier_pair_compatibility_guard() {
         assert!(shard_verifier::inference::is_model_pair_compatible(
+            "meta-llama/Llama-3.2-1B",
+            "meta-llama/Llama-3.2-1B"
+        ));
+        assert!(shard_verifier::inference::is_model_pair_compatible(
             "shard-hybrid",
             "default-model"
         ));

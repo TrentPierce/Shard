@@ -78,7 +78,7 @@ def validate(instance, schema: dict, path: str = "$") -> None:
 def test_chat_completions_contract() -> None:
     schema = load_schema("v1.chat-completions.request.schema.json")
     payload = {
-        "model": "shard-hybrid",
+        "model": "meta-llama/Llama-3.2-1B",
         "stream": True,
         "max_tokens": 128,
         "messages": [{"role": "user", "content": "hello"}],

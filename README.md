@@ -60,7 +60,7 @@ from shard import Shard
 client = Shard()
 
 response = client.chat.completions.create(
-    model="shard-hybrid",
+    model="meta-llama/Llama-3.2-1B",
     messages=[{"role": "user", "content": "Explain the Shard network architecture."}]
 )
 print(response.choices[0].message.content)

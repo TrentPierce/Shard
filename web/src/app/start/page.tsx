@@ -37,7 +37,7 @@ const sections: Section[] = [
     summary: "Install SDK and call chat",
     body: "Install the Shard SDK from PyPI and use it as a drop-in OpenAI replacement.",
     codeLabel: "Python SDK",
-    code: "pip install shard-inference\n\nfrom shard import Shard\nclient = Shard()\n\nresponse = client.chat.completions.create(\n    model=\"shard-hybrid\",\n    messages=[{\"role\": \"user\", \"content\": \"Explain the Shard network architecture.\"}]\n)\nprint(response.choices[0].message.content)",
+    code: "pip install shard-inference\n\nfrom shard import Shard\nclient = Shard()\n\nresponse = client.chat.completions.create(\n    model=\"meta-llama/Llama-3.2-1B\",\n    messages=[{\"role\": \"user\", \"content\": \"Explain the Shard network architecture.\"}]\n)\nprint(response.choices[0].message.content)",
   },
 ]
 

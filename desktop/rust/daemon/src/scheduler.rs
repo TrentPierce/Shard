@@ -128,7 +128,7 @@ fn local_scout_fallback_enabled() -> bool {
                 let lowered = v.trim().to_ascii_lowercase();
                 !matches!(lowered.as_str(), "0" | "false" | "no" | "off")
             })
-            .unwrap_or(false)
+            .unwrap_or(true)
     })
 }
 
@@ -139,7 +139,18 @@ fn local_scout_fallback_delay_ms() -> u64 {
             .ok()
             .and_then(|v| v.parse::<u64>().ok())
             .map(|v| v.clamp(0, 10_000))
-            .unwrap_or(750)
+            .unwrap_or(250)
+    })
+}
+
+fn local_scout_fallback_remote_delay_ms() -> u64 {
+    static DELAY_MS: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+    *DELAY_MS.get_or_init(|| {
+        std::env::var("SHARD_LOCAL_SCOUT_FALLBACK_REMOTE_DELAY_MS")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .map(|v| v.clamp(50, 15_000))
+            .unwrap_or(1_200)
     })
 }
 
@@ -254,17 +265,18 @@ async fn schedule_local_scout_fallback(state: &SharedState, work: &WorkRequest) 
     if !local_daemon_draft_capable(state).await {
         return;
     }
-    // Avoid verifier lock contention when real remote peers are available.
-    // Local fallback is intended as an emergency path, not the default path.
+    // Hybrid fallback: give remote scouts first chance, then trigger local draft
+    // generation to cap tail latency.
     let has_remote_peers = {
         let peers = state.peers.lock().await;
         !peers.is_empty()
     };
-    if has_remote_peers {
-        return;
-    }
 
-    let delay_ms = local_scout_fallback_delay_ms();
+    let delay_ms = if has_remote_peers {
+        local_scout_fallback_remote_delay_ms()
+    } else {
+        local_scout_fallback_delay_ms()
+    };
     let state_clone = state.clone();
     let work_clone = work.clone();
     tokio::spawn(async move {
@@ -298,23 +310,23 @@ fn compute_effective_scout_timeout_ms(
         return 0;
     }
     // Keep speculative waits tightly bounded to preserve TTFT under WAN jitter.
-    let bounded_base = base_timeout_ms.clamp(1_000, 15_000);
+    let bounded_base = base_timeout_ms.clamp(800, 8_000);
     if queue_depth > 1024 {
-        return bounded_base.min(2_000);
+        return bounded_base.min(1_500);
     }
     if queue_depth > 512 {
-        return bounded_base.min(3_000);
+        return bounded_base.min(2_000);
     }
     if queue_depth > 256 {
-        return bounded_base.min(4_500);
+        return bounded_base.min(3_000);
     }
     if active_scouts <= 1 {
-        return bounded_base.min(7_000);
+        return bounded_base.min(4_500);
     }
     if active_scouts <= 3 {
-        return bounded_base.min(5_500);
+        return bounded_base.min(3_500);
     }
-    bounded_base.min(4_500)
+    bounded_base.min(3_000)
 }
 
 async fn estimate_active_scouts(state: &SharedState) -> usize {
@@ -564,7 +576,7 @@ pub(crate) async fn wait_for_scout_draft(
 
         let notifier = get_or_create_draft_notifier(state, work_id).await;
         let remaining_ms = timeout_deadline.saturating_sub(now_ms()) as u64;
-        let wait_ms = remaining_ms.clamp(50, 1000);
+        let wait_ms = remaining_ms.clamp(25, 250);
         let _ = tokio::time::timeout(
             tokio::time::Duration::from_millis(wait_ms),
             notifier.notified(),
@@ -827,7 +839,7 @@ pub(crate) async fn chat_completions_handler(
     let requested_draft_model = req
         .model
         .clone()
-        .unwrap_or_else(|| "shard-hybrid".to_string());
+        .unwrap_or_else(|| "meta-llama/Llama-3.2-1B".to_string());
     let rollout_decision = {
         let rollout = state.canary_rollout.lock().await;
         let canary_eligible = shard_verifier::inference::is_model_pair_compatible(
@@ -1335,8 +1347,8 @@ mod tests {
     #[test]
     fn adaptive_timeout_short_circuits_without_active_scouts() {
         assert_eq!(compute_effective_scout_timeout_ms(30_000, 0, 0), 0);
-        assert_eq!(compute_effective_scout_timeout_ms(30_000, 1, 0), 7_000);
-        assert_eq!(compute_effective_scout_timeout_ms(30_000, 2, 0), 5_500);
-        assert_eq!(compute_effective_scout_timeout_ms(30_000, 8, 900), 3_000);
+        assert_eq!(compute_effective_scout_timeout_ms(30_000, 1, 0), 4_500);
+        assert_eq!(compute_effective_scout_timeout_ms(30_000, 2, 0), 3_500);
+        assert_eq!(compute_effective_scout_timeout_ms(30_000, 8, 900), 2_000);
     }
 }

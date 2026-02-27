@@ -35,25 +35,31 @@ pub struct ModelCompatibilityPair {
     pub supports_speculative: bool,
 }
 
+pub const CANONICAL_LLAMA_MODEL_ID: &str = "meta-llama/llama-3.2-1b";
+
+fn normalize_model_id(model_id: &str) -> String {
+    let normalized = model_id.trim().to_ascii_lowercase();
+    match normalized.as_str() {
+        "" => String::new(),
+        // Backward-compatible aliases.
+        "shard-hybrid"
+        | "default-model"
+        | "llama-3.2-1b-draft"
+        | "meta-llama/llama-3.2-1b"
+        | "meta-llama/llama-3.2-1b-instruct" => CANONICAL_LLAMA_MODEL_ID.to_string(),
+        other => other.to_string(),
+    }
+}
+
 pub fn compatibility_matrix() -> Vec<ModelCompatibilityPair> {
     vec![
         ModelCompatibilityPair {
-            draft_model: "shard-hybrid".to_string(),
-            verifier_model: "default-model".to_string(),
-            supports_speculative: true,
-        },
-        ModelCompatibilityPair {
-            draft_model: "shard-hybrid".to_string(),
+            draft_model: CANONICAL_LLAMA_MODEL_ID.to_string(),
             verifier_model: "bitnet-1.58b".to_string(),
             supports_speculative: true,
         },
         ModelCompatibilityPair {
-            draft_model: "llama-3.2-1b-draft".to_string(),
-            verifier_model: "bitnet-1.58b".to_string(),
-            supports_speculative: true,
-        },
-        ModelCompatibilityPair {
-            draft_model: "llama-3.2-1b-draft".to_string(),
+            draft_model: CANONICAL_LLAMA_MODEL_ID.to_string(),
             verifier_model: "verifier-v2".to_string(),
             supports_speculative: true,
         },
@@ -66,8 +72,8 @@ pub fn compatibility_matrix() -> Vec<ModelCompatibilityPair> {
 }
 
 pub fn is_model_pair_compatible(draft_model: &str, verifier_model: &str) -> bool {
-    let draft = draft_model.trim().to_ascii_lowercase();
-    let verifier = verifier_model.trim().to_ascii_lowercase();
+    let draft = normalize_model_id(draft_model);
+    let verifier = normalize_model_id(verifier_model);
     if draft.is_empty() || verifier.is_empty() {
         return false;
     }
@@ -288,7 +294,10 @@ impl VerifierModel for ShardEngine {
 
 #[cfg(test)]
 mod tests {
-    use super::{check_model_compatibility, compatibility_matrix, is_model_pair_compatible};
+    use super::{
+        check_model_compatibility, compatibility_matrix, is_model_pair_compatible,
+        CANONICAL_LLAMA_MODEL_ID,
+    };
 
     #[test]
     fn compatibility_reports_protocol_defaults() {
@@ -301,7 +310,7 @@ mod tests {
     fn compatibility_matrix_contains_known_pairs() {
         let matrix = compatibility_matrix();
         assert!(matrix.iter().any(|pair| {
-            pair.draft_model == "shard-hybrid"
+            pair.draft_model == CANONICAL_LLAMA_MODEL_ID
                 && pair.verifier_model == "bitnet-1.58b"
                 && pair.supports_speculative
         }));
@@ -309,7 +318,15 @@ mod tests {
 
     #[test]
     fn model_pair_compatibility_enforced() {
+        assert!(is_model_pair_compatible(
+            "meta-llama/Llama-3.2-1B",
+            "meta-llama/Llama-3.2-1B"
+        ));
         assert!(is_model_pair_compatible("shard-hybrid", "bitnet-1.58b"));
+        assert!(is_model_pair_compatible(
+            "default-model",
+            "meta-llama/Llama-3.2-1B"
+        ));
         assert!(!is_model_pair_compatible("legacy-draft-v0", "verifier-v2"));
         assert!(is_model_pair_compatible("bitnet-1.58b", "bitnet-1.58b"));
     }
