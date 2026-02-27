@@ -4502,7 +4502,7 @@ mod tests {
         let public_tcp = format!("/ip4/35.175.242.222/tcp/4001/p2p/{peer}");
         let public_quic = format!("/ip4/35.175.242.222/udp/9092/quic-v1/p2p/{peer}");
 
-        let mut addrs = vec![public_tcp.clone(), private_tcp.clone(), public_quic.clone()];
+        let mut addrs = [public_tcp.clone(), private_tcp.clone(), public_quic.clone()];
         addrs.sort_by_key(|addr| super::reconnect_addr_sort_key(addr));
 
         assert_eq!(addrs[0], public_tcp);
