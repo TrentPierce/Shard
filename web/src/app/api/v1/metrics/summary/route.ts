@@ -1,6 +1,8 @@
+export const runtime = 'edge';
 import { NextResponse } from "next/server"
 import { fetchWithBackendFailover, shardBackendUrls } from "@/lib/server/shard-backend"
 import { deriveHealthState, healthStateToLegacyStatus } from "@/lib/server/health-state"
+import { getChatProxySliSnapshot } from "@/lib/server/proxy-chat-sli"
 
 export const dynamic = "force-dynamic"
 
@@ -36,6 +38,7 @@ export async function GET() {
   // The Rust daemon exposes metrics at `/metrics/summary` (no `/v1` prefix).
   // We proxy that here for the web app and dashboards.
   const candidates = shardBackendUrls("/metrics/summary")
+  const chatProxySli = getChatProxySliSnapshot()
 
   try {
     const { response, backend, attempts } = await fetchWithBackendFailover("/metrics/summary", {
@@ -58,6 +61,7 @@ export async function GET() {
             backend_status: response.status,
             backend,
             backend_attempts: attempts,
+            proxy_chat_sli: chatProxySli,
           },
           { status: 200 },
         )
@@ -69,6 +73,7 @@ export async function GET() {
           backend_status: response.status,
           backend,
           backend_attempts: attempts,
+          proxy_chat_sli: chatProxySli,
           ...data,
         },
         { status: 200 },
@@ -81,6 +86,7 @@ export async function GET() {
         health_state: healthState,
         backend,
         backend_attempts: attempts,
+        proxy_chat_sli: chatProxySli,
       },
       { status: 200 },
     )
@@ -96,6 +102,7 @@ export async function GET() {
           stale_snapshot_age_ms: Date.now() - cached.updated_at_ms,
           backend_candidates: candidates,
           error: String(error),
+          proxy_chat_sli: chatProxySli,
         },
         { status: 200 },
       )
@@ -106,8 +113,10 @@ export async function GET() {
         health_state: "unavailable",
         backend_candidates: candidates,
         error: String(error),
+        proxy_chat_sli: chatProxySli,
       },
       { status: 200 },
     )
   }
 }
+

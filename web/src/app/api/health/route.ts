@@ -1,6 +1,11 @@
+export const runtime = 'edge';
 import { NextResponse } from "next/server"
 import { fetchWithBackendFailover, shardBackendUrls } from "@/lib/server/shard-backend"
 import { deriveHealthState, healthStateToLegacyStatus } from "@/lib/server/health-state"
+import {
+  getChatProxySliSnapshot,
+  isChatProxySliBreached,
+} from "@/lib/server/proxy-chat-sli"
 import { SHARD_VERSION } from "@/lib/version"
 
 export const dynamic = "force-dynamic"
@@ -51,6 +56,7 @@ function readFreshActivitySnapshot(): ActivitySnapshot | null {
 
 export async function GET() {
   const candidates = shardBackendUrls("/health")
+  const chatProxySli = getChatProxySliSnapshot()
 
   try {
     const started = performance.now()
@@ -65,14 +71,21 @@ export async function GET() {
     const data = await response.json().catch(() => ({}))
     updateActivitySnapshot(data)
     const cached = readFreshActivitySnapshot()
-    const healthState = deriveHealthState(data, response.ok)
+    const baseHealthState = deriveHealthState(data, response.ok)
+    const healthState =
+      baseHealthState === "ready" && isChatProxySliBreached(chatProxySli)
+        ? "degraded"
+        : baseHealthState
 
     if (!response.ok) {
       return NextResponse.json(
         {
           status: healthStateToLegacyStatus(healthState),
           health_state: healthState,
-          readiness_reason: "backend_non_ok",
+          readiness_reason:
+            baseHealthState === "ready" && healthState === "degraded"
+              ? "proxy_chat_5xx_sli_breach"
+              : "backend_non_ok",
           ready_for_inference: false,
           active_browser_sessions: cached?.active_browser_sessions ?? 0,
           active_scouts: cached?.active_scouts ?? 0,
@@ -84,6 +97,7 @@ export async function GET() {
           backend,
           backend_attempts: attempts,
           latency_ms: latencyMs,
+          proxy_chat_sli: chatProxySli,
           web_version: SHARD_VERSION,
           ...data,
         },
@@ -96,9 +110,14 @@ export async function GET() {
         ...data,
         status: data?.status ?? healthStateToLegacyStatus(healthState),
         health_state: healthState,
+        readiness_reason:
+          baseHealthState === "ready" && healthState === "degraded"
+            ? "proxy_chat_5xx_sli_breach"
+            : data?.readiness_reason,
         backend,
         backend_attempts: attempts,
         latency_ms: latencyMs,
+        proxy_chat_sli: chatProxySli,
         web_version: SHARD_VERSION,
       },
       { status: 200 },
@@ -121,9 +140,11 @@ export async function GET() {
         error: "Failed to connect to backend",
         backend_candidates: candidates,
         details: String(error),
+        proxy_chat_sli: chatProxySli,
         web_version: SHARD_VERSION,
       },
       { status: 200 }
     )
   }
 }
+

@@ -1,8 +1,10 @@
+export const runtime = 'edge';
 import { NextRequest, NextResponse } from "next/server"
 import {
   forwardRequestHeaders,
   shardBackendUrls,
 } from "@/lib/server/shard-backend"
+import { recordChatProxyResult } from "@/lib/server/proxy-chat-sli"
 
 export const dynamic = "force-dynamic"
 
@@ -32,6 +34,7 @@ export async function POST(request: NextRequest) {
   const primaryCandidates = shardBackendUrls("/v1/chat/completions", false)
   const fallbackCandidates = shardBackendUrls("/v1/chat/completions", true)
   const allCandidates = Array.from(new Set([...primaryCandidates, ...fallbackCandidates]))
+  const startedAt = Date.now()
 
   try {
     const bodyText = await request.text()
@@ -40,6 +43,8 @@ export async function POST(request: NextRequest) {
     let usedFallback = false
     let response: Response | null = null
     let backendUsed: string | null = null
+    let lastFailureKind: "http_5xx" | "timeout" | "other_error" = "other_error"
+    let lastBackendStatus: number | null = null
 
     for (let i = 0; i < allCandidates.length; i += 1) {
       const candidate = allCandidates[i]
@@ -62,6 +67,7 @@ export async function POST(request: NextRequest) {
           response = candidateResponse
           backendUsed = candidate
           usedFallback = isFallbackCandidate
+          lastBackendStatus = candidateResponse.status
           break
         }
 
@@ -69,23 +75,46 @@ export async function POST(request: NextRequest) {
           response = candidateResponse
           backendUsed = candidate
           usedFallback = isFallbackCandidate
+          lastBackendStatus = candidateResponse.status
           break
         }
+        lastFailureKind = "http_5xx"
+        lastBackendStatus = candidateResponse.status
       } catch (error) {
+        const errorName = error instanceof Error ? error.name : ""
+        if (errorName === "TimeoutError") {
+          lastFailureKind = "timeout"
+        } else {
+          lastFailureKind = "other_error"
+        }
         console.error("[Chat Proxy] Candidate fetch exception:", candidate, error)
         continue
       }
     }
 
     if (!response || !backendUsed) {
+      recordChatProxyResult({
+        outcome: lastFailureKind,
+        attempts: attempts.length,
+        fallback_used: attempts.some((candidate) => !primaryCandidates.includes(candidate)),
+        latency_ms: Date.now() - startedAt,
+      })
       return NextResponse.json(
         {
           error: "Chat completion failed after failover attempts",
           backend_attempts: attempts,
+          backend_status: lastBackendStatus ?? undefined,
         },
         { status: 502 },
       )
     }
+
+    recordChatProxyResult({
+      outcome: response.ok ? "success" : response.status >= 500 ? "http_5xx" : "other_error",
+      attempts: attempts.length,
+      fallback_used: usedFallback,
+      latency_ms: Date.now() - startedAt,
+    })
 
     if (response.body) {
       return new NextResponse(response.body, {
@@ -96,6 +125,7 @@ export async function POST(request: NextRequest) {
           Connection: "keep-alive",
           "X-Shard-Fallback": usedFallback ? "true" : "false",
           "X-Shard-Backend": backendUsed,
+          "X-Shard-Backend-Attempts": String(attempts.length),
           "Access-Control-Allow-Origin": "*",
         },
       })
@@ -107,6 +137,12 @@ export async function POST(request: NextRequest) {
       { status: response.status },
     )
   } catch (error) {
+    recordChatProxyResult({
+      outcome: "other_error",
+      attempts: 1,
+      fallback_used: false,
+      latency_ms: Date.now() - startedAt,
+    })
     return NextResponse.json(
       {
         error: "Chat completion failed after fallback attempt",
@@ -127,3 +163,4 @@ export async function OPTIONS() {
     },
   })
 }
+

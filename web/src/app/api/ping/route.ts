@@ -1,3 +1,4 @@
+export const runtime = 'edge';
 import { NextResponse } from "next/server"
 import { shardBackendUrl } from "@/lib/server/shard-backend"
 
@@ -31,3 +32,4 @@ export async function GET() {
 export async function POST() {
   return GET()
 }
+

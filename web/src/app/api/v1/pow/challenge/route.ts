@@ -1,3 +1,4 @@
+export const runtime = 'edge';
 import { NextRequest, NextResponse } from "next/server"
 import { fetchWithBackendFailover, shardBackendUrls } from "@/lib/server/shard-backend"
 
@@ -31,4 +32,5 @@ export async function GET(request: NextRequest) {
     )
   }
 }
+
 

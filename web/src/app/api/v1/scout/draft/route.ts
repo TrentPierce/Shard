@@ -1,3 +1,4 @@
+export const runtime = 'edge';
 import { NextRequest, NextResponse } from "next/server"
 import {
   fetchWithBackendFailover,
@@ -92,3 +93,4 @@ export async function POST(request: NextRequest) {
     )
   }
 }
+
