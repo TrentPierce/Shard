@@ -28,6 +28,71 @@ fn strip_control_tokens(raw: &str) -> String {
     }
 }
 
+fn repetition_detector_min_repeats() -> usize {
+    static MIN_REPEATS: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *MIN_REPEATS.get_or_init(|| {
+        std::env::var("SHARD_OUTPUT_REPETITION_MIN_REPEATS")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .map(|v| v.clamp(3, 16))
+            .unwrap_or(5)
+    })
+}
+
+fn repetition_detector_max_unit_chars() -> usize {
+    static MAX_UNIT: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *MAX_UNIT.get_or_init(|| {
+        std::env::var("SHARD_OUTPUT_REPETITION_MAX_UNIT_CHARS")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .map(|v| v.clamp(1, 64))
+            .unwrap_or(12)
+    })
+}
+
+fn detect_repetitive_suffix(text: &str) -> Option<(String, usize)> {
+    let min_repeats = repetition_detector_min_repeats();
+    let max_unit_chars = repetition_detector_max_unit_chars();
+    let chars: Vec<char> = text.chars().collect();
+    if chars.len() < min_repeats {
+        return None;
+    }
+    let max_unit = (chars.len() / min_repeats).min(max_unit_chars);
+    if max_unit == 0 {
+        return None;
+    }
+
+    for unit_len in 1..=max_unit {
+        let unit_start = chars.len().saturating_sub(unit_len);
+        let unit = &chars[unit_start..];
+        let mut repeats = 1usize;
+        while unit_len.saturating_mul(repeats + 1) <= chars.len() {
+            let seg_start = chars.len().saturating_sub(unit_len * (repeats + 1));
+            let seg_end = seg_start + unit_len;
+            if chars[seg_start..seg_end] == *unit {
+                repeats += 1;
+            } else {
+                break;
+            }
+        }
+        if repeats >= min_repeats {
+            let repeated_unit: String = unit.iter().collect();
+            if repeated_unit.trim().is_empty() {
+                continue;
+            }
+            return Some((repeated_unit, repeats));
+        }
+    }
+    None
+}
+
+fn should_abort_on_degenerate_output(existing: &str, next_piece: &str) -> Option<(String, usize)> {
+    let mut candidate = String::with_capacity(existing.len().saturating_add(next_piece.len()));
+    candidate.push_str(existing);
+    candidate.push_str(next_piece);
+    detect_repetitive_suffix(candidate.as_str())
+}
+
 fn model_pair_acceptance_rates(
     draft_count: u64,
     accepted_count: u64,
@@ -150,7 +215,7 @@ fn local_scout_fallback_remote_delay_ms() -> u64 {
             .ok()
             .and_then(|v| v.parse::<u64>().ok())
             .map(|v| v.clamp(50, 15_000))
-            .unwrap_or(1_200)
+            .unwrap_or(600)
     })
 }
 
@@ -310,23 +375,23 @@ fn compute_effective_scout_timeout_ms(
         return 0;
     }
     // Keep speculative waits tightly bounded to preserve TTFT under WAN jitter.
-    let bounded_base = base_timeout_ms.clamp(800, 8_000);
+    let bounded_base = base_timeout_ms.clamp(400, 4_000);
     if queue_depth > 1024 {
-        return bounded_base.min(1_500);
+        return bounded_base.min(900);
     }
     if queue_depth > 512 {
-        return bounded_base.min(2_000);
+        return bounded_base.min(1_200);
     }
     if queue_depth > 256 {
-        return bounded_base.min(3_000);
+        return bounded_base.min(1_500);
     }
     if active_scouts <= 1 {
-        return bounded_base.min(4_500);
+        return bounded_base.min(1_200);
     }
     if active_scouts <= 3 {
-        return bounded_base.min(3_500);
+        return bounded_base.min(1_000);
     }
-    bounded_base.min(3_000)
+    bounded_base.min(800)
 }
 
 async fn estimate_active_scouts(state: &SharedState) -> usize {
@@ -351,10 +416,9 @@ async fn estimate_active_scouts(state: &SharedState) -> usize {
             .count()
     };
 
-    let local_daemon_capable = if local_daemon_draft_capable(state).await {
-        1
-    } else {
-        0
+    let connected_peer_count = {
+        let peers = state.peers.lock().await;
+        peers.len()
     };
 
     let healthy_scout_reports = {
@@ -379,8 +443,8 @@ async fn estimate_active_scouts(state: &SharedState) -> usize {
 
     browser_draft_capable
         .max(recent_submitters)
-        .max(local_daemon_capable)
         .max(healthy_scout_reports)
+        .max(connected_peer_count)
 }
 
 async fn effective_speculative_timeout_ms(state: &SharedState, config: &SpeculativeConfig) -> u64 {
@@ -891,6 +955,7 @@ pub(crate) async fn chat_completions_handler(
         let stream = async_stream::stream! {
             let mut request_acceptance: Option<(f64, f64)> = None;
             let mut completion_tokens_generated: u64 = 0;
+            let mut degeneration_detected = false;
             let mut speculative_draft = if use_speculative {
                 if let Some(ref config) = speculative_config {
                     fetch_speculative_draft(&state, &request_id, &prompt, config).await
@@ -909,6 +974,7 @@ pub(crate) async fn chat_completions_handler(
 
                     // Speculative decoding: try to get scout draft
                     let mut accepted_text = String::new();
+                    let mut emitted_text_for_guard = String::new();
                     let prompt_tokens = tokens.clone();
                     let mut prompt_already_evaluated = false;
 
@@ -979,6 +1045,7 @@ pub(crate) async fn chat_completions_handler(
                                         });
                                         yield Ok::<_, std::convert::Infallible>(Event::default().data(chunk.to_string()));
                                         accepted_text.push_str(clean.as_str());
+                                        emitted_text_for_guard.push_str(clean.as_str());
                                     }
                                 }
 
@@ -1006,12 +1073,25 @@ pub(crate) async fn chat_completions_handler(
                                 if best_idx == 128001 || best_idx == 128009 {
                                     break;
                                 }
-                                completion_tokens_generated =
-                                    completion_tokens_generated.saturating_add(1);
 
                                 if let Ok(raw_piece) = engine.token_to_piece(best_idx as i32) {
                                     let piece = strip_control_tokens(raw_piece.as_str());
                                     if !piece.is_empty() {
+                                        if let Some((repeat_unit, repeat_count)) = should_abort_on_degenerate_output(
+                                            emitted_text_for_guard.as_str(),
+                                            piece.as_str(),
+                                        ) {
+                                            degeneration_detected = true;
+                                            state.system_metrics.inc_output_degeneration_detected();
+                                            state.system_metrics.inc_fallback_invocations();
+                                            tracing::warn!(
+                                                request_id = %request_id,
+                                                repeat_unit = %repeat_unit,
+                                                repeat_count,
+                                                "output degeneration detected during streaming generation; stopping early"
+                                            );
+                                            break;
+                                        }
                                         let chunk = serde_json::json!({
                                             "id": request_id,
                                             "object": "chat.completion.chunk",
@@ -1020,12 +1100,15 @@ pub(crate) async fn chat_completions_handler(
                                             "choices": [{"index": 0, "delta": {"content": piece}, "finish_reason": serde_json::Value::Null}],
                                         });
                                         yield Ok::<_, std::convert::Infallible>(Event::default().data(chunk.to_string()));
+                                        emitted_text_for_guard.push_str(piece.as_str());
                                     }
                                 }
 
                                 if engine.eval(&[best_idx as i32]).is_err() {
                                     break;
                                 }
+                                completion_tokens_generated =
+                                    completion_tokens_generated.saturating_add(1);
                                 emitted += 1;
                             } else {
                                 break;
@@ -1048,6 +1131,15 @@ pub(crate) async fn chat_completions_handler(
             yield Ok(Event::default().data(final_chunk.to_string()));
             yield Ok(Event::default().data("[DONE]"));
 
+            if degeneration_detected {
+                tracing::info!(
+                    request_id = %request_id,
+                    completion_tokens_generated,
+                    "stream response stopped due to degeneration guard"
+                );
+            }
+
+            state.system_metrics.inc_chat_completion_success();
             state
                 .system_metrics
                 .inc_tokens_processed(completion_tokens_generated);
@@ -1074,6 +1166,7 @@ pub(crate) async fn chat_completions_handler(
         let mut request_acceptance: Option<(f64, f64)> = None;
         let mut prompt_token_count: u64 = 0;
         let mut completion_tokens_generated: u64 = 0;
+        let mut degeneration_detected = false;
         let mut speculative_draft = if use_speculative {
             if let Some(ref config) = speculative_config {
                 fetch_speculative_draft(&state, &request_id, &prompt, config).await
@@ -1197,17 +1290,36 @@ pub(crate) async fn chat_completions_handler(
                                 if best_idx == 128001 || best_idx == 128009 {
                                     break;
                                 }
-                                completion_tokens_generated =
-                                    completion_tokens_generated.saturating_add(1);
 
                                 if let Ok(piece) = engine.token_to_piece(best_idx as i32) {
                                     let clean = strip_control_tokens(piece.as_str());
-                                    full_text.push_str(clean.as_str());
+                                    if !clean.is_empty() {
+                                        if let Some((repeat_unit, repeat_count)) =
+                                            should_abort_on_degenerate_output(
+                                                full_text.as_str(),
+                                                clean.as_str(),
+                                            )
+                                        {
+                                            degeneration_detected = true;
+                                            state.system_metrics.inc_output_degeneration_detected();
+                                            state.system_metrics.inc_fallback_invocations();
+                                            tracing::warn!(
+                                                request_id = %request_id,
+                                                repeat_unit = %repeat_unit,
+                                                repeat_count,
+                                                "output degeneration detected during non-stream generation; stopping early"
+                                            );
+                                            break;
+                                        }
+                                        full_text.push_str(clean.as_str());
+                                    }
                                 }
 
                                 if engine.eval(&[best_idx as i32]).is_err() {
                                     break;
                                 }
+                                completion_tokens_generated =
+                                    completion_tokens_generated.saturating_add(1);
                                 emitted += 1;
                             } else {
                                 break;
@@ -1237,6 +1349,15 @@ pub(crate) async fn chat_completions_handler(
         state
             .system_metrics
             .inc_tokens_processed(completion_tokens_generated);
+        state.system_metrics.inc_chat_completion_success();
+
+        if degeneration_detected {
+            tracing::info!(
+                request_id = %request_id,
+                completion_tokens_generated,
+                "non-stream response stopped due to degeneration guard"
+            );
+        }
 
         let full_text = strip_control_tokens(full_text.as_str());
         let total_tokens = prompt_token_count.saturating_add(completion_tokens_generated);
@@ -1264,8 +1385,8 @@ pub(crate) async fn chat_completions_handler(
 mod tests {
     use super::{
         auth_required, compute_effective_scout_timeout_ms, enqueue_scout_work,
-        model_pair_acceptance_rates, resolve_inference_mode, strip_control_tokens, InferenceMode,
-        WorkRequest,
+        model_pair_acceptance_rates, resolve_inference_mode, should_abort_on_degenerate_output,
+        strip_control_tokens, InferenceMode, WorkRequest,
     };
     use std::collections::VecDeque;
 
@@ -1349,8 +1470,14 @@ mod tests {
     #[test]
     fn adaptive_timeout_short_circuits_without_active_scouts() {
         assert_eq!(compute_effective_scout_timeout_ms(30_000, 0, 0), 0);
-        assert_eq!(compute_effective_scout_timeout_ms(30_000, 1, 0), 4_500);
-        assert_eq!(compute_effective_scout_timeout_ms(30_000, 2, 0), 3_500);
-        assert_eq!(compute_effective_scout_timeout_ms(30_000, 8, 900), 2_000);
+        assert_eq!(compute_effective_scout_timeout_ms(30_000, 1, 0), 1_200);
+        assert_eq!(compute_effective_scout_timeout_ms(30_000, 2, 0), 1_000);
+        assert_eq!(compute_effective_scout_timeout_ms(30_000, 8, 900), 1_200);
+    }
+
+    #[test]
+    fn degeneration_guard_detects_repetitive_suffix() {
+        assert!(should_abort_on_degenerate_output("endendendend", "end").is_some());
+        assert!(should_abort_on_degenerate_output("hello world ", "there").is_none());
     }
 }

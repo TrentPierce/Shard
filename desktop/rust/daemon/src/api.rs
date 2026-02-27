@@ -2392,12 +2392,20 @@ pub(crate) async fn metrics_summary_handler(
         serde_json::json!(counters.transport_relay_failure_total),
     );
     payload.insert(
+        "chat_completion_success_total".to_string(),
+        serde_json::json!(counters.chat_completion_success_total),
+    );
+    payload.insert(
         "tokens_processed_total".to_string(),
         serde_json::json!(counters.tokens_processed_total),
     );
     payload.insert(
         "tokens_offloaded_to_scouts_total".to_string(),
         serde_json::json!(counters.tokens_offloaded_to_scouts_total),
+    );
+    payload.insert(
+        "output_degeneration_detected_total".to_string(),
+        serde_json::json!(counters.output_degeneration_detected_total),
     );
     payload.insert(
         "verification_fallback_total".to_string(),

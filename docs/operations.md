@@ -19,12 +19,16 @@
   - latency regression
   - speculative acceptance collapse
   - PoW failure spikes
+  - zero-token drift despite successful requests
+  - scout submit success-rate degradation
 
 ### Paging Thresholds
 - `ShardHighTaskFailureRate`: page if task failures > 20/5m for 5m.
 - `ShardHighP95Latency`: page if p95 latency > 2500ms for 10m.
 - `ShardSpeculativeAcceptanceDrop`: warn if acceptance rate < 0.60 for 10m.
 - `ShardPowFailureSpike`: warn if PoW failures > 30/10m.
+- `ShardZeroTokenDrift`: page if successful chat completions occur but total token counters remain zero for 5m.
+- `ShardScoutSubmitDegraded`: warn if scout submit success rate drops below 20% over 10m with at least 20 submit attempts.
 
 ### Alert-to-Runbook Mapping
 - Ops alerts -> `docs/operations.md`
@@ -35,9 +39,11 @@
 1. Confirm health and metrics endpoints.
 2. Check auth/PoW failure counters.
 3. Check browser contribution telemetry event stream (`shard:contribution-status`) and session state for non-contributing reason codes.
-4. Drain failing nodes from scheduling path.
-5. Roll back release if SLO breach persists.
-6. Record timeline and corrective actions.
+4. Validate token drift alert inputs: `shard_chat_completion_success_total` and `shard_tokens_processed_total + shard_tokens_offloaded_to_scouts_total`.
+5. Validate scout ingress health: submit attempt/success/failure counters and active draft-capable scout counts.
+6. Drain failing nodes from scheduling path.
+7. Roll back release if SLO breach persists.
+8. Record timeline and corrective actions.
 
 ## Runbooks
 - Incident response: `docs/runbooks/incident-response.md`

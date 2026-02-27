@@ -45,3 +45,24 @@ groups:
           description: "PoW failures exceeded 30 over 10 minutes."
           runbook_url: "https://github.com/TrentPierce/Shard/blob/main/docs/security.md"
 
+      - alert: ShardZeroTokenDrift
+        expr: increase(shard_chat_completion_success_total[5m]) > 0 and (increase(shard_tokens_processed_total[5m]) + increase(shard_tokens_offloaded_to_scouts_total[5m])) == 0
+        for: 5m
+        labels:
+          severity: page
+          team: shard-sre
+        annotations:
+          summary: "Successful requests with zero token progress"
+          description: "Chat completions succeeded over 5 minutes while token counters stayed at zero."
+          runbook_url: "https://github.com/TrentPierce/Shard/blob/main/docs/operations.md"
+
+      - alert: ShardScoutSubmitDegraded
+        expr: increase(shard_scout_client_submit_attempts_total[10m]) >= 20 and (increase(shard_scout_client_submit_success_total[10m]) / clamp_min(increase(shard_scout_client_submit_attempts_total[10m]), 1)) < 0.20
+        for: 10m
+        labels:
+          severity: warn
+          team: shard-sre
+        annotations:
+          summary: "Scout submit success rate degraded"
+          description: "Browser scout draft submit success fell below 20% over 10 minutes with meaningful traffic."
+          runbook_url: "https://github.com/TrentPierce/Shard/blob/main/docs/operations.md"

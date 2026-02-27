@@ -7,9 +7,11 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 #[derive(Debug, Default)]
 pub struct SystemMetrics {
+    chat_completion_success_total: AtomicU64,
     tokens_processed_total: AtomicU64,
     tokens_offloaded_to_scouts_total: AtomicU64,
     verification_fallback_total: AtomicU64,
+    output_degeneration_detected_total: AtomicU64,
     task_failures_total: AtomicU64,
     signature_verification_failures_total: AtomicU64,
     node_identity_auth_failures_total: AtomicU64,
@@ -62,9 +64,11 @@ pub struct SystemMetrics {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct SystemMetricsSnapshot {
+    pub chat_completion_success_total: u64,
     pub tokens_processed_total: u64,
     pub tokens_offloaded_to_scouts_total: u64,
     pub verification_fallback_total: u64,
+    pub output_degeneration_detected_total: u64,
     pub task_failures_total: u64,
     pub signature_verification_failures_total: u64,
     pub node_identity_auth_failures_total: u64,
@@ -150,6 +154,11 @@ pub struct NodeMetricSnapshot {
 }
 
 impl SystemMetrics {
+    pub fn inc_chat_completion_success(&self) {
+        self.chat_completion_success_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
     pub fn inc_tokens_processed(&self, value: u64) {
         self.tokens_processed_total
             .fetch_add(value, Ordering::Relaxed);
@@ -162,6 +171,11 @@ impl SystemMetrics {
 
     pub fn inc_verification_fallback(&self) {
         self.verification_fallback_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn inc_output_degeneration_detected(&self) {
+        self.output_degeneration_detected_total
             .fetch_add(1, Ordering::Relaxed);
     }
 
@@ -446,6 +460,9 @@ impl SystemMetrics {
 
         let mut output = format!(
             concat!(
+                "# HELP shard_chat_completion_success_total Successful chat completion responses.\n",
+                "# TYPE shard_chat_completion_success_total counter\n",
+                "shard_chat_completion_success_total {}\n",
                 "# HELP shard_tokens_processed_total Total tokens processed.\n",
                 "# TYPE shard_tokens_processed_total counter\n",
                 "shard_tokens_processed_total {}\n",
@@ -455,6 +472,9 @@ impl SystemMetrics {
                 "# HELP shard_verification_fallback_total Verification fallback executions.\n",
                 "# TYPE shard_verification_fallback_total counter\n",
                 "shard_verification_fallback_total {}\n",
+                "# HELP shard_output_degeneration_detected_total Output degeneration detections that triggered fallback/reset behavior.\n",
+                "# TYPE shard_output_degeneration_detected_total counter\n",
+                "shard_output_degeneration_detected_total {}\n",
                 "# HELP shard_task_failures_total Total task failures.\n",
                 "# TYPE shard_task_failures_total counter\n",
                 "shard_task_failures_total {}\n",
@@ -525,9 +545,12 @@ impl SystemMetrics {
                 "# TYPE shard_speculative_speedup_ratio gauge\n",
                 "shard_speculative_speedup_ratio {:.6}\n",
             ),
+            self.chat_completion_success_total.load(Ordering::Relaxed),
             self.tokens_processed_total.load(Ordering::Relaxed),
             self.tokens_offloaded_to_scouts_total.load(Ordering::Relaxed),
             self.verification_fallback_total.load(Ordering::Relaxed),
+            self.output_degeneration_detected_total
+                .load(Ordering::Relaxed),
             self.task_failures_total.load(Ordering::Relaxed),
             self.signature_verification_failures_total
                 .load(Ordering::Relaxed),
@@ -718,11 +741,17 @@ impl SystemMetrics {
 
     pub fn snapshot(&self) -> SystemMetricsSnapshot {
         SystemMetricsSnapshot {
+            chat_completion_success_total: self
+                .chat_completion_success_total
+                .load(Ordering::Relaxed),
             tokens_processed_total: self.tokens_processed_total.load(Ordering::Relaxed),
             tokens_offloaded_to_scouts_total: self
                 .tokens_offloaded_to_scouts_total
                 .load(Ordering::Relaxed),
             verification_fallback_total: self.verification_fallback_total.load(Ordering::Relaxed),
+            output_degeneration_detected_total: self
+                .output_degeneration_detected_total
+                .load(Ordering::Relaxed),
             task_failures_total: self.task_failures_total.load(Ordering::Relaxed),
             signature_verification_failures_total: self
                 .signature_verification_failures_total
@@ -842,9 +871,11 @@ mod tests {
     #[test]
     fn snapshot_reflects_counter_updates() {
         let metrics = SystemMetrics::default();
+        metrics.inc_chat_completion_success();
         metrics.inc_tokens_processed(12);
         metrics.inc_tokens_offloaded_to_scouts(8);
         metrics.inc_verification_fallback();
+        metrics.inc_output_degeneration_detected();
         metrics.inc_task_failures();
         metrics.inc_signature_verification_failures();
         metrics.inc_node_identity_auth_failures();
@@ -888,9 +919,11 @@ mod tests {
         metrics.inc_transport_relay_failure();
 
         let snap = metrics.snapshot();
+        assert_eq!(snap.chat_completion_success_total, 1);
         assert_eq!(snap.tokens_processed_total, 12);
         assert_eq!(snap.tokens_offloaded_to_scouts_total, 8);
         assert_eq!(snap.verification_fallback_total, 1);
+        assert_eq!(snap.output_degeneration_detected_total, 1);
         assert_eq!(snap.task_failures_total, 1);
         assert_eq!(snap.signature_verification_failures_total, 1);
         assert_eq!(snap.node_identity_auth_failures_total, 1);
