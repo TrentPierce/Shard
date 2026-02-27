@@ -247,10 +247,11 @@ Production Readiness Plan (Enterprise + Maintainability)
   - Add alerting for zero-token drift despite successful requests.
   - Track scout submit success and liveness as first-class SLI signals.
 
-  ## 10. Remediation Progress (2026-02-25)
+  ## 10. Remediation Progress (2026-02-27)
 
-  - R0-T31 complete: daemon chat completion responses now emit non-zero `usage` token counts and increment runtime token counters on generated output.
-  - R0-T32 complete: runtime readiness is now explicitly surfaced (`status`, `readiness_reason`, `ready_for_inference`) so nodes without loaded models are not presented as fully ready.
-  - R0-T34 partially complete: speculative path state handling is corrected to preserve verified draft progress; latest live runs now show non-zero scout assignment/submission/wait-hit counters, acceptance-aware timeout/bypass controls are now active (`SHARD_SPECULATIVE_BYPASS_THRESHOLD`, `SHARD_SPECULATIVE_BYPASS_MIN_SAMPLES`), gossipsub draft-result handoff now routes into idempotent/mailbox/notifier paths used by `wait_for_scout_draft`, daemon-side scout workers can draft/publish on signed work requests, and mesh reconnect behavior was hardened, but accepted speculative token counters remain at zero in sustained WAN browser sessions, so closure still requires draft-capable scout stability under live benchmark windows.
-  - R0-T38 partially complete: web chat proxy timeout guard was corrected to remove premature 2s abort behavior that generated hosted 502s under normal inference latency; closure requires production deploy and benchmark revalidation.
-  - TODO-WEB-RECONNECT-01 complete: browser scout worker lifecycle now persists across topology refresh/re-render cycles so open tabs auto-resume contribution after backend restart/deploy without manual page refresh.
+  - R0-T31 complete: daemon chat completion responses emit non-zero `usage` token counts and increment runtime token counters on generated output.
+  - R0-T32 complete: runtime readiness is explicitly surfaced (`status`, `readiness_reason`, `ready_for_inference`) so nodes without loaded models are not presented as fully ready.
+  - R0-T34 complete: speculative draft/verify flow now consistently produces non-zero accepted speculative counters in live runs; wait/mailbox/idempotent lifecycle cleanup and queue/backpressure handling were hardened to keep work-id handoff deterministic under concurrency.
+  - R0-T38 partially complete: web scout/proxy reliability improved via transient-aware retries, jittered backoff, bounded failover budgets, and degraded-health snapshot fallback to prevent backend stalls from zeroing dashboard activity; EC2 distributed p95 latency is still above target and remains the primary open performance risk.
+  - R1-T39 partially complete: health API behavior now preserves stale activity across transient outages and `/api/health/system` routing is consistent, but full tri-state readiness normalization across daemon/web/dashboard is still pending.
+  - TODO-WEB-RECONNECT-01 complete: browser scout worker lifecycle persists across topology refresh/re-render cycles so open tabs auto-resume contribution after backend restart/deploy without manual refresh.
