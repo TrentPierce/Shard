@@ -21,15 +21,29 @@ pub(crate) fn runtime_health_state(
 pub(crate) async fn health_handler(
     AxumState(state): AxumState<SharedState>,
 ) -> Json<serde_json::Value> {
+    let now = now_ms();
     let topo = state.topology.lock().await;
     let peers = state.peers.lock().await;
     let known = state.known_peers.lock().await;
-    let browser_sessions = state.browser_sessions.lock().await;
     let verified_count = peers.values().filter(|p| p.verified).count();
     let capacity = state.capacity.load(Ordering::Relaxed);
     let load = state.current_load.load(Ordering::Relaxed);
     let latency_ms = state.avg_latency_ms.load(Ordering::Relaxed);
-    let browser_scout_count = browser_sessions.len();
+    let browser_scout_count = {
+        let mut sessions = state.browser_sessions.lock().await;
+        prune_browser_sessions(&mut sessions, now);
+        sessions.len()
+    };
+    let (
+        draft_capable_scout_count,
+        scout_runtime_webgpu_total,
+        scout_runtime_wasm_total,
+        scout_last_submit_success_ms,
+    ) = {
+        let mut runtime = state.scout_client_runtime.lock().await;
+        prune_scout_client_runtime(&mut runtime, now);
+        summarize_scout_client_runtime(&runtime, now)
+    };
     let recent_scout_submitters = {
         let results = state.results.lock().await;
         let cutoff = now_ms().saturating_sub(5 * 60 * 1000);
@@ -41,7 +55,7 @@ pub(crate) async fn health_handler(
         }
         unique.len()
     };
-    let scout_count = browser_scout_count.max(recent_scout_submitters);
+    let scout_count = draft_capable_scout_count.max(recent_scout_submitters);
     let model_compat =
         shard_verifier::inference::check_model_compatibility(state.model_id.as_str());
     let rollout_snapshot = {
@@ -69,8 +83,12 @@ pub(crate) async fn health_handler(
         "connected_peers": peers.len(),
         "verified_peers": verified_count,
         "active_scouts": scout_count,
+        "draft_capable_scouts": draft_capable_scout_count,
         "active_browser_sessions": browser_scout_count,
         "recent_scout_submitters": recent_scout_submitters,
+        "scout_runtime_webgpu_total": scout_runtime_webgpu_total,
+        "scout_runtime_wasm_total": scout_runtime_wasm_total,
+        "scout_last_submit_success_ms": scout_last_submit_success_ms,
         "known_peers": known.len(),
         "uptime_ms": now_ms() - state.daemon_start,
         "listen_addrs": topo.listen_addrs,
@@ -266,6 +284,8 @@ pub(crate) async fn peers_handler(
 }
 
 const BROWSER_SESSION_TTL_MS: u128 = 5 * 60 * 1000;
+pub(crate) const SCOUT_CLIENT_RUNTIME_TTL_MS: u128 = 10 * 60 * 1000;
+pub(crate) const SCOUT_CLIENT_ACTIVE_WINDOW_MS: u128 = 3 * 60 * 1000;
 const DEFAULT_SCOUT_WORK_MAX_AGE_MS: u128 = 180_000;
 
 fn scout_work_max_age_ms() -> u128 {
@@ -294,6 +314,43 @@ pub(crate) fn prune_browser_sessions(
     now: u128,
 ) {
     sessions.retain(|_, session| session.expires_at_ms > now);
+}
+
+pub(crate) fn prune_scout_client_runtime(
+    statuses: &mut HashMap<String, ScoutClientRuntimeStatus>,
+    now: u128,
+) {
+    statuses.retain(|_, status| {
+        now.saturating_sub(status.last_event_ms) <= SCOUT_CLIENT_RUNTIME_TTL_MS
+    });
+}
+
+fn summarize_scout_client_runtime(
+    statuses: &HashMap<String, ScoutClientRuntimeStatus>,
+    now: u128,
+) -> (usize, usize, usize, Option<u128>) {
+    let mut draft_capable = 0usize;
+    let mut webgpu_total = 0usize;
+    let mut wasm_total = 0usize;
+    let mut last_submit_success_ms: Option<u128> = None;
+
+    for status in statuses.values() {
+        let mode = status.runtime_mode.as_deref().unwrap_or_default();
+        if mode.eq_ignore_ascii_case("webgpu") {
+            webgpu_total += 1;
+            if now.saturating_sub(status.last_event_ms) <= SCOUT_CLIENT_ACTIVE_WINDOW_MS {
+                draft_capable += 1;
+            }
+        } else if mode.eq_ignore_ascii_case("wasm") {
+            wasm_total += 1;
+        }
+
+        if let Some(ts) = status.last_submit_success_ms {
+            last_submit_success_ms = Some(last_submit_success_ms.map_or(ts, |current| current.max(ts)));
+        }
+    }
+
+    (draft_capable, webgpu_total, wasm_total, last_submit_success_ms)
 }
 
 pub(crate) async fn credits_balance_handler(
@@ -845,9 +902,14 @@ pub(crate) async fn scout_client_event_handler(
         }));
     }
 
+    let now = now_ms();
+    let event_name = event.event.as_str();
+
     match event.event.as_str() {
         "submit_attempt" => state.system_metrics.inc_scout_client_submit_attempt(),
-        "submit_success" => state.system_metrics.inc_scout_client_submit_success(),
+        "submit_success" => {
+            state.system_metrics.inc_scout_client_submit_success();
+        }
         "submit_http_error" => state.system_metrics.inc_scout_client_submit_http_failure(),
         "submit_timeout" => state.system_metrics.inc_scout_client_submit_timeout(),
         "submit_pow_failure" => state.system_metrics.inc_scout_client_submit_pow_failure(),
@@ -856,6 +918,7 @@ pub(crate) async fn scout_client_event_handler(
             .inc_scout_client_submit_network_failure(),
         "generate_failure" => state.system_metrics.inc_scout_client_generate_failure(),
         "fallback_draft_used" => state.system_metrics.inc_scout_client_fallback_draft(),
+        "runtime_webgpu_ready" | "runtime_wasm_fallback" => {}
         _ => {
             tracing::debug!(
                 scout_id = %scout_id,
@@ -868,6 +931,32 @@ pub(crate) async fn scout_client_event_handler(
                 "ok": false,
                 "detail": "unknown event",
             }));
+        }
+    }
+
+    {
+        let mut runtime = state.scout_client_runtime.lock().await;
+        prune_scout_client_runtime(&mut runtime, now);
+        let entry = runtime
+            .entry(scout_id.to_string())
+            .or_insert_with(|| ScoutClientRuntimeStatus {
+                scout_id: scout_id.to_string(),
+                runtime_mode: None,
+                last_event: event_name.to_string(),
+                last_event_detail: None,
+                last_event_ms: now,
+                last_submit_success_ms: None,
+            });
+        entry.last_event = event_name.to_string();
+        entry.last_event_detail = event.detail.as_ref().map(|d| d.chars().take(300).collect());
+        entry.last_event_ms = now;
+        if event_name == "runtime_webgpu_ready" {
+            entry.runtime_mode = Some("webgpu".to_string());
+        } else if event_name == "runtime_wasm_fallback" {
+            entry.runtime_mode = Some("wasm".to_string());
+        }
+        if event_name == "submit_success" {
+            entry.last_submit_success_ms = Some(now);
         }
     }
 
@@ -1555,7 +1644,7 @@ pub(crate) async fn metrics_handler(AxumState(state): AxumState<SharedState>) ->
         node_latency_ms,
         scheduler_decision_latency_ms: 0,
         e2e_latency_p50_ms: p.p50_ms,
-        e2e_latency_p95_ms: p.p90_ms,
+        e2e_latency_p95_ms: p.p95_ms,
         e2e_latency_p99_ms: p.p99_ms,
         node_uptime_seconds: uptime_seconds,
     });
@@ -2003,6 +2092,19 @@ pub(crate) async fn metrics_summary_handler(
         }
     }
 
+    let (
+        draft_capable_scout_count,
+        scout_runtime_webgpu_total,
+        scout_runtime_wasm_total,
+        scout_last_submit_success_ms,
+    ) = {
+        let mut runtime = state.scout_client_runtime.lock().await;
+        prune_scout_client_runtime(&mut runtime, now);
+        summarize_scout_client_runtime(&runtime, now)
+    };
+    let scout_submit_success_age_ms =
+        scout_last_submit_success_ms.map(|ts| now.saturating_sub(ts));
+
     let counters = state.system_metrics.snapshot();
     let total_tokens = counters
         .tokens_processed_total
@@ -2073,8 +2175,28 @@ pub(crate) async fn metrics_summary_handler(
         "average_latency_ms".to_string(),
         serde_json::json!(state.avg_latency_ms.load(Ordering::Relaxed)),
     );
-    payload.insert("p95_latency_ms".to_string(), serde_json::json!(p.p90_ms));
+    payload.insert("p95_latency_ms".to_string(), serde_json::json!(p.p95_ms));
     payload.insert("p99_latency_ms".to_string(), serde_json::json!(p.p99_ms));
+    payload.insert(
+        "draft_capable_scouts".to_string(),
+        serde_json::json!(draft_capable_scout_count),
+    );
+    payload.insert(
+        "scout_runtime_webgpu_total".to_string(),
+        serde_json::json!(scout_runtime_webgpu_total),
+    );
+    payload.insert(
+        "scout_runtime_wasm_total".to_string(),
+        serde_json::json!(scout_runtime_wasm_total),
+    );
+    payload.insert(
+        "scout_last_submit_success_ms".to_string(),
+        serde_json::json!(scout_last_submit_success_ms),
+    );
+    payload.insert(
+        "scout_submit_success_age_ms".to_string(),
+        serde_json::json!(scout_submit_success_age_ms),
+    );
     payload.insert(
         "offload_percentage_estimate".to_string(),
         serde_json::json!(offload_percentage),

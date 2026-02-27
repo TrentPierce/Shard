@@ -330,28 +330,30 @@ fn compute_effective_scout_timeout_ms(
 }
 
 async fn estimate_active_scouts(state: &SharedState) -> usize {
-    let browser_sessions = state.browser_sessions.lock().await;
-    let browser_count = browser_sessions.len();
-    drop(browser_sessions);
+    const SCOUT_RUNTIME_TTL_MS: u128 = 10 * 60 * 1000;
+    const SCOUT_ACTIVE_WINDOW_MS: u128 = 3 * 60 * 1000;
 
-    let snapshot = state.system_metrics.snapshot();
-    let browser_draft_capable = if snapshot.scout_client_submit_success_total > 0 {
-        browser_count
-    } else {
-        0
+    let browser_draft_capable = {
+        let now = now_ms();
+        let mut runtime = state.scout_client_runtime.lock().await;
+        runtime.retain(|_, status| now.saturating_sub(status.last_event_ms) <= SCOUT_RUNTIME_TTL_MS);
+        runtime
+            .values()
+            .filter(|status| {
+                status
+                    .runtime_mode
+                    .as_deref()
+                    .map(|mode| mode.eq_ignore_ascii_case("webgpu"))
+                    .unwrap_or(false)
+                    && now.saturating_sub(status.last_event_ms) <= SCOUT_ACTIVE_WINDOW_MS
+            })
+            .count()
     };
 
     let local_daemon_capable = if local_daemon_draft_capable(state).await {
         1
     } else {
         0
-    };
-
-    // Count connected daemon peers as potential scouts.
-    // Actual draft-capability is confirmed via submitters and local engine status.
-    let connected_peer_count = {
-        let peers = state.peers.lock().await;
-        peers.len()
     };
 
     let healthy_scout_reports = {
@@ -378,7 +380,6 @@ async fn estimate_active_scouts(state: &SharedState) -> usize {
         .max(recent_submitters)
         .max(local_daemon_capable)
         .max(healthy_scout_reports)
-        .max(connected_peer_count)
 }
 
 async fn effective_speculative_timeout_ms(state: &SharedState, config: &SpeculativeConfig) -> u64 {

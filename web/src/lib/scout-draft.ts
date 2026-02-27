@@ -93,6 +93,8 @@ type ScoutClientEventName =
   | "submit_network_error"
   | "generate_failure"
   | "fallback_draft_used"
+  | "runtime_webgpu_ready"
+  | "runtime_wasm_fallback"
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))

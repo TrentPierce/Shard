@@ -692,6 +692,7 @@ pub(crate) struct SharedState {
     ledger: Arc<Mutex<LedgerState>>,
     ledger_store: Arc<LedgerStore>,
     browser_sessions: Arc<Mutex<HashMap<String, BrowserLayerSession>>>,
+    scout_client_runtime: Arc<Mutex<HashMap<String, ScoutClientRuntimeStatus>>>,
     browser_work: Arc<Mutex<VecDeque<BrowserLayerWorkItem>>>,
     node_wallet: String,
     model_id: String,
@@ -1067,6 +1068,16 @@ struct BrowserLayerSession {
     obfuscation_key: Vec<u8>,
     last_seen_ms: u128,
     expires_at_ms: u128,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct ScoutClientRuntimeStatus {
+    pub scout_id: String,
+    pub runtime_mode: Option<String>,
+    pub last_event: String,
+    pub last_event_detail: Option<String>,
+    pub last_event_ms: u128,
+    pub last_submit_success_ms: Option<u128>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -2259,6 +2270,7 @@ async fn main() -> Result<()> {
         ledger: Arc::new(Mutex::new(loaded_ledger)),
         ledger_store,
         browser_sessions: Arc::new(Mutex::new(HashMap::new())),
+        scout_client_runtime: Arc::new(Mutex::new(HashMap::new())),
         browser_work: Arc::new(Mutex::new(VecDeque::new())),
         node_wallet: node_wallet.clone(),
         model_id: cli.model_id.clone(),
