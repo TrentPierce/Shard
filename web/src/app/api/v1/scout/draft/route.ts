@@ -17,7 +17,10 @@ export async function POST(request: NextRequest) {
       method: "POST",
       headers: forwardRequestHeaders(),
       body,
-      timeoutMs: 8_000,
+      timeoutMs: 4_000,
+      totalTimeoutMs: 6_500,
+      maxAttempts: 2,
+      retryJitterMs: 180,
       failoverOnStatuses: [500, 502, 503, 504],
     })
     const data = await response.json().catch(() => ({}))

@@ -73,6 +73,7 @@ let gossipsub: GossipSub | null = null;
 let isInitialized = false;
 let reconnectTimer: ReturnType<typeof setInterval> | null = null;
 let peerCountTimer: ReturnType<typeof setInterval> | null = null;
+let reconnectInFlight = false;
 let workHandler: WorkHandler | null = null;
 let resultHandler: ResultHandler | null = null;
 let bootstrapPeersSnapshot: string[] = [];
@@ -82,6 +83,8 @@ const RESULT_TOPIC = 'shard-work-result';
 const DEFAULT_RECONNECT_INTERVAL_MS = 10000;
 const PERSISTED_BOOTSTRAP_KEY = 'shard:p2p:bootstrap:v1';
 const MAX_PERSISTED_BOOTSTRAPS = 32;
+const RECONNECT_TICK_JITTER_MS = 1200;
+const RECONNECT_DIAL_TIMEOUT_MS = 5000;
 
 // ─── Core Functions ────────────────────────────────────────────────────────
 
@@ -103,11 +106,12 @@ export async function initP2P(config: P2PConfig = {}): Promise<string> {
       .split(/[,\n ]+/)
       .map((v) => v.trim())
       .filter(Boolean);
-    const fallbackLocalPeer = '/ip4/127.0.0.1/tcp/4101/ws';
+    const isHttpsPage = typeof window !== 'undefined' && window.location.protocol === 'https:';
+    const fallbackLocalPeers = isHttpsPage ? [] : ['/ip4/127.0.0.1/tcp/4101/ws'];
     const requestedPeers = mergeBootstrapPeers(
       config.bootstrapPeers && config.bootstrapPeers.length > 0
         ? config.bootstrapPeers
-        : [...envBootstrapPeers, fallbackLocalPeer],
+        : [...envBootstrapPeers, ...fallbackLocalPeers],
       readPersistedBootstrapPeers()
     );
     const bootstrapPeers = sanitizeBootstrapPeers(requestedPeers);
@@ -204,7 +208,10 @@ export async function initP2P(config: P2PConfig = {}): Promise<string> {
       clearInterval(reconnectTimer);
     }
     reconnectTimer = setInterval(() => {
-      void reconnectBootstrapPeers();
+      const jitterMs = Math.floor(Math.random() * RECONNECT_TICK_JITTER_MS);
+      setTimeout(() => {
+        void reconnectBootstrapPeers();
+      }, jitterMs);
     }, reconnectInterval);
     void reconnectBootstrapPeers();
 
@@ -297,30 +304,59 @@ function extractRemoteAddr(event: any): string | null {
   }
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function shuffleArray<T>(input: T[]): T[] {
+  const copy = [...input];
+  for (let i = copy.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy;
+}
+
+async function dialWithTimeout(node: Libp2p, peer: string, timeoutMs: number): Promise<void> {
+  await Promise.race([
+    node.dial(peer as any) as Promise<unknown>,
+    (async () => {
+      await sleep(timeoutMs);
+      throw new Error(`dial_timeout_${timeoutMs}ms`);
+    })(),
+  ]);
+}
+
 async function reconnectBootstrapPeers(): Promise<void> {
   if (!p2pNode) return;
+  if (reconnectInFlight) return;
+  reconnectInFlight = true;
   // Maintain at least MIN_MESH_PEERS connections for redundancy.
   // Previously stopped reconnecting at 1 peer, which left the node
   // vulnerable to single-peer failure.
-  const MIN_MESH_PEERS = 2;
-  if (p2pNode.getPeers().length >= MIN_MESH_PEERS) return;
+  try {
+    const MIN_MESH_PEERS = 2;
+    if (p2pNode.getPeers().length >= MIN_MESH_PEERS) return;
 
-  const reconnectCandidates = sanitizeBootstrapPeers(
-    mergeBootstrapPeers(bootstrapPeersSnapshot, readPersistedBootstrapPeers())
-  );
-  if (reconnectCandidates.length === 0) {
-    return;
-  }
-
-  const MAX_RECONNECT_DIALS_PER_TICK = 3;
-  for (const peer of reconnectCandidates.slice(0, MAX_RECONNECT_DIALS_PER_TICK)) {
-    try {
-      await p2pNode.dial(peer as any);
-      console.log('[p2p] Reconnected bootstrap peer:', peer);
-      persistBootstrapPeers([peer]);
-    } catch (error) {
-      console.warn('[p2p] Reconnect attempt failed:', peer, error);
+    const reconnectCandidates = sanitizeBootstrapPeers(
+      mergeBootstrapPeers(bootstrapPeersSnapshot, readPersistedBootstrapPeers())
+    );
+    if (reconnectCandidates.length === 0) {
+      return;
     }
+
+    const MAX_RECONNECT_DIALS_PER_TICK = 3;
+    for (const peer of shuffleArray(reconnectCandidates).slice(0, MAX_RECONNECT_DIALS_PER_TICK)) {
+      try {
+        await dialWithTimeout(p2pNode, peer, RECONNECT_DIAL_TIMEOUT_MS);
+        console.log('[p2p] Reconnected bootstrap peer:', peer);
+        persistBootstrapPeers([peer]);
+      } catch (error) {
+        console.warn('[p2p] Reconnect attempt failed:', peer, error);
+      }
+    }
+  } finally {
+    reconnectInFlight = false;
   }
 }
 
@@ -424,6 +460,7 @@ export async function stopP2P(): Promise<void> {
   p2pNode = null;
   gossipsub = null;
   isInitialized = false;
+  reconnectInFlight = false;
 }
 
 // ─── Internal Helpers ──────────────────────────────────────────────────────

@@ -60,6 +60,12 @@ export type ScoutSubmissionResult = {
     detail: string
 }
 
+export type WorkPollResult = {
+    work: WorkRequest | null
+    transientError: boolean
+    detail?: string
+}
+
 function fallbackDraftFromPrompt(_prompt: string, _maxTokens: number): string {
     // No real inference available — return empty to skip draft submission.
     // The previous echo-back approach (returning tail words of the prompt)
@@ -103,6 +109,51 @@ async function generateDraftsWithTimeout(
  * If detected, the browser MUST disable WebGPU and route to the local
  * Shard (double-dip prevention per the agents.md spec).
  */
+function isWsTransportAddr(addr: string): boolean {
+    const normalized = addr.toLowerCase()
+    return (
+        normalized.startsWith("ws://") ||
+        normalized.startsWith("wss://") ||
+        normalized.includes("/ws/") ||
+        normalized.endsWith("/ws") ||
+        normalized.includes("/wss/") ||
+        normalized.endsWith("/wss")
+    )
+}
+
+function isSecureWsTransportAddr(addr: string): boolean {
+    const normalized = addr.toLowerCase()
+    return (
+        normalized.startsWith("wss://") ||
+        normalized.includes("/wss/") ||
+        normalized.endsWith("/wss")
+    )
+}
+
+function collectSwarmWorkerBootstrapAddrs(
+    topology: Topology | null,
+    knownShardAddr: string | null,
+): string[] | undefined {
+    const rawCandidates = [
+        knownShardAddr ?? "",
+        topology?.shard_ws_multiaddr ?? "",
+        ...(topology?.listen_addrs ?? []),
+        ...(topology?.bootstrap_peers ?? []),
+    ]
+        .map((addr) => String(addr || "").trim())
+        .filter(Boolean)
+
+    const isHttpsPage = typeof window !== "undefined" && window.location.protocol === "https:"
+    const deduped = new Set<string>()
+    for (const addr of rawCandidates) {
+        if (!isWsTransportAddr(addr)) continue
+        if (isHttpsPage && !isSecureWsTransportAddr(addr)) continue
+        deduped.add(addr)
+    }
+    const output = Array.from(deduped)
+    return output.length > 0 ? output : undefined
+}
+
 export async function probeLocalShard(): Promise<LocalShardProbe> {
     const endpoint = rustUrl("/health")
     const LATENCY_THRESHOLD_MS = 2  // Same-machine detection threshold
@@ -218,24 +269,7 @@ export async function initSwarmWorker(
     )
     await navigator.serviceWorker.ready
 
-    // Parse bootstrap addresses from topology
-    let bootstrapAddrs: string[] | undefined
-    if (topology?.listen_addrs) {
-        bootstrapAddrs = topology.listen_addrs
-            .filter(addr => addr.includes('/ws/') || addr.startsWith('ws://') || addr.startsWith('wss://'))
-            .map(addr => {
-                if (addr.startsWith('ws://') || addr.startsWith('wss://')) {
-                    return addr
-                }
-                const hostMatch = addr.match(/(?:ip4|dns4)\/([^/]+)/)
-                const portMatch = addr.match(/tcp\/(\d+)/)
-                if (hostMatch && portMatch) {
-                    return `ws://${hostMatch[1]}:${portMatch[1]}`
-                }
-                return null
-            })
-            .filter((addr): addr is string => addr !== null)
-    }
+    const bootstrapAddrs = collectSwarmWorkerBootstrapAddrs(topology, knownShardAddr)
 
     registration.active?.postMessage({
         type: "INIT_SCOUT",
@@ -343,31 +377,43 @@ async function submitDraftResult(result: WorkResult): Promise<ScoutSubmissionRes
 /**
  * Request work from the API.
  */
-export async function requestWork(): Promise<WorkRequest | null> {
+export async function requestWork(): Promise<WorkPollResult> {
     try {
         const polled = await pollForWork(getScoutId(), {
             // Poll less aggressively so WAN scouts do not self-DOS the control plane.
             pollTimeoutMs: 4500,
             pollRetries: 2,
             pollRetryBackoffMs: 400,
+            pollMaxRetryBackoffMs: 3500,
         })
         if (!polled.work) {
             if (polled.transient_error) {
                 console.warn("Transient scout polling failure:", polled.detail)
             }
-            return null
+            return {
+                work: null,
+                transientError: Boolean(polled.transient_error),
+                detail: polled.detail,
+            }
         }
 
         // Transform backend response to local type
         return {
-            request_id: polled.work.request_id,
-            prompt_context: polled.work.prompt_context ?? polled.work.prompt ?? "",
-            min_tokens: polled.work.min_tokens ?? polled.work.max_tokens ?? 4,
-            created_at_ms: polled.work.created_at_ms
+            work: {
+                request_id: polled.work.request_id,
+                prompt_context: polled.work.prompt_context ?? polled.work.prompt ?? "",
+                min_tokens: polled.work.min_tokens ?? polled.work.max_tokens ?? 4,
+                created_at_ms: polled.work.created_at_ms,
+            },
+            transientError: false,
         }
     } catch (error: any) {
         console.error("Failed to request work:", error)
-        return null
+        return {
+            work: null,
+            transientError: true,
+            detail: error?.message ?? String(error),
+        }
     }
 }
 
@@ -397,7 +443,8 @@ export async function startScoutWorker(
         }
         inFlight = true
         try {
-            const work = await requestWork()
+            const polled = await requestWork()
+            const work = polled.work
             if (work) {
                 onRequest?.(work)
                 const result = await handleScoutWork(work)
@@ -408,7 +455,7 @@ export async function startScoutWorker(
                     consecutiveFailures = 0
                 }
             } else {
-                consecutiveFailures = 0
+                consecutiveFailures = polled.transientError ? consecutiveFailures + 1 : 0
             }
         } finally {
             inFlight = false

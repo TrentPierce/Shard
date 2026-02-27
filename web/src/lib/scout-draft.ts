@@ -13,6 +13,7 @@ export interface DraftResponse {
   detail?: string
   status?: number
   retried?: number
+  transient_error?: boolean
 }
 
 export interface ScoutConfig {
@@ -22,10 +23,18 @@ export interface ScoutConfig {
   timeoutMs: number
   maxRetries: number
   retryBackoffMs: number
+  maxRetryBackoffMs: number
   maxQueueDepth: number
+  maxQueueWaitMs: number
   pollTimeoutMs: number
   pollRetries: number
   pollRetryBackoffMs: number
+  pollMaxRetryBackoffMs: number
+  powRequestTimeoutMs: number
+  powRetries: number
+  powRetryBackoffMs: number
+  powFailureCooldownMs: number
+  clientEventTimeoutMs: number
 }
 
 export interface SubmitDraftOptions extends Partial<ScoutConfig> {
@@ -39,10 +48,18 @@ const DEFAULT_CONFIG: ScoutConfig = {
   timeoutMs: 15000,
   maxRetries: 2,
   retryBackoffMs: 250,
+  maxRetryBackoffMs: 3000,
   maxQueueDepth: 16,
+  maxQueueWaitMs: 25000,
   pollTimeoutMs: 1500,
   pollRetries: 2,
   pollRetryBackoffMs: 300,
+  pollMaxRetryBackoffMs: 3000,
+  powRequestTimeoutMs: 5000,
+  powRetries: 1,
+  powRetryBackoffMs: 500,
+  powFailureCooldownMs: 10000,
+  clientEventTimeoutMs: 1200,
 }
 
 const SCOUT_ID_KEY = "shard_scout_id"
@@ -53,10 +70,13 @@ let isSubmitting = false
 let activeSubmissionAbort: AbortController | null = null
 let powVerifiedUntilMs = 0
 let powVerificationInFlight: Promise<boolean> | null = null
+let powRetryNotBeforeMs = 0
+let clientEventMutedUntilMs = 0
 
 type QueueItem = {
   submission: DraftSubmission
   cfg: ScoutConfig
+  enqueuedAtMs: number
   resolve: (value: DraftResponse) => void
 }
 
@@ -78,26 +98,72 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
+function getJitteredBackoff(baseMs: number, attempt: number, capMs: number): number {
+  const boundedBase = Math.max(1, Math.floor(baseMs))
+  const boundedCap = Math.max(boundedBase, Math.floor(capMs))
+  const ceiling = Math.min(boundedCap, boundedBase * Math.pow(2, Math.max(0, attempt)))
+  const floor = Math.max(10, Math.floor(ceiling * 0.25))
+  return floor + Math.floor(Math.random() * Math.max(1, ceiling - floor + 1))
+}
+
+function isTransientDetail(detail: string): boolean {
+  const lower = detail.toLowerCase()
+  return (
+    lower.includes("timeout") ||
+    lower.includes("network") ||
+    lower.includes("failed to fetch") ||
+    lower.includes("temporarily unavailable") ||
+    lower.includes("backend returned non-ok") ||
+    lower.includes("all backend candidates failed") ||
+    lower.includes("http 5")
+  )
+}
+
+async function fetchWithTimeout(
+  input: RequestInfo | URL,
+  init: RequestInit,
+  timeoutMs: number,
+): Promise<Response> {
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    return await fetch(input, { ...init, signal: controller.signal })
+  } finally {
+    clearTimeout(timeoutId)
+  }
+}
+
 export async function reportScoutClientEvent(
   event: ScoutClientEventName,
   detail?: string,
   status?: number,
   scoutIdValue?: string,
 ): Promise<void> {
+  if (Date.now() < clientEventMutedUntilMs) {
+    return
+  }
   try {
-    await fetch(apiUrl("/v1/scout/client-event"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      keepalive: true,
-      body: JSON.stringify({
-        scout_id: scoutIdValue ?? getScoutId(),
-        event,
-        detail: detail?.slice(0, 300),
-        status,
-      }),
-    })
+    const response = await fetchWithTimeout(
+      apiUrl("/v1/scout/client-event"),
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        keepalive: true,
+        body: JSON.stringify({
+          scout_id: scoutIdValue ?? getScoutId(),
+          event,
+          detail: detail?.slice(0, 300),
+          status,
+        }),
+      },
+      DEFAULT_CONFIG.clientEventTimeoutMs,
+    )
+    if (response.status >= 500 || response.status === 202) {
+      clientEventMutedUntilMs = Date.now() + getJitteredBackoff(10000, 0, 30000)
+    }
   } catch {
-    // Best-effort telemetry only.
+    // Best-effort telemetry only. On repeated failures, avoid generating a storm.
+    clientEventMutedUntilMs = Date.now() + getJitteredBackoff(10000, 0, 30000)
   }
 }
 
@@ -156,55 +222,83 @@ function solvePow(challengeHex: string, difficulty: number): Promise<{ nonce: nu
   })
 }
 
-async function ensurePowVerifiedForScout(scoutIdValue: string): Promise<boolean> {
+async function ensurePowVerifiedForScout(scoutIdValue: string, cfg: ScoutConfig): Promise<boolean> {
   const now = Date.now()
   if (powVerifiedUntilMs > now) {
     return true
+  }
+  if (powRetryNotBeforeMs > now) {
+    const waitMs = powRetryNotBeforeMs - now
+    throw new Error(`PoW verification cooling down (${waitMs}ms remaining)`)
   }
   if (powVerificationInFlight) {
     return powVerificationInFlight
   }
 
   powVerificationInFlight = (async () => {
-    const challengeUrl = apiUrl(
-      `/v1/pow/challenge?peer_id=${encodeURIComponent(scoutIdValue)}&hardware_concurrency=${getPowConcurrencyHint()}&is_mobile=${isMobileDevice()}`,
-    )
-    const challengeRes = await fetch(challengeUrl, {
-      method: "GET",
-      headers: { "Content-Type": "application/json" },
-    })
-    if (!challengeRes.ok) {
-      throw new Error(`PoW challenge failed (HTTP ${challengeRes.status})`)
-    }
+    for (let attempt = 0; attempt <= cfg.powRetries; attempt += 1) {
+      try {
+        const challengeUrl = apiUrl(
+          `/v1/pow/challenge?peer_id=${encodeURIComponent(scoutIdValue)}&hardware_concurrency=${getPowConcurrencyHint()}&is_mobile=${isMobileDevice()}`,
+        )
+        const challengeRes = await fetchWithTimeout(
+          challengeUrl,
+          {
+            method: "GET",
+            headers: { "Content-Type": "application/json" },
+          },
+          cfg.powRequestTimeoutMs,
+        )
+        if (!challengeRes.ok) {
+          throw new Error(`PoW challenge failed (HTTP ${challengeRes.status})`)
+        }
 
-    const challengeJson = await challengeRes.json()
-    const challenge = challengeJson?.challenge as PowChallengePayload | undefined
-    if (!challenge?.challenge_bytes_hex || !challenge?.difficulty) {
-      throw new Error("PoW challenge payload is invalid")
-    }
+        const challengeJson = await challengeRes.json()
+        const challenge = challengeJson?.challenge as PowChallengePayload | undefined
+        if (
+          !challenge?.challenge_bytes_hex ||
+          !Number.isFinite(challenge.difficulty) ||
+          challenge.difficulty <= 0
+        ) {
+          throw new Error("PoW challenge payload is invalid")
+        }
 
-    const solved = await solvePow(challenge.challenge_bytes_hex, challenge.difficulty)
-    const verifyRes = await fetch(apiUrl("/v1/pow/verify"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        peer_id: scoutIdValue,
-        nonce: solved.nonce,
-        hash_hex: solved.hashHex,
-      }),
-    })
-    if (!verifyRes.ok) {
-      throw new Error(`PoW verify failed (HTTP ${verifyRes.status})`)
-    }
+        const solved = await solvePow(challenge.challenge_bytes_hex, challenge.difficulty)
+        const verifyRes = await fetchWithTimeout(
+          apiUrl("/v1/pow/verify"),
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              peer_id: scoutIdValue,
+              nonce: solved.nonce,
+              hash_hex: solved.hashHex,
+            }),
+          },
+          cfg.powRequestTimeoutMs,
+        )
+        if (!verifyRes.ok) {
+          throw new Error(`PoW verify failed (HTTP ${verifyRes.status})`)
+        }
 
-    const verifyJson = await verifyRes.json()
-    if (!verifyJson?.ok) {
-      throw new Error("PoW solution rejected")
-    }
+        const verifyJson = await verifyRes.json()
+        if (!verifyJson?.ok) {
+          throw new Error("PoW solution rejected")
+        }
 
-    // Daemon default verification TTL is 1 hour.
-    powVerifiedUntilMs = Date.now() + 50 * 60 * 1000
-    return true
+        // Daemon default verification TTL is 1 hour.
+        powVerifiedUntilMs = Date.now() + 50 * 60 * 1000
+        powRetryNotBeforeMs = 0
+        return true
+      } catch (error) {
+        if (attempt >= cfg.powRetries) {
+          powRetryNotBeforeMs = Date.now() + getJitteredBackoff(cfg.powFailureCooldownMs, 0, cfg.powFailureCooldownMs * 2)
+          throw error
+        }
+        await sleep(getJitteredBackoff(cfg.powRetryBackoffMs, attempt, cfg.powFailureCooldownMs))
+      }
+    }
+    throw new Error("PoW verification retry budget exhausted")
   })()
 
   try {
@@ -238,9 +332,9 @@ export function getScoutId(): string {
 
 function shouldRetrySubmission(result: DraftResponse): boolean {
   if (result.ok) return false
+  if (result.transient_error) return true
   if ((result.status ?? 0) >= 500) return true
-  const detail = (result.detail ?? "").toLowerCase()
-  return detail.includes("timeout") || detail.includes("network") || detail.includes("failed to fetch")
+  return isTransientDetail(result.detail ?? "")
 }
 
 async function submitDraftOnce(
@@ -251,8 +345,8 @@ async function submitDraftOnce(
   activeSubmissionAbort = controller
   const timeoutId = setTimeout(() => controller.abort(), cfg.timeoutMs)
   try {
-    await reportScoutClientEvent("submit_attempt", undefined, undefined, submission.scout_id)
-    await ensurePowVerifiedForScout(submission.scout_id)
+    void reportScoutClientEvent("submit_attempt", undefined, undefined, submission.scout_id)
+    await ensurePowVerifiedForScout(submission.scout_id, cfg)
     const response = await fetch(apiUrl("/v1/scout/draft"), {
       method: "POST",
       headers: {
@@ -264,30 +358,35 @@ async function submitDraftOnce(
     clearTimeout(timeoutId)
 
     if (!response.ok) {
-      const error = await response.json().catch(() => ({ detail: "Unknown error" }))
-      await reportScoutClientEvent(
+      const error = (await response.json().catch(() => ({}))) as DraftResponse
+      const detail = error.detail || `HTTP ${response.status}`
+      const transientError = Boolean(error.transient_error) || response.status >= 500 || isTransientDetail(detail)
+      void reportScoutClientEvent(
         "submit_http_error",
-        error.detail || `HTTP ${response.status}`,
+        detail,
         response.status,
         submission.scout_id,
       )
       return {
         ok: false,
-        detail: error.detail || `HTTP ${response.status}`,
+        detail,
         status: response.status,
+        transient_error: transientError,
       }
     }
 
-    const result = (await response.json()) as DraftResponse
+    const result = (await response.json().catch(() => ({ ok: false, detail: "Invalid backend response" }))) as DraftResponse
+    const transientError = Boolean(result.transient_error) || (!result.ok && isTransientDetail(result.detail ?? ""))
     if (result.ok) {
-      await reportScoutClientEvent("submit_success", undefined, response.status, submission.scout_id)
+      void reportScoutClientEvent("submit_success", undefined, response.status, submission.scout_id)
     } else {
       const detail = result.detail || "Draft rejected by verifier/backend"
-      await reportScoutClientEvent("submit_http_error", detail, response.status, submission.scout_id)
+      void reportScoutClientEvent("submit_http_error", detail, response.status, submission.scout_id)
     }
     return {
       ...result,
       status: response.status,
+      transient_error: transientError,
     }
   } catch (error) {
     clearTimeout(timeoutId)
@@ -296,6 +395,7 @@ async function submitDraftOnce(
       return {
         ok: false,
         detail: `Timeout: verifier did not respond within ${cfg.timeoutMs}ms`,
+        transient_error: true,
       }
     }
     const detail = error instanceof Error ? error.message : "Unknown error submitting draft"
@@ -307,6 +407,7 @@ async function submitDraftOnce(
     return {
       ok: false,
       detail,
+      transient_error: isTransientDetail(detail),
     }
   } finally {
     activeSubmissionAbort = null
@@ -332,7 +433,7 @@ async function submitWithRetry(
         retried: attempt,
       }
     }
-    await sleep(cfg.retryBackoffMs * (attempt + 1))
+    await sleep(getJitteredBackoff(cfg.retryBackoffMs, attempt, cfg.maxRetryBackoffMs))
     attempt += 1
   }
   return { ok: false, detail: "Draft submission retry budget exhausted", retried: cfg.maxRetries }
@@ -341,16 +442,38 @@ async function submitWithRetry(
 async function processSubmissionQueue(): Promise<void> {
   if (processingQueue) return
   processingQueue = true
-  while (submissionQueue.length > 0) {
-    const next = submissionQueue.shift()
-    if (!next) continue
-    isSubmitting = true
-    const response = await submitWithRetry(next.submission, next.cfg)
-    isSubmitting = false
-    queuedWorkIds.delete(next.submission.work_id)
-    next.resolve(response)
+  try {
+    while (submissionQueue.length > 0) {
+      const next = submissionQueue.shift()
+      if (!next) continue
+
+      const queueWaitMs = Date.now() - next.enqueuedAtMs
+      if (queueWaitMs > next.cfg.maxQueueWaitMs) {
+        queuedWorkIds.delete(next.submission.work_id)
+        next.resolve({
+          ok: false,
+          detail: `Draft dropped after waiting ${queueWaitMs}ms in submission queue`,
+          transient_error: true,
+        })
+        continue
+      }
+
+      isSubmitting = true
+      try {
+        const response = await submitWithRetry(next.submission, next.cfg)
+        queuedWorkIds.delete(next.submission.work_id)
+        next.resolve(response)
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : "Unexpected queue processing error"
+        queuedWorkIds.delete(next.submission.work_id)
+        next.resolve({ ok: false, detail, transient_error: true })
+      } finally {
+        isSubmitting = false
+      }
+    }
+  } finally {
+    processingQueue = false
   }
-  processingQueue = false
 }
 
 export async function submitDraft(
@@ -372,9 +495,10 @@ export async function submitDraft(
     void reportScoutClientEvent("submit_network_error", "duplicate_work_id")
     return { ok: false, detail: "Duplicate work_id already queued" }
   }
-  if (submissionQueue.length >= cfg.maxQueueDepth) {
+  const queueDepth = submissionQueue.length + (isSubmitting ? 1 : 0)
+  if (queueDepth >= cfg.maxQueueDepth) {
     void reportScoutClientEvent("submit_network_error", "queue_full")
-    return { ok: false, detail: "Draft submission queue is full" }
+    return { ok: false, detail: "Draft submission queue is full", transient_error: true }
   }
 
   const submission: DraftSubmission = {
@@ -388,7 +512,7 @@ export async function submitDraft(
   queuedWorkIds.add(workId)
 
   return new Promise<DraftResponse>((resolve) => {
-    submissionQueue.push({ submission, cfg, resolve })
+    submissionQueue.push({ submission, cfg, enqueuedAtMs: Date.now(), resolve })
     void processSubmissionQueue()
   })
 }
@@ -428,7 +552,7 @@ export async function pollForWork(
 ): Promise<WorkItem> {
   const cfg = { ...DEFAULT_CONFIG, ...config }
   try {
-    await ensurePowVerifiedForScout(scoutIdValue)
+    await ensurePowVerifiedForScout(scoutIdValue, cfg)
   } catch (error) {
     return {
       work: null,
@@ -454,13 +578,19 @@ export async function pollForWork(
       clearTimeout(timeoutId)
       if (!response.ok) {
         if (response.status >= 500 && attempt < cfg.pollRetries) {
-          await sleep(cfg.pollRetryBackoffMs * (attempt + 1))
+          await sleep(getJitteredBackoff(cfg.pollRetryBackoffMs, attempt, cfg.pollMaxRetryBackoffMs))
           attempt += 1
           continue
         }
-        return { work: null, detail: `HTTP ${response.status}` }
+        return { work: null, detail: `HTTP ${response.status}`, transient_error: response.status >= 500 }
       }
-      return (await response.json()) as WorkItem
+      const payload = (await response.json()) as WorkItem
+      if (payload.transient_error && attempt < cfg.pollRetries) {
+        await sleep(getJitteredBackoff(cfg.pollRetryBackoffMs, attempt, cfg.pollMaxRetryBackoffMs))
+        attempt += 1
+        continue
+      }
+      return payload
     } catch (error) {
       clearTimeout(timeoutId)
       if (attempt >= cfg.pollRetries) {
@@ -472,7 +602,7 @@ export async function pollForWork(
               : "Unknown polling error"
         return { work: null, transient_error: true, detail }
       }
-      await sleep(cfg.pollRetryBackoffMs * (attempt + 1))
+      await sleep(getJitteredBackoff(cfg.pollRetryBackoffMs, attempt, cfg.pollMaxRetryBackoffMs))
       attempt += 1
     }
   }

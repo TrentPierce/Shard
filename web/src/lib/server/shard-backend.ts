@@ -57,9 +57,16 @@ export function shardBackendUrls(path: string, fallback = false): string[] {
   return bases.map((base) => `${base}${cleanPath}`)
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
 type FetchBackendsOptions = RequestInit & {
   fallback?: boolean
   timeoutMs?: number
+  totalTimeoutMs?: number
+  retryJitterMs?: number
+  maxAttempts?: number
   failoverOnStatuses?: number[]
 }
 
@@ -70,35 +77,57 @@ export async function fetchWithBackendFailover(
   const {
     fallback = false,
     timeoutMs = 8000,
+    totalTimeoutMs,
+    retryJitterMs = 150,
+    maxAttempts,
     failoverOnStatuses = [500, 502, 503, 504],
     ...requestInit
   } = options
 
   const candidates = shardBackendUrls(path, fallback)
+  const limitedCandidates = candidates.slice(0, Math.max(1, Math.min(candidates.length, maxAttempts ?? candidates.length)))
+  const effectiveTotalTimeoutMs = totalTimeoutMs ?? timeoutMs * Math.max(1, limitedCandidates.length)
   const attempts: string[] = []
   let lastError: unknown = null
+  const startedAt = Date.now()
 
-  for (let i = 0; i < candidates.length; i += 1) {
-    const backend = candidates[i]
+  for (let i = 0; i < limitedCandidates.length; i += 1) {
+    const backend = limitedCandidates[i]
     attempts.push(backend)
+
+    const elapsedMs = Date.now() - startedAt
+    const remainingBudgetMs = effectiveTotalTimeoutMs - elapsedMs
+    if (remainingBudgetMs <= 0) {
+      throw Object.assign(new Error("Backend failover timeout budget exhausted"), {
+        attempts,
+        cause: lastError,
+      })
+    }
+    const attemptTimeoutMs = Math.max(100, Math.min(timeoutMs, remainingBudgetMs))
 
     try {
       const response = await fetch(backend, {
         ...requestInit,
-        signal: AbortSignal.timeout(timeoutMs),
+        signal: AbortSignal.timeout(attemptTimeoutMs),
         cache: "no-store",
       })
 
-      if (!failoverOnStatuses.includes(response.status) || i === candidates.length - 1) {
+      if (!failoverOnStatuses.includes(response.status) || i === limitedCandidates.length - 1) {
         return { response, backend, attempts }
+      }
+      if (retryJitterMs > 0) {
+        await sleep(Math.floor(Math.random() * retryJitterMs))
       }
     } catch (error) {
       lastError = error
-      if (i === candidates.length - 1) {
+      if (i === limitedCandidates.length - 1) {
         throw Object.assign(new Error("All backend candidates failed"), {
           attempts,
           cause: lastError,
         })
+      }
+      if (retryJitterMs > 0) {
+        await sleep(Math.floor(Math.random() * retryJitterMs))
       }
     }
   }

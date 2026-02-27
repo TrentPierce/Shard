@@ -17,10 +17,26 @@ export async function POST(request: NextRequest) {
       method: "POST",
       headers: forwardRequestHeaders(),
       body,
-      timeoutMs: 7_000,
+      timeoutMs: 1_200,
+      totalTimeoutMs: 1_800,
+      maxAttempts: 1,
       failoverOnStatuses: [500, 502, 503, 504],
     })
     const data = await response.json().catch(() => ({}))
+    if (response.status >= 500) {
+      return NextResponse.json(
+        {
+          ok: false,
+          transient_error: true,
+          detail: "Telemetry backend unavailable",
+          backend_status: response.status,
+          backend,
+          backend_attempts: attempts,
+          ...data,
+        },
+        { status: 202 },
+      )
+    }
     return NextResponse.json(
       { ...data, backend, backend_attempts: attempts },
       { status: response.status },
@@ -29,12 +45,12 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       {
         ok: false,
+        transient_error: true,
         detail: "Failed to submit scout client event to backend",
         backend_candidates: candidates,
         error: String(error),
       },
-      { status: 502 },
+      { status: 202 },
     )
   }
 }
-
