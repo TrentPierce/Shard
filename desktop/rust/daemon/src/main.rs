@@ -756,6 +756,9 @@ pub(crate) struct SharedState {
     ban_tx: mpsc::Sender<(String, String)>,
     /// Timeout tracker for speculative decoding
     scout_timeout_tracker: Arc<Mutex<ScoutTimeoutTracker>>,
+    /// Channel for daemon-side scout workers to publish generated drafts
+    /// back to the main event loop for gossipsub broadcast.
+    draft_publish_tx: mpsc::Sender<WorkResponse>,
     /// Bootstrap peer failure tracking (peer_id -> consecutive failures)
     /// Used to remove unreachable bootstraps after MAX_BOOTSTRAP_FAILURES
     bootstrap_failures: Arc<Mutex<HashMap<String, u32>>>,
@@ -2149,6 +2152,7 @@ async fn main() -> Result<()> {
     let (browser_result_tx, mut browser_result_rx) = mpsc::channel::<ForwardPassActivation>(256);
     let (scout_draft_tx, scout_draft_rx) = mpsc::channel::<ScoutDraft>(64);
     let (ban_tx, mut ban_rx) = mpsc::channel::<(String, String)>(128);
+    let (draft_publish_tx, mut draft_publish_rx) = mpsc::channel::<WorkResponse>(64);
     let canary_rollout_cfg = CanaryRolloutConfig::from_env(cli.model_id.as_str());
 
     let node_identity = NodeIdentity::load_or_create(&identity_path)?;
@@ -2279,6 +2283,7 @@ async fn main() -> Result<()> {
         scout_draft_notifiers: Arc::new(Mutex::new(HashMap::new())),
         speculative_pending: Arc::new(Mutex::new(HashMap::new())),
         ban_tx,
+        draft_publish_tx,
         scout_timeout_tracker: Arc::new(Mutex::new(ScoutTimeoutTracker::new())),
         bootstrap_failures: Arc::new(Mutex::new(HashMap::new())),
         bootstrap_registry: Arc::new(Mutex::new(loaded_bootstrap_registry)),
@@ -2997,6 +3002,34 @@ async fn main() -> Result<()> {
                 }
             }
 
+            // ── outbound daemon-scout draft results ──
+            Some(draft_response) = draft_publish_rx.recv() => {
+                let nonce = state.credit_nonce.fetch_add(1, Ordering::Relaxed);
+                let envelope = shard_common::common::signed_envelope::SignedEnvelope::sign(
+                    draft_response.clone(),
+                    &signing_key,
+                    nonce,
+                    now_ms(),
+                );
+                match serde_json::to_vec(&envelope) {
+                    Ok(payload) => {
+                        match swarm.behaviour_mut().gossipsub.publish(result_topic.clone(), payload) {
+                            Ok(_) => tracing::info!(
+                                request_id = %draft_response.request_id,
+                                tokens = draft_response.draft_tokens.len(),
+                                "published daemon-scout WorkResponse to gossipsub"
+                            ),
+                            Err(e) => tracing::warn!(
+                                request_id = %draft_response.request_id,
+                                %e,
+                                "daemon-scout gossipsub publish failed"
+                            ),
+                        }
+                    }
+                    Err(e) => tracing::error!(%e, "failed to serialize daemon-scout WorkResponse"),
+                }
+            }
+
             // ── inbound pipeline forward requests (HTTP -> pooled gossipsub fanout) ──
             Some(dispatch) = pipeline_rx.recv() => {
                 let pool_size = state.race_pool_size.clamp(1, 8);
@@ -3145,6 +3178,40 @@ async fn main() -> Result<()> {
                                     state.gossipsub_latency_hist.observe(propagation_ms);
                                 }
 
+                                // Insert into idempotent_results so wait_for_scout_draft can find it
+                                {
+                                    let mut by_id = state.idempotent_results.lock().await;
+                                    by_id.insert(result.request_id.clone(), result.clone());
+                                }
+
+                                // Insert into scout_draft_mailbox for deterministic handoff
+                                {
+                                    let draft = ScoutDraft {
+                                        work_id: result.request_id.clone(),
+                                        scout_id: result.peer_id.clone(),
+                                        draft_tokens: result.draft_tokens.clone(),
+                                        draft_text: result.draft_text.clone(),
+                                        timestamp_ms: result.created_at_ms.unwrap_or_else(now_ms),
+                                        latency_ms: result.latency_ms as u64,
+                                    };
+                                    let mut mailbox = state.scout_draft_mailbox.lock().await;
+                                    let queue = mailbox
+                                        .entry(draft.work_id.clone())
+                                        .or_insert_with(VecDeque::new);
+                                    queue.push_back(draft);
+                                    while queue.len() > 8 {
+                                        queue.pop_front();
+                                    }
+                                }
+
+                                // Notify any waiters blocked in wait_for_scout_draft
+                                {
+                                    let notifiers = state.scout_draft_notifiers.lock().await;
+                                    if let Some(notify) = notifiers.get(&result.request_id) {
+                                        notify.notify_waiters();
+                                    }
+                                }
+
                                 let mut q = state.results.lock().await;
                                 q.push_back(result);
                                 while q.len() > 128 { q.pop_front(); }
@@ -3160,11 +3227,109 @@ async fn main() -> Result<()> {
 
                                     tracing::info!(id = %envelope.payload.request_id, signer = %envelope.signer_pubkey_hex, "received valid Signed WorkRequest via gossipsub");
 
+                                    let work = envelope.payload;
+
                                     // If we are acting as a Scout, pick up this work
-                                    let mut queue = state.scout_work.lock().await;
-                                    queue.push_back(envelope.payload);
-                                    while queue.len() > 1024 {
-                                        queue.pop_front();
+                                    {
+                                        let mut queue = state.scout_work.lock().await;
+                                        queue.push_back(work.clone());
+                                        while queue.len() > 1024 {
+                                            queue.pop_front();
+                                        }
+                                    }
+
+                                    // ── Daemon-side scout worker ──
+                                    // If this node contributes compute and has a local engine,
+                                    // generate draft tokens and publish them back via gossipsub.
+                                    let contribute_enabled = {
+                                        let topo = state.topology.lock().await;
+                                        topo.contribute_enabled
+                                    };
+                                    if contribute_enabled {
+                                        let scout_state = state.clone();
+                                        let scout_peer_id = local_peer_id.to_string();
+                                        tokio::spawn(async move {
+                                            let draft_start = now_ms();
+                                            let mut engine_guard = scout_state.engine.lock().await;
+                                            let engine = match engine_guard.as_mut() {
+                                                Some(e) => e,
+                                                None => {
+                                                    tracing::debug!(
+                                                        request_id = %work.request_id,
+                                                        "daemon scout: no local engine available"
+                                                    );
+                                                    return;
+                                                }
+                                            };
+
+                                            let mut tokens = match engine.tokenize(&work.prompt_context, 4096) {
+                                                Ok(t) => t,
+                                                Err(_) => return,
+                                            };
+                                            if !tokens.is_empty() && tokens[0] == 128000 {
+                                                tokens.remove(0);
+                                            }
+                                            if engine.eval(&tokens).is_err() {
+                                                return;
+                                            }
+
+                                            let target = (work.min_tokens.max(4) as usize).min(32);
+                                            let mut draft_tokens = Vec::with_capacity(target);
+                                            let mut draft_text = String::new();
+
+                                            for _ in 0..target {
+                                                let logits = match engine.get_logits(128256) {
+                                                    Ok(l) => l,
+                                                    Err(_) => break,
+                                                };
+                                                let mut best_idx = 0usize;
+                                                let mut best_val = -f32::INFINITY;
+                                                for (i, &val) in logits.iter().enumerate() {
+                                                    if val > best_val {
+                                                        best_val = val;
+                                                        best_idx = i;
+                                                    }
+                                                }
+                                                // Stop on EOS / EOT tokens
+                                                if best_idx == 128001 || best_idx == 128009 {
+                                                    break;
+                                                }
+                                                draft_tokens.push(best_idx as i32);
+                                                if let Ok(piece) = engine.token_to_piece(best_idx as i32) {
+                                                    draft_text.push_str(&piece);
+                                                }
+                                                if engine.eval(&[best_idx as i32]).is_err() {
+                                                    break;
+                                                }
+                                            }
+
+                                            drop(engine_guard);
+
+                                            if draft_tokens.is_empty() {
+                                                return;
+                                            }
+
+                                            let latency_ms = (now_ms() - draft_start) as f32;
+                                            let response = WorkResponse {
+                                                request_id: work.request_id.clone(),
+                                                peer_id: scout_peer_id,
+                                                draft_tokens,
+                                                draft_text,
+                                                latency_ms,
+                                                created_at_ms: Some(now_ms()),
+                                            };
+
+                                            tracing::info!(
+                                                request_id = %work.request_id,
+                                                tokens = response.draft_tokens.len(),
+                                                latency_ms = %format!("{:.0}", latency_ms),
+                                                "daemon scout: generated draft tokens"
+                                            );
+
+                                            if let Err(e) = scout_state.draft_publish_tx.send(response).await {
+                                                tracing::warn!(%e, "daemon scout: failed to send draft to publish channel");
+                                            }
+                                        });
                                     }
                                 }
                                 Err(e) => {

@@ -126,6 +126,13 @@ async fn estimate_active_scouts(state: &SharedState) -> usize {
     let browser_count = browser_sessions.len();
     drop(browser_sessions);
 
+    // Count connected daemon peers — they can also act as scouts
+    // via the daemon-side scout worker.
+    let connected_peer_count = {
+        let peers = state.peers.lock().await;
+        peers.len()
+    };
+
     let recent_submitters = {
         let results = state.results.lock().await;
         let cutoff = now_ms().saturating_sub(3 * 60 * 1000);
@@ -138,7 +145,9 @@ async fn estimate_active_scouts(state: &SharedState) -> usize {
         unique.len()
     };
 
-    browser_count.max(recent_submitters)
+    browser_count
+        .max(recent_submitters)
+        .max(connected_peer_count)
 }
 
 async fn effective_speculative_timeout_ms(state: &SharedState, config: &SpeculativeConfig) -> u64 {
