@@ -1544,16 +1544,16 @@ fn filter_bootstrap_addrs(addrs: Vec<String>, allow_private: bool) -> Vec<String
 
 fn reconnect_transport_priority(addr: &Multiaddr) -> u8 {
     let text = addr.to_string();
-    if text.contains("/quic-v1") {
+    if text.contains("/tcp/") && !text.contains("/ws/") && !text.contains("/wss/") {
         return 0;
     }
-    if text.contains("/webrtc-direct") {
+    if text.contains("/quic-v1") {
         return 1;
     }
-    if text.contains("/wss/") || text.contains("/ws/") {
+    if text.contains("/webrtc-direct") {
         return 2;
     }
-    if text.contains("/tcp/") {
+    if text.contains("/wss/") || text.contains("/ws/") {
         return 3;
     }
     4
@@ -4496,7 +4496,7 @@ mod tests {
     }
 
     #[test]
-    fn reconnect_sort_key_prefers_public_quic_and_deprioritizes_private_tcp() {
+    fn reconnect_sort_key_prefers_public_tcp_and_deprioritizes_private_tcp() {
         let peer = PeerId::random();
         let private_tcp = format!("/ip4/192.168.1.25/tcp/4001/p2p/{peer}");
         let public_tcp = format!("/ip4/35.175.242.222/tcp/4001/p2p/{peer}");
@@ -4505,8 +4505,8 @@ mod tests {
         let mut addrs = vec![public_tcp.clone(), private_tcp.clone(), public_quic.clone()];
         addrs.sort_by_key(|addr| super::reconnect_addr_sort_key(addr));
 
-        assert_eq!(addrs[0], public_quic);
-        assert_eq!(addrs[1], public_tcp);
+        assert_eq!(addrs[0], public_tcp);
+        assert_eq!(addrs[1], public_quic);
         assert_eq!(addrs[2], private_tcp);
     }
 
