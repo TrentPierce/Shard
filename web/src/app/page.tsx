@@ -27,6 +27,12 @@ const flow = [
 
 export default function HomePage() {
   const telemetry = useDashboardTelemetry()
+  const statusClass =
+    telemetry.healthState === "ready"
+      ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
+      : telemetry.healthState === "degraded"
+      ? "border-amber-500/40 bg-amber-500/10 text-amber-300"
+      : "border-rose-500/40 bg-rose-500/10 text-rose-300"
 
   const values = {
     verifier: telemetry.verifierNodes.toLocaleString(),
@@ -40,9 +46,16 @@ export default function HomePage() {
       <main id="main-content" className="pb-16 pt-10 sm:pt-14">
         <section className="relative overflow-hidden rounded-3xl border border-ring bg-gradient-to-br from-base-900 to-base-800 px-6 py-12 shadow-panel sm:px-10 sm:py-16">
           <div className="relative mx-auto max-w-4xl">
-            <p className="mb-5 text-xs font-semibold uppercase tracking-[0.22em] text-accent-400">
-              Live Telemetry Dashboard
-            </p>
+            <div className="mb-5 flex flex-wrap items-center gap-3">
+              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-accent-400">
+                Live Telemetry Dashboard
+              </p>
+              <span
+                className={`inline-flex min-h-7 items-center rounded-full border px-2.5 text-[11px] font-semibold uppercase tracking-[0.14em] ${statusClass}`}
+              >
+                {telemetry.statusLabel}
+              </span>
+            </div>
             <h1 className="text-balance text-3xl font-semibold tracking-tight text-ink-50 sm:text-5xl">
               Browser-powered distributed inference. Run models together.
             </h1>

@@ -15,6 +15,8 @@
 - `SHARD_HEARTBEAT_TIMEOUT_MS`
 - `SHARD_ALLOW_PRIVATE_BOOTSTRAP` (`true|false`, default `false`; allows dialing private/loopback bootstrap multiaddrs)
 - `SHARD_HARDCODED_BOOTSTRAP_MODE` (`fallback|always|disabled`, default `fallback`; `fallback` only uses built-in bootstrap when no user/bootstrap-url/persisted peers exist)
+- `SHARD_BOOTSTRAP_REGISTRY_TTL_MS` (optional TTL for persisted bootstrap registry entries; default `86400000`)
+- `SHARD_BOOTSTRAP_REGISTRY_MIN_SCORE` (optional minimum stability score `0..100` for registry-seeded bootstrap addrs; default `30`)
 - `SHARD_CANARY_ENABLED`
 - `SHARD_CANARY_MODEL_ID`
 - `SHARD_CANARY_TRAFFIC_PERCENT`
@@ -22,6 +24,10 @@
 - `SHARD_CANARY_MIN_ACCEPTANCE_RATE`
 - `SHARD_CANARY_MAX_REJECT_RATE`
 - `SHARD_CANARY_MIN_SAMPLES`
+- `SHARD_PROXY_SLI_HISTORY_MS` (optional retention window for proxy chat SLI samples; default `900000`)
+- `SHARD_PROXY_SLI_WINDOW_MS` (optional active SLI window for proxy chat error-rate calculations; default `300000`)
+- `SHARD_PROXY_SLI_MIN_WINDOW_REQUESTS` (minimum 5m requests before proxy 5xx SLI breach can trigger; default `20`)
+- `SHARD_PROXY_SLI_MAX_5XX_RATE` (proxy 5xx SLI threshold; default `0.05`)
 
 ## Core Services
 - Daemon: `desktop/rust/daemon`

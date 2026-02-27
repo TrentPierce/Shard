@@ -9,10 +9,12 @@ type DashboardTelemetry = {
   tokensPerSecond: number
   totalTokensGenerated: number
   isLive: boolean
+  healthState: "ready" | "degraded" | "unavailable"
+  statusLabel: "READY" | "DEGRADED" | "OFFLINE"
 }
 
 export function useDashboardTelemetry(): DashboardTelemetry {
-  const { telemetry, isConnected } = useSwarmTelemetry()
+  const { telemetry, isConnected, statusLabel } = useSwarmTelemetry()
   const liveTotalRef = useRef(0)
   const [lastKnownTps, setLastKnownTps] = useState(0)
 
@@ -53,5 +55,7 @@ export function useDashboardTelemetry(): DashboardTelemetry {
     tokensPerSecond,
     totalTokensGenerated,
     isLive: isConnected,
+    healthState: telemetry.healthState,
+    statusLabel,
   }
 }

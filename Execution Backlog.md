@@ -314,7 +314,7 @@ Execution Backlog (Epics, Tickets, Acceptance Criteria, Sequencing)
 
   ## 9. Post-Readiness TODO Queue (Tracked Follow-Ups)
 
-  - TODO-NET-BOOTSTRAP-01: Replace stale hardcoded bootstrap peers in defaults with a live bootstrap-registry seed set and TTL-based pruning to prevent repeated dial failures when peer identities rotate.
+  - TODO-NET-BOOTSTRAP-01: `Done (2026-02-27)` Daemon bootstrap seeding now includes persisted bootstrap-registry entries filtered by configurable TTL/stability score, with stale-entry pruning and known-peer cleanup to prevent stale dial churn after peer identity rotation.
   - TODO-NET-BOOTSTRAP-02: `Done (2026-02-25)` Browser libp2p now persists last-known-good bootstrap peers and runs periodic reconnect attempts when peer count drops to zero.
   - TODO-NET-REPUTATION-01: `Done (2026-02-25)` Scout penalty policy now requires sustained failure patterns (longer window + consecutive failures) before blackholing to reduce false-positive bans under WAN jitter.
   - TODO-NET-POLLING-01: `Done (2026-02-25)` Browser scout polling backoff/timeout tuned to reduce control-plane load spikes and transient 502 cascades during bursty scout traffic.
@@ -328,7 +328,7 @@ Execution Backlog (Epics, Tickets, Acceptance Criteria, Sequencing)
   - TODO-SCOUT-READY-01: `Done (2026-02-27)` Scheduler eligibility now uses scout runtime capability (`runtime_webgpu_ready` vs `runtime_wasm_fallback`) instead of raw browser session counts, preventing fallback-only scouts from inflating speculative wait budgets.
   - TODO-SCOUT-INGRESS-02: `Done (2026-02-25)` Hardened `/api/v1/scout/work` and `/api/v1/scout/draft` proxy resilience under sustained load (graceful degrade behavior, timeout/failover tuning, and explicit error semantics) so browser scouts do not churn on transient backend stalls.
   - TODO-SCOUT-INGRESS-03: `Done (2026-02-27)` Added proxy-side backend cooldown/load-shedding for scout work/draft routes to avoid failure amplification and request storms when backend is already degraded.
-  - TODO-WEB-PROXY-01: Add explicit proxy-side SLI for `/api/v1/chat/completions` (5xx rate, timeout rate, and backend-attempt labels) and alert if health is `ok` while chat proxy 5xx exceeds 5% for 5 minutes.
+  - TODO-WEB-PROXY-01: `Done (2026-02-27)` Added proxy-side chat SLI counters/rates (5xx, timeout, attempts) with Prometheus export via `/api/metrics`, health-route readiness downgrade on SLI breach, and `ShardChatProxy5xxHighWhileBackendHealthy` alert wiring.
   - TODO-MODEL-ALIGN-01: `Done (2026-02-27)` Default scout and verifier model IDs are now aligned on `meta-llama/Llama-3.2-1B`; runtime compatibility logic normalizes legacy aliases (`shard-hybrid`, `default-model`, `llama-3.2-1b-draft`) to preserve backward compatibility while enforcing a single canonical model identity.
 
   ## 10. Post-Readiness Remediation Backlog (2026-02-25)
@@ -433,5 +433,5 @@ Execution Backlog (Epics, Tickets, Acceptance Criteria, Sequencing)
   - R0-T34: `Done` (speculative draft/verify activation is now non-zero in live runs, with accepted speculative token counters active and `speculative_verify_zero_accept_total` no longer dominating baseline runs; mailbox/idempotent lifecycle cleanup and queue/backpressure handling were hardened to preserve deterministic work-id handoff under concurrency).
   - R0-T35: `Done` (benchmark harness now emits explicit `speculative_zero_draft_fallback_reason` evidence and CI workflow enforces `--require-speculative-gate`, failing distributed runs that report zero draft counters without an explicit fallback reason).
   - R0-T38: `Partial` (web scout and proxy stability now include transient-aware retries, jittered backoff, bounded failover budgets, stale-snapshot serving for health/peers/topology/metrics, and scout-route backend cooldown/load-shedding to prevent outage feedback loops; EC2 distributed latency SLO target remains open and still requires transport/queue tuning).
-  - R1-T39: `Partial` (tri-state semantics are now propagated by web proxy routes and reflected by dashboard telemetry state; remaining work is UI-level tri-state badging and explicit integration tests for all readiness-state transitions).
+  - R1-T39: `Done` (tri-state semantics are propagated end-to-end in proxy routes and dashboard telemetry; homepage now renders explicit readiness badging and automated tests cover readiness state transitions in dashboard telemetry/status mapping).
   - R1-T40: `Done` (dashboard token totals consume authoritative backend counters; scout submit and zero-token drift alerting is now wired via `ShardScoutSubmitDegraded`/`ShardZeroTokenDrift`, with runbook-linked thresholds in operations docs).

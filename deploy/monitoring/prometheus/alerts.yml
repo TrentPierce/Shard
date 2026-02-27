@@ -66,3 +66,14 @@ groups:
           summary: "Scout submit success rate degraded"
           description: "Browser scout draft submit success fell below 20% over 10 minutes with meaningful traffic."
           runbook_url: "https://github.com/TrentPierce/Shard/blob/main/docs/operations.md"
+
+      - alert: ShardChatProxy5xxHighWhileBackendHealthy
+        expr: shard_web_proxy_backend_health_ready == 1 and shard_web_chat_proxy_requests_5m >= 20 and shard_web_chat_proxy_http_5xx_rate_5m > 0.05
+        for: 5m
+        labels:
+          severity: page
+          team: shard-sre
+        annotations:
+          summary: "Chat proxy 5xx SLI breached while backend reports ready"
+          description: "Web chat proxy 5xx ratio exceeded 5% over 5 minutes despite backend healthy state."
+          runbook_url: "https://github.com/TrentPierce/Shard/blob/main/docs/operations.md"

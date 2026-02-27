@@ -114,7 +114,7 @@ fn speculative_logit_tolerance() -> f32 {
             .ok()
             .and_then(|v| v.parse::<f32>().ok())
             .filter(|v| *v >= 0.0 && v.is_finite())
-            .unwrap_or(12.0)
+            .unwrap_or(18.0)
     })
 }
 
@@ -125,7 +125,7 @@ fn speculative_top_k() -> usize {
             .ok()
             .and_then(|v| v.parse::<usize>().ok())
             .map(|v| v.clamp(1, 100))
-            .unwrap_or(10)
+            .unwrap_or(20)
     })
 }
 
@@ -386,12 +386,12 @@ fn compute_effective_scout_timeout_ms(
         return bounded_base.min(1_500);
     }
     if active_scouts <= 1 {
-        return bounded_base.min(1_200);
+        return bounded_base.min(600);
     }
     if active_scouts <= 3 {
-        return bounded_base.min(1_000);
+        return bounded_base.min(500);
     }
-    bounded_base.min(800)
+    bounded_base.min(400)
 }
 
 async fn estimate_active_scouts(state: &SharedState) -> usize {
@@ -468,10 +468,10 @@ async fn effective_speculative_timeout_ms(state: &SharedState, config: &Speculat
         .system_metrics
         .snapshot()
         .speculative_verify_attempts_total;
-    if verify_attempts >= 3 && acceptance_rate < 0.10 {
-        // Cap at 5 seconds when acceptance is near-zero
-        let scaled = (timeout_ms as f64 * acceptance_rate.max(0.05) * 2.0) as u64;
-        let capped = scaled.clamp(2_000, 5_000);
+    if verify_attempts >= 5 && acceptance_rate < 0.25 {
+        // When speculative acceptance is weak, aggressively shrink wait budget.
+        let scaled = (timeout_ms as f64 * acceptance_rate.max(0.10)) as u64;
+        let capped = scaled.clamp(250, 1_000);
         tracing::debug!(
             original_timeout_ms = timeout_ms,
             acceptance_rate = format!("{:.1}%", acceptance_rate * 100.0),
@@ -928,11 +928,11 @@ pub(crate) async fn chat_completions_handler(
         let bypass_threshold: f64 = std::env::var("SHARD_SPECULATIVE_BYPASS_THRESHOLD")
             .ok()
             .and_then(|v| v.parse().ok())
-            .unwrap_or(0.05); // Default: bypass if < 5% acceptance
+            .unwrap_or(0.20); // Default: bypass if < 20% acceptance
         let min_samples: u64 = std::env::var("SHARD_SPECULATIVE_BYPASS_MIN_SAMPLES")
             .ok()
             .and_then(|v| v.parse().ok())
-            .unwrap_or(5); // Need at least 5 verification attempts before bypassing
+            .unwrap_or(10); // Need at least 10 verification attempts before bypassing
         let verify_attempts = state
             .system_metrics
             .snapshot()
@@ -1470,8 +1470,8 @@ mod tests {
     #[test]
     fn adaptive_timeout_short_circuits_without_active_scouts() {
         assert_eq!(compute_effective_scout_timeout_ms(30_000, 0, 0), 0);
-        assert_eq!(compute_effective_scout_timeout_ms(30_000, 1, 0), 1_200);
-        assert_eq!(compute_effective_scout_timeout_ms(30_000, 2, 0), 1_000);
+        assert_eq!(compute_effective_scout_timeout_ms(30_000, 1, 0), 600);
+        assert_eq!(compute_effective_scout_timeout_ms(30_000, 2, 0), 500);
         assert_eq!(compute_effective_scout_timeout_ms(30_000, 8, 900), 1_200);
     }
 
