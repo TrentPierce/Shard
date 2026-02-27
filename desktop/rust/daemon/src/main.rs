@@ -2344,6 +2344,22 @@ async fn main() -> Result<()> {
         tracing::debug!("BITNET_LIB or BITNET_MODEL not set, ShardEngine unavailable");
     }
 
+    let require_engine_for_contribute = std::env::var("SHARD_REQUIRE_ENGINE_FOR_CONTRIBUTE")
+        .ok()
+        .map(|v| {
+            let lowered = v.trim().to_ascii_lowercase();
+            !matches!(lowered.as_str(), "0" | "false" | "no" | "off")
+        })
+        .unwrap_or(true);
+    if cli.contribute && require_engine_for_contribute {
+        let engine_loaded = state.engine.lock().await.is_some();
+        if !engine_loaded {
+            anyhow::bail!(
+                "contribute mode requires a compatible engine. Ensure BITNET_LIB points to a shard_engine library exporting shard_init_ex and BITNET_MODEL points to a valid model file"
+            );
+        }
+    }
+
     // ── build swarm ──
     // ── build transport ──
     let (relay_transport, relay_client_behaviour) = relay::client::new(local_peer_id);
@@ -2390,13 +2406,31 @@ async fn main() -> Result<()> {
     // ── build swarm ──
     let behaviour = {
         // ── Gossipsub config tuned for small-mesh P2P networks (2-20 nodes) ──
+        let parse_mesh = |name: &str, default: usize, min: usize, max: usize| -> usize {
+            std::env::var(name)
+                .ok()
+                .and_then(|v| v.parse::<usize>().ok())
+                .map(|v| v.clamp(min, max))
+                .unwrap_or(default)
+        };
+        let mesh_n_low = parse_mesh("SHARD_GOSSIPSUB_MESH_N_LOW", 1, 1, 64);
+        let mut mesh_n = parse_mesh("SHARD_GOSSIPSUB_MESH_N", 1, 1, 64);
+        let mut mesh_n_high = parse_mesh("SHARD_GOSSIPSUB_MESH_N_HIGH", 2, 1, 128);
+        if mesh_n < mesh_n_low {
+            mesh_n = mesh_n_low;
+        }
+        if mesh_n_high < mesh_n {
+            mesh_n_high = mesh_n;
+        }
+        let gossip_lazy = parse_mesh("SHARD_GOSSIPSUB_GOSSIP_LAZY", 1, 1, 64);
+
         let gossipsub_config = gossipsub::ConfigBuilder::default()
-            .mesh_n_low(2) // Minimum mesh peers before requesting more
-            .mesh_n(4) // Target mesh size (default 6 is too high for <20 nodes)
-            .mesh_n_high(8) // Max mesh peers
-            .gossip_lazy(3) // Peers receiving gossip vs full msgs
+            .mesh_n_low(mesh_n_low)
+            .mesh_n(mesh_n)
+            .mesh_n_high(mesh_n_high)
+            .gossip_lazy(gossip_lazy)
             .heartbeat_interval(Duration::from_secs(1))
-            .max_transmit_size(512 * 1024) // 512KB — prompt payloads can be large
+            .max_transmit_size(512 * 1024)
             .validation_mode(gossipsub::ValidationMode::Permissive)
             .build()
             .map_err(|e| anyhow::anyhow!(e.to_string()))?;

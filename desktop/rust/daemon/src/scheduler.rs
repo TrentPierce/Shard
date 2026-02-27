@@ -99,6 +99,167 @@ async fn dispatch_scout_work(state: &SharedState, work: WorkRequest) {
     }
 }
 
+fn local_scout_fallback_enabled() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| {
+        std::env::var("SHARD_LOCAL_SCOUT_FALLBACK")
+            .ok()
+            .map(|v| {
+                let lowered = v.trim().to_ascii_lowercase();
+                !matches!(lowered.as_str(), "0" | "false" | "no" | "off")
+            })
+            .unwrap_or(true)
+    })
+}
+
+fn local_scout_fallback_delay_ms() -> u64 {
+    static DELAY_MS: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+    *DELAY_MS.get_or_init(|| {
+        std::env::var("SHARD_LOCAL_SCOUT_FALLBACK_DELAY_MS")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .map(|v| v.clamp(0, 10_000))
+            .unwrap_or(750)
+    })
+}
+
+async fn local_daemon_draft_capable(state: &SharedState) -> bool {
+    let contribute_enabled = {
+        let topo = state.topology.lock().await;
+        topo.contribute_enabled
+    };
+    if !contribute_enabled {
+        return false;
+    }
+    let engine_guard = state.engine.lock().await;
+    engine_guard.is_some()
+}
+
+async fn generate_local_daemon_draft(
+    state: &SharedState,
+    work: &WorkRequest,
+) -> Option<WorkResponse> {
+    if !local_daemon_draft_capable(state).await {
+        return None;
+    }
+    let local_peer_id = {
+        let topo = state.topology.lock().await;
+        topo.local_peer_id.clone()
+    };
+    let draft_start = now_ms();
+    let mut engine_guard = state.engine.lock().await;
+    let engine = engine_guard.as_mut()?;
+
+    let mut tokens = engine.tokenize(&work.prompt_context, 4096).ok()?;
+    if !tokens.is_empty() && tokens[0] == 128000 {
+        tokens.remove(0);
+    }
+    if engine.eval(&tokens).is_err() {
+        return None;
+    }
+
+    let target = (work.min_tokens.max(4) as usize).min(32);
+    let mut draft_tokens = Vec::with_capacity(target);
+    let mut draft_text = String::new();
+
+    for _ in 0..target {
+        let logits = engine.get_logits(128256).ok()?;
+        let mut best_idx = 0usize;
+        let mut best_val = -f32::INFINITY;
+        for (i, &val) in logits.iter().enumerate() {
+            if val > best_val {
+                best_val = val;
+                best_idx = i;
+            }
+        }
+        if best_idx == 128001 || best_idx == 128009 {
+            break;
+        }
+        draft_tokens.push(best_idx as i32);
+        if let Ok(piece) = engine.token_to_piece(best_idx as i32) {
+            draft_text.push_str(&piece);
+        }
+        if engine.eval(&[best_idx as i32]).is_err() {
+            break;
+        }
+    }
+
+    if draft_tokens.is_empty() {
+        return None;
+    }
+
+    let latency_ms = (now_ms().saturating_sub(draft_start)) as f32;
+    Some(WorkResponse {
+        request_id: work.request_id.clone(),
+        peer_id: local_peer_id,
+        draft_tokens,
+        draft_text,
+        latency_ms,
+        created_at_ms: Some(now_ms()),
+    })
+}
+
+async fn publish_local_daemon_draft(state: &SharedState, response: WorkResponse) {
+    state.system_metrics.inc_scout_draft_submission();
+
+    {
+        let mut by_id = state.idempotent_results.lock().await;
+        by_id.insert(response.request_id.clone(), response.clone());
+    }
+
+    {
+        let draft = scout_draft_from_work_response(&response);
+        let mut mailbox = state.scout_draft_mailbox.lock().await;
+        let queue = mailbox
+            .entry(draft.work_id.clone())
+            .or_insert_with(std::collections::VecDeque::new);
+        queue.push_back(draft);
+        while queue.len() > 8 {
+            queue.pop_front();
+        }
+    }
+
+    {
+        let notifiers = state.scout_draft_notifiers.lock().await;
+        if let Some(notify) = notifiers.get(&response.request_id) {
+            notify.notify_waiters();
+        }
+    }
+}
+
+async fn schedule_local_scout_fallback(state: &SharedState, work: &WorkRequest) {
+    if !local_scout_fallback_enabled() {
+        return;
+    }
+    if !local_daemon_draft_capable(state).await {
+        return;
+    }
+
+    let delay_ms = local_scout_fallback_delay_ms();
+    let state_clone = state.clone();
+    let work_clone = work.clone();
+    tokio::spawn(async move {
+        if delay_ms > 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
+        }
+        let still_pending = {
+            let pending = state_clone.speculative_pending.lock().await;
+            pending.contains_key(work_clone.request_id.as_str())
+        };
+        if !still_pending {
+            return;
+        }
+        if let Some(response) = generate_local_daemon_draft(&state_clone, &work_clone).await {
+            tracing::debug!(
+                request_id = %work_clone.request_id,
+                draft_tokens = response.draft_tokens.len(),
+                "local daemon scout fallback produced draft"
+            );
+            publish_local_daemon_draft(&state_clone, response).await;
+        }
+    });
+}
+
 fn compute_effective_scout_timeout_ms(
     base_timeout_ms: u64,
     active_scouts: usize,
@@ -126,8 +287,21 @@ async fn estimate_active_scouts(state: &SharedState) -> usize {
     let browser_count = browser_sessions.len();
     drop(browser_sessions);
 
-    // Count connected daemon peers — they can also act as scouts
-    // via the daemon-side scout worker.
+    let snapshot = state.system_metrics.snapshot();
+    let browser_draft_capable = if snapshot.scout_client_submit_success_total > 0 {
+        browser_count
+    } else {
+        0
+    };
+
+    let local_daemon_capable = if local_daemon_draft_capable(state).await {
+        1
+    } else {
+        0
+    };
+
+    // Count connected daemon peers as potential scouts.
+    // Actual draft-capability is confirmed via submitters and local engine status.
     let connected_peer_count = {
         let peers = state.peers.lock().await;
         peers.len()
@@ -145,8 +319,9 @@ async fn estimate_active_scouts(state: &SharedState) -> usize {
         unique.len()
     };
 
-    browser_count
+    browser_draft_capable
         .max(recent_submitters)
+        .max(local_daemon_capable)
         .max(connected_peer_count)
 }
 
@@ -206,7 +381,8 @@ async fn fetch_speculative_draft(
         return None;
     }
 
-    dispatch_scout_work(state, work).await;
+    dispatch_scout_work(state, work.clone()).await;
+    schedule_local_scout_fallback(state, &work).await;
 
     let draft_start = now_ms();
     let draft = wait_for_scout_draft(state, request_id, scout_timeout_ms).await;
