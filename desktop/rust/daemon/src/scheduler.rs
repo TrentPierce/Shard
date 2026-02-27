@@ -336,7 +336,8 @@ async fn estimate_active_scouts(state: &SharedState) -> usize {
     let browser_draft_capable = {
         let now = now_ms();
         let mut runtime = state.scout_client_runtime.lock().await;
-        runtime.retain(|_, status| now.saturating_sub(status.last_event_ms) <= SCOUT_RUNTIME_TTL_MS);
+        runtime
+            .retain(|_, status| now.saturating_sub(status.last_event_ms) <= SCOUT_RUNTIME_TTL_MS);
         runtime
             .values()
             .filter(|status| {

@@ -346,11 +346,17 @@ fn summarize_scout_client_runtime(
         }
 
         if let Some(ts) = status.last_submit_success_ms {
-            last_submit_success_ms = Some(last_submit_success_ms.map_or(ts, |current| current.max(ts)));
+            last_submit_success_ms =
+                Some(last_submit_success_ms.map_or(ts, |current| current.max(ts)));
         }
     }
 
-    (draft_capable, webgpu_total, wasm_total, last_submit_success_ms)
+    (
+        draft_capable,
+        webgpu_total,
+        wasm_total,
+        last_submit_success_ms,
+    )
 }
 
 pub(crate) async fn credits_balance_handler(
@@ -937,16 +943,17 @@ pub(crate) async fn scout_client_event_handler(
     {
         let mut runtime = state.scout_client_runtime.lock().await;
         prune_scout_client_runtime(&mut runtime, now);
-        let entry = runtime
-            .entry(scout_id.to_string())
-            .or_insert_with(|| ScoutClientRuntimeStatus {
-                scout_id: scout_id.to_string(),
-                runtime_mode: None,
-                last_event: event_name.to_string(),
-                last_event_detail: None,
-                last_event_ms: now,
-                last_submit_success_ms: None,
-            });
+        let entry =
+            runtime
+                .entry(scout_id.to_string())
+                .or_insert_with(|| ScoutClientRuntimeStatus {
+                    scout_id: scout_id.to_string(),
+                    runtime_mode: None,
+                    last_event: event_name.to_string(),
+                    last_event_detail: None,
+                    last_event_ms: now,
+                    last_submit_success_ms: None,
+                });
         entry.last_event = event_name.to_string();
         entry.last_event_detail = event.detail.as_ref().map(|d| d.chars().take(300).collect());
         entry.last_event_ms = now;
@@ -2102,8 +2109,7 @@ pub(crate) async fn metrics_summary_handler(
         prune_scout_client_runtime(&mut runtime, now);
         summarize_scout_client_runtime(&runtime, now)
     };
-    let scout_submit_success_age_ms =
-        scout_last_submit_success_ms.map(|ts| now.saturating_sub(ts));
+    let scout_submit_success_age_ms = scout_last_submit_success_ms.map(|ts| now.saturating_sub(ts));
 
     let counters = state.system_metrics.snapshot();
     let total_tokens = counters
