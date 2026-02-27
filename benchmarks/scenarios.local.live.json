@@ -1,0 +1,9 @@
+{
+  "scenarios": [
+    {
+      "name": "local-live",
+      "node_count": 1,
+      "base_url": "http://127.0.0.1:9091"
+    }
+  ]
+}

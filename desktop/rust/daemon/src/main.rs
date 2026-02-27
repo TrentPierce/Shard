@@ -674,6 +674,7 @@ pub(crate) struct SharedState {
     topology: Arc<Mutex<TopologyState>>,
     peers: Arc<Mutex<HashMap<String, PeerInfo>>>,
     known_peers: Arc<Mutex<Vec<String>>>,
+    known_peers_path: PathBuf,
     results: Arc<Mutex<VecDeque<WorkResponse>>>,
     scout_work: Arc<Mutex<VecDeque<WorkRequest>>>,
     work_tx: mpsc::Sender<WorkRequest>,
@@ -1399,9 +1400,43 @@ fn now_ms() -> u128 {
 }
 
 fn data_dir() -> std::path::PathBuf {
+    if let Ok(override_dir) = std::env::var("SHARD_DATA_DIR") {
+        let trimmed = override_dir.trim();
+        if !trimmed.is_empty() {
+            return std::path::PathBuf::from(trimmed);
+        }
+    }
     dirs::data_local_dir()
         .unwrap_or_else(|| std::path::PathBuf::from("."))
         .join("shard")
+}
+
+async fn ensure_data_dir() -> Result<std::path::PathBuf> {
+    let primary = data_dir();
+    match tokio::fs::create_dir_all(&primary).await {
+        Ok(_) => Ok(primary),
+        Err(primary_error) => {
+            let fallback = std::env::current_dir()
+                .unwrap_or_else(|_| std::path::PathBuf::from("."))
+                .join(".shard-data");
+            tokio::fs::create_dir_all(&fallback).await.map_err(|fallback_error| {
+                anyhow::anyhow!(
+                    "failed to initialize data dir at {} ({}) and fallback {} ({})",
+                    primary.display(),
+                    primary_error,
+                    fallback.display(),
+                    fallback_error
+                )
+            })?;
+            tracing::warn!(
+                primary = %primary.display(),
+                fallback = %fallback.display(),
+                error = %primary_error,
+                "using fallback data directory after primary data dir initialization failure"
+            );
+            Ok(fallback)
+        }
+    }
 }
 
 fn extract_peer_id_from_multiaddr(addr: &Multiaddr) -> Option<PeerId> {
@@ -1491,6 +1526,72 @@ fn should_include_hardcoded_bootstrap(
         HardcodedBootstrapMode::Disabled => false,
         HardcodedBootstrapMode::Fallback => !has_user_bootstrap,
     }
+}
+
+fn bootstrap_registry_ttl_ms() -> u128 {
+    std::env::var("SHARD_BOOTSTRAP_REGISTRY_TTL_MS")
+        .ok()
+        .and_then(|value| value.parse::<u128>().ok())
+        .filter(|value| *value >= 60_000)
+        .unwrap_or(24 * 60 * 60 * 1000)
+}
+
+fn bootstrap_registry_min_score() -> u32 {
+    std::env::var("SHARD_BOOTSTRAP_REGISTRY_MIN_SCORE")
+        .ok()
+        .and_then(|value| value.parse::<u32>().ok())
+        .map(|value| value.min(100))
+        .unwrap_or(30)
+}
+
+fn prune_bootstrap_registry(
+    registry: &mut HashMap<String, BootstrapRegistryEntry>,
+    now_ms: u128,
+    ttl_ms: u128,
+) -> Vec<String> {
+    let mut removed_peer_ids = Vec::new();
+    registry.retain(|peer_id, entry| {
+        let is_fresh = now_ms.saturating_sub(entry.updated_at_ms) <= ttl_ms;
+        if !is_fresh {
+            removed_peer_ids.push(peer_id.clone());
+        }
+        is_fresh
+    });
+    removed_peer_ids
+}
+
+fn bootstrap_registry_seed_addrs(
+    registry: &HashMap<String, BootstrapRegistryEntry>,
+    now_ms: u128,
+    ttl_ms: u128,
+    min_score: u32,
+) -> Vec<String> {
+    let mut entries = registry
+        .values()
+        .filter(|entry| now_ms.saturating_sub(entry.updated_at_ms) <= ttl_ms)
+        .filter(|entry| entry.stability_score >= min_score)
+        .cloned()
+        .collect::<Vec<_>>();
+    entries.sort_by(|a, b| {
+        b.stability_score
+            .cmp(&a.stability_score)
+            .then(b.updated_at_ms.cmp(&a.updated_at_ms))
+            .then(b.uptime_hours.cmp(&a.uptime_hours))
+    });
+    unique_addrs(entries.into_iter().map(|entry| entry.multiaddr).collect())
+}
+
+fn remove_known_addrs_for_peers(known: &mut Vec<String>, peer_ids: &HashSet<String>) -> usize {
+    if peer_ids.is_empty() {
+        return 0;
+    }
+    let before = known.len();
+    known.retain(|addr| {
+        peer_id_from_addr_str(addr)
+            .map(|peer_id| !peer_ids.contains(&peer_id))
+            .unwrap_or(true)
+    });
+    before.saturating_sub(known.len())
 }
 
 fn should_attempt_reconnect(
@@ -2043,8 +2144,7 @@ fn create_router(state: SharedState) -> Router {
 #[tokio::main]
 async fn main() -> Result<()> {
     let mut cli = Cli::parse();
-    let data = data_dir();
-    tokio::fs::create_dir_all(&data).await?;
+    let data = ensure_data_dir().await?;
     let config_path = std::env::var("SHARD_NODE_CONFIG")
         .map(PathBuf::from)
         .unwrap_or_else(|_| data.join("shard-node.yaml"));
@@ -2117,7 +2217,29 @@ async fn main() -> Result<()> {
         Vec::new()
     };
     let persisted = load_persisted_peers(&known_peers_path).await;
-    let loaded_bootstrap_registry = load_bootstrap_registry(&bootstrap_registry_path).await;
+    let mut loaded_bootstrap_registry = load_bootstrap_registry(&bootstrap_registry_path).await;
+    let now_bootstrap_init = now_ms();
+    let registry_ttl_ms = bootstrap_registry_ttl_ms();
+    let registry_min_score = bootstrap_registry_min_score();
+    let stale_registry_ids = prune_bootstrap_registry(
+        &mut loaded_bootstrap_registry,
+        now_bootstrap_init,
+        registry_ttl_ms,
+    );
+    if !stale_registry_ids.is_empty() {
+        tracing::info!(
+            removed = stale_registry_ids.len(),
+            ttl_ms = registry_ttl_ms,
+            "pruned stale bootstrap registry entries during startup"
+        );
+        save_bootstrap_registry(&bootstrap_registry_path, &loaded_bootstrap_registry).await;
+    }
+    let registry_seed_bootstrap = bootstrap_registry_seed_addrs(
+        &loaded_bootstrap_registry,
+        now_bootstrap_init,
+        registry_ttl_ms,
+        registry_min_score,
+    );
 
     // Optional defaults from environment to avoid stale hardcoded peers.
     let default_bootstrap = std::env::var("SHARD_DEFAULT_BOOTSTRAP")
@@ -2174,6 +2296,7 @@ async fn main() -> Result<()> {
     bootstrap_sources.extend(file_bootstrap);
     bootstrap_sources.extend(persisted);
     bootstrap_sources.extend(url_bootstrap);
+    bootstrap_sources.extend(registry_seed_bootstrap.clone());
 
     let hardcoded_mode =
         parse_hardcoded_bootstrap_mode(std::env::var("SHARD_HARDCODED_BOOTSTRAP_MODE").ok());
@@ -2186,6 +2309,10 @@ async fn main() -> Result<()> {
     let bootstrap_addrs = filter_bootstrap_addrs(bootstrap_sources, allow_private_bootstrap);
     tracing::info!(
         bootstrap_count = bootstrap_addrs.len(),
+        registry_bootstrap_count = registry_seed_bootstrap.len(),
+        bootstrap_registry_entries = loaded_bootstrap_registry.len(),
+        bootstrap_registry_ttl_ms = registry_ttl_ms,
+        bootstrap_registry_min_score = registry_min_score,
         include_hardcoded_bootstrap = include_hardcoded,
         hardcoded_bootstrap_mode = ?hardcoded_mode,
         "resolved bootstrap peers"
@@ -2252,6 +2379,7 @@ async fn main() -> Result<()> {
         })),
         peers: Arc::new(Mutex::new(HashMap::new())),
         known_peers: Arc::new(Mutex::new(bootstrap_addrs.clone())),
+        known_peers_path: known_peers_path.clone(),
         results: Arc::new(Mutex::new(VecDeque::new())),
         scout_work: Arc::new(Mutex::new(VecDeque::new())),
         work_tx,
@@ -2923,6 +3051,7 @@ async fn main() -> Result<()> {
     let layer_ttl_ms: u128 = 60_000;
     let mut next_layer_announcement_ms = 0u128;
     let mut next_ledger_snapshot_ms = 0u128;
+    let mut next_bootstrap_registry_maintenance_ms = 0u128;
 
     // Per-peer exponential backoff for reconnection attempts.
     // Maps peer_id_string -> (consecutive_failures, next_eligible_tick_ms)
@@ -2936,6 +3065,39 @@ async fn main() -> Result<()> {
                 known.sort_by_key(|addr| reconnect_addr_sort_key(addr));
                 let connected: HashSet<String> = state.peers.lock().await.keys().cloned().collect();
                 let now = now_ms();
+                if now >= next_bootstrap_registry_maintenance_ms {
+                    let stale_peer_ids = {
+                        let mut registry = state.bootstrap_registry.lock().await;
+                        let removed =
+                            prune_bootstrap_registry(&mut registry, now, registry_ttl_ms);
+                        if !removed.is_empty() {
+                            save_bootstrap_registry(
+                                state.bootstrap_registry_path.as_path(),
+                                &registry,
+                            )
+                            .await;
+                        }
+                        removed
+                    };
+                    if !stale_peer_ids.is_empty() {
+                        let stale_set: HashSet<String> = stale_peer_ids.into_iter().collect();
+                        let removed_addrs = {
+                            let mut known = state.known_peers.lock().await;
+                            let removed = remove_known_addrs_for_peers(&mut known, &stale_set);
+                            if removed > 0 {
+                                save_persisted_peers(state.known_peers_path.as_path(), &known).await;
+                            }
+                            removed
+                        };
+                        tracing::info!(
+                            stale_bootstrap_peers = stale_set.len(),
+                            removed_known_addrs = removed_addrs,
+                            ttl_ms = registry_ttl_ms,
+                            "pruned stale bootstrap registry entries and known-peer seeds"
+                        );
+                    }
+                    next_bootstrap_registry_maintenance_ms = now + (5 * 60 * 1000);
+                }
                 let max_dials = max_reconnect_dials_per_tick();
                 let mut dial_attempts = 0usize;
                 let mut attempted_peer_ids: HashSet<String> = HashSet::new();
@@ -4220,9 +4382,10 @@ async fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        accept_replay_nonce, filter_bootstrap_addrs, is_non_public_bootstrap_addr,
-        load_bootstrap_registry, node_is_healthy, parse_hardcoded_bootstrap_mode,
-        peer_id_from_addr_str, record_bootstrap_failure, save_bootstrap_registry,
+        accept_replay_nonce, bootstrap_registry_seed_addrs, filter_bootstrap_addrs,
+        is_non_public_bootstrap_addr, load_bootstrap_registry, node_is_healthy,
+        parse_hardcoded_bootstrap_mode, peer_id_from_addr_str, prune_bootstrap_registry,
+        record_bootstrap_failure, remove_known_addrs_for_peers, save_bootstrap_registry,
         should_attempt_reconnect, should_include_hardcoded_bootstrap,
         should_reject_peer_connection, unique_addrs, validate_work_request, BootstrapRegistryEntry,
         CanaryRolloutConfig, CanaryRolloutController, HardcodedBootstrapMode, LatencyHistogram,
@@ -4659,6 +4822,60 @@ mod tests {
             loaded.get("peer-a").map(|entry| entry.stability_score),
             Some(90)
         );
+    }
+
+    #[test]
+    fn bootstrap_registry_prunes_stale_entries_and_seeds_stable_addrs() {
+        let now = 1_000_000u128;
+        let ttl_ms = 60_000u128;
+        let mut registry = HashMap::new();
+        registry.insert(
+            "fresh".to_string(),
+            BootstrapRegistryEntry {
+                peer_id: "fresh".to_string(),
+                multiaddr: "/ip4/35.175.242.222/tcp/4001/p2p/12D3KooWfresh".to_string(),
+                stability_score: 92,
+                uptime_hours: 12,
+                version: "0.6.1".to_string(),
+                updated_at_ms: now - 10_000,
+            },
+        );
+        registry.insert(
+            "stale".to_string(),
+            BootstrapRegistryEntry {
+                peer_id: "stale".to_string(),
+                multiaddr: "/ip4/35.175.242.222/tcp/4001/p2p/12D3KooWstale".to_string(),
+                stability_score: 95,
+                uptime_hours: 24,
+                version: "0.6.1".to_string(),
+                updated_at_ms: now - 120_000,
+            },
+        );
+
+        let removed = prune_bootstrap_registry(&mut registry, now, ttl_ms);
+        assert_eq!(removed, vec!["stale".to_string()]);
+
+        let seeded = bootstrap_registry_seed_addrs(&registry, now, ttl_ms, 80);
+        assert_eq!(seeded.len(), 1);
+        assert!(seeded[0].contains("12D3KooWfresh"));
+    }
+
+    #[test]
+    fn remove_known_addrs_for_peers_drops_only_matching_peer_entries() {
+        let keep_peer = PeerId::random().to_string();
+        let drop_peer = PeerId::random().to_string();
+        let mut known = vec![
+            format!("/ip4/35.175.242.222/tcp/4001/p2p/{keep_peer}"),
+            format!("/ip4/35.175.242.222/tcp/4001/p2p/{drop_peer}"),
+            "/ip4/35.175.242.222/tcp/4001".to_string(),
+        ];
+        let mut stale = HashSet::new();
+        stale.insert(drop_peer.clone());
+
+        let removed = remove_known_addrs_for_peers(&mut known, &stale);
+        assert_eq!(removed, 1);
+        assert!(known.iter().all(|addr| !addr.contains(&drop_peer)));
+        assert!(known.iter().any(|addr| addr.contains(&keep_peer)));
     }
 
     #[test]

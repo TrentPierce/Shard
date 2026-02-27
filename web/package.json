@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev --port 3000",
-    "lint": "next lint",
+    "lint": "eslint . --max-warnings=0",
     "build": "next build",
     "start": "next start",
     "deploy:prod": "echo \"Production deploys are handled by Cloudflare Pages GitHub integration\"",

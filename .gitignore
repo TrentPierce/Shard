@@ -38,6 +38,7 @@ web/.next/
 web/out/
 web/build/
 web/.env*.local
+web/.env.vercel*
 web/.vercel
 web/npm-debug.log*
 web/yarn-debug.log*
@@ -85,6 +86,7 @@ build_log.txt
 
 # ─── Deployment ───
 .vercel
+.env.vercel*
 .env*.local
 override.conf
 

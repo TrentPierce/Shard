@@ -1,0 +1,6 @@
+{
+  "scenarios": [
+    { "name": "local-daemon", "node_count": 2, "base_url": "http://127.0.0.1:9091" },
+    { "name": "ec2-daemon", "node_count": 2, "base_url": "http://35.175.242.222:9091" }
+  ]
+}

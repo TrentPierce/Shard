@@ -237,7 +237,7 @@ export function useSwarmTelemetry() {
     }
   }, [])
 
-  const statusLabel = useMemo(
+  const statusLabel: "READY" | "DEGRADED" | "OFFLINE" = useMemo(
     () => {
       if (telemetry.healthState === "ready") return "READY"
       if (telemetry.healthState === "degraded") return "DEGRADED"

@@ -9,6 +9,8 @@
   - SLO: acceptance `>= 0.60`, reject `<= 0.40`.
 - Throughput SLI: tokens/sec and queue depth.
   - SLO: queue depth under steady-state threshold.
+- Proxy chat SLI: web `/api/v1/chat/completions` 5xx ratio when backend health is ready.
+  - SLO: `5xx <= 5%` over 5m when `shard_web_proxy_backend_health_ready = 1`.
 
 ## Dashboards and Alerts
 - Grafana dashboard: `deploy/monitoring/grafana/dashboards/shard-operations.json`
@@ -21,6 +23,7 @@
   - PoW failure spikes
   - zero-token drift despite successful requests
   - scout submit success-rate degradation
+  - chat proxy 5xx spike while backend reports healthy
 
 ### Paging Thresholds
 - `ShardHighTaskFailureRate`: page if task failures > 20/5m for 5m.
@@ -29,6 +32,7 @@
 - `ShardPowFailureSpike`: warn if PoW failures > 30/10m.
 - `ShardZeroTokenDrift`: page if successful chat completions occur but total token counters remain zero for 5m.
 - `ShardScoutSubmitDegraded`: warn if scout submit success rate drops below 20% over 10m with at least 20 submit attempts.
+- `ShardChatProxy5xxHighWhileBackendHealthy`: page if chat proxy 5xx rate exceeds 5% over 5m with at least 20 requests and backend health-ready gauge is 1.
 
 ### Alert-to-Runbook Mapping
 - Ops alerts -> `docs/operations.md`
