@@ -10,7 +10,7 @@ export async function GET() {
   try {
     const started = performance.now()
     const { response, backend, attempts } = await fetchWithBackendFailover("/health", {
-      timeoutMs: 30_000,
+      timeoutMs: 6_000,
       failoverOnStatuses: [500, 502, 503, 504],
     })
     const latencyMs = Math.round(performance.now() - started)

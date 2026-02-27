@@ -17,24 +17,35 @@ export async function POST(request: NextRequest) {
       method: "POST",
       headers: forwardRequestHeaders(),
       body,
-      timeoutMs: 20_000,
+      timeoutMs: 8_000,
       failoverOnStatuses: [500, 502, 503, 504],
     })
     const data = await response.json().catch(() => ({}))
-    return NextResponse.json(
-      { ...data, backend, backend_attempts: attempts },
-      { status: response.status },
-    )
+    if (!response.ok) {
+      return NextResponse.json(
+        {
+          ok: false,
+          transient_error: true,
+          detail: "Backend returned non-OK for browser-layer submit",
+          backend_status: response.status,
+          backend,
+          backend_attempts: attempts,
+          ...data,
+        },
+        { status: 200 },
+      )
+    }
+    return NextResponse.json({ ...data, backend, backend_attempts: attempts }, { status: 200 })
   } catch (error) {
     return NextResponse.json(
       {
         ok: false,
+        transient_error: true,
         detail: "Failed to submit browser layer output",
         backend_candidates: candidates,
         error: String(error),
       },
-      { status: 502 },
+      { status: 200 },
     )
   }
 }
-

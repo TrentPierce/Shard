@@ -10,11 +10,23 @@ export async function GET() {
 
   try {
     const { response, backend, attempts } = await fetchWithBackendFailover("/metrics/summary", {
-      timeoutMs: 30_000,
+      timeoutMs: 6_000,
       failoverOnStatuses: [500, 502, 503, 504],
     })
-    const data = await response.json()
-    return NextResponse.json({ ...data, backend, backend_attempts: attempts }, { status: response.status })
+    const data = await response.json().catch(() => ({}))
+    if (!response.ok) {
+      return NextResponse.json(
+        {
+          status: "degraded",
+          backend_status: response.status,
+          backend,
+          backend_attempts: attempts,
+          ...data,
+        },
+        { status: 200 },
+      )
+    }
+    return NextResponse.json({ ...data, backend, backend_attempts: attempts }, { status: 200 })
   } catch (error) {
     return NextResponse.json(
       {

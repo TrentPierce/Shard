@@ -12,7 +12,7 @@ export async function GET() {
 
   try {
     const { response, backend, attempts } = await fetchWithBackendFailover("/v1/system/topology", {
-      timeoutMs: 30_000,
+      timeoutMs: 6_000,
       failoverOnStatuses: [500, 502, 503, 504],
     })
     const data = await response.json()

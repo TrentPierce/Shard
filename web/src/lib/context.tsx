@@ -96,6 +96,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const retryScout = useCallback(() => {
         stopScoutWorkerRef.current?.()
         stopLayerHostRef.current?.()
+        void import("@/lib/p2p")
+            .then((p2p) => p2p.stopP2P())
+            .catch(() => undefined)
         stopScoutWorkerRef.current = null
         stopLayerHostRef.current = null
         scoutBootedRef.current = false
@@ -216,11 +219,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                 try {
                     const liveTopology = await fetchTopology()
                     const bootstrapPeers = getBootstrapPeersFromTopology(liveTopology)
+                    if (bootstrapPeers.length === 0) {
+                        console.warn("[p2p] Skipping browser P2P init: no dialable websocket bootstrap peers")
+                        return
+                    }
                     const p2p = await import("@/lib/p2p")
                     await p2p.initP2P({ emitSelf: false, bootstrapPeers: bootstrapPeers.length > 0 ? bootstrapPeers : undefined })
                     p2p.subscribeToWork((work) => console.log("Work:", work.request_id))
                     p2p.subscribeToResults((result) => {
-                        p2p.publishResult(result)
+                        console.log("[p2p] Result observed:", result.request_id)
                     })
                 } catch (e) {
                     console.error(e)
@@ -245,6 +252,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         return () => {
             stopScoutWorkerRef.current?.()
             stopLayerHostRef.current?.()
+            void import("@/lib/p2p")
+                .then((p2p) => p2p.stopP2P())
+                .catch(() => undefined)
         }
     }, [])
 

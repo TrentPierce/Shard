@@ -16,7 +16,7 @@ export async function GET(request: NextRequest) {
     const { response, backend, attempts } = await fetchWithBackendFailover(path, {
       method: "GET",
       headers: forwardRequestHeaders(),
-      timeoutMs: 20_000,
+      timeoutMs: 8_000,
       failoverOnStatuses: [500, 502, 503, 504],
     })
     const data = await response.json().catch(() => ({}))

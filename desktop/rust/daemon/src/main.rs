@@ -1542,6 +1542,45 @@ fn filter_bootstrap_addrs(addrs: Vec<String>, allow_private: bool) -> Vec<String
         .collect()
 }
 
+fn reconnect_transport_priority(addr: &Multiaddr) -> u8 {
+    let text = addr.to_string();
+    if text.contains("/quic-v1") {
+        return 0;
+    }
+    if text.contains("/webrtc-direct") {
+        return 1;
+    }
+    if text.contains("/wss/") || text.contains("/ws/") {
+        return 2;
+    }
+    if text.contains("/tcp/") {
+        return 3;
+    }
+    4
+}
+
+fn reconnect_addr_sort_key(addr_str: &str) -> (u8, String) {
+    if let Ok(addr) = addr_str.parse::<Multiaddr>() {
+        let mut priority = reconnect_transport_priority(&addr);
+        if is_non_public_bootstrap_addr(&addr) {
+            priority = priority.saturating_add(10);
+        }
+        return (priority, addr_str.to_string());
+    }
+    (u8::MAX, addr_str.to_string())
+}
+
+fn max_reconnect_dials_per_tick() -> usize {
+    static MAX_DIALS: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *MAX_DIALS.get_or_init(|| {
+        std::env::var("SHARD_MAX_RECONNECT_DIALS_PER_TICK")
+            .ok()
+            .and_then(|value| value.parse::<usize>().ok())
+            .map(|value| value.clamp(1, 64))
+            .unwrap_or(8)
+    })
+}
+
 fn record_bootstrap_failure(
     known: &mut Vec<String>,
     failures: &mut HashMap<String, u32>,
@@ -2886,15 +2925,22 @@ async fn main() -> Result<()> {
     loop {
         tokio::select! {
             _ = reconnect_tick.tick() => {
-                let known = state.known_peers.lock().await.clone();
+                let mut known = state.known_peers.lock().await.clone();
+                known.sort_by_key(|addr| reconnect_addr_sort_key(addr));
                 let connected: HashSet<String> = state.peers.lock().await.keys().cloned().collect();
                 let now = now_ms();
+                let max_dials = max_reconnect_dials_per_tick();
+                let mut dial_attempts = 0usize;
+                let mut attempted_peer_ids: HashSet<String> = HashSet::new();
                 for addr_str in known {
                     if let Ok(addr) = addr_str.parse::<Multiaddr>() {
                         if should_attempt_reconnect(&addr, &local_peer_id, &connected) {
                             // Per-peer backoff check
                             let peer_ref = peer_id_from_addr_str(&addr_str)
-                                .unwrap_or_else(|| "<unknown>".to_string());
+                                .unwrap_or_else(|| addr_str.clone());
+                            if !attempted_peer_ids.insert(peer_ref.clone()) {
+                                continue;
+                            }
                             if let Some((failures, next_eligible)) = reconnect_backoff.get(&peer_ref) {
                                 if now < *next_eligible {
                                     tracing::debug!(
@@ -2905,6 +2951,14 @@ async fn main() -> Result<()> {
                                     );
                                     continue;
                                 }
+                            }
+                            if dial_attempts >= max_dials {
+                                tracing::debug!(
+                                    dial_attempts,
+                                    max_dials,
+                                    "reconnect dial cap reached for this tick"
+                                );
+                                break;
                             }
 
                             if let Err(err) = swarm.dial(addr.clone()) {
@@ -2917,6 +2971,7 @@ async fn main() -> Result<()> {
                             } else {
                                 tracing::info!(peer_id = %peer_ref, "reconnect dial attempted for disconnected peer");
                             }
+                            dial_attempts = dial_attempts.saturating_add(1);
                         } else {
                             // Peer is connected — clear any backoff
                             let peer_ref = peer_id_from_addr_str(&addr_str);
@@ -4007,6 +4062,10 @@ async fn main() -> Result<()> {
 
                         tracing::info!(%peer_id, "peer connected");
                         reconnect_backoff.remove(&peer_id.to_string());
+                        {
+                            let mut failures = state.bootstrap_failures.lock().await;
+                            failures.remove(&peer_id.to_string());
+                        }
                         let remote_addr = endpoint.get_remote_address().to_string();
                         let transport_kind = transport_kind_from_text(remote_addr.as_str());
                         record_transport_success(&state.system_metrics, transport_kind);
@@ -4056,50 +4115,74 @@ async fn main() -> Result<()> {
                         // ── Fast reconnect with exponential backoff ──
                         // For known peers, attempt immediate reconnection instead of
                         // waiting for the next 20s reconnect tick.
-                        let known_addrs: Vec<String> = {
+                        let mut known_addrs: Vec<String> = {
                             let known = state.known_peers.lock().await;
-                            known.iter()
+                            known
+                                .iter()
                                 .filter(|a| a.contains(&peer_id.to_string()))
                                 .cloned()
                                 .collect()
                         };
+                        known_addrs.sort_by_key(|addr| reconnect_addr_sort_key(addr));
+                        let connected_snapshot: HashSet<String> =
+                            state.peers.lock().await.keys().cloned().collect();
                         if !known_addrs.is_empty() {
-                            let reconnect_state = state.clone();
-                            let peer_str = peer_id.to_string();
-                            tokio::spawn(async move {
-                                const MAX_FAST_RETRIES: u32 = 3;
-                                let mut delay = Duration::from_secs(2);
-                                for attempt in 1..=MAX_FAST_RETRIES {
-                                    tokio::time::sleep(delay).await;
-                                    // Check if we've already reconnected
-                                    {
-                                        let peers = reconnect_state.peers.lock().await;
-                                        if peers.contains_key(&peer_str) {
-                                            tracing::debug!(
-                                                peer_id = %peer_str,
-                                                "fast reconnect: already reconnected, aborting"
-                                            );
-                                            return;
-                                        }
-                                    }
-                                    for addr_str in &known_addrs {
-                                        if let Ok(addr) = addr_str.parse::<libp2p::Multiaddr>() {
-                                            tracing::info!(
-                                                peer_id = %peer_str,
-                                                attempt,
-                                                delay_ms = delay.as_millis() as u64,
-                                                "fast reconnect attempt"
-                                            );
-                                            // We can't dial from within this task since we don't
-                                            // have the swarm. Instead, ensure the address stays in
-                                            // known_peers so the regular reconnect tick picks it up
-                                            // immediately on its next cycle.
-                                            let _ = addr; // address is already in known_peers
-                                        }
-                                    }
-                                    delay = delay.saturating_mul(2).min(Duration::from_secs(16));
+                            let peer_ref = peer_id.to_string();
+                            let now = now_ms();
+                            let mut attempted = false;
+                            for addr_str in known_addrs {
+                                let Ok(addr) = addr_str.parse::<libp2p::Multiaddr>() else {
+                                    continue;
+                                };
+                                if !should_attempt_reconnect(&addr, &local_peer_id, &connected_snapshot)
+                                {
+                                    continue;
                                 }
-                            });
+                                if let Some((failures, next_eligible)) = reconnect_backoff.get(&peer_ref)
+                                {
+                                    if now < *next_eligible {
+                                        tracing::debug!(
+                                            peer_id = %peer_ref,
+                                            failures = *failures,
+                                            retry_in_ms = (*next_eligible - now),
+                                            "fast reconnect deferred (exponential backoff)"
+                                        );
+                                        break;
+                                    }
+                                }
+                                attempted = true;
+                                match swarm.dial(addr.clone()) {
+                                    Ok(()) => {
+                                        reconnect_backoff.remove(&peer_ref);
+                                        tracing::info!(
+                                            peer_id = %peer_ref,
+                                            %addr,
+                                            "fast reconnect dial attempted"
+                                        );
+                                    }
+                                    Err(err) => {
+                                        tracing::debug!(
+                                            peer_id = %peer_ref,
+                                            %addr,
+                                            %err,
+                                            "fast reconnect dial failed"
+                                        );
+                                        let entry =
+                                            reconnect_backoff.entry(peer_ref.clone()).or_insert((0, 0));
+                                        entry.0 += 1;
+                                        let backoff_ms =
+                                            ((20_000u128) << entry.0.min(4)).min(300_000);
+                                        entry.1 = now + backoff_ms;
+                                    }
+                                }
+                                break;
+                            }
+                            if !attempted {
+                                tracing::debug!(
+                                    peer_id = %peer_ref,
+                                    "no eligible address for fast reconnect"
+                                );
+                            }
                         }
                     }
 
@@ -4415,6 +4498,26 @@ mod tests {
             &local_peer,
             &connected
         ));
+    }
+
+    #[test]
+    fn reconnect_sort_key_prefers_public_quic_and_deprioritizes_private_tcp() {
+        let peer = PeerId::random();
+        let private_tcp = format!("/ip4/192.168.1.25/tcp/4001/p2p/{peer}");
+        let public_tcp = format!("/ip4/35.175.242.222/tcp/4001/p2p/{peer}");
+        let public_quic = format!("/ip4/35.175.242.222/udp/9092/quic-v1/p2p/{peer}");
+
+        let mut addrs = vec![public_tcp.clone(), private_tcp.clone(), public_quic.clone()];
+        addrs.sort_by_key(|addr| super::reconnect_addr_sort_key(addr));
+
+        assert_eq!(addrs[0], public_quic);
+        assert_eq!(addrs[1], public_tcp);
+        assert_eq!(addrs[2], private_tcp);
+    }
+
+    #[test]
+    fn reconnect_dial_cap_default_is_eight() {
+        assert_eq!(super::max_reconnect_dials_per_tick(), 8);
     }
 
     #[test]

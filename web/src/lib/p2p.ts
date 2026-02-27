@@ -178,7 +178,7 @@ export async function initP2P(config: P2PConfig = {}): Promise<string> {
 
     p2pNode.addEventListener('peer:connect', (event: any) => {
       const remoteAddr = extractRemoteAddr(event);
-      if (remoteAddr) {
+      if (remoteAddr && isWsDialablePeer(remoteAddr)) {
         persistBootstrapPeers([remoteAddr]);
       }
       console.log('[p2p] Peer connected:', event?.detail?.toString?.() ?? 'unknown');
@@ -215,6 +215,23 @@ export async function initP2P(config: P2PConfig = {}): Promise<string> {
   }
 }
 
+function isWsDialablePeer(peer: string): boolean {
+  const normalized = peer.toLowerCase();
+  return (
+    normalized.startsWith('ws://') ||
+    normalized.startsWith('wss://') ||
+    normalized.includes('/ws/') ||
+    normalized.endsWith('/ws') ||
+    normalized.includes('/wss/') ||
+    normalized.endsWith('/wss')
+  );
+}
+
+function isSecureWsPeer(peer: string): boolean {
+  const normalized = peer.toLowerCase();
+  return normalized.startsWith('wss://') || normalized.includes('/wss/') || normalized.endsWith('/wss');
+}
+
 function sanitizeBootstrapPeers(peers: string[]): string[] {
   const isHttpsPage = typeof window !== 'undefined' && window.location.protocol === 'https:';
   const unique = new Set<string>();
@@ -222,18 +239,8 @@ function sanitizeBootstrapPeers(peers: string[]): string[] {
   for (const raw of peers) {
     const peer = String(raw || '').trim();
     if (!peer) continue;
-
-    // On HTTPS pages, reject insecure websocket transports.
-    if (isHttpsPage) {
-      const insecureWs =
-        peer.startsWith('ws://') ||
-        peer.includes('/ws/') ||
-        peer.endsWith('/ws');
-      if (insecureWs && !peer.startsWith('wss://') && !peer.includes('/wss/')) {
-        continue;
-      }
-    }
-
+    if (!isWsDialablePeer(peer)) continue;
+    if (isHttpsPage && !isSecureWsPeer(peer)) continue;
     unique.add(peer);
   }
 
@@ -305,7 +312,8 @@ async function reconnectBootstrapPeers(): Promise<void> {
     return;
   }
 
-  for (const peer of reconnectCandidates) {
+  const MAX_RECONNECT_DIALS_PER_TICK = 3;
+  for (const peer of reconnectCandidates.slice(0, MAX_RECONNECT_DIALS_PER_TICK)) {
     try {
       await p2pNode.dial(peer as any);
       console.log('[p2p] Reconnected bootstrap peer:', peer);
