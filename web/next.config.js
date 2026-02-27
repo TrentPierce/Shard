@@ -1,5 +1,5 @@
 /** @type {import('next').NextConfig} */
-// Default to server mode in hosted environments (Vercel).
+// Default to server mode in hosted environments.
 // Only enable static export when explicitly requested.
 const isTauri = process.env.TAURI_ENV_PLATFORM !== undefined;
 const staticExport = process.env.NEXT_OUTPUT_MODE === "export" || isTauri;

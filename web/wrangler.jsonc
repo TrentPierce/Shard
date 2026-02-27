@@ -1,0 +1,9 @@
+{
+  "name": "shard-web",
+  "compatibility_date": "2026-02-27",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "directory": ".open-next/assets"
+  },
+  "main": ".open-next/worker.js"
+}
