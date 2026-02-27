@@ -3316,10 +3316,7 @@ async fn main() -> Result<()> {
                                     // If we are acting as a Scout, pick up this work
                                     {
                                         let mut queue = state.scout_work.lock().await;
-                                        queue.push_back(work.clone());
-                                        while queue.len() > 1024 {
-                                            queue.pop_front();
-                                        }
+                                        enqueue_scout_work(&mut queue, work.clone());
                                     }
 
                                     // ── Daemon-side scout worker ──

@@ -66,7 +66,7 @@ fn speculative_top_k() -> usize {
 
 const DEFAULT_SCOUT_WORK_QUEUE_MAX: usize = 1024;
 
-fn scout_work_queue_max() -> usize {
+pub(crate) fn scout_work_queue_max() -> usize {
     std::env::var("SHARD_SCOUT_WORK_QUEUE_MAX")
         .ok()
         .and_then(|v| v.parse::<usize>().ok())
@@ -74,7 +74,10 @@ fn scout_work_queue_max() -> usize {
         .unwrap_or(DEFAULT_SCOUT_WORK_QUEUE_MAX)
 }
 
-fn enqueue_scout_work(queue: &mut std::collections::VecDeque<WorkRequest>, work: WorkRequest) {
+pub(crate) fn enqueue_scout_work(
+    queue: &mut std::collections::VecDeque<WorkRequest>,
+    work: WorkRequest,
+) {
     let max_len = scout_work_queue_max();
     queue.push_back(work);
     while queue.len() > max_len {
@@ -90,8 +93,30 @@ async fn dispatch_scout_work(state: &SharedState, work: WorkRequest) {
 
     match state.work_tx.try_send(work) {
         Ok(_) => {}
-        Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
-            tracing::warn!("work publish channel saturated; dropping scout broadcast");
+        Err(tokio::sync::mpsc::error::TrySendError::Full(work)) => {
+            // Best-effort fallback when the broadcast channel is briefly saturated.
+            // This avoids losing speculative opportunities during short bursts.
+            let work_tx = state.work_tx.clone();
+            tokio::spawn(async move {
+                match tokio::time::timeout(
+                    std::time::Duration::from_millis(25),
+                    work_tx.send(work),
+                )
+                .await
+                {
+                    Ok(Ok(())) => {
+                        tracing::debug!("work publish channel recovered via fallback send");
+                    }
+                    Ok(Err(_)) => {
+                        tracing::warn!("work publish channel closed during fallback send");
+                    }
+                    Err(_) => {
+                        tracing::warn!(
+                            "work publish channel saturated; fallback send timed out"
+                        );
+                    }
+                }
+            });
         }
         Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
             tracing::warn!("work publish channel closed; unable to broadcast");
@@ -108,7 +133,7 @@ fn local_scout_fallback_enabled() -> bool {
                 let lowered = v.trim().to_ascii_lowercase();
                 !matches!(lowered.as_str(), "0" | "false" | "no" | "off")
             })
-            .unwrap_or(true)
+            .unwrap_or(false)
     })
 }
 
@@ -234,6 +259,15 @@ async fn schedule_local_scout_fallback(state: &SharedState, work: &WorkRequest) 
     if !local_daemon_draft_capable(state).await {
         return;
     }
+    // Avoid verifier lock contention when real remote peers are available.
+    // Local fallback is intended as an emergency path, not the default path.
+    let has_remote_peers = {
+        let peers = state.peers.lock().await;
+        !peers.is_empty()
+    };
+    if has_remote_peers {
+        return;
+    }
 
     let delay_ms = local_scout_fallback_delay_ms();
     let state_clone = state.clone();
@@ -268,18 +302,24 @@ fn compute_effective_scout_timeout_ms(
     if active_scouts == 0 {
         return 0;
     }
-    // WAN browser scouts can have high TTFT; allow longer waits by default.
-    let bounded_base = base_timeout_ms.clamp(5_000, 120_000);
-    if queue_depth > 768 {
-        return bounded_base.min(20_000);
+    // Keep speculative waits tightly bounded to preserve TTFT under WAN jitter.
+    let bounded_base = base_timeout_ms.clamp(1_000, 15_000);
+    if queue_depth > 1024 {
+        return bounded_base.min(2_000);
+    }
+    if queue_depth > 512 {
+        return bounded_base.min(3_000);
+    }
+    if queue_depth > 256 {
+        return bounded_base.min(4_500);
     }
     if active_scouts <= 1 {
-        return bounded_base.min(90_000);
+        return bounded_base.min(7_000);
     }
     if active_scouts <= 3 {
-        return bounded_base.min(75_000);
+        return bounded_base.min(5_500);
     }
-    bounded_base.min(60_000)
+    bounded_base.min(4_500)
 }
 
 async fn estimate_active_scouts(state: &SharedState) -> usize {
@@ -307,6 +347,14 @@ async fn estimate_active_scouts(state: &SharedState) -> usize {
         peers.len()
     };
 
+    let healthy_scout_reports = {
+        let reports = state.node_metric_reports.lock().await;
+        reports
+            .values()
+            .filter(|snapshot| snapshot.healthy && snapshot.role.eq_ignore_ascii_case("scout"))
+            .count()
+    };
+
     let recent_submitters = {
         let results = state.results.lock().await;
         let cutoff = now_ms().saturating_sub(3 * 60 * 1000);
@@ -322,6 +370,7 @@ async fn estimate_active_scouts(state: &SharedState) -> usize {
     browser_draft_capable
         .max(recent_submitters)
         .max(local_daemon_capable)
+        .max(healthy_scout_reports)
         .max(connected_peer_count)
 }
 
@@ -368,6 +417,15 @@ async fn fetch_speculative_draft(
     prompt: &str,
     config: &SpeculativeConfig,
 ) -> Option<ScoutDraft> {
+    let in_cooldown = {
+        let tracker = state.scout_timeout_tracker.lock().await;
+        tracker.is_in_cooldown()
+    };
+    if in_cooldown {
+        tracing::debug!("skipping speculative dispatch while scout timeout cooldown is active");
+        return None;
+    }
+
     let work = WorkRequest {
         request_id: request_id.to_string(),
         prompt_context: prompt.to_string(),
@@ -443,6 +501,22 @@ async fn clear_draft_notifier(state: &SharedState, work_id: &str) {
     notifiers.remove(work_id);
 }
 
+async fn clear_speculative_work_state(state: &SharedState, work_id: &str) {
+    {
+        let mut pending = state.speculative_pending.lock().await;
+        pending.remove(work_id);
+    }
+    {
+        let mut mailbox = state.scout_draft_mailbox.lock().await;
+        mailbox.remove(work_id);
+    }
+    {
+        let mut by_id = state.idempotent_results.lock().await;
+        by_id.remove(work_id);
+    }
+    clear_draft_notifier(state, work_id).await;
+}
+
 /// Wait for a scout draft submission with timeout.
 pub(crate) async fn wait_for_scout_draft(
     state: &SharedState,
@@ -452,7 +526,7 @@ pub(crate) async fn wait_for_scout_draft(
     state.system_metrics.inc_speculative_wait_request();
     {
         let mut pending = state.speculative_pending.lock().await;
-        pending.insert(work_id.to_string(), now_ms());
+        pending.entry(work_id.to_string()).or_insert_with(now_ms);
     }
     let start = now_ms();
     let timeout_deadline = start + timeout_ms as u128;
@@ -461,10 +535,10 @@ pub(crate) async fn wait_for_scout_draft(
         if now_ms() >= timeout_deadline {
             state.system_metrics.inc_speculative_wait_timeout();
             let age_ms = {
-                let mut pending = state.speculative_pending.lock().await;
+                let pending = state.speculative_pending.lock().await;
                 pending
-                    .remove(work_id)
-                    .map(|issued| now_ms().saturating_sub(issued) as u64)
+                    .get(work_id)
+                    .map(|issued| now_ms().saturating_sub(*issued) as u64)
                     .unwrap_or(timeout_ms)
             };
             tracing::warn!(
@@ -473,8 +547,14 @@ pub(crate) async fn wait_for_scout_draft(
                 wait_age_ms = age_ms,
                 "scout draft timeout"
             );
-            clear_draft_notifier(state, work_id).await;
+            clear_speculative_work_state(state, work_id).await;
             return None;
+        }
+
+        if let Some(draft) = pop_mailbox_draft(state, work_id).await {
+            state.system_metrics.inc_speculative_wait_hit();
+            clear_speculative_work_state(state, work_id).await;
+            return Some(draft);
         }
 
         if let Some(existing) = {
@@ -482,21 +562,8 @@ pub(crate) async fn wait_for_scout_draft(
             by_id.remove(work_id)
         } {
             state.system_metrics.inc_speculative_wait_hit();
-            {
-                let mut pending = state.speculative_pending.lock().await;
-                pending.remove(work_id);
-            }
-            clear_draft_notifier(state, work_id).await;
-            return Some(scout_draft_from_work_response(&existing));
-        }
-
-        if let Some(draft) = pop_mailbox_draft(state, work_id).await {
-            state.system_metrics.inc_speculative_wait_hit();
-            {
-                let mut pending = state.speculative_pending.lock().await;
-                pending.remove(work_id);
-            }
-            clear_draft_notifier(state, work_id).await;
+            let draft = scout_draft_from_work_response(&existing);
+            clear_speculative_work_state(state, work_id).await;
             return Some(draft);
         }
 
@@ -858,6 +925,9 @@ pub(crate) async fn chat_completions_handler(
                                 state.system_metrics.inc_speculative_draft_tokens(draft_count);
                                 state.system_metrics.inc_speculative_accepted_tokens(accepted_count);
                                 state.system_metrics.inc_speculative_rejected_tokens(rejected_count);
+                                state
+                                    .system_metrics
+                                    .inc_tokens_offloaded_to_scouts(accepted_count);
 
                                 if !result.accepted_tokens.is_empty() {
                                     let mut ledger = state.ledger.lock().await;
@@ -1047,6 +1117,9 @@ pub(crate) async fn chat_completions_handler(
                             state
                                 .system_metrics
                                 .inc_speculative_rejected_tokens(rejected_count);
+                            state
+                                .system_metrics
+                                .inc_tokens_offloaded_to_scouts(accepted_count);
 
                             if !result.accepted_tokens.is_empty() {
                                 let mut ledger = state.ledger.lock().await;
@@ -1267,8 +1340,8 @@ mod tests {
     #[test]
     fn adaptive_timeout_short_circuits_without_active_scouts() {
         assert_eq!(compute_effective_scout_timeout_ms(30_000, 0, 0), 0);
-        assert_eq!(compute_effective_scout_timeout_ms(30_000, 1, 0), 30_000);
-        assert_eq!(compute_effective_scout_timeout_ms(30_000, 2, 0), 30_000);
-        assert_eq!(compute_effective_scout_timeout_ms(30_000, 8, 900), 20_000);
+        assert_eq!(compute_effective_scout_timeout_ms(30_000, 1, 0), 7_000);
+        assert_eq!(compute_effective_scout_timeout_ms(30_000, 2, 0), 5_500);
+        assert_eq!(compute_effective_scout_timeout_ms(30_000, 8, 900), 3_000);
     }
 }
