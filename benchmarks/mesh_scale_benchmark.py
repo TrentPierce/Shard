@@ -443,6 +443,163 @@ def benchmark_scenario(
     measured_reject = (
         float(delta_rejected) / float(delta_drafts) if delta_drafts > 0 else None
     )
+    verification_fallback_total_delta = max(
+        0,
+        int(metrics_after.get("verification_fallback_total", 0))
+        - int(metrics_before.get("verification_fallback_total", 0)),
+    )
+    scout_draft_submissions_total_delta = max(
+        0,
+        int(metrics_after.get("scout_draft_submissions_total", 0))
+        - int(metrics_before.get("scout_draft_submissions_total", 0)),
+    )
+    scout_draft_reject_pow_total_delta = max(
+        0,
+        int(metrics_after.get("scout_draft_reject_pow_total", 0))
+        - int(metrics_before.get("scout_draft_reject_pow_total", 0)),
+    )
+    scout_draft_reject_spotcheck_total_delta = max(
+        0,
+        int(metrics_after.get("scout_draft_reject_spotcheck_total", 0))
+        - int(metrics_before.get("scout_draft_reject_spotcheck_total", 0)),
+    )
+    scout_draft_reject_empty_tokens_total_delta = max(
+        0,
+        int(metrics_after.get("scout_draft_reject_empty_tokens_total", 0))
+        - int(metrics_before.get("scout_draft_reject_empty_tokens_total", 0)),
+    )
+    scout_client_submit_attempts_total_delta = max(
+        0,
+        int(metrics_after.get("scout_client_submit_attempts_total", 0))
+        - int(metrics_before.get("scout_client_submit_attempts_total", 0)),
+    )
+    scout_client_submit_success_total_delta = max(
+        0,
+        int(metrics_after.get("scout_client_submit_success_total", 0))
+        - int(metrics_before.get("scout_client_submit_success_total", 0)),
+    )
+    scout_client_submit_http_failures_total_delta = max(
+        0,
+        int(metrics_after.get("scout_client_submit_http_failures_total", 0))
+        - int(metrics_before.get("scout_client_submit_http_failures_total", 0)),
+    )
+    scout_client_submit_network_failures_total_delta = max(
+        0,
+        int(metrics_after.get("scout_client_submit_network_failures_total", 0))
+        - int(metrics_before.get("scout_client_submit_network_failures_total", 0)),
+    )
+    scout_client_submit_timeouts_total_delta = max(
+        0,
+        int(metrics_after.get("scout_client_submit_timeouts_total", 0))
+        - int(metrics_before.get("scout_client_submit_timeouts_total", 0)),
+    )
+    scout_client_submit_pow_failures_total_delta = max(
+        0,
+        int(metrics_after.get("scout_client_submit_pow_failures_total", 0))
+        - int(metrics_before.get("scout_client_submit_pow_failures_total", 0)),
+    )
+    scout_work_assignments_total_delta = max(
+        0,
+        int(metrics_after.get("scout_work_assignments_total", 0))
+        - int(metrics_before.get("scout_work_assignments_total", 0)),
+    )
+    transport_tcp_success_total_delta = max(
+        0,
+        int(metrics_after.get("transport_tcp_success_total", 0))
+        - int(metrics_before.get("transport_tcp_success_total", 0)),
+    )
+    transport_tcp_failure_total_delta = max(
+        0,
+        int(metrics_after.get("transport_tcp_failure_total", 0))
+        - int(metrics_before.get("transport_tcp_failure_total", 0)),
+    )
+    transport_websocket_success_total_delta = max(
+        0,
+        int(metrics_after.get("transport_websocket_success_total", 0))
+        - int(metrics_before.get("transport_websocket_success_total", 0)),
+    )
+    transport_websocket_failure_total_delta = max(
+        0,
+        int(metrics_after.get("transport_websocket_failure_total", 0))
+        - int(metrics_before.get("transport_websocket_failure_total", 0)),
+    )
+    transport_quic_success_total_delta = max(
+        0,
+        int(metrics_after.get("transport_quic_success_total", 0))
+        - int(metrics_before.get("transport_quic_success_total", 0)),
+    )
+    transport_quic_failure_total_delta = max(
+        0,
+        int(metrics_after.get("transport_quic_failure_total", 0))
+        - int(metrics_before.get("transport_quic_failure_total", 0)),
+    )
+    transport_webrtc_success_total_delta = max(
+        0,
+        int(metrics_after.get("transport_webrtc_success_total", 0))
+        - int(metrics_before.get("transport_webrtc_success_total", 0)),
+    )
+    transport_webrtc_failure_total_delta = max(
+        0,
+        int(metrics_after.get("transport_webrtc_failure_total", 0))
+        - int(metrics_before.get("transport_webrtc_failure_total", 0)),
+    )
+    transport_relay_success_total_delta = max(
+        0,
+        int(metrics_after.get("transport_relay_success_total", 0))
+        - int(metrics_before.get("transport_relay_success_total", 0)),
+    )
+    transport_relay_failure_total_delta = max(
+        0,
+        int(metrics_after.get("transport_relay_failure_total", 0))
+        - int(metrics_before.get("transport_relay_failure_total", 0)),
+    )
+
+    speculative_zero_draft_fallback_reason: str | None = None
+    if inference_mode.lower() in ("distributed", "speculative") and delta_drafts == 0:
+        health_state = (
+            str(health_after.get("status", "")).lower() if isinstance(health_after, dict) else ""
+        )
+        readiness_reason = (
+            str(health_after.get("readiness_reason", ""))
+            if isinstance(health_after, dict)
+            else ""
+        )
+        active_scouts = (
+            int(health_after.get("active_scouts", 0)) if isinstance(health_after, dict) else 0
+        )
+        draft_capable_scouts = (
+            int(health_after.get("draft_capable_scouts", 0))
+            if isinstance(health_after, dict)
+            else 0
+        )
+        submit_failure_total = (
+            scout_client_submit_http_failures_total_delta
+            + scout_client_submit_network_failures_total_delta
+            + scout_client_submit_timeouts_total_delta
+            + scout_client_submit_pow_failures_total_delta
+        )
+        if health_state and health_state not in ("ok", "ready"):
+            speculative_zero_draft_fallback_reason = (
+                f"backend_not_ready:{health_state}:{readiness_reason or 'unknown_reason'}"
+            )
+        elif draft_capable_scouts == 0 and active_scouts == 0:
+            speculative_zero_draft_fallback_reason = "no_draft_capable_scouts"
+        elif scout_work_assignments_total_delta == 0:
+            speculative_zero_draft_fallback_reason = "no_scout_work_assignments"
+        elif (
+            scout_client_submit_attempts_total_delta > 0
+            and scout_client_submit_success_total_delta == 0
+        ):
+            if scout_client_submit_pow_failures_total_delta > 0:
+                speculative_zero_draft_fallback_reason = "pow_rejections"
+            elif submit_failure_total > 0:
+                speculative_zero_draft_fallback_reason = "scout_submit_transport_failures"
+            else:
+                speculative_zero_draft_fallback_reason = "scout_submit_no_success"
+        elif scout_draft_submissions_total_delta > 0 and delta_accepted == 0 and delta_rejected > 0:
+            speculative_zero_draft_fallback_reason = "all_drafts_rejected_by_verifier"
+        elif verification_fallback_total_delta > 0:
+            speculative_zero_draft_fallback_reason = "verifier_fallback_path"
 
     return {
         "scenario": scenario.name,
@@ -480,106 +637,29 @@ def benchmark_scenario(
             "measured_acceptance_rate": measured_acceptance,
             "measured_reject_rate": measured_reject,
             "measured_speedup_ratio": metrics_after.get("speculative_speedup_ratio"),
-            "verification_fallback_total_delta": max(
-                0,
-                int(metrics_after.get("verification_fallback_total", 0))
-                - int(metrics_before.get("verification_fallback_total", 0)),
-            ),
-            "scout_draft_submissions_total_delta": max(
-                0,
-                int(metrics_after.get("scout_draft_submissions_total", 0))
-                - int(metrics_before.get("scout_draft_submissions_total", 0)),
-            ),
-            "scout_draft_reject_pow_total_delta": max(
-                0,
-                int(metrics_after.get("scout_draft_reject_pow_total", 0))
-                - int(metrics_before.get("scout_draft_reject_pow_total", 0)),
-            ),
-            "scout_draft_reject_spotcheck_total_delta": max(
-                0,
-                int(metrics_after.get("scout_draft_reject_spotcheck_total", 0))
-                - int(metrics_before.get("scout_draft_reject_spotcheck_total", 0)),
-            ),
-            "scout_draft_reject_empty_tokens_total_delta": max(
-                0,
-                int(metrics_after.get("scout_draft_reject_empty_tokens_total", 0))
-                - int(metrics_before.get("scout_draft_reject_empty_tokens_total", 0)),
-            ),
-            "scout_client_submit_attempts_total_delta": max(
-                0,
-                int(metrics_after.get("scout_client_submit_attempts_total", 0))
-                - int(metrics_before.get("scout_client_submit_attempts_total", 0)),
-            ),
-            "scout_client_submit_success_total_delta": max(
-                0,
-                int(metrics_after.get("scout_client_submit_success_total", 0))
-                - int(metrics_before.get("scout_client_submit_success_total", 0)),
-            ),
-            "scout_client_submit_http_failures_total_delta": max(
-                0,
-                int(metrics_after.get("scout_client_submit_http_failures_total", 0))
-                - int(metrics_before.get("scout_client_submit_http_failures_total", 0)),
-            ),
-            "scout_client_submit_network_failures_total_delta": max(
-                0,
-                int(metrics_after.get("scout_client_submit_network_failures_total", 0))
-                - int(metrics_before.get("scout_client_submit_network_failures_total", 0)),
-            ),
-            "scout_client_submit_timeouts_total_delta": max(
-                0,
-                int(metrics_after.get("scout_client_submit_timeouts_total", 0))
-                - int(metrics_before.get("scout_client_submit_timeouts_total", 0)),
-            ),
-            "transport_tcp_success_total_delta": max(
-                0,
-                int(metrics_after.get("transport_tcp_success_total", 0))
-                - int(metrics_before.get("transport_tcp_success_total", 0)),
-            ),
-            "transport_tcp_failure_total_delta": max(
-                0,
-                int(metrics_after.get("transport_tcp_failure_total", 0))
-                - int(metrics_before.get("transport_tcp_failure_total", 0)),
-            ),
-            "transport_websocket_success_total_delta": max(
-                0,
-                int(metrics_after.get("transport_websocket_success_total", 0))
-                - int(metrics_before.get("transport_websocket_success_total", 0)),
-            ),
-            "transport_websocket_failure_total_delta": max(
-                0,
-                int(metrics_after.get("transport_websocket_failure_total", 0))
-                - int(metrics_before.get("transport_websocket_failure_total", 0)),
-            ),
-            "transport_quic_success_total_delta": max(
-                0,
-                int(metrics_after.get("transport_quic_success_total", 0))
-                - int(metrics_before.get("transport_quic_success_total", 0)),
-            ),
-            "transport_quic_failure_total_delta": max(
-                0,
-                int(metrics_after.get("transport_quic_failure_total", 0))
-                - int(metrics_before.get("transport_quic_failure_total", 0)),
-            ),
-            "transport_webrtc_success_total_delta": max(
-                0,
-                int(metrics_after.get("transport_webrtc_success_total", 0))
-                - int(metrics_before.get("transport_webrtc_success_total", 0)),
-            ),
-            "transport_webrtc_failure_total_delta": max(
-                0,
-                int(metrics_after.get("transport_webrtc_failure_total", 0))
-                - int(metrics_before.get("transport_webrtc_failure_total", 0)),
-            ),
-            "transport_relay_success_total_delta": max(
-                0,
-                int(metrics_after.get("transport_relay_success_total", 0))
-                - int(metrics_before.get("transport_relay_success_total", 0)),
-            ),
-            "transport_relay_failure_total_delta": max(
-                0,
-                int(metrics_after.get("transport_relay_failure_total", 0))
-                - int(metrics_before.get("transport_relay_failure_total", 0)),
-            ),
+            "verification_fallback_total_delta": verification_fallback_total_delta,
+            "scout_draft_submissions_total_delta": scout_draft_submissions_total_delta,
+            "scout_draft_reject_pow_total_delta": scout_draft_reject_pow_total_delta,
+            "scout_draft_reject_spotcheck_total_delta": scout_draft_reject_spotcheck_total_delta,
+            "scout_draft_reject_empty_tokens_total_delta": scout_draft_reject_empty_tokens_total_delta,
+            "scout_client_submit_attempts_total_delta": scout_client_submit_attempts_total_delta,
+            "scout_client_submit_success_total_delta": scout_client_submit_success_total_delta,
+            "scout_client_submit_http_failures_total_delta": scout_client_submit_http_failures_total_delta,
+            "scout_client_submit_network_failures_total_delta": scout_client_submit_network_failures_total_delta,
+            "scout_client_submit_timeouts_total_delta": scout_client_submit_timeouts_total_delta,
+            "scout_client_submit_pow_failures_total_delta": scout_client_submit_pow_failures_total_delta,
+            "scout_work_assignments_total_delta": scout_work_assignments_total_delta,
+            "speculative_zero_draft_fallback_reason": speculative_zero_draft_fallback_reason,
+            "transport_tcp_success_total_delta": transport_tcp_success_total_delta,
+            "transport_tcp_failure_total_delta": transport_tcp_failure_total_delta,
+            "transport_websocket_success_total_delta": transport_websocket_success_total_delta,
+            "transport_websocket_failure_total_delta": transport_websocket_failure_total_delta,
+            "transport_quic_success_total_delta": transport_quic_success_total_delta,
+            "transport_quic_failure_total_delta": transport_quic_failure_total_delta,
+            "transport_webrtc_success_total_delta": transport_webrtc_success_total_delta,
+            "transport_webrtc_failure_total_delta": transport_webrtc_failure_total_delta,
+            "transport_relay_success_total_delta": transport_relay_success_total_delta,
+            "transport_relay_failure_total_delta": transport_relay_failure_total_delta,
         },
         "transport_observation_before": transport_before,
         "transport_observation_after": transport_after,
@@ -733,6 +813,29 @@ def summarize(run_results: list[dict[str, Any]]) -> dict[str, Any]:
     return {"scenarios": scenarios_summary}
 
 
+def speculative_gate_violations(
+    run_results: list[dict[str, Any]],
+    inference_mode: str,
+) -> list[dict[str, Any]]:
+    if inference_mode.lower() not in ("distributed", "speculative"):
+        return []
+    violations: list[dict[str, Any]] = []
+    for run in run_results:
+        delta = run.get("metrics_delta", {})
+        drafts = int(delta.get("speculative_draft_tokens_total", 0))
+        reason = delta.get("speculative_zero_draft_fallback_reason")
+        if drafts == 0 and (not isinstance(reason, str) or not reason.strip()):
+            violations.append(
+                {
+                    "scenario": str(run.get("scenario", "unknown")),
+                    "run_index": int(run.get("run_index", -1)),
+                    "base_url": str(run.get("base_url", "")),
+                    "metrics_delta": delta,
+                }
+            )
+    return violations
+
+
 def sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -762,6 +865,7 @@ def write_markdown_report(
         f"- Timestamp (UTC): `{meta['timestamp_utc']}`",
         f"- Git commit: `{meta['git_commit']}`",
         f"- Inference mode: `{meta['inference_mode']}`",
+        f"- Speculative CI gate required: `{meta['require_speculative_gate']}`",
         f"- Latency breakdown mode: `{'stream TTFT/inter-token' if meta['collect_latency_breakdown'] else 'request-only latency'}`",
         f"- Runs per scenario: `{meta['runs_per_scenario']}`",
         f"- Requests per run: `{meta['requests_per_run']}`",
@@ -854,6 +958,14 @@ def main() -> None:
         action="store_true",
         help="Use stream requests to measure TTFT and inter-token latency",
     )
+    parser.add_argument(
+        "--require-speculative-gate",
+        action="store_true",
+        help=(
+            "Fail with non-zero exit when distributed/speculative runs report zero draft "
+            "counter deltas without explicit fallback reasons"
+        ),
+    )
     args = parser.parse_args()
 
     random.seed(args.seed)
@@ -917,6 +1029,7 @@ def main() -> None:
         "inference_mode": args.inference_mode,
         "max_tokens": args.max_tokens,
         "collect_latency_breakdown": args.collect_latency_breakdown,
+        "require_speculative_gate": args.require_speculative_gate,
     }
     metadata_json = run_dir / "metadata.json"
     metadata_json.write_text(json.dumps(meta, indent=2), encoding="utf-8")
@@ -934,6 +1047,22 @@ def main() -> None:
     }
     manifest_json = run_dir / "manifest.json"
     manifest_json.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+
+    if args.require_speculative_gate:
+        violations = speculative_gate_violations(run_results, args.inference_mode)
+        if violations:
+            print("Speculative activation gate FAILED:")
+            for violation in violations:
+                print(
+                    " - scenario={scenario} run={run_index} base_url={base_url}".format(
+                        scenario=violation["scenario"],
+                        run_index=violation["run_index"],
+                        base_url=violation["base_url"],
+                    )
+                )
+            print(f"Artifacts captured at: {run_dir}")
+            raise SystemExit(2)
+        print("Speculative activation gate passed.")
 
     print(f"Wrote benchmark artifacts to: {run_dir}")
     print(f"Summary: {summary_json}")
