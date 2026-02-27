@@ -1582,12 +1582,12 @@ fn max_reconnect_dials_per_tick() -> usize {
 }
 
 fn record_bootstrap_failure(
-    known: &mut Vec<String>,
+    _known: &mut Vec<String>,
     failures: &mut HashMap<String, u32>,
     peer_id: &PeerId,
 ) -> bool {
     let peer_id_str = peer_id.to_string();
-    let is_bootstrap = known.iter().any(|addr| {
+    let is_bootstrap = _known.iter().any(|addr| {
         if let Ok(multiaddr) = addr.parse::<libp2p::Multiaddr>() {
             extract_peer_id_from_multiaddr(&multiaddr) == Some(*peer_id)
         } else {
@@ -1601,15 +1601,10 @@ fn record_bootstrap_failure(
     let count = failures.entry(peer_id_str.clone()).or_insert(0);
     *count += 1;
     if *count >= MAX_BOOTSTRAP_FAILURES {
-        known.retain(|addr| {
-            if let Ok(multiaddr) = addr.parse::<libp2p::Multiaddr>() {
-                extract_peer_id_from_multiaddr(&multiaddr) != Some(*peer_id)
-            } else {
-                true
-            }
-        });
-        failures.remove(&peer_id_str);
-        return true;
+        // Keep bootstrap peers in the known set to preserve recovery after
+        // restarts/transient WAN faults. Reconnect backoff handles retry pacing.
+        *count = MAX_BOOTSTRAP_FAILURES;
+        return false;
     }
     false
 }
@@ -4521,7 +4516,7 @@ mod tests {
     }
 
     #[test]
-    fn bootstrap_failures_remove_unhealthy_bootstrap_peer() {
+    fn bootstrap_failures_keep_bootstrap_peer_for_recovery() {
         let peer = PeerId::random();
         let addr = format!("/ip4/127.0.0.1/tcp/4001/p2p/{peer}");
         let mut known = vec![addr];
@@ -4532,9 +4527,12 @@ mod tests {
             removed = record_bootstrap_failure(&mut known, &mut failures, &peer);
         }
 
-        assert!(removed);
-        assert!(known.is_empty());
-        assert!(!failures.contains_key(&peer.to_string()));
+        assert!(!removed);
+        assert_eq!(known.len(), 1);
+        assert_eq!(
+            failures.get(&peer.to_string()).copied(),
+            Some(MAX_BOOTSTRAP_FAILURES)
+        );
     }
 
     #[test]
