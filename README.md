@@ -50,7 +50,7 @@ Download the [Shard Desktop App](https://github.com/TrentPierce/Shard/releases/t
 Open the [Live Dashboard](https://www.shardnetwork.live/) in latest Chrome or Edge with hardware acceleration enabled. Your browser will automatically begin loading a lightweight WebGPU model and contributing compute.
 
 ### 3. Developer Integration (Python SDK)
-Install the Shard SDK directly from PyPI:
+Install the Shard SDK directly from PyPI (canonical package name):
 ```bash
 pip install shard-inference
 ```

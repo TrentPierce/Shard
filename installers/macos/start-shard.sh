@@ -19,9 +19,19 @@ fi
 
 chmod +x "${BIN}"
 TCP_PORT="${SHARD_TCP_PORT:-4001}"
+CONTROL_PORT="${SHARD_CONTROL_PORT:-9091}"
+WEBRTC_PORT="${SHARD_WEBRTC_PORT:-9090}"
+QUIC_PORT="${SHARD_QUIC_PORT:-9092}"
 
 echo "Starting Shard daemon with TCP port ${TCP_PORT}..."
 echo "Binary: ${BIN}"
 echo
 
-exec "${BIN}" --tcp-port "${TCP_PORT}"
+BOOTSTRAP_ARGS=()
+if [[ -n "${SHARD_BOOTSTRAP_NODES:-}" ]]; then
+  while IFS= read -r node; do
+    [[ -n "${node}" ]] && BOOTSTRAP_ARGS+=("--bootstrap-node" "${node}")
+  done < <(printf "%s" "${SHARD_BOOTSTRAP_NODES}" | tr ",;" "\n")
+fi
+
+exec "${BIN}" --tcp-port "${TCP_PORT}" --control-port "${CONTROL_PORT}" --webrtc-port "${WEBRTC_PORT}" --quic-port "${QUIC_PORT}" "${BOOTSTRAP_ARGS[@]}"

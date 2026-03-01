@@ -4,14 +4,22 @@ use axum::{
         ws::{Message, WebSocket, WebSocketUpgrade},
         State,
     },
+    http::{HeaderMap, StatusCode},
     response::IntoResponse,
     routing::get,
     Router,
 };
 use futures::{SinkExt, StreamExt};
 use serde::Serialize;
-use std::{net::SocketAddr, time::Duration};
+use std::{net::SocketAddr, sync::Arc, time::Duration};
 use tokio::time;
+
+#[derive(Clone)]
+struct TelemetryWsState {
+    shared: SharedState,
+    token: Option<String>,
+    max_connections: Arc<tokio::sync::Semaphore>,
+}
 
 #[derive(Debug, Serialize)]
 struct TelemetrySnapshot {
@@ -23,9 +31,24 @@ struct TelemetrySnapshot {
 
 pub(crate) fn spawn_telemetry_ws_server(state: SharedState, port: u16) {
     tokio::spawn(async move {
+        let token = std::env::var("SHARD_TELEMETRY_WS_TOKEN")
+            .ok()
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty());
+        let max_connections = std::env::var("SHARD_TELEMETRY_WS_MAX_CONNECTIONS")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .map(|v| v.clamp(1, 10_000))
+            .unwrap_or(64);
+        let ws_state = TelemetryWsState {
+            shared: state,
+            token,
+            max_connections: Arc::new(tokio::sync::Semaphore::new(max_connections)),
+        };
+
         let app = Router::new()
             .route("/telemetry/ws", get(telemetry_ws_handler))
-            .with_state(state);
+            .with_state(ws_state);
 
         let addr = SocketAddr::from(([0, 0, 0, 0], port));
         tracing::info!(%addr, "telemetry websocket server starting");
@@ -41,13 +64,39 @@ pub(crate) fn spawn_telemetry_ws_server(state: SharedState, port: u16) {
 }
 
 async fn telemetry_ws_handler(
+    headers: HeaderMap,
     ws: WebSocketUpgrade,
-    State(state): State<SharedState>,
+    State(state): State<TelemetryWsState>,
 ) -> impl IntoResponse {
-    ws.on_upgrade(move |socket| telemetry_stream(socket, state))
+    if let Some(required) = &state.token {
+        let provided = headers
+            .get("x-telemetry-token")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_default();
+        if provided != required {
+            return (StatusCode::UNAUTHORIZED, "missing/invalid telemetry token").into_response();
+        }
+    }
+
+    let permit = match state.max_connections.clone().try_acquire_owned() {
+        Ok(permit) => permit,
+        Err(_) => {
+            return (
+                StatusCode::TOO_MANY_REQUESTS,
+                "telemetry connection limit reached",
+            )
+                .into_response()
+        }
+    };
+
+    ws.on_upgrade(move |socket| telemetry_stream(socket, state.shared, permit))
 }
 
-async fn telemetry_stream(socket: WebSocket, state: SharedState) {
+async fn telemetry_stream(
+    socket: WebSocket,
+    state: SharedState,
+    _permit: tokio::sync::OwnedSemaphorePermit,
+) {
     let (mut sender, mut receiver) = socket.split();
     let mut ticker = time::interval(Duration::from_secs(2));
 

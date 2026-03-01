@@ -789,7 +789,7 @@ struct ResourcePolicy {
 /// Configuration for speculative decoding (Scout draft verification).
 #[derive(Clone, Debug)]
 struct SpeculativeConfig {
-    /// Timeout in ms to wait for scout draft (default: 800ms).
+    /// Timeout in ms to wait for scout draft (default: 1500ms).
     scout_timeout_ms: u64,
     /// Cooldown in ms after 3 consecutive timeouts (default: 60000ms).
     scout_cooldown_ms: u64,
@@ -808,7 +808,7 @@ impl Default for SpeculativeConfig {
                 // Browser scouts poll work over HTTP and may need PoW + queueing +
                 // submission retries. Keep default high enough to avoid dropping
                 // valid drafts as late mismatches.
-                .unwrap_or(90_000),
+                .unwrap_or(1_500),
             scout_cooldown_ms: 60000,
             max_consecutive_timeouts: 3,
             draft_token_count: 4,
@@ -2042,7 +2042,18 @@ fn create_router(state: SharedState) -> Router {
             cors = cors.allow_origin(origins);
         }
     } else {
-        cors = cors.allow_origin(Any);
+        // Secure-by-default CORS baseline; operators can override with SHARD_CORS_ORIGINS.
+        let default_origins = [
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+            "http://localhost:9091",
+            "http://127.0.0.1:9091",
+        ];
+        let origins: Vec<HeaderValue> = default_origins
+            .iter()
+            .filter_map(|value| HeaderValue::from_str(value).ok())
+            .collect();
+        cors = cors.allow_origin(origins);
     }
 
     Router::new()

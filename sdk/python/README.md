@@ -20,7 +20,9 @@ shard-daemon \
   --tcp-port 4001 \
   --webrtc-port 9090 \
   --quic-port 9092 \
-  --bootstrap-node /ip4/35.175.242.222/tcp/4001/p2p/12D3KooWConhJakwyGN72uZ1Jtxi3LFecN3cYKxEX3aNLDAo48by
+  --bootstrap-node /ip4/35.175.242.222/tcp/4001/p2p/12D3KooWConhJakwyGN72uZ1Jtxi3LFecN3cYKxEX3aNLDAo48by \
+  --bootstrap-node /dns4/bootstrap-2.shardnetwork.live/tcp/4001/p2p/12D3KooWExamplePeerTwo \
+  --bootstrap-node /dns4/bootstrap-3.shardnetwork.live/udp/9092/quic-v1/p2p/12D3KooWExamplePeerThree
 ```
 
 Once running, visit `https://shardnetwork.live` and your node will appear in the
