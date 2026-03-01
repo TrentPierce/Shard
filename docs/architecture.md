@@ -33,3 +33,9 @@
 
 ## Decision Records
 - ADR index: `docs/adr/README.md`
+
+## Operational Hardening
+- Telemetry WebSocket (`/telemetry/ws`) supports optional token auth via `SHARD_TELEMETRY_WS_TOKEN`.
+- Telemetry fan-out is rate-controlled with `SHARD_TELEMETRY_WS_MAX_CONNECTIONS` (default: 64).
+- Speculative draft wait defaults are TTFT-oriented (`SHARD_SCOUT_TIMEOUT_MS` defaults to 1500ms and is dynamically bounded by queue/scout health).
+- Default CORS policy is local-only unless explicitly overridden via `SHARD_CORS_ORIGINS`.

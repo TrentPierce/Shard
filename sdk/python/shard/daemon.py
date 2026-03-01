@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Optional
 import httpx
 import atexit
+import socket
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +96,18 @@ def find_daemon_executable() -> str:
 
 _daemon_process: Optional[subprocess.Popen] = None
 
+def _is_port_available(host: str, port: int) -> bool:
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    try:
+        sock.bind((host, port))
+    except OSError:
+        return False
+    finally:
+        sock.close()
+    return True
+
+
 def stop_daemon():
     """Stop the background daemon process."""
     global _daemon_process
@@ -124,7 +137,10 @@ def start_daemon(port: int = 9091, background: bool = True):
         return
 
     ensure_assets()
-    
+
+    if not _is_port_available("127.0.0.1", port):
+        raise RuntimeError(f"Port {port} is already in use. Set a different control port.")
+
     exe = find_daemon_executable()
     # Add --public-api to help stats visibility if requested, 
     # but here we focus on the local onboarding.
@@ -136,13 +152,16 @@ def start_daemon(port: int = 9091, background: bool = True):
     if platform.system() == "Windows" and background:
         creationflags = subprocess.CREATE_NO_WINDOW
         
-    _daemon_process = subprocess.Popen(
-        cmd,
-        stdout=subprocess.DEVNULL if background else None,
-        stderr=subprocess.DEVNULL if background else None,
-        creationflags=creationflags,
-        env=os.environ.copy()
-    )
+    popen_kwargs = {
+        "stdout": subprocess.DEVNULL if background else None,
+        "stderr": subprocess.DEVNULL if background else None,
+        "creationflags": creationflags,
+        "env": os.environ.copy(),
+    }
+    if platform.system() != "Windows":
+        popen_kwargs["start_new_session"] = True
+
+    _daemon_process = subprocess.Popen(cmd, **popen_kwargs)
     
     atexit.register(stop_daemon)
     
