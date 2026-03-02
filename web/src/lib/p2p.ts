@@ -22,6 +22,7 @@ import { bootstrap } from '@libp2p/bootstrap';
 import type { Libp2p } from 'libp2p';
 import type { GossipSub } from '@chainsafe/libp2p-gossipsub';
 import type { Message } from '@libp2p/interface';
+import { multiaddr as createMultiaddr } from '@multiformats/multiaddr';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -318,8 +319,9 @@ function shuffleArray<T>(input: T[]): T[] {
 }
 
 async function dialWithTimeout(node: Libp2p, peer: string, timeoutMs: number): Promise<void> {
+  const ma = createMultiaddr(peer);
   await Promise.race([
-    node.dial(peer as any) as Promise<unknown>,
+    node.dial(ma as any) as Promise<unknown>,
     (async () => {
       await sleep(timeoutMs);
       throw new Error(`dial_timeout_${timeoutMs}ms`);

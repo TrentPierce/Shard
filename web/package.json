@@ -25,6 +25,7 @@
     "@libp2p/webrtc": "^4.0.0",
     "@libp2p/websockets": "^8.0.17",
     "@mlc-ai/web-llm": "^0.2.78",
+    "@multiformats/multiaddr": "^13.0.1",
     "@noble/ed25519": "^3.0.0",
     "@tanstack/react-query": "^5.90.21",
     "@tauri-apps/api": "^2.10.1",
