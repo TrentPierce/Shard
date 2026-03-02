@@ -59,7 +59,7 @@ Head to **[shardnetwork.live](https://shardnetwork.live)** and click **Start**.
 
 #### One-Liner Install (macOS / Linux):
 ```bash
-curl -sSL https://shard.network/install.sh | bash
+curl -sSL https://raw.githubusercontent.com/TrentPierce/Shard/main/install.sh | bash
 ```
 
 Alternatively, download our desktop installers from the [Releases Page](https://github.com/TrentPierce/Shard/releases).
