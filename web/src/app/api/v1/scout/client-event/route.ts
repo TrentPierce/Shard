@@ -21,7 +21,7 @@ export async function POST(request: NextRequest) {
       timeoutMs: 1_200,
       totalTimeoutMs: 1_800,
       maxAttempts: 1,
-      failoverOnStatuses: [500, 502, 503, 504],
+      failoverOnStatuses: [500, 502, 503, 504, 521, 530],
     })
     const data = await response.json().catch(() => ({}))
     if (response.status >= 500) {

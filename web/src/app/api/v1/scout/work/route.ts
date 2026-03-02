@@ -57,7 +57,7 @@ export async function GET(request: NextRequest) {
       totalTimeoutMs: 3_800,
       maxAttempts: 2,
       retryJitterMs: 180,
-      failoverOnStatuses: [500, 502, 503, 504],
+      failoverOnStatuses: [500, 502, 503, 504, 521, 530],
     })
     const data = await response.json().catch(() => ({}))
     if (!response.ok) {

@@ -13,7 +13,7 @@ export async function GET() {
                 timeoutMs: 2_500,
                 totalTimeoutMs: 4_000,
                 maxAttempts: 2,
-                failoverOnStatuses: [500, 502, 503, 504],
+                failoverOnStatuses: [500, 502, 503, 504, 521, 530],
             }).catch(() => null),
         ])
         const text = await response.text()

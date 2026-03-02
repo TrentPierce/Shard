@@ -44,7 +44,7 @@ export async function GET() {
   try {
     const { response, backend, attempts } = await fetchWithBackendFailover("/v1/system/topology", {
       timeoutMs: 6_000,
-      failoverOnStatuses: [500, 502, 503, 504],
+      failoverOnStatuses: [500, 502, 503, 504, 521, 530],
     })
     const data = await response.json()
     updateTopologySnapshot(data)

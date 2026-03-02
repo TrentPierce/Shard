@@ -60,7 +60,7 @@ export async function fetchWithBackendFailover(
     totalTimeoutMs = 15_000,
     maxAttempts = 3,
     retryJitterMs = 250,
-    failoverOnStatuses = [500, 502, 503, 504],
+    failoverOnStatuses = [500, 502, 503, 504, 521, 530],
   } = options
 
   const candidates = shardBackendUrls(path)

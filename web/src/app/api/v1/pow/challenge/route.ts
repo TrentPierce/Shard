@@ -13,7 +13,7 @@ export async function GET(request: NextRequest) {
     const { response, backend, attempts } = await fetchWithBackendFailover(path, {
       method: "GET",
       timeoutMs: 10_000,
-      failoverOnStatuses: [500, 502, 503, 504],
+      failoverOnStatuses: [500, 502, 503, 504, 521, 530],
     })
     const data = await response.json().catch(() => ({}))
     return NextResponse.json(
