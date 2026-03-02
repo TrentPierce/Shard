@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="assets/logo.png" alt="Shard" width="200" />
+  <img src="docs/assets/logo.png" alt="Shard" width="200" />
   <h1>Shard</h1>
   <p><strong>Browser-Powered Distributed Inference for Private Enterprise AI</strong></p>
 
@@ -10,6 +10,8 @@
    [![Version](https://img.shields.io/badge/version-0.6.1-00d4ff.svg)](https://github.com/TrentPierce/Shard/releases/tag/v0.6.1)
   [![Demo Video](https://img.shields.io/badge/Demo-Video-red?style=for-the-badge&logo=youtube)](#)
   [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/TrentPierce/Shard)
+
+  <h3><a href="docs/GETTING_STARTED.md">🚀 Quick Start Guide</a></h3>
 
 </div>
 
@@ -79,6 +81,21 @@ Shard is built on a high-integrity libp2p mesh:
 [**Read the Architecture Guide**](docs/architecture.md) | [**API Documentation**](docs/api.md) | [**Contributing Guide**](docs/contributing.md)
 
 ## Benchmarking and Proof
+
+Shard's distributed edge inference achieves zero-marginal-cost generation without sacrificing latency. In our latest synthetic load test against an AWS EC2 testnet over WAN:
+
+| Mode | Requests | Concurrency | RPS | Avg Latency | P50 (Median) | P95 | Offload |
+|---|---|---|---|---|---|---|---|
+| **baseline** | 100 | 50 | 67.39 req/s | 480.36ms | 446.00ms | 812.00ms | 100% |
+| **distributed** | 100 | 50 | **108.12 req/s** | **298.04ms** | **264.00ms** | **586.00ms** | 100% |
+
+```mermaid
+xychart-beta
+    title "Throughput Comparison (Requests per Second)"
+    x-axis ["Baseline", "Distributed Edge"]
+    y-axis "RPS" 0 --> 125
+    bar [67.39, 108.12]
+```
 
 For investor-safe, reproducible performance evidence (raw artifacts + confidence intervals), use:
 - [Benchmarking Guide](benchmarks/README.md)

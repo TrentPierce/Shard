@@ -29,7 +29,7 @@ struct TelemetrySnapshot {
     sampled_at_ms: u128,
 }
 
-pub(crate) fn spawn_telemetry_ws_server(state: SharedState, port: u16) {
+pub(crate) fn spawn_telemetry_ws_server(state: SharedState, port: u16, public_api: bool) {
     tokio::spawn(async move {
         let token = std::env::var("SHARD_TELEMETRY_WS_TOKEN")
             .ok()
@@ -50,7 +50,8 @@ pub(crate) fn spawn_telemetry_ws_server(state: SharedState, port: u16) {
             .route("/telemetry/ws", get(telemetry_ws_handler))
             .with_state(ws_state);
 
-        let addr = SocketAddr::from(([0, 0, 0, 0], port));
+        let bind_ip = if public_api { [0, 0, 0, 0] } else { [127, 0, 0, 1] };
+        let addr = SocketAddr::from((bind_ip, port));
         tracing::info!(%addr, "telemetry websocket server starting");
 
         let listener = tokio::net::TcpListener::bind(addr)

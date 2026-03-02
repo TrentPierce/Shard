@@ -69,6 +69,11 @@ pub struct ShardApp {
     pub active_peers: usize,
     pub tokens_generated: u64,
     pub uptime: String,
+    pub vram_alloc_gb: f32,
+    pub vram_limit_gb: f32,
+    pub reject_rate: f32,
+    pub nat_status: String,
+    pub relay_status: String,
     pub process_manager: Arc<Mutex<crate::process::ProcessManager>>,
     pub telemetry_rx: Option<tokio::sync::mpsc::Receiver<TelemetryUpdate>>,
     pub download_progress: Option<f32>,
@@ -81,6 +86,11 @@ pub struct TelemetryUpdate {
     pub peers: usize,
     pub tokens: u64,
     pub uptime: String,
+    pub vram_alloc_gb: f32,
+    pub vram_limit_gb: f32,
+    pub reject_rate: f32,
+    pub nat_status: String,
+    pub relay_status: String,
 }
 
 impl ShardApp {
@@ -103,6 +113,11 @@ impl ShardApp {
             active_peers: 0,
             tokens_generated: 0,
             uptime: "00:00:00".to_string(),
+            vram_alloc_gb: 0.0,
+            vram_limit_gb: 0.0,
+            reject_rate: 0.0,
+            nat_status: "unknown".to_string(),
+            relay_status: "unknown".to_string(),
             process_manager: pm,
             telemetry_rx: Some(rx),
             download_progress: None,
@@ -117,6 +132,11 @@ impl ShardApp {
                 self.active_peers = update.peers;
                 self.tokens_generated = update.tokens;
                 self.uptime = update.uptime;
+                self.vram_alloc_gb = update.vram_alloc_gb;
+                self.vram_limit_gb = update.vram_limit_gb;
+                self.reject_rate = update.reject_rate;
+                self.nat_status = update.nat_status;
+                self.relay_status = update.relay_status;
             }
         }
     }
@@ -277,6 +297,26 @@ impl ShardApp {
 
                 ui.label("Uptime:");
                 ui.label(&self.uptime);
+                ui.end_row();
+
+                ui.label("VRAM Alloc (GB):");
+                if self.vram_limit_gb > 0.0 {
+                    ui.label(format!("{:.2} / {:.2}", self.vram_alloc_gb, self.vram_limit_gb));
+                } else {
+                    ui.label(format!("{:.2}", self.vram_alloc_gb));
+                }
+                ui.end_row();
+
+                ui.label("Reject Rate:");
+                ui.label(format!("{:.1}%", self.reject_rate * 100.0));
+                ui.end_row();
+
+                ui.label("NAT Status:");
+                ui.label(&self.nat_status);
+                ui.end_row();
+
+                ui.label("Relay Status:");
+                ui.label(&self.relay_status);
                 ui.end_row();
             });
     }

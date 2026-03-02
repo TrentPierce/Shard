@@ -41,6 +41,8 @@ jobs:
           components: clippy, rustfmt
       - name: Check formatting
         run: cargo fmt --check
+      - name: Fetch locked dependencies
+        run: cargo fetch --locked
       - name: Clippy lints
         run: cargo clippy --workspace --exclude shard-gui --all-targets -- -D warnings
       - name: Cargo tests
@@ -60,10 +62,11 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y cmake
-      - name: Install SDK
+      - name: Install SDK (locked)
         run: |
-          pip install ./sdk/python[dev]
-          pip install pytest pytest-asyncio httpx pytest-cov
+          pip install pip-tools
+          pip-sync sdk/python/requirements.lock
+          pip install ./sdk/python --no-deps
       - name: Run Python tests
         run: |
           python -m pytest tests/ -v --cov=shard --cov-report=xml

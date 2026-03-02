@@ -41,7 +41,16 @@ struct DraftResultSubmission {
     work_id: String,
     scout_id: String,
     draft_text: String,
+    #[serde(default)]
+    prompt_context: Option<String>,
+    #[serde(default)]
+    draft_tokens: Vec<i32>,
+    #[serde(default)]
     timestamp: Option<f64>,
+    #[serde(default)]
+    scout_mode: Option<String>,
+    #[serde(default)]
+    spot_check: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -138,14 +147,22 @@ async fn run_mode(
     let started = Instant::now();
     let mut tasks = Vec::with_capacity(args.requests);
     let signed = mode == "distributed";
+    let nonce_counter = Arc::new(std::sync::atomic::AtomicU64::new((now_ms() % 1_000_000_000) as u64 * 1000));
 
     for i in 0..args.requests {
         let permit = sem.clone().acquire_owned().await?;
         let client = client.clone();
         let base_url = args.base_url.clone();
-        let key = key.clone();
         let mode = mode_owned.clone();
+        let nonce_counter = nonce_counter.clone();
         tasks.push(tokio::spawn(async move {
+            let mut sk_bytes = [0u8; 32];
+            for b in 0..8 {
+                sk_bytes[b] = ((i as u64) >> (b * 8)) as u8;
+                sk_bytes[b+8] = ((now_ms() as u64) >> (b * 8)) as u8;
+            }
+            let key = ed25519_dalek::SigningKey::from_bytes(&sk_bytes);
+
             let _permit = permit;
             let req_id = format!("{}-{}", mode, i);
             let start = Instant::now();
@@ -158,7 +175,8 @@ async fn run_mode(
             };
 
             let sent = if signed {
-                let body = sign_payload(work, &key, (i as u64) * 2 + 1, now_ms());
+                let n = nonce_counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                let body = sign_payload(work, &key, n, now_ms());
                 client
                     .post(format!("{base_url}/signed/broadcast-work"))
                     .json(&body)
@@ -176,15 +194,53 @@ async fn run_mode(
                 return (false, start.elapsed().as_millis() as f64, 0usize);
             }
 
+            let scout_pubkey = hex::encode(key.verifying_key().to_bytes());
+            if let Ok(res) = client
+                .get(format!("{base_url}/v1/pow/challenge?peer_id={scout_pubkey}&hardware_concurrency=8"))
+                .send()
+                .await
+            {
+                if let Ok(val) = res.json::<serde_json::Value>().await {
+                    if let Some(c) = val.get("challenge") {
+                        let c_hex = c["challenge_bytes_hex"].as_str().unwrap_or("");
+                        let diff = c["difficulty"].as_u64().unwrap_or(0) as u8;
+                        if let Ok(c_bytes) = hex::decode(c_hex) {
+                            let sol = tokio::task::spawn_blocking(move || {
+                                shard_common::common::pow_challenge::solve_challenge(&c_bytes, diff)
+                            })
+                            .await
+                            .unwrap_or(None);
+
+                            if let Some(sol) = sol {
+                                let _ = client
+                                    .post(format!("{base_url}/v1/pow/verify"))
+                                    .json(&serde_json::json!({
+                                        "peer_id": scout_pubkey,
+                                        "nonce": sol.nonce,
+                                        "hash_hex": sol.hash_hex,
+                                    }))
+                                    .send()
+                                    .await;
+                            }
+                        }
+                    }
+                }
+            }
+
             let draft = DraftResultSubmission {
                 work_id: req_id.clone(),
-                scout_id: hex::encode(key.verifying_key().to_bytes()),
+                scout_id: scout_pubkey.clone(),
                 draft_text: "token-a token-b token-c".to_string(),
+                prompt_context: None,
+                draft_tokens: vec![128001, 128002, 128003],
                 timestamp: Some((now_ms() as f64) / 1000.0),
+                scout_mode: None,
+                spot_check: None,
             };
 
-            let submit_ok = if signed {
-                let body = sign_payload(draft, &key, (i as u64) * 2 + 2, now_ms());
+            let submit_res = if signed {
+                let n = nonce_counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                let body = sign_payload(draft, &key, n, now_ms());
                 client
                     .post(format!("{base_url}/signed/submit-draft"))
                     .json(&body)
@@ -198,7 +254,15 @@ async fn run_mode(
                     .await
             };
 
-            if submit_ok.is_err() {
+            let is_submit_err = submit_res.is_err();
+            if let Ok(res) = submit_res {
+                if let Ok(json) = res.json::<serde_json::Value>().await {
+                    if json["ok"].as_bool() == Some(false) {
+                        println!("Submission rejected: {:?}", json["detail"]);
+                    }
+                }
+            } 
+            if is_submit_err {
                 return (false, start.elapsed().as_millis() as f64, 0usize);
             }
 
@@ -309,13 +373,41 @@ async fn main() -> anyhow::Result<()> {
     let md_path = args.out_dir.join(format!("benchmark-{stamp}.md"));
     std::fs::write(&json_path, serde_json::to_vec_pretty(&report)?)?;
 
-    let md = format!(
-        "# Shard Benchmark Report\n\n- Timestamp: `{}`\n- Signature validation overhead (ms): `{:.2}`\n- Estimated GPU savings (%): `{:.2}`\n\n```json\n{}\n```\n",
+    let mut md = format!(
+        "# Shard Benchmark Report\n\n- **Timestamp:** `{}`\n- **Signature validation overhead:** `{:.2} ms`\n- **Estimated GPU savings:** `{:.2}%`\n\n",
         report.timestamp_ms,
         report.signature_validation_overhead_ms,
-        report.estimated_gpu_savings_percent,
-        serde_json::to_string_pretty(&report)?
+        report.estimated_gpu_savings_percent
     );
+
+    md.push_str("## Mode Results\n\n");
+    md.push_str("| Mode | Requests | Concurrency | RPS | Success | Failure Rate | Avg Latency | P50 | P95 | P99 | Offload |\n");
+    md.push_str("|---|---|---|---|---|---|---|---|---|---|---|\n");
+
+    if let Some(ref b) = report.baseline {
+        md.push_str(&format!(
+            "| {} | {} | {} | {:.2} | {}/{} | {:.2}% | {:.2}ms | {:.2}ms | {:.2}ms | {:.2}ms | {:.2}% |\n",
+            b.mode, b.requests, b.concurrency, b.throughput_rps,
+            b.successes, b.requests, b.failure_rate_percent,
+            b.average_latency_ms, b.p50_latency_ms, b.p95_latency_ms, b.p99_latency_ms,
+            b.offload_percent
+        ));
+    }
+    if let Some(ref d) = report.distributed_signed {
+        md.push_str(&format!(
+            "| {} | {} | {} | {:.2} | {}/{} | {:.2}% | {:.2}ms | {:.2}ms | {:.2}ms | {:.2}ms | {:.2}% |\n",
+            d.mode, d.requests, d.concurrency, d.throughput_rps,
+            d.successes, d.requests, d.failure_rate_percent,
+            d.average_latency_ms, d.p50_latency_ms, d.p95_latency_ms, d.p99_latency_ms,
+            d.offload_percent
+        ));
+    }
+
+    md.push_str("\n<details><summary>Raw JSON Dataset</summary>\n\n");
+    md.push_str("```json\n");
+    md.push_str(&serde_json::to_string_pretty(&report)?);
+    md.push_str("\n```\n</details>\n");
+
     std::fs::write(&md_path, md)?;
 
     println!("{}", serde_json::to_string_pretty(&report)?);

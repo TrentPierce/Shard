@@ -261,6 +261,8 @@ pub(crate) async fn topology_handler(
         "public_api": topo.is_public,
         "public_api_addr": state.public_host.clone().or(topo.public_api_addr.clone()),
         "relay_mode": topo.relay_server_enabled,
+        "relay_reservation_active": topo.relay_reservation_active,
+        "nat_status": topo.nat_status.clone(),
         "contribute": topo.contribute_enabled,
         "wallet": state.node_wallet.clone(),
         "model_id": state.model_id.clone(),
@@ -686,7 +688,15 @@ pub(crate) async fn browser_layer_submit_handler(
         shape: req.shape.clone(),
         data: plain,
     };
-    let encoded = wire.encode();
+    let encoded = match wire.encode() {
+        Ok(encoded) => encoded,
+        Err(detail) => {
+            return Json(serde_json::json!({
+                "ok": false,
+                "detail": format!("failed to encode tensor wire payload: {detail}"),
+            }))
+        }
+    };
     let response_packet = ForwardPassActivation {
         request_id: req.request_id.clone(),
         step_id: req.step_id.clone(),

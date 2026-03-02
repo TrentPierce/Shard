@@ -16,6 +16,8 @@
 #![allow(clippy::unnecessary_cast)]
 
 use anyhow::Result;
+use axum::body::Body;
+use axum::middleware::{from_fn_with_state, Next};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::{
     extract::Path as AxumPath,
@@ -24,7 +26,7 @@ use axum::{
         ws::{Message, WebSocket, WebSocketUpgrade},
         State as AxumState,
     },
-    http::{HeaderMap, HeaderValue, Method, StatusCode},
+    http::{HeaderMap, HeaderValue, Method, Request, StatusCode},
     response::{Html, IntoResponse, Response},
     routing::{get, post},
     Json, Router,
@@ -48,7 +50,7 @@ use rand::{distributions::Alphanumeric, Rng};
 use serde::{Deserialize, Serialize};
 use shard_common::types::{WorkRequest, WorkResponse};
 use std::{
-    collections::{HashMap, HashSet, VecDeque},
+    collections::{BTreeMap, HashMap, HashSet, VecDeque},
     hash::{Hash, Hasher},
     net::{IpAddr, SocketAddr},
     path::{Path, PathBuf},
@@ -635,6 +637,8 @@ struct TopologyState {
     public_api_addr: Option<String>,
     is_public: bool,
     relay_server_enabled: bool,
+    relay_reservation_active: bool,
+    nat_status: String,
     contribute_enabled: bool,
     capacity: u32,   // tokens per second
     load: u32,       // current active requests
@@ -754,6 +758,8 @@ pub(crate) struct SharedState {
     scout_draft_notifiers: Arc<Mutex<HashMap<String, Arc<Notify>>>>,
     /// Pending speculative requests keyed by work/request id with issue timestamp.
     speculative_pending: Arc<Mutex<HashMap<String, u128>>>,
+    /// Buffered draft segments for out-of-order speculative submissions.
+    draft_buffers: Arc<Mutex<HashMap<String, DraftBuffer>>>,
     /// Channel for announcing bans to the network
     ban_tx: mpsc::Sender<(String, String)>,
     /// Timeout tracker for speculative decoding
@@ -862,6 +868,47 @@ struct ScoutDraft {
     timestamp_ms: u128,
 }
 
+#[derive(Debug, Clone)]
+struct DraftBufferConfig {
+    max_segments: usize,
+    max_gap_tokens: u32,
+    min_emit_tokens: usize,
+    ttl_ms: u128,
+}
+
+#[derive(Debug, Clone)]
+struct DraftBuffer {
+    next_seq: u32,
+    assembled: Vec<i32>,
+    segments: BTreeMap<u32, Vec<i32>>,
+    last_update_ms: u128,
+}
+
+fn draft_buffer_config() -> DraftBufferConfig {
+    DraftBufferConfig {
+        max_segments: std::env::var("SHARD_DRAFT_BUFFER_MAX_SEGMENTS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .map(|v: usize| v.clamp(1, 32))
+            .unwrap_or(8),
+        max_gap_tokens: std::env::var("SHARD_DRAFT_BUFFER_MAX_GAP_TOKENS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .map(|v: u32| v.clamp(16, 4096))
+            .unwrap_or(256),
+        min_emit_tokens: std::env::var("SHARD_DRAFT_BUFFER_MIN_TOKENS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .map(|v: usize| v.clamp(1, 4096))
+            .unwrap_or(8),
+        ttl_ms: std::env::var("SHARD_DRAFT_BUFFER_TTL_MS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .map(|v: u128| v.clamp(5_000, 120_000))
+            .unwrap_or(30_000),
+    }
+}
+
 /// Result of verifying draft tokens against the verifier model.
 #[derive(Clone, Debug)]
 struct DraftVerificationResult {
@@ -897,6 +944,78 @@ async fn record_request_alert(state: &SharedState) {
 async fn record_latency_alert(state: &SharedState, latency_ms: f64) {
     let latency_ms = latency_ms.max(0.0).round() as u64;
     capture_alert(state, |manager| manager.on_latency(latency_ms)).await;
+}
+
+async fn push_scout_draft(state: &SharedState, draft: ScoutDraft) {
+    let work_id = draft.work_id.clone();
+    {
+        let mut mailbox = state.scout_draft_mailbox.lock().await;
+        let queue = mailbox
+            .entry(work_id.clone())
+            .or_insert_with(VecDeque::new);
+        queue.push_back(draft);
+        while queue.len() > 8 {
+            queue.pop_front();
+        }
+    }
+    {
+        let notifiers = state.scout_draft_notifiers.lock().await;
+        if let Some(notify) = notifiers.get(&work_id) {
+            notify.notify_waiters();
+        }
+    }
+}
+
+async fn process_draft_submission(
+    state: &SharedState,
+    submission: DraftSubmission,
+) -> Option<ScoutDraft> {
+    if submission.draft_tokens.is_empty() {
+        return None;
+    }
+    let config = draft_buffer_config();
+    let now = now_ms();
+    let key = format!("{}:{}", submission.task_id, submission.scout_peer_id);
+    let mut buffers = state.draft_buffers.lock().await;
+    buffers.retain(|_, buffer| now.saturating_sub(buffer.last_update_ms) <= config.ttl_ms);
+    let buffer = buffers.entry(key.clone()).or_insert_with(|| DraftBuffer {
+        next_seq: 0,
+        assembled: Vec::new(),
+        segments: BTreeMap::new(),
+        last_update_ms: now,
+    });
+    buffer.last_update_ms = now;
+
+    if submission.seq_start > buffer.next_seq.saturating_add(config.max_gap_tokens) {
+        return None;
+    }
+
+    let tokens: Vec<i32> = submission.draft_tokens.into_iter().map(|t| t as i32).collect();
+    if buffer.segments.len() >= config.max_segments {
+        if let Some((&oldest, _)) = buffer.segments.iter().next() {
+            buffer.segments.remove(&oldest);
+        }
+    }
+    buffer.segments.insert(submission.seq_start, tokens);
+
+    while let Some(segment) = buffer.segments.remove(&buffer.next_seq) {
+        buffer.next_seq = buffer.next_seq.saturating_add(segment.len() as u32);
+        buffer.assembled.extend(segment);
+    }
+
+    if buffer.assembled.len() >= config.min_emit_tokens {
+        let assembled = std::mem::take(&mut buffer.assembled);
+        buffers.remove(&key);
+        return Some(ScoutDraft {
+            work_id: submission.task_id,
+            scout_id: submission.scout_peer_id,
+            draft_tokens: assembled,
+            draft_text: String::new(),
+            latency_ms: 0,
+            timestamp_ms: now,
+        });
+    }
+    None
 }
 
 async fn record_signature_alert(state: &SharedState, success: bool) {
@@ -1656,6 +1775,53 @@ fn filter_bootstrap_addrs(addrs: Vec<String>, allow_private: bool) -> Vec<String
         .collect()
 }
 
+fn filter_relay_addrs(addrs: Vec<String>, allow_private: bool) -> Vec<String> {
+    unique_addrs(addrs)
+        .into_iter()
+        .filter(|addr| {
+            let Ok(multiaddr) = addr.parse::<Multiaddr>() else {
+                return false;
+            };
+            let has_peer = multiaddr
+                .iter()
+                .any(|p| matches!(p, libp2p::multiaddr::Protocol::P2p(_)));
+            if !has_peer {
+                tracing::warn!(%addr, "dropping relay address missing /p2p/<peer>");
+                return false;
+            }
+            if !allow_private && is_non_public_bootstrap_addr(&multiaddr) {
+                tracing::warn!(%addr, "dropping non-public relay address; set SHARD_ALLOW_PRIVATE_RELAY=true to allow");
+                return false;
+            }
+            true
+        })
+        .collect()
+}
+
+fn build_autonat_config() -> autonat::v1::Config {
+    let mut config = autonat::v1::Config::default();
+    let confidence_max = std::env::var("SHARD_AUTONAT_CONFIDENCE_MAX")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .map(|value| value.clamp(3, 10))
+        .unwrap_or(5);
+    let retry_secs = std::env::var("SHARD_AUTONAT_RETRY_SECS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .map(|value| value.clamp(30, 600))
+        .unwrap_or(180);
+    let refresh_secs = std::env::var("SHARD_AUTONAT_REFRESH_SECS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .map(|value| value.clamp(300, 3600))
+        .unwrap_or(1800);
+
+    config.confidence_max = confidence_max;
+    config.retry_interval = Duration::from_secs(retry_secs);
+    config.refresh_interval = Duration::from_secs(refresh_secs);
+    config
+}
+
 fn reconnect_transport_priority(addr: &Multiaddr) -> u8 {
     let text = addr.to_string();
     if text.contains("/tcp/") && !text.contains("/ws/") && !text.contains("/wss/") {
@@ -2024,39 +2190,86 @@ fn should_accept_work(state: &SharedState) -> Result<(), String> {
     Ok(())
 }
 
-fn create_router(state: SharedState) -> Router {
-    let mut cors = CorsLayer::new()
-        .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
-        .allow_headers(Any);
+#[derive(Clone)]
+struct ApiAccessPolicy {
+    allowed_origins: Arc<HashSet<String>>,
+    public_api: bool,
+}
 
+fn build_cors_origins(control_port: u16, public_host: Option<&str>) -> Vec<HeaderValue> {
     if let Ok(raw_origins) = std::env::var("SHARD_CORS_ORIGINS") {
         let origins: Vec<HeaderValue> = raw_origins
             .split(',')
             .map(str::trim)
             .filter(|value| !value.is_empty())
+            .filter(|value| !value.eq_ignore_ascii_case("any") && *value != "*")
             .filter_map(|value| HeaderValue::from_str(value).ok())
             .collect();
-        if origins.is_empty() {
-            cors = cors.allow_origin(Any);
-        } else {
-            cors = cors.allow_origin(origins);
+        if !origins.is_empty() {
+            return origins;
         }
-    } else {
-        // Secure-by-default CORS baseline; operators can override with SHARD_CORS_ORIGINS.
-        let default_origins = [
-            "http://localhost:3000",
-            "http://127.0.0.1:3000",
-            "http://localhost:9091",
-            "http://127.0.0.1:9091",
-        ];
-        let origins: Vec<HeaderValue> = default_origins
-            .iter()
-            .filter_map(|value| HeaderValue::from_str(value).ok())
-            .collect();
-        cors = cors.allow_origin(origins);
+    }
+
+    // Secure-by-default CORS baseline; operators can override with SHARD_CORS_ORIGINS.
+    let mut defaults = vec![
+        format!("http://localhost:3000"),
+        format!("http://127.0.0.1:3000"),
+        format!("http://localhost:{control_port}"),
+        format!("http://127.0.0.1:{control_port}"),
+    ];
+    if let Some(host) = public_host {
+        defaults.push(format!("http://{host}:{control_port}"));
+        defaults.push(format!("https://{host}:{control_port}"));
+    }
+    defaults
+        .iter()
+        .filter_map(|value| HeaderValue::from_str(value).ok())
+        .collect()
+}
+
+fn host_is_local(host: &str) -> bool {
+    let raw = host.trim().trim_start_matches('[').trim_end_matches(']');
+    let host_only = raw.split(':').next().unwrap_or(raw);
+    matches!(host_only, "localhost" | "127.0.0.1" | "::1")
+}
+
+async fn enforce_api_origin(
+    AxumState(policy): AxumState<ApiAccessPolicy>,
+    req: Request<Body>,
+    next: Next,
+) -> Response {
+    if !policy.public_api {
+        if let Some(host) = req.headers().get("host").and_then(|v| v.to_str().ok()) {
+            if !host_is_local(host) {
+                return (StatusCode::FORBIDDEN, "host not allowed").into_response();
+            }
+        }
+    }
+
+    if let Some(origin) = req.headers().get("origin").and_then(|v| v.to_str().ok()) {
+        if !policy.allowed_origins.contains(origin) {
+            return (StatusCode::FORBIDDEN, "origin not allowed").into_response();
+        }
+    }
+
+    next.run(req).await
+}
+
+fn create_router(
+    state: SharedState,
+    cors_origins: Vec<HeaderValue>,
+    policy: ApiAccessPolicy,
+) -> Router {
+    let mut cors = CorsLayer::new()
+        .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
+        .allow_headers(Any);
+
+    if !cors_origins.is_empty() {
+        cors = cors.allow_origin(cors_origins);
     }
 
     Router::new()
+        .layer(from_fn_with_state(policy, enforce_api_origin))
         .route("/health", get(health_handler))
         .route("/v1/system/health", get(health_handler))
         .route("/connectivity", get(connectivity_handler))
@@ -2193,6 +2406,10 @@ async fn main() -> Result<()> {
         }
     }
 
+    if let Err(detail) = preflight_ports(&cli) {
+        return Err(anyhow::anyhow!(detail));
+    }
+
     use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
     let filter_layer = tracing_subscriber::EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(&cli.log_level));
@@ -2276,7 +2493,11 @@ async fn main() -> Result<()> {
     // If the production bootstrap peer changes in the future, update
     // this multiaddr and the corresponding docs in docs/ENVIRONMENT.md.
     let hardcoded_bootstrap = vec![
-        "/ip4/35.175.242.222/tcp/4001/p2p/12D3KooWConhJakwyGN72uZ1Jtxi3LFecN3cYKxEX3aNLDAo48by"
+        "/ip4/35.175.242.222/tcp/4001/p2p/12D3KooWPQqkkZk7NeWA2b1FeWYuBFRW8X7Q9ugymnzxeKJHFLUV"
+            .to_string(),
+    ];
+    let hardcoded_relay = vec![
+        "/ip4/35.175.242.222/tcp/4001/p2p/12D3KooWPQqkkZk7NeWA2b1FeWYuBFRW8X7Q9ugymnzxeKJHFLUV"
             .to_string(),
     ];
 
@@ -2303,6 +2524,10 @@ async fn main() -> Result<()> {
         .ok()
         .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
         .unwrap_or(false);
+    let allow_private_relay = std::env::var("SHARD_ALLOW_PRIVATE_RELAY")
+        .ok()
+        .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
+        .unwrap_or(false);
 
     let mut bootstrap_sources = default_bootstrap;
     bootstrap_sources.extend(cli.bootstrap_node.clone());
@@ -2320,8 +2545,34 @@ async fn main() -> Result<()> {
     }
 
     let bootstrap_addrs = filter_bootstrap_addrs(bootstrap_sources, allow_private_bootstrap);
+
+    let relay_sources = std::env::var("SHARD_RELAY_BOOTSTRAP")
+        .ok()
+        .map(|raw| {
+            raw.split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let default_relay = std::env::var("SHARD_DEFAULT_RELAY")
+        .ok()
+        .map(|raw| {
+            raw.split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let mut relay_addrs = default_relay;
+    relay_addrs.extend(relay_sources);
+    if relay_addrs.is_empty() && include_hardcoded {
+        relay_addrs.extend(hardcoded_relay);
+    }
+    relay_addrs = filter_relay_addrs(relay_addrs, allow_private_relay);
     tracing::info!(
         bootstrap_count = bootstrap_addrs.len(),
+        relay_bootstrap_count = relay_addrs.len(),
         registry_bootstrap_count = registry_seed_bootstrap.len(),
         bootstrap_registry_entries = loaded_bootstrap_registry.len(),
         bootstrap_registry_ttl_ms = registry_ttl_ms,
@@ -2385,6 +2636,8 @@ async fn main() -> Result<()> {
             public_api_addr: cli.public_host.clone(),
             is_public: cli.public_api,
             relay_server_enabled: cli.relay_mode,
+            relay_reservation_active: false,
+            nat_status: "unknown".to_string(),
             contribute_enabled: cli.contribute,
             capacity: 100, // Default: 100 tokens/sec
             load: 0,
@@ -2469,6 +2722,7 @@ async fn main() -> Result<()> {
         scout_draft_mailbox: Arc::new(Mutex::new(HashMap::new())),
         scout_draft_notifiers: Arc::new(Mutex::new(HashMap::new())),
         speculative_pending: Arc::new(Mutex::new(HashMap::new())),
+        draft_buffers: Arc::new(Mutex::new(HashMap::new())),
         ban_tx,
         draft_publish_tx,
         scout_timeout_tracker: Arc::new(Mutex::new(ScoutTimeoutTracker::new())),
@@ -2592,7 +2846,7 @@ async fn main() -> Result<()> {
 
     // ── build swarm ──
     let behaviour = {
-        // ── Gossipsub config tuned for small-mesh P2P networks (2-20 nodes) ──
+        // ── Gossipsub config tuned for scalable meshes ──
         let parse_mesh = |name: &str, default: usize, min: usize, max: usize| -> usize {
             std::env::var(name)
                 .ok()
@@ -2600,16 +2854,29 @@ async fn main() -> Result<()> {
                 .map(|v| v.clamp(min, max))
                 .unwrap_or(default)
         };
-        let mesh_n_low = parse_mesh("SHARD_GOSSIPSUB_MESH_N_LOW", 1, 1, 64);
-        let mut mesh_n = parse_mesh("SHARD_GOSSIPSUB_MESH_N", 1, 1, 64);
-        let mut mesh_n_high = parse_mesh("SHARD_GOSSIPSUB_MESH_N_HIGH", 2, 1, 128);
+        let profile = std::env::var("SHARD_GOSSIPSUB_PROFILE")
+            .unwrap_or_else(|_| "large".to_string())
+            .to_lowercase();
+        let (default_low, default_n, default_high, default_lazy) = match profile.as_str() {
+            "small" => (1, 1, 2, 1),
+            "medium" => (3, 5, 8, 4),
+            _ => (6, 10, 20, 6),
+        };
+        let mesh_n_low = parse_mesh("SHARD_GOSSIPSUB_MESH_N_LOW", default_low, 1, 128);
+        let mut mesh_n = parse_mesh("SHARD_GOSSIPSUB_MESH_N", default_n, 1, 128);
+        let mut mesh_n_high = parse_mesh("SHARD_GOSSIPSUB_MESH_N_HIGH", default_high, 1, 256);
         if mesh_n < mesh_n_low {
             mesh_n = mesh_n_low;
         }
         if mesh_n_high < mesh_n {
             mesh_n_high = mesh_n;
         }
-        let gossip_lazy = parse_mesh("SHARD_GOSSIPSUB_GOSSIP_LAZY", 1, 1, 64);
+        let gossip_lazy = parse_mesh("SHARD_GOSSIPSUB_GOSSIP_LAZY", default_lazy, 1, 128);
+        let max_transmit_size = std::env::var("SHARD_GOSSIPSUB_MAX_TRANSMIT_BYTES")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .map(|v| v.clamp(64 * 1024, 2 * 1024 * 1024))
+            .unwrap_or(512 * 1024);
 
         let gossipsub_config = gossipsub::ConfigBuilder::default()
             .mesh_n_low(mesh_n_low)
@@ -2617,7 +2884,7 @@ async fn main() -> Result<()> {
             .mesh_n_high(mesh_n_high)
             .gossip_lazy(gossip_lazy)
             .heartbeat_interval(Duration::from_secs(1))
-            .max_transmit_size(512 * 1024)
+            .max_transmit_size(max_transmit_size)
             .validation_mode(gossipsub::ValidationMode::Permissive)
             .build()
             .map_err(|e| anyhow::anyhow!(e.to_string()))?;
@@ -2682,7 +2949,7 @@ async fn main() -> Result<()> {
         } else {
             libp2p::swarm::behaviour::toggle::Toggle::from(None)
         };
-        let autonat = autonat::v1::Behaviour::new(local_peer_id, autonat::v1::Config::default());
+        let autonat = autonat::v1::Behaviour::new(local_peer_id, build_autonat_config());
         let identify = identify::Behaviour::new(identify::Config::new(
             "/shard/1.0.0".to_string(),
             id_keys.public(),
@@ -2768,6 +3035,26 @@ async fn main() -> Result<()> {
         }
     }
 
+    if !cli.relay_mode && cli.nat_traversal && !relay_addrs.is_empty() {
+        for addr_str in &relay_addrs {
+            if let Ok(mut addr) = addr_str.parse::<Multiaddr>() {
+                if let Some(peer_id) = extract_peer_id_from_multiaddr(&addr) {
+                    tracing::info!(%peer_id, "dialing relay bootstrap peer");
+                }
+                let _ = swarm.dial(addr.clone());
+                if !addr
+                    .iter()
+                    .any(|p| matches!(p, libp2p::multiaddr::Protocol::P2p(_)))
+                {
+                    continue;
+                }
+                addr.push(libp2p::multiaddr::Protocol::P2pCircuit);
+                tracing::info!(%addr, "attempting relay reservation");
+                let _ = swarm.listen_on(addr);
+            }
+        }
+    }
+
     if !bootstrap_addrs.is_empty() {
         if let Err(e) = swarm.behaviour_mut().kad.bootstrap() {
             tracing::warn!(%e, "failed to bootstrap Kademlia DHT");
@@ -2780,7 +3067,7 @@ async fn main() -> Result<()> {
         tracing::warn!(%e, "failed to publish local layer provider record");
     }
 
-    telemetry_ws::spawn_telemetry_ws_server(state.clone(), cli.telemetry_ws_port);
+    telemetry_ws::spawn_telemetry_ws_server(state.clone(), cli.telemetry_ws_port, cli.public_api);
 
     // ── spawn ICE server refresh loop ──
     if let Some(url) = cli.ice_provider_url {
@@ -2856,14 +3143,36 @@ async fn main() -> Result<()> {
 
     // ── spawn HTTP control-plane server ──
     let http_state = state.clone();
-    let control_port = cli.control_port;
+    let control_bind_ip = if cli.public_api {
+        [0, 0, 0, 0]
+    } else {
+        [127, 0, 0, 1]
+    };
+    let control_addr = SocketAddr::from((control_bind_ip, cli.control_port));
+    let listener = tokio::net::TcpListener::bind(control_addr)
+        .await
+        .expect("failed to bind control-plane port");
+    let control_port = listener
+        .local_addr()
+        .map(|addr| addr.port())
+        .unwrap_or(cli.control_port);
+    let public_host = cli.public_host.as_deref().and_then(normalize_public_host);
+    let cors_origins = build_cors_origins(control_port, public_host.as_deref());
+    let allowed_origin_set = cors_origins
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .map(|value| value.to_string())
+        .collect::<HashSet<_>>();
+    let policy = ApiAccessPolicy {
+        allowed_origins: Arc::new(allowed_origin_set),
+        public_api: cli.public_api,
+    };
+    println!("control_port={control_port}");
+
     tokio::spawn(async move {
-        let app = create_router(http_state);
-        let addr = SocketAddr::from(([0, 0, 0, 0], control_port));
+        let app = create_router(http_state, cors_origins, policy);
+        let addr = SocketAddr::from((control_bind_ip, control_port));
         tracing::info!(%addr, "control-plane HTTP server starting");
-        let listener = tokio::net::TcpListener::bind(addr)
-            .await
-            .expect("failed to bind control-plane port");
         axum::serve(listener, app)
             .await
             .expect("control-plane server crashed");
@@ -2959,11 +3268,14 @@ async fn main() -> Result<()> {
         }
     });
 
+    let (shutdown_tx, mut shutdown_rx) = tokio::sync::watch::channel(false);
+
     // Graceful signed deregistration signal handler.
     let shutdown_state = state.clone();
     let shutdown_signing_key = signing_key.clone();
+    let shutdown_trigger = shutdown_tx.clone();
     tokio::spawn(async move {
-        if tokio::signal::ctrl_c().await.is_ok() {
+        if shutdown_signal().await {
             let envelope = SignedEnvelope::sign(
                 NodeRegistration {
                     node_pubkey: shutdown_state.node_public_key.clone(),
@@ -2987,11 +3299,12 @@ async fn main() -> Result<()> {
                 )
                 .await;
             }
-            std::process::exit(0);
+            let _ = shutdown_trigger.send(true);
         }
     });
 
     println!();
+    let control_host = if cli.public_api { "0.0.0.0" } else { "127.0.0.1" };
     println!("  ╔══════════════════════════════════════════════╗");
     println!(
         "  ║       Shard Daemon  v{}           ║",
@@ -3003,12 +3316,12 @@ async fn main() -> Result<()> {
         &local_peer_id.to_string()[..20]
     );
     println!(
-        "  ║  Control API  : http://0.0.0.0:{}          ║",
-        control_port
+        "  ║  Control API  : http://{}:{}          ║",
+        control_host, control_port
     );
     println!(
-        "  ║  Telemetry WS : ws://0.0.0.0:{}/telemetry/ws ║",
-        cli.telemetry_ws_port
+        "  ║  Telemetry WS : ws://{}:{}/telemetry/ws ║",
+        control_host, cli.telemetry_ws_port
     );
     println!(
         "  ║  TCP          : /ip4/0.0.0.0/tcp/{}        ║",
@@ -3058,6 +3371,13 @@ async fn main() -> Result<()> {
     println!();
 
     let mut reconnect_tick = tokio::time::interval(Duration::from_secs(cli.reconnect_seconds));
+    let kad_bootstrap_interval_secs = std::env::var("SHARD_KAD_BOOTSTRAP_INTERVAL_SECS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .map(|v| v.clamp(60, 3600))
+        .unwrap_or(300);
+    let mut kad_bootstrap_tick =
+        tokio::time::interval(Duration::from_secs(kad_bootstrap_interval_secs));
     let mut pending_handshakes: HashMap<OutboundRequestId, PeerId> = HashMap::new();
     let mut pending_layer_queries: HashMap<libp2p::kad::QueryId, (String, u32)> = HashMap::new();
     let mut pending_ledger_sync: HashMap<OutboundRequestId, (PeerId, u64)> = HashMap::new();
@@ -3073,6 +3393,22 @@ async fn main() -> Result<()> {
     // ── main event loop ──
     loop {
         tokio::select! {
+            _ = shutdown_rx.changed() => {
+                if *shutdown_rx.borrow() {
+                    tracing::info!("shutdown signal received; draining and exiting");
+                    break;
+                }
+            }
+            _ = kad_bootstrap_tick.tick() => {
+                let connected = state.peers.lock().await.len();
+                if connected > 0 {
+                    if let Err(e) = swarm.behaviour_mut().kad.bootstrap() {
+                        tracing::debug!(%e, "periodic kademlia bootstrap failed");
+                    } else {
+                        tracing::debug!("periodic kademlia bootstrap triggered");
+                    }
+                }
+            }
             _ = reconnect_tick.tick() => {
                 let mut known = state.known_peers.lock().await.clone();
                 known.sort_by_key(|addr| reconnect_addr_sort_key(addr));
@@ -3465,22 +3801,7 @@ async fn main() -> Result<()> {
                                         timestamp_ms: result.created_at_ms.unwrap_or_else(now_ms),
                                         latency_ms: result.latency_ms as u64,
                                     };
-                                    let mut mailbox = state.scout_draft_mailbox.lock().await;
-                                    let queue = mailbox
-                                        .entry(draft.work_id.clone())
-                                        .or_insert_with(VecDeque::new);
-                                    queue.push_back(draft);
-                                    while queue.len() > 8 {
-                                        queue.pop_front();
-                                    }
-                                }
-
-                                // Notify any waiters blocked in wait_for_scout_draft
-                                {
-                                    let notifiers = state.scout_draft_notifiers.lock().await;
-                                    if let Some(notify) = notifiers.get(&result.request_id) {
-                                        notify.notify_waiters();
-                                    }
+                                    push_scout_draft(&state, draft).await;
                                 }
 
                                 let mut q = state.results.lock().await;
@@ -4017,7 +4338,28 @@ async fn main() -> Result<()> {
 
                     // ── verify protocol ──
                     SwarmEvent::Behaviour(ShardBehaviourEvent::Verify(event)) => {
-                        tracing::debug!(?event, "verify protocol event");
+                        match event {
+                            request_response::Event::Message { peer, message, .. } => match message {
+                                request_response::Message::Request {
+                                    request, channel, ..
+                                } => {
+                                    tracing::debug!(%peer, "received draft submission");
+                                    if let Some(draft) =
+                                        process_draft_submission(&state, request).await
+                                    {
+                                        push_scout_draft(&state, draft).await;
+                                    }
+                                    let _ = swarm
+                                        .behaviour_mut()
+                                        .verify
+                                        .send_response(channel, "ok".to_string());
+                                }
+                                request_response::Message::Response { response, .. } => {
+                                    tracing::debug!(%peer, %response, "draft submission response");
+                                }
+                            },
+                            other => tracing::debug!(?other, "verify protocol event"),
+                        }
                     }
 
                     // ── kademlia ──
@@ -4061,6 +4403,17 @@ async fn main() -> Result<()> {
 
                     SwarmEvent::Behaviour(ShardBehaviourEvent::RelayClient(event)) => {
                         tracing::info!("RelayClient event: {:?}", event);
+                        match event {
+                            relay::client::Event::ReservationReqAccepted { .. } => {
+                                let mut topo = state.topology.lock().await;
+                                topo.relay_reservation_active = true;
+                            }
+                            relay::client::Event::OutboundCircuitEstablished { .. } => {
+                                let mut topo = state.topology.lock().await;
+                                topo.relay_reservation_active = true;
+                            }
+                            _ => {}
+                        }
                     }
 
                     // ── relay server ──
@@ -4092,9 +4445,11 @@ async fn main() -> Result<()> {
                         match new {
                             autonat::NatStatus::Public(_) => {
                                 topo.is_public = true;
+                                topo.nat_status = "public".to_string();
                             }
                             autonat::NatStatus::Private => {
                                 topo.is_public = false;
+                                topo.nat_status = "private".to_string();
                             }
                             _ => {}
                         }
@@ -4390,6 +4745,13 @@ async fn main() -> Result<()> {
             }
         }
     }
+
+    // Clean up GPU resources before exit.
+    {
+        let mut engine_guard = state.engine.lock().await;
+        *engine_guard = None;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -4923,4 +5285,87 @@ mod tests {
         tracker.record_timeout(&config);
         assert!(!tracker.is_in_cooldown());
     }
+}
+
+fn check_tcp_bind(addr: [u8; 4], port: u16) -> Option<String> {
+    if port == 0 {
+        return None;
+    }
+    let addr = std::net::Ipv4Addr::from(addr);
+    std::net::TcpListener::bind((addr, port))
+        .map(|listener| {
+            drop(listener);
+            None
+        })
+        .unwrap_or_else(|e| Some(format!("tcp/{port}: {e}")))
+}
+
+fn check_udp_bind(addr: [u8; 4], port: u16) -> Option<String> {
+    if port == 0 {
+        return None;
+    }
+    let addr = std::net::Ipv4Addr::from(addr);
+    std::net::UdpSocket::bind((addr, port))
+        .map(|socket| {
+            drop(socket);
+            None
+        })
+        .unwrap_or_else(|e| Some(format!("udp/{port}: {e}")))
+}
+
+fn preflight_ports(cli: &Cli) -> Result<(), String> {
+    let mut conflicts = Vec::new();
+    let control_addr = if cli.public_api { [0, 0, 0, 0] } else { [127, 0, 0, 1] };
+    if let Some(conflict) = check_tcp_bind(control_addr, cli.control_port) {
+        conflicts.push(format!("control port {conflict}"));
+    }
+    if let Some(conflict) = check_tcp_bind(control_addr, cli.telemetry_ws_port) {
+        conflicts.push(format!("telemetry ws {conflict}"));
+    }
+    if let Some(conflict) = check_tcp_bind([0, 0, 0, 0], cli.tcp_port) {
+        conflicts.push(format!("p2p tcp {conflict}"));
+    }
+    if let Some(conflict) = check_tcp_bind([0, 0, 0, 0], cli.tcp_port + 100) {
+        conflicts.push(format!("p2p ws {conflict}"));
+    }
+    if let Some(conflict) = check_udp_bind([0, 0, 0, 0], cli.webrtc_port) {
+        conflicts.push(format!("webrtc {conflict}"));
+    }
+    if let Some(conflict) = check_udp_bind([0, 0, 0, 0], cli.quic_port) {
+        conflicts.push(format!("quic {conflict}"));
+    }
+
+    if conflicts.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "port preflight failed: {}",
+            conflicts.join(", ")
+        ))
+    }
+}
+
+#[cfg(unix)]
+async fn shutdown_signal() -> bool {
+    let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+        .expect("failed to install SIGTERM handler");
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => true,
+        _ = sigterm.recv() => true,
+    }
+}
+
+#[cfg(windows)]
+async fn shutdown_signal() -> bool {
+    let mut sigbreak = tokio::signal::windows::ctrl_break()
+        .expect("failed to install Ctrl-Break handler");
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => true,
+        _ = sigbreak.recv() => true,
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
+async fn shutdown_signal() -> bool {
+    tokio::signal::ctrl_c().await.is_ok()
 }

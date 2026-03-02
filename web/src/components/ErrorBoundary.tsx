@@ -1,122 +1,79 @@
 "use client"
 
-import React, { Component, ErrorInfo, ReactNode } from "react"
+import React from "react"
 
-interface ErrorBoundaryProps {
-    children: ReactNode
-    fallback?: ReactNode
+type ErrorBoundaryProps = {
+  children: React.ReactNode
 }
 
-interface ErrorBoundaryState {
-    hasError: boolean
-    error: Error | null
+type ErrorBoundaryState = {
+  hasError: boolean
+  error?: Error
 }
 
-/**
- * Error Boundary Component
- * 
- * Catches JavaScript errors anywhere in the child component tree,
- * logs them, and displays a fallback UI.
- * 
- * Usage:
- * <ErrorBoundary fallback={<div>Something went wrong</div>}>
- *   <YourComponent />
- * </ErrorBoundary>
- */
-export default class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
-    state: ErrorBoundaryState = {
-        hasError: false,
-        error: null,
+export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  state: ErrorBoundaryState = { hasError: false }
+
+  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+    return { hasError: true, error }
+  }
+
+  componentDidCatch(error: Error, info: React.ErrorInfo) {
+    console.error("UI error boundary caught:", error, info)
+  }
+
+  handleReload = () => {
+    if (typeof window !== "undefined") {
+      window.location.reload()
     }
+  }
 
-    static getDerivedStateFromError(error: Error): ErrorBoundaryState {
-        return {
-            hasError: true,
-            error,
-        }
-    }
-
-    componentDidCatch(error: Error, errorInfo: ErrorInfo) {
-        console.error("[ErrorBoundary] Caught error:", error)
-        console.error("[ErrorBoundary] Error info:", errorInfo)
-
-        // Log error details for debugging
-        const errorData = {
-            error: error.message,
-            componentStack: errorInfo.componentStack,
-            timestamp: new Date().toISOString(),
-        }
-
-        // Store error in sessionStorage for potential recovery
-        if (typeof window !== "undefined") {
-            try {
-                const errors = JSON.parse(sessionStorage.getItem("shard-errors") || "[]")
-                errors.push(errorData)
-                sessionStorage.setItem("shard-errors", JSON.stringify(errors.slice(-20))) // Keep last 20 errors
-            } catch {
-                // Ignore sessionStorage errors
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="error-boundary">
+          <div className="error-boundary__panel">
+            <p className="error-boundary__title">Dashboard encountered an error</p>
+            <p className="error-boundary__detail">
+              The UI failed to render. You can reload to reconnect to the node.
+            </p>
+            <button className="btn btn-primary" type="button" onClick={this.handleReload}>
+              Reload Dashboard
+            </button>
+          </div>
+          <style jsx>{`
+            .error-boundary {
+              min-height: 60vh;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              padding: 2rem;
             }
-        }
+            .error-boundary__panel {
+              max-width: 520px;
+              width: 100%;
+              border: 1px solid var(--ring);
+              border-radius: 16px;
+              padding: 24px;
+              background: var(--base-900);
+              box-shadow: var(--shadow-panel);
+            }
+            .error-boundary__title {
+              font-size: 1.125rem;
+              font-weight: 600;
+              color: var(--ink-50);
+              margin-bottom: 8px;
+            }
+            .error-boundary__detail {
+              font-size: 0.9rem;
+              color: var(--ink-300);
+              margin-bottom: 16px;
+            }
+          `}</style>
+        </div>
+      )
     }
 
-    handleReset = () => {
-        this.setState({ hasError: false, error: null })
-        
-        // Clear errors from sessionStorage
-        if (typeof window !== "undefined") {
-            sessionStorage.removeItem("shard-errors")
-        }
-        
-        // Reload page to recover
-        window.location.reload()
-    }
-
-    render() {
-        if (this.state.hasError) {
-            return (
-                <div
-                    className="error-boundary"
-                    role="alert"
-                    aria-live="assertive"
-                    aria-labelledby="error-title"
-                >
-                    <div className="error-boundary__content">
-                        <div className="error-boundary__icon" aria-hidden="true">
-                            ⚠️
-                        </div>
-                        <h1 id="error-title" className="error-boundary__title">
-                            Something went wrong
-                        </h1>
-                        <p className="error-boundary__message">
-                            {this.state.error?.message || "An unexpected error occurred"}
-                        </p>
-                        <details className="error-boundary__details">
-                            <summary>Error Details</summary>
-                            <pre>
-                                {this.state.error?.stack || "No stack trace available"}
-                            </pre>
-                        </details>
-                        <div className="error-boundary__actions">
-                            <button
-                                onClick={this.handleReset}
-                                className="error-boundary__button error-boundary__button--primary"
-                                type="button"
-                            >
-                                Reload Application
-                            </button>
-                            <button
-                                onClick={() => this.setState({ hasError: false })}
-                                className="error-boundary__button error-boundary__button--secondary"
-                                type="button"
-                            >
-                                Dismiss
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )
-        }
-
-        return this.props.children
-    }
+    return this.props.children
+  }
 }

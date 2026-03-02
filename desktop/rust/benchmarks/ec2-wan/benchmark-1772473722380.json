@@ -1,0 +1,33 @@
+{
+  "timestamp_ms": 1772473722380,
+  "baseline": {
+    "mode": "baseline",
+    "requests": 100,
+    "concurrency": 25,
+    "successes": 100,
+    "failures": 0,
+    "throughput_rps": 83.16772559973286,
+    "average_latency_ms": 252.49,
+    "p50_latency_ms": 244.0,
+    "p95_latency_ms": 369.0,
+    "p99_latency_ms": 502.0,
+    "offload_percent": 100.0,
+    "failure_rate_percent": 0.0
+  },
+  "distributed_signed": {
+    "mode": "distributed",
+    "requests": 100,
+    "concurrency": 25,
+    "successes": 0,
+    "failures": 100,
+    "throughput_rps": 0.0,
+    "average_latency_ms": 1105.82,
+    "p50_latency_ms": 1103.0,
+    "p95_latency_ms": 1234.0,
+    "p99_latency_ms": 1320.0,
+    "offload_percent": 0.0,
+    "failure_rate_percent": 100.0
+  },
+  "signature_validation_overhead_ms": 853.3299999999999,
+  "estimated_gpu_savings_percent": 0.0
+}

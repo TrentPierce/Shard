@@ -173,8 +173,11 @@ export function useSwarmTelemetry() {
   })
   const [isConnected, setIsConnected] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [consecutiveFailures, setConsecutiveFailures] = useState(0)
   const historyRef = useRef<ThroughputSample[]>([])
   const contributorsRef = useRef<Contributor[]>([])
+  const pollRef = useRef<() => Promise<void>>()
 
   // Poll API for real telemetry
   useEffect(() => {
@@ -207,10 +210,23 @@ export function useSwarmTelemetry() {
           totalTokensGenerated: data.totalTokensGenerated,
         })
         setIsConnected(data.healthState !== "unavailable")
+        setErrorMessage(null)
+        setConsecutiveFailures(0)
       } catch (e) {
         console.error("Telemetry poll failed:", e)
         if (!isUnmounted) {
           setIsConnected(false)
+          setConsecutiveFailures((value) => {
+            const next = value + 1
+            if (next >= 3) {
+              setTelemetry((prev) => ({
+                ...prev,
+                healthState: "unavailable",
+              }))
+            }
+            return next
+          })
+          setErrorMessage(e instanceof Error ? e.message : "Telemetry unavailable")
         }
       } finally {
         if (!isUnmounted) {
@@ -218,6 +234,7 @@ export function useSwarmTelemetry() {
         }
       }
     }
+    pollRef.current = pollTelemetry
 
     // Initial fetch
     pollTelemetry()
@@ -246,5 +263,9 @@ export function useSwarmTelemetry() {
     [telemetry.healthState],
   )
 
-  return { telemetry, isConnected, isLoading, statusLabel }
+  const retryNow = () => {
+    pollRef.current?.()
+  }
+
+  return { telemetry, isConnected, isLoading, statusLabel, errorMessage, retryNow }
 }

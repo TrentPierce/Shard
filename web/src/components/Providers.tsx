@@ -3,6 +3,7 @@
 import { useState } from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { AppProvider } from "@/lib/context"
+import { ErrorBoundary } from "@/components/ErrorBoundary"
 
 /**
  * React Query client provider for Shard web app.
@@ -27,9 +28,11 @@ export function Providers({ children }: { children: React.ReactNode }) {
 
     return (
         <QueryClientProvider client={queryClient}>
-            <AppProvider>
-                {children}
-            </AppProvider>
+            <ErrorBoundary>
+                <AppProvider>
+                    {children}
+                </AppProvider>
+            </ErrorBoundary>
         </QueryClientProvider>
     )
 }

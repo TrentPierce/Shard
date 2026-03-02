@@ -1,6 +1,9 @@
 use serde::{Deserialize, Serialize};
 
 const MAGIC: [u8; 4] = *b"SFB1";
+// DType marker for packed trinary (1.58-bit) payloads.
+// Encoding: each trit is 0..2 mapped to base-3 digits.
+const DTYPE_TRINARY_PACKED: u8 = 3;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct TensorWirePacket {
@@ -11,19 +14,36 @@ pub struct TensorWirePacket {
 }
 
 impl TensorWirePacket {
-    pub fn encode(&self) -> Vec<u8> {
-        let mut out = Vec::with_capacity(32 + self.tensor_name.len() + self.data.len());
+    pub fn encode(&self) -> Result<Vec<u8>, String> {
+        let mut payload = self.data.clone();
+        if self.dtype == DTYPE_TRINARY_PACKED {
+            if let Some(trit_count) = trit_count_from_shape(&self.shape) {
+                let packed_len = packed_trit_len(trit_count);
+                if payload.len() == trit_count {
+                    payload = pack_trits_5(&payload)?;
+                } else if payload.len() != packed_len {
+                    return Err(format!(
+                        "trinary payload length mismatch: got {}, expected {} or {}",
+                        payload.len(),
+                        trit_count,
+                        packed_len
+                    ));
+                }
+            }
+        }
+
+        let mut out = Vec::with_capacity(32 + self.tensor_name.len() + payload.len());
         out.extend_from_slice(&MAGIC);
         out.push(self.dtype);
         out.extend_from_slice(&(self.tensor_name.len() as u32).to_le_bytes());
         out.extend_from_slice(&(self.shape.len() as u32).to_le_bytes());
-        out.extend_from_slice(&(self.data.len() as u32).to_le_bytes());
+        out.extend_from_slice(&(payload.len() as u32).to_le_bytes());
         out.extend_from_slice(self.tensor_name.as_bytes());
         for d in &self.shape {
             out.extend_from_slice(&d.to_le_bytes());
         }
-        out.extend_from_slice(&self.data);
-        out
+        out.extend_from_slice(&payload);
+        Ok(out)
     }
 
     pub fn decode(buf: &[u8]) -> Result<Self, String> {
@@ -52,7 +72,12 @@ impl TensorWirePacket {
             off += 4;
         }
 
-        let data = buf[off..off + data_len].to_vec();
+        let mut data = buf[off..off + data_len].to_vec();
+        if dtype == DTYPE_TRINARY_PACKED {
+            if let Some(trit_count) = trit_count_from_shape(&shape) {
+                data = unpack_trits_5(&data, trit_count)?;
+            }
+        }
         Ok(Self {
             tensor_name: name,
             dtype,
@@ -60,6 +85,64 @@ impl TensorWirePacket {
             data,
         })
     }
+}
+
+fn trit_count_from_shape(shape: &[u32]) -> Option<usize> {
+    let mut total: u64 = 1;
+    for &dim in shape {
+        total = total.saturating_mul(dim as u64);
+        if total > (usize::MAX as u64) {
+            return None;
+        }
+    }
+    Some(total as usize)
+}
+
+fn packed_trit_len(trit_count: usize) -> usize {
+    (trit_count + 4) / 5
+}
+
+fn pack_trits_5(trits: &[u8]) -> Result<Vec<u8>, String> {
+    let mut out = Vec::with_capacity(packed_trit_len(trits.len()));
+    let mut idx = 0;
+    while idx < trits.len() {
+        let mut value: u8 = 0;
+        let mut multiplier: u8 = 1;
+        for _ in 0..5 {
+            let trit = trits.get(idx).copied().unwrap_or(0);
+            if trit > 2 {
+                return Err("trinary values must be in range 0..=2".into());
+            }
+            value = value
+                .checked_add(trit.saturating_mul(multiplier))
+                .ok_or_else(|| "trinary pack overflow".to_string())?;
+            multiplier = multiplier.saturating_mul(3);
+            idx = idx.saturating_add(1);
+            if idx >= trits.len() {
+                break;
+            }
+        }
+        out.push(value);
+    }
+    Ok(out)
+}
+
+fn unpack_trits_5(packed: &[u8], trit_count: usize) -> Result<Vec<u8>, String> {
+    let mut out = Vec::with_capacity(trit_count);
+    for &byte in packed {
+        let mut value = byte;
+        for _ in 0..5 {
+            if out.len() >= trit_count {
+                return Ok(out);
+            }
+            out.push(value % 3);
+            value /= 3;
+        }
+    }
+    if out.len() != trit_count {
+        return Err("trinary payload truncated".into());
+    }
+    Ok(out)
 }
 
 #[cfg(test)]
@@ -74,7 +157,20 @@ mod tests {
             shape: vec![2, 4],
             data: vec![1, 2, 3, 4, 5, 6, 7, 8],
         };
-        let enc = pkt.encode();
+        let enc = pkt.encode().expect("encode");
+        let dec = TensorWirePacket::decode(&enc).expect("decode");
+        assert_eq!(pkt, dec);
+    }
+
+    #[test]
+    fn trinary_pack_roundtrip() {
+        let pkt = TensorWirePacket {
+            tensor_name: "trit_weights".into(),
+            dtype: super::DTYPE_TRINARY_PACKED,
+            shape: vec![2, 3],
+            data: vec![0, 1, 2, 2, 1, 0],
+        };
+        let enc = pkt.encode().expect("encode");
         let dec = TensorWirePacket::decode(&enc).expect("decode");
         assert_eq!(pkt, dec);
     }

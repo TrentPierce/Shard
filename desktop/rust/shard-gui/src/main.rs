@@ -39,23 +39,116 @@ async fn main() -> Result<()> {
             // Spawn background task for telemetry and events
             let tx = telemetry_tx.clone();
             tokio::spawn(async move {
-                let mut count = 0;
+                #[derive(serde::Deserialize)]
+                struct HealthResp {
+                    status: Option<String>,
+                    rust_uptime_ms: Option<u128>,
+                    connected_peers: Option<usize>,
+                    engine_loaded: Option<bool>,
+                    bitnet_model: Option<String>,
+                }
+
+                #[derive(serde::Deserialize)]
+                struct TopologyResp {
+                    nat_status: Option<String>,
+                    relay_mode: Option<bool>,
+                    relay_reservation_active: Option<bool>,
+                    contribute: Option<bool>,
+                }
+
+                #[derive(serde::Deserialize)]
+                struct MetricsSummary {
+                    speculative_reject_rate: Option<f32>,
+                    speculative_rejected_tokens_total: Option<u64>,
+                    tokens_processed_total: Option<u64>,
+                    tokens_offloaded_to_scouts_total: Option<u64>,
+                }
+
+                let client = reqwest::Client::new();
+
                 loop {
+                    let health = client
+                        .get("http://127.0.0.1:9091/health")
+                        .send()
+                        .await
+                        .ok()
+                        .and_then(|r| r.json::<HealthResp>().await.ok());
+                    let topo = client
+                        .get("http://127.0.0.1:9091/v1/system/topology")
+                        .send()
+                        .await
+                        .ok()
+                        .and_then(|r| r.json::<TopologyResp>().await.ok());
+                    let metrics = client
+                        .get("http://127.0.0.1:9091/metrics/summary")
+                        .send()
+                        .await
+                        .ok()
+                        .and_then(|r| r.json::<MetricsSummary>().await.ok());
+
+                    let peers = health.as_ref().and_then(|h| h.connected_peers).unwrap_or(0);
+                    let uptime_ms = health.as_ref().and_then(|h| h.rust_uptime_ms).unwrap_or(0);
+                    let uptime_secs = uptime_ms / 1000;
+                    let uptime = format!(
+                        "{:02}:{:02}:{:02}",
+                        uptime_secs / 3600,
+                        (uptime_secs / 60) % 60,
+                        uptime_secs % 60
+                    );
+                    let role = if topo.as_ref().and_then(|t| t.contribute).unwrap_or(false) {
+                        "Shard"
+                    } else {
+                        "Scout"
+                    };
+                    let nat_status = topo
+                        .as_ref()
+                        .and_then(|t| t.nat_status.clone())
+                        .unwrap_or_else(|| "unknown".to_string());
+                    let relay_status = match (
+                        topo.as_ref().and_then(|t| t.relay_mode),
+                        topo.as_ref().and_then(|t| t.relay_reservation_active),
+                    ) {
+                        (Some(true), _) => "server".to_string(),
+                        (Some(false), Some(true)) => "reserved".to_string(),
+                        (Some(false), Some(false)) => "inactive".to_string(),
+                        _ => "unknown".to_string(),
+                    };
+                    let reject_rate = metrics
+                        .as_ref()
+                        .and_then(|m| m.speculative_reject_rate)
+                        .unwrap_or(0.0);
+
+                    let mut vram_alloc_gb = 0.0;
+                    if let Some(path) = health.as_ref().and_then(|h| h.bitnet_model.clone()) {
+                        if let Ok(metadata) = std::fs::metadata(path) {
+                            vram_alloc_gb = metadata.len() as f32 / (1024.0 * 1024.0 * 1024.0);
+                        }
+                    }
+
+                    let total_tokens = metrics
+                        .as_ref()
+                        .and_then(|m| m.tokens_processed_total)
+                        .unwrap_or(0)
+                        + metrics
+                            .as_ref()
+                            .and_then(|m| m.tokens_offloaded_to_scouts_total)
+                            .unwrap_or(0);
+
                     let _ = tx
                         .send(app::TelemetryUpdate {
-                            role: "Scout".to_string(),
-                            peers: count % 10,
-                            tokens: (count * 100) as u64,
-                            uptime: format!(
-                                "{:02}:{:02}:{:02}",
-                                count / 3600,
-                                (count / 60) % 60,
-                                count % 60
-                            ),
+                            role: role.to_string(),
+                            peers,
+                            tokens: total_tokens,
+                            uptime,
+                            vram_alloc_gb,
+                            vram_limit_gb: 0.0,
+                            reject_rate,
+                            nat_status,
+                            relay_status,
                         })
                         .await;
-                    count += 1;
-                    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+
+                    tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
                 }
             });
 

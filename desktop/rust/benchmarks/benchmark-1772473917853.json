@@ -1,0 +1,20 @@
+{
+  "timestamp_ms": 1772473917853,
+  "baseline": null,
+  "distributed_signed": {
+    "mode": "distributed",
+    "requests": 10,
+    "concurrency": 5,
+    "successes": 0,
+    "failures": 10,
+    "throughput_rps": 0.0,
+    "average_latency_ms": 5181.7,
+    "p50_latency_ms": 4066.0,
+    "p95_latency_ms": 11576.0,
+    "p99_latency_ms": 11576.0,
+    "offload_percent": 0.0,
+    "failure_rate_percent": 100.0
+  },
+  "signature_validation_overhead_ms": 0.0,
+  "estimated_gpu_savings_percent": 0.0
+}
