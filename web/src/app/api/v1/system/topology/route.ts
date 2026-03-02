@@ -1,4 +1,4 @@
-export const runtime = 'edge';
+
 import { NextResponse } from "next/server"
 import { fetchWithBackendFailover, shardBackendUrls } from "@/lib/server/shard-backend"
 import { deriveHealthState, healthStateToLegacyStatus } from "@/lib/server/health-state"
