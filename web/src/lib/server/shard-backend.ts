@@ -106,14 +106,32 @@ export async function fetchWithBackendFailover(
     const attemptTimeoutMs = Math.max(100, Math.min(timeoutMs, remainingBudgetMs))
 
     try {
-      const response = await fetch(backend, {
-        ...requestInit,
-        signal: AbortSignal.timeout(attemptTimeoutMs),
-        cache: "no-store",
-      })
+      // Auto-downgrade to http for raw IPs if https fails (common in edge proxies)
+      const isRawIp = /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(new URL(backend).hostname);
+      let response: Response;
+
+      try {
+        response = await fetch(backend, {
+          ...requestInit,
+          signal: AbortSignal.timeout(attemptTimeoutMs),
+          cache: "no-store",
+        })
+      } catch (err) {
+        if (isRawIp && backend.startsWith("https://")) {
+          const insecure = backend.replace("https://", "http://");
+          console.warn(`[failover] Downgrading to insecure http for raw IP: ${backend} -> ${insecure}`);
+          response = await fetch(insecure, {
+            ...requestInit,
+            signal: AbortSignal.timeout(attemptTimeoutMs),
+            cache: "no-store",
+          });
+        } else {
+          throw err;
+        }
+      }
 
       if (!failoverOnStatuses.includes(response.status) || i === limitedCandidates.length - 1) {
-        return { response, backend, attempts }
+        return { response, backend: response.url, attempts }
       }
       if (retryJitterMs > 0) {
         await sleep(Math.floor(Math.random() * retryJitterMs))

@@ -1,7 +1,7 @@
 import type { Metadata, Viewport } from "next"
 import { IBM_Plex_Mono, Space_Grotesk } from "next/font/google"
 import "./globals.css"
-import ErrorBoundary from "@/components/ErrorBoundary"
+import { ErrorBoundary } from "@/components/ErrorBoundary"
 import ServiceWorkerManager from "@/components/ServiceWorkerManager"
 import { SiteNav } from "@/components/shell/SiteNav"
 import { Providers } from "@/components/Providers"

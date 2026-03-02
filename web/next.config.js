@@ -22,6 +22,22 @@ const nextConfig = {
     : {
       // Security headers are only emitted in server mode.
       async headers() {
+        const csp = [
+          "default-src 'self'",
+          "script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval' 'unsafe-inline' blob: https://static.cloudflareinsights.com",
+          "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+          "font-src 'self' data: https://fonts.gstatic.com",
+          "connect-src 'self' https: wss: http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:* https://cloudflareinsights.com",
+          "img-src 'self' data: blob: https:",
+          "worker-src 'self' blob:",
+          "child-src 'self' blob:",
+          "object-src 'none'",
+          "base-uri 'self'",
+          "form-action 'self'",
+          "frame-ancestors 'none'",
+          "upgrade-insecure-requests",
+        ].join("; ");
+
         return [
           {
             source: "/:path*",
@@ -32,9 +48,10 @@ const nextConfig = {
               { key: "X-DNS-Prefetch-Control", value: "on" },
               { key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains; preload" },
               { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=(), interest-cohort=()" },
+              { key: "Content-Security-Policy", value: csp },
             ],
           },
-        ]
+        ];
       },
     }),
   webpack: (config, { isServer }) => {
@@ -59,6 +76,6 @@ const nextConfig = {
     }
     return config;
   },
-}
+};
 
-module.exports = nextConfig
+module.exports = nextConfig;
