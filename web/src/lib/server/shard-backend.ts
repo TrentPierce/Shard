@@ -1,7 +1,9 @@
 import { headers } from "next/headers"
 
-const DEFAULT_BACKEND = "http://35.175.242.222:9091"
-const DEFAULT_FALLBACK = "http://35.175.242.222:8080" // Port 8080 is common on some proxy configs
+// Primary: Cloudflare Tunnel (https, no raw IP issues, browser-friendly)
+const DEFAULT_BACKEND = "https://api.shardnetwork.live"
+// Fallback: raw IP over HTTP (in case tunnel is down)
+const DEFAULT_FALLBACK = "http://35.175.242.222:9091"
 
 function normalizeUrl(url: string): string {
   return url.trim().replace(/\/$/, "")
