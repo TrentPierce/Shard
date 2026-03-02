@@ -1,4 +1,4 @@
-
+export const runtime = 'edge';
 import { NextRequest } from "next/server"
 import { POST as chatCompletionPost, GET as chatCompletionGet, OPTIONS as chatCompletionOptions } from "@/app/api/v1/chat/completions/route"
 

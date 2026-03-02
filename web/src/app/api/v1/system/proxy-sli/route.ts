@@ -1,4 +1,4 @@
-
+export const runtime = 'edge';
 import { NextResponse } from "next/server"
 import { getChatProxySliSnapshot } from "@/lib/server/proxy-chat-sli"
 

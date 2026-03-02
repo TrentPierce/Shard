@@ -7,148 +7,125 @@ function normalizeUrl(url: string): string {
   return url.trim().replace(/\/$/, "")
 }
 
-function parseUrlList(raw?: string | null): string[] {
-  if (!raw) return []
-  return raw
-    .split(/[\n,;\s]+/)
-    .map((item) => normalizeUrl(item))
-    .filter(Boolean)
+function parseUrlList(envValue: string | undefined): string[] {
+  if (!envValue) return []
+  return envValue
+    .split(",")
+    .map((u) => u.trim())
+    .filter((u) => u.length > 0)
+    .map(normalizeUrl)
 }
 
-function dedupe(list: string[]): string[] {
-  return Array.from(new Set(list))
+function dedupe(urls: string[]): string[] {
+  return Array.from(new Set(urls))
 }
 
-export function getShardBackendBaseUrls(): string[] {
-  const multi = parseUrlList(
-    process.env.SHARD_BACKEND_URLS || process.env.NEXT_PUBLIC_SHARD_BACKEND_URLS,
-  )
+export function shardBackendUrls(path: string = ""): string[] {
+  const cleanPath = path.startsWith("/") ? path : `/${path}`
+  const multi = parseUrlList(process.env.SHARD_BACKEND_URLS)
   const single = parseUrlList(
     process.env.SHARD_BACKEND_URL || process.env.NEXT_PUBLIC_SHARD_BACKEND_URL,
   )
   const defaults = [normalizeUrl(DEFAULT_BACKEND), normalizeUrl(DEFAULT_FALLBACK)]
-  return dedupe([...multi, ...single, ...defaults])
+  return dedupe([...multi, ...single, ...defaults]).map((base) => `${base}${cleanPath}`)
 }
 
-export function getFallbackBackendUrls(): string[] {
-  const multi = parseUrlList(process.env.SHARD_FALLBACK_URLS)
-  const single = parseUrlList(process.env.SHARD_FALLBACK_URL)
-  const defaults = [normalizeUrl(DEFAULT_FALLBACK)]
-  return dedupe([...multi, ...single, ...defaults])
+async function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms))
 }
 
-export function getShardBackendBaseUrl(): string {
-  return getShardBackendBaseUrls()[0]
-}
-
-export function getFallbackBackendUrl(): string {
-  return getFallbackBackendUrls()[0]
-}
-
-export function shardBackendUrl(path: string, fallback = false): string {
-  const cleanPath = path.startsWith("/") ? path : `/${path}`
-  const base = fallback ? getFallbackBackendUrl() : getShardBackendBaseUrl()
-  return `${base}${cleanPath}`
-}
-
-export function shardBackendUrls(path: string, fallback = false): string[] {
-  const cleanPath = path.startsWith("/") ? path : `/${path}`
-  const bases = fallback ? getFallbackBackendUrls() : getShardBackendBaseUrls()
-  return bases.map((base) => `${base}${cleanPath}`)
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
-}
-
-type FetchBackendsOptions = RequestInit & {
-  fallback?: boolean
+export type FetchWithFailoverOptions = {
+  method?: "GET" | "POST" | "PUT" | "DELETE"
+  headers?: HeadersInit
+  body?: BodyInit | null
   timeoutMs?: number
   totalTimeoutMs?: number
-  retryJitterMs?: number
   maxAttempts?: number
+  retryJitterMs?: number
   failoverOnStatuses?: number[]
 }
 
+/**
+ * Executes a fetch against multiple backend candidates with automatic failover.
+ */
 export async function fetchWithBackendFailover(
   path: string,
-  options: FetchBackendsOptions = {},
-): Promise<{ response: Response; backend: string; attempts: string[] }> {
+  options: FetchWithFailoverOptions = {},
+): Promise<{ response: Response; backend: string; attempts: number }> {
   const {
-    fallback = false,
-    timeoutMs = 8000,
-    totalTimeoutMs,
-    retryJitterMs = 150,
-    maxAttempts,
+    method = "GET",
+    headers: requestHeaders = {},
+    body = null,
+    timeoutMs = 6_000,
+    totalTimeoutMs = 15_000,
+    maxAttempts = 3,
+    retryJitterMs = 250,
     failoverOnStatuses = [500, 502, 503, 504],
-    ...requestInit
   } = options
 
-  const candidates = shardBackendUrls(path, fallback)
-  const limitedCandidates = candidates.slice(0, Math.max(1, Math.min(candidates.length, maxAttempts ?? candidates.length)))
-  const effectiveTotalTimeoutMs = totalTimeoutMs ?? timeoutMs * Math.max(1, limitedCandidates.length)
-  const attempts: string[] = []
+  const candidates = shardBackendUrls(path)
+  const limitedCandidates = candidates.slice(0, maxAttempts)
+  const startTime = Date.now()
+
   let lastError: unknown = null
-  const startedAt = Date.now()
+  let attempts = 0
 
-  for (let i = 0; i < limitedCandidates.length; i += 1) {
-    const backend = limitedCandidates[i]
-    attempts.push(backend)
+  for (let i = 0; i < limitedCandidates.length; i++) {
+    let backend = limitedCandidates[i]
+    attempts++
 
-    const elapsedMs = Date.now() - startedAt
-    const remainingBudgetMs = effectiveTotalTimeoutMs - elapsedMs
-    if (remainingBudgetMs <= 0) {
-      throw Object.assign(new Error("Backend failover timeout budget exhausted"), {
-        attempts,
-        cause: lastError,
-      })
+    if (Date.now() - startTime > totalTimeoutMs) {
+      throw new Error(`Total failover timeout exceeded (${totalTimeoutMs}ms)`)
     }
-    const attemptTimeoutMs = Math.max(100, Math.min(timeoutMs, remainingBudgetMs))
+
+    const attemptTimeoutMs = Math.min(timeoutMs, totalTimeoutMs - (Date.now() - startTime))
+    if (attemptTimeoutMs <= 0) {
+      throw new Error("Total failover timeout exceeded during attempt preparation")
+    }
+
+    // Prepare fetchInit
+    const fetchInit: RequestInit = {
+      method,
+      headers: requestHeaders,
+      body,
+      signal: AbortSignal.timeout(attemptTimeoutMs),
+      cache: "no-store",
+    }
 
     try {
-      // Auto-downgrade to http for raw IPs if https fails (common in edge proxies)
-      const isRawIp = /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(new URL(backend).hostname);
-      let response: Response;
+      console.info(`[backend] Fetching candidate ${backend} (attempt ${i + 1}/${limitedCandidates.length})`);
 
-      try {
-        response = await fetch(backend, {
-          ...requestInit,
-          signal: AbortSignal.timeout(attemptTimeoutMs),
-          cache: "no-store",
-        })
-      } catch (err) {
-        if (isRawIp && backend.startsWith("https://")) {
-          const insecure = backend.replace("https://", "http://");
-          console.warn(`[failover] Downgrading to insecure http for raw IP: ${backend} -> ${insecure}`);
-          response = await fetch(insecure, {
-            ...requestInit,
-            signal: AbortSignal.timeout(attemptTimeoutMs),
-            cache: "no-store",
-          });
-        } else {
-          throw err;
-        }
+      // Automatic HTTPS -> HTTP fallback for raw IP addresses BEFORE the actual fetch
+      // Cloudflare Edge Runtime often fails immediately on HTTPS to raw IP.
+      const urlObj = new URL(backend)
+      const isRawIp = /^\d{1,3}(\.\d{1,3}){3}/.test(urlObj.hostname)
+      if (isRawIp && urlObj.protocol === "https:") {
+        console.warn(`[backend] Raw IP detected with HTTPS; trying insecure HTTP directly to avoid Edge 530: ${backend}`);
+        backend = backend.replace("https://", "http://")
       }
+
+      const response = await fetch(backend, fetchInit)
 
       if (!failoverOnStatuses.includes(response.status) && response.status < 500 || i === limitedCandidates.length - 1) {
+        console.info(`[backend] Candidate ${backend} responded with ${response.status}`);
         return { response, backend: response.url, attempts }
       }
+
       console.warn(`[failover] Candidate ${backend} returned status ${response.status}; trying next...`);
-      if (retryJitterMs > 0) {
-        await sleep(Math.floor(Math.random() * retryJitterMs))
-      }
-    } catch (error) {
+    } catch (error: any) {
       lastError = error
-      console.error(`[failover] Candidate ${backend} fetch threw error: ${error}; trying next...`);
+      console.error(`[failover] Candidate ${backend} fetch threw error: ${error?.message || error}; trying next...`);
+
       if (i === limitedCandidates.length - 1) {
-        throw Object.assign(new Error(`All backend candidates failed: ${String(error)}`), {
+        throw Object.assign(new Error(`All backend candidates failed: ${error?.message || String(error)}`), {
           attempts,
           cause: lastError,
         })
       }
-      if (retryJitterMs > 0) {
-        await sleep(Math.floor(Math.random() * retryJitterMs))
-      }
+    }
+
+    if (retryJitterMs > 0) {
+      await sleep(Math.floor(Math.random() * retryJitterMs))
     }
   }
 
@@ -156,14 +133,22 @@ export async function fetchWithBackendFailover(
 }
 
 export function forwardRequestHeaders(contentType = "application/json"): HeadersInit {
-  const incoming = headers()
-  const auth = incoming.get("authorization")
-  const wallet = incoming.get("x-shard-wallet")
-  const inferenceMode = incoming.get("x-shard-inference-mode")
-
-  const out: Record<string, string> = { "Content-Type": contentType }
-  if (auth) out.Authorization = auth
-  if (wallet) out["X-Shard-Wallet"] = wallet
-  if (inferenceMode) out["X-Shard-Inference-Mode"] = inferenceMode
-  return out
+  try {
+    const incoming = headers()
+    const out: Record<string, string> = {
+      "Content-Type": contentType,
+    }
+    incoming.forEach((v, k) => {
+      const lowerK = k.toLowerCase()
+      // Skip headers that should not be forwarded to the backend
+      if (["host", "connection", "content-length", "content-type", "x-forwarded-for", "cf-ray", "cf-connecting-ip"].includes(lowerK)) {
+        return
+      }
+      out[k] = v
+    })
+    return out
+  } catch (e) {
+    // Return minimal headers if headers() throws (e.g. outside request context during build/edge edge cases)
+    return { "Content-Type": contentType }
+  }
 }
