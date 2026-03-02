@@ -1,7 +1,7 @@
 import { headers } from "next/headers"
 
 const DEFAULT_BACKEND = "http://35.175.242.222:9091"
-const DEFAULT_FALLBACK = "http://35.175.242.222:9091" // Can be a different dedicated verifier
+const DEFAULT_FALLBACK = "http://35.175.242.222:8080" // Port 8080 is common on some proxy configs
 
 function normalizeUrl(url: string): string {
   return url.trim().replace(/\/$/, "")
@@ -26,7 +26,7 @@ export function getShardBackendBaseUrls(): string[] {
   const single = parseUrlList(
     process.env.SHARD_BACKEND_URL || process.env.NEXT_PUBLIC_SHARD_BACKEND_URL,
   )
-  const defaults = [normalizeUrl(DEFAULT_BACKEND)]
+  const defaults = [normalizeUrl(DEFAULT_BACKEND), normalizeUrl(DEFAULT_FALLBACK)]
   return dedupe([...multi, ...single, ...defaults])
 }
 
@@ -130,16 +130,18 @@ export async function fetchWithBackendFailover(
         }
       }
 
-      if (!failoverOnStatuses.includes(response.status) || i === limitedCandidates.length - 1) {
+      if (!failoverOnStatuses.includes(response.status) && response.status < 500 || i === limitedCandidates.length - 1) {
         return { response, backend: response.url, attempts }
       }
+      console.warn(`[failover] Candidate ${backend} returned status ${response.status}; trying next...`);
       if (retryJitterMs > 0) {
         await sleep(Math.floor(Math.random() * retryJitterMs))
       }
     } catch (error) {
       lastError = error
+      console.error(`[failover] Candidate ${backend} fetch threw error: ${error}; trying next...`);
       if (i === limitedCandidates.length - 1) {
-        throw Object.assign(new Error("All backend candidates failed"), {
+        throw Object.assign(new Error(`All backend candidates failed: ${String(error)}`), {
           attempts,
           cause: lastError,
         })

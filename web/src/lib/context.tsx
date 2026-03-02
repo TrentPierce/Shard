@@ -136,14 +136,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         for (const bootstrapPeer of envBootstrapPeers) addWithPeerId(bootstrapPeer)
 
         const isHttps = typeof window !== "undefined" && window.location.protocol === "https:"
+        console.debug(`[p2p] Candidates:`, candidates)
         const filtered = candidates.filter((addr) => {
             if (!isHttps) return true
             const insecureWs = addr.startsWith("ws://") || addr.includes("/ws/") || addr.endsWith("/ws")
+            if (insecureWs) {
+                console.warn(`[p2p] Filtering insecure peer ${addr} (Mixed Content block for HTTPS)`)
+            }
             return !insecureWs || addr.startsWith("wss://") || addr.includes("/wss/")
         })
+        console.info(`[p2p] Found ${filtered.length} dialable bootstrap peers`)
         return filtered
     }, [])
-
     useEffect(() => {
         if (scoutBootedRef.current) return
 
