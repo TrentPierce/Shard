@@ -6,7 +6,7 @@
 
 [![CI/CD](https://github.com/TrentPierce/Shard/actions/workflows/ci.yml/badge.svg)](https://github.com/TrentPierce/Shard/actions/workflows/ci.yml)
 [![Version](https://img.shields.io/badge/version-0.6.1-blue.svg)](https://github.com/TrentPierce/Shard/releases/tag/v0.6.1)
-[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
+[![License: BSL 1.1](https://img.shields.io/badge/License-BSL%201.1-blue.svg)](LICENSE)
 
 ![Shard Network Demo](docs/assets/demo.gif)
 
@@ -80,4 +80,4 @@ We welcome contributions! Please read our [Contributing Guidelines](docs/contrib
 - View the [Gateway API Specs](docs/api.md) for integrating applications.
 
 ## License
-MIT License.
+Shard is licensed under the **Business Source License 1.1 (BSL 1.1)**. See the full license text in [LICENSE](LICENSE).
