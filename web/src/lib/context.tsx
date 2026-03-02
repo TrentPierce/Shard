@@ -128,6 +128,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             candidates.push(peerId ? `${addr}/p2p/${peerId}` : addr)
         }
 
+        // Inject the secure wss:// bootstrap peer via Cloudflare Tunnel.
+        // p2p.shardnetwork.live:443 -> CF Tunnel -> localhost:4101 (libp2p ws)
+        if (peerId) {
+            candidates.push(`/dns4/p2p.shardnetwork.live/tcp/443/wss/p2p/${peerId}`)
+        }
+
         addWithPeerId(topo.shard_webrtc_multiaddr)
         addWithPeerId(topo.shard_ws_multiaddr)
         addWithPeerId(topo.shard_quic_multiaddr ?? null)
@@ -136,16 +142,20 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         for (const bootstrapPeer of envBootstrapPeers) addWithPeerId(bootstrapPeer)
 
         const isHttps = typeof window !== "undefined" && window.location.protocol === "https:"
-        console.debug(`[p2p] Candidates:`, candidates)
+        console.debug(`[p2p] All candidates:`, candidates)
         const filtered = candidates.filter((addr) => {
             if (!isHttps) return true
-            const insecureWs = addr.startsWith("ws://") || addr.includes("/ws/") || addr.endsWith("/ws")
-            if (insecureWs) {
-                console.warn(`[p2p] Filtering insecure peer ${addr} (Mixed Content block for HTTPS)`)
+            // On HTTPS pages, only allow secure transports
+            const hasWss = addr.includes("/wss/") || addr.includes("/wss") || addr.startsWith("wss://")
+            if (hasWss) return true // explicitly secure
+            const hasInsecureWs = addr.includes("/ws/") || addr.endsWith("/ws") || addr.startsWith("ws://")
+            if (hasInsecureWs) {
+                console.warn(`[p2p] Filtering insecure peer ${addr} (Mixed Content)`)
+                return false
             }
-            return !insecureWs || addr.startsWith("wss://") || addr.includes("/wss/")
+            return true // non-WS transports (tcp, quic, etc.) pass through
         })
-        console.info(`[p2p] Found ${filtered.length} dialable bootstrap peers`)
+        console.info(`[p2p] Found ${filtered.length} dialable bootstrap peers`, filtered)
         return filtered
     }, [])
     useEffect(() => {
