@@ -8,6 +8,7 @@
 "use client"
 
 import { useState } from "react"
+import { SHARD_VERSION } from "@/lib/version"
 
 interface ContributeButtonProps {
   className?: string
@@ -65,11 +66,11 @@ export function ContributeButton({ className = "" }: ContributeButtonProps) {
       case "browser":
         return "#webgpu" // Opens WebLLM modal
       case "light":
-        return `${baseUrl}/download/v0.4.0/shard-0.4.0-windows-x64.exe`
+        return `${baseUrl}/download/v${SHARD_VERSION}/shard-${SHARD_VERSION}-windows-x64.exe`
       case "full":
-        return `${baseUrl}/download/v0.4.0/shard-0.4.0-windows-x64.exe`
+        return `${baseUrl}/download/v${SHARD_VERSION}/shard-${SHARD_VERSION}-windows-x64.exe`
       case "shard":
-        return `${baseUrl}/download/v0.4.0/shard-0.4.0-linux-x86_64.AppImage`
+        return `${baseUrl}/download/v${SHARD_VERSION}/shard-${SHARD_VERSION}-linux-x86_64.AppImage`
       default:
         return baseUrl
     }
@@ -77,14 +78,14 @@ export function ContributeButton({ className = "" }: ContributeButtonProps) {
 
   const handleDownload = async (tier: ContributionTier) => {
     setDownloadStatus("downloading")
-    
+
     // For browser tier, open WebLLM modal
     if (tier === "browser") {
       setDownloadStatus("browser")
       // Trigger WebLLM initialization
       return
     }
-    
+
     // For other tiers, initiate download
     const url = getDownloadUrl(tier)
     window.open(url, "_blank")
@@ -126,11 +127,10 @@ export function ContributeButton({ className = "" }: ContributeButtonProps) {
                   <button
                     key={tier.id}
                     onClick={() => setSelectedTier(tier.id)}
-                    className={`w-full p-4 rounded-lg border-2 text-left transition-all ${
-                      selectedTier === tier.id
+                    className={`w-full p-4 rounded-lg border-2 text-left transition-all ${selectedTier === tier.id
                         ? "border-emerald-500 bg-emerald-500/10"
                         : "border-slate-700 hover:border-slate-600"
-                    }`}
+                      }`}
                   >
                     <div className="flex justify-between items-start">
                       <div>
@@ -171,8 +171,8 @@ export function ContributeButton({ className = "" }: ContributeButtonProps) {
                   {downloadStatus === "downloading"
                     ? "Downloading..."
                     : downloadStatus === "downloaded"
-                    ? "Download Started!"
-                    : "Download"}
+                      ? "Download Started!"
+                      : "Download"}
                 </button>
                 <button
                   onClick={() => setShowModal(false)}

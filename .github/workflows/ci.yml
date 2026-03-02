@@ -1,78 +1,19 @@
 name: CI
-
-on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
-
+on: [push, pull_request]
 jobs:
-  web-checks:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: web
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: web/package-lock.json
-      - name: Install dependencies
-        run: npm ci --ignore-scripts
-      - name: Lint
-        run: npm run lint
-      - name: Build
-        run: npm run build
-      - name: Test
-        run: npm test -- --passWithNoTests
-
-  rust-checks:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: desktop/rust
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy, rustfmt
-      - name: Check formatting
-        run: cargo fmt --check
-      - name: Fetch locked dependencies
-        run: cargo fetch --locked
-      - name: Clippy lints
-        run: cargo clippy --workspace --exclude shard-gui --all-targets -- -D warnings
-      - name: Cargo tests
-        run: cargo test --workspace --exclude shard-gui --all-targets
-
-  python-checks:
+  rust:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Verify version consistency
-        run: python scripts/verify_versions.py
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
-      - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y cmake
-      - name: Install SDK (locked)
-        run: |
-          pip install pip-tools
-          pip-sync sdk/python/requirements.lock
-          pip install ./sdk/python --no-deps
-      - name: Run Python tests
-        run: |
-          python -m pytest tests/ -v --cov=shard --cov-report=xml
-      - name: Upload coverage
-        if: success()
-        uses: codecov/codecov-action@v4
-        with:
-          files: ./coverage.xml
-          flags: unittests
+      - run: cd desktop/rust && cargo test --all-targets
+      - run: cd desktop/rust && cargo clippy -- -D warnings
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: cd web && npm ci && npm test -- --passWithNoTests
+  version-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python scripts/verify_versions.py

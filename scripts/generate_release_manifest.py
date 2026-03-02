@@ -76,6 +76,26 @@ def main() -> None:
         "artifacts": entries,
     }
 
+    # Auto-update Winget manifest if we have a Windows executable
+    winget_manifest = ROOT / "installers" / "winget" / "manifest.yaml"
+    if winget_manifest.exists():
+        for entry in entries:
+            if entry["path"].endswith(".exe"):
+                text = winget_manifest.read_text(encoding="utf-8")
+                text = text.replace("REPLACE_WITH_ACTUAL_SHA256", entry["sha256"])
+                winget_manifest.write_text(text, encoding="utf-8")
+                break
+
+    # Auto-update Homebrew formula if we have a tar.gz
+    brew_formula = ROOT / "installers" / "homebrew" / "Formula" / "shard.rb"
+    if brew_formula.exists():
+        for entry in entries:
+            if entry["path"].endswith(".tar.gz"):
+                text = brew_formula.read_text(encoding="utf-8")
+                text = text.replace("REPLACE_WITH_ACTUAL_SHA256", entry["sha256"])
+                brew_formula.write_text(text, encoding="utf-8")
+                break
+
     out_path = ROOT / args.out
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")

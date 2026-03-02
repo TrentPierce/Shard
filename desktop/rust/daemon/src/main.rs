@@ -9,8 +9,6 @@
 //! Build:   cargo build --release
 //! Run:     ./shard-daemon --control-port 9091
 
-#![allow(dead_code)]
-#![allow(unused_variables)]
 #![allow(clippy::too_many_arguments)]
 #![allow(clippy::manual_range_contains)]
 #![allow(clippy::unnecessary_cast)]
@@ -2358,6 +2356,7 @@ fn create_router(
         .route("/scout/penalty", post(scout_penalty_update_handler))
         .route("/scout/penalty", get(scout_penalty_status_handler))
         .route("/metrics", get(metrics_handler))
+        .route("/v1/leaderboard", get(leaderboard_handler))
         .route("/metrics/summary", get(metrics_summary_handler))
         .route("/metrics/latency-profile", get(latency_profile_handler))
         .route("/dashboard", get(dashboard_handler))

@@ -4,7 +4,7 @@
 
 set -e
 
-VERSION="0.4.0"
+VERSION=$(cat ../../VERSION)
 APP_NAME="shard-daemon"
 INSTALL_DIR="/opt/shard"
 

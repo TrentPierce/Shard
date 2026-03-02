@@ -3,11 +3,12 @@
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 
-import { MessageSquare, Globe, LayoutDashboard } from "lucide-react"
+import { MessageSquare, Globe, LayoutDashboard, Trophy } from "lucide-react"
 
 const navItems = [
     { name: "Chat", href: "/chat", icon: <MessageSquare size={18} /> },
     { name: "Network", href: "/network", icon: <Globe size={18} /> },
+    { name: "Leaderboard", href: "/leaderboard", icon: <Trophy size={18} /> },
     { name: "Dashboard", href: "/dashboard", icon: <LayoutDashboard size={18} /> },
 ]
 

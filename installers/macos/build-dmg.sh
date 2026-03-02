@@ -4,7 +4,7 @@
 
 set -e
 
-VERSION="0.4.0"
+VERSION=$(cat ../../VERSION)
 APP_NAME="Shard"
 DMG_NAME="Shard-${VERSION}-macOS.dmg"
 VOLUME_NAME="Shard"

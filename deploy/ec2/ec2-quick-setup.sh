@@ -40,7 +40,7 @@ echo "[3/6] Setting up Python environment..."
 python3 -m venv venv
 source venv/bin/activate
 pip install --upgrade pip
-pip install -r desktop/python/requirements.txt
+pip install -e sdk/python
 
 # ─────────────────────────────────────────────────────────────
 # Step 4: Set up Web dashboard
@@ -64,7 +64,7 @@ sudo nginx -t
 echo "[6/6] Starting services..."
 
 # Start Python API in background
-cd /opt/Shard/desktop/python
+cd /opt/Shard/sdk/python
 export SHARD_API_KEYS="prod-key-$(date +%s)"
 export SHARD_RATE_LIMIT_PER_MINUTE=120
 nohup python run.py --port 8000 > /tmp/shard-api.log 2>&1 &

@@ -1,20 +1,25 @@
-# Contributing
+# Contributing to Shard
 
-## Development Gates
-- Web: lint, build, tests.
-- Rust: fmt, clippy, tests.
-- Python: `pytest tests/`.
-- Version governance: `python scripts/verify_versions.py`.
+First, thank you for your interest in contributing to Shard! We appreciate your help in building a fast, private, and distributed inference network.
 
-## Contract Changes
-- Update schema files under `docs/schemas/`.
-- Update `docs/api.md`.
-- Add or adjust contract tests in `tests/contract_protocol_test.py`.
+## Contributor License Agreement (CLA)
 
-## Security-Sensitive Changes
-- Do not bypass PoW, auth, or replay guards.
-- Add negative tests for new ingress or trust paths.
+Before we can merge your pull requests, you must sign the Shard Project Contributor License Agreement (CLA). The CLA is located in the root `CLA.md` file. By submitting a PR, you confirm that your contribution is covered by the CLA.
 
-## Commit Conventions for Readiness Backlog
-- Use atomic commits mapped to ticket IDs, e.g. `P0-T10: enforce PoW on scout ingress`.
+## Pull Request Process
 
+1. Fork the repository and create your feature branch: `git checkout -b feature/my-new-feature`
+2. Commit your changes. Be sure to write clear commit messages.
+3. Make sure to run the tests and lints!
+   - Rust daemon: `cd desktop/rust && cargo test --all-targets` and `cargo clippy -- -D warnings`
+   - Web frontend: `cd web && npm test`
+4. Push to the branch: `git push origin feature/my-new-feature`
+5. Open a Pull Request on GitHub.
+
+## Adding Features
+
+Please check the existing issues before starting on a new feature. For major changes, we recommend opening an issue first to discuss your proposed approach and ensure it aligns with the project vision.
+
+## Setting Up the Development Environment
+
+See `docs/deployment.md` for information on setting up Shard, including the web dashboard and daemon.

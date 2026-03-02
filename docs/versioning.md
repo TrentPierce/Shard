@@ -1,25 +1,15 @@
-# Versioning Policy
+# Versioning
 
-## Single Source of Truth
-- Root `VERSION` defines the release version.
+Shard uses a single, unified `VERSION` file at the root of the repository to ensure all components of the network (daemon, web app, python SDK, installers, etc.) stay exactly in sync.
 
-## Propagation
-- `scripts/sync_versions.py` writes version to Rust/web/SDK/installers.
-- `scripts/verify_versions.py` fails if any required surface is out of sync.
+When a new version is released:
 
-## Runtime Consistency
-- `/health` exposes daemon runtime version.
-- Web package and SDK package versions must match root `VERSION` for release builds.
+1. Update the `VERSION` file.
+2. Run the sync script: `make version-sync` (or `python scripts/sync_versions.py`)
+3. The script automatically updates all package manifests and configurations:
+   - `desktop/rust/*/Cargo.toml`
+   - `web/package.json` and `web/src/lib/version.ts`
+   - `sdk/python/pyproject.toml`
+   - Installers and README badges
 
-## Release Manifest Standard
-- Generate manifest with:
-  - `python scripts/generate_release_manifest.py --artifact <path> ...`
-- Verify manifest with:
-  - `python scripts/verify_release_manifest.py --manifest dist/release-manifest.json --require-signatures`
-- Sign artifacts with:
-  - `python scripts/sign_release.py <artifact>`
-- Manifest ties each artifact checksum to `VERSION`, git tag, and commit.
-
-## Breaking Change Policy
-- Backward-compatible changes: patch/minor increments.
-- Breaking API or protocol changes: major increment and migration notes in release docs.
+We enforce matching versions strictly in our CI pipeline via `scripts/verify_versions.py`. This ensures no mismatched client/server versions are published.

@@ -1,0 +1,22 @@
+{
+    "type": "object",
+    "properties": {
+        "ok": {
+            "type": "boolean"
+        },
+        "leaderboard": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "wallet": {
+                        "type": "string"
+                    },
+                    "balance": {
+                        "type": "number"
+                    }
+                }
+            }
+        }
+    }
+}
