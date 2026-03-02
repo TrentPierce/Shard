@@ -301,7 +301,10 @@ impl ShardApp {
 
                 ui.label("VRAM Alloc (GB):");
                 if self.vram_limit_gb > 0.0 {
-                    ui.label(format!("{:.2} / {:.2}", self.vram_alloc_gb, self.vram_limit_gb));
+                    ui.label(format!(
+                        "{:.2} / {:.2}",
+                        self.vram_alloc_gb, self.vram_limit_gb
+                    ));
                 } else {
                     ui.label(format!("{:.2}", self.vram_alloc_gb));
                 }

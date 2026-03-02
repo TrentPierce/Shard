@@ -116,7 +116,7 @@ pub(crate) struct CanaryRolloutConfig {
 }
 
 impl CanaryRolloutConfig {
-    fn from_env(default_model_id: &str) -> Self {
+    fn from_env(_default_model_id: &str) -> Self {
         let enabled = std::env::var("SHARD_CANARY_ENABLED")
             .ok()
             .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
@@ -749,6 +749,7 @@ pub(crate) struct SharedState {
     ice_servers: Arc<Mutex<Vec<String>>>,
     /// Channel for receiving scout draft submissions
     scout_draft_tx: mpsc::Sender<ScoutDraft>,
+    #[allow(dead_code)]
     scout_draft_rx: Arc<Mutex<Option<mpsc::Receiver<ScoutDraft>>>>,
     /// Per-work mailbox for deterministic draft handoff to verifier waiters.
     scout_draft_mailbox: Arc<Mutex<HashMap<String, VecDeque<ScoutDraft>>>>,
@@ -913,6 +914,7 @@ struct DraftVerificationResult {
     accepted_tokens: Vec<i32>,
     accepted_text: String,
     first_rejection_idx: Option<usize>,
+    #[allow(dead_code)]
     resample_token: Option<i32>,
 }
 
@@ -948,9 +950,7 @@ async fn push_scout_draft(state: &SharedState, draft: ScoutDraft) {
     let work_id = draft.work_id.clone();
     {
         let mut mailbox = state.scout_draft_mailbox.lock().await;
-        let queue = mailbox
-            .entry(work_id.clone())
-            .or_insert_with(VecDeque::new);
+        let queue = mailbox.entry(work_id.clone()).or_insert_with(VecDeque::new);
         queue.push_back(draft);
         while queue.len() > 8 {
             queue.pop_front();
@@ -988,7 +988,11 @@ async fn process_draft_submission(
         return None;
     }
 
-    let tokens: Vec<i32> = submission.draft_tokens.into_iter().map(|t| t as i32).collect();
+    let tokens: Vec<i32> = submission
+        .draft_tokens
+        .into_iter()
+        .map(|t| t as i32)
+        .collect();
     if buffer.segments.len() >= config.max_segments {
         if let Some((&oldest, _)) = buffer.segments.iter().next() {
             buffer.segments.remove(&oldest);
@@ -2510,7 +2514,7 @@ async fn main() -> Result<()> {
                 );
                 peers.into_iter().map(|p| p.multiaddr).collect()
             }
-            Err(e) => {
+            Err(_e) => {
                 tracing::warn!({});
                 Vec::new()
             }
@@ -3099,11 +3103,9 @@ async fn main() -> Result<()> {
         let local_peer_id = local_peer_id.to_string();
         let stability_threshold = cli.stability_threshold_hours;
         tokio::spawn(async move {
-            let client = reqwest::Client::new();
             loop {
                 tokio::time::sleep(Duration::from_secs(300)).await; // Check every 5 minutes
 
-                let now = now_ms();
                 let now = now_ms();
                 let uptime_hours = (now - advertise_state.daemon_start) / (1000 * 60 * 60);
                 let uptime_hours_u64 = uptime_hours as u64;
@@ -3127,7 +3129,7 @@ async fn main() -> Result<()> {
                         version: env!("CARGO_PKG_VERSION").to_string(),
                     };
 
-                    if let Err(e) =
+                    if let Err(_e) =
                         bootstrap_discovery::register_as_bootstrap(&advertise_url, &registration)
                             .await
                     {
@@ -3303,7 +3305,11 @@ async fn main() -> Result<()> {
     });
 
     println!();
-    let control_host = if cli.public_api { "0.0.0.0" } else { "127.0.0.1" };
+    let control_host = if cli.public_api {
+        "0.0.0.0"
+    } else {
+        "127.0.0.1"
+    };
     println!("  ╔══════════════════════════════════════════════╗");
     println!(
         "  ║       Shard Daemon  v{}           ║",
@@ -5314,7 +5320,11 @@ fn check_udp_bind(addr: [u8; 4], port: u16) -> Option<String> {
 
 fn preflight_ports(cli: &Cli) -> Result<(), String> {
     let mut conflicts = Vec::new();
-    let control_addr = if cli.public_api { [0, 0, 0, 0] } else { [127, 0, 0, 1] };
+    let control_addr = if cli.public_api {
+        [0, 0, 0, 0]
+    } else {
+        [127, 0, 0, 1]
+    };
     if let Some(conflict) = check_tcp_bind(control_addr, cli.control_port) {
         conflicts.push(format!("control port {conflict}"));
     }
@@ -5337,10 +5347,7 @@ fn preflight_ports(cli: &Cli) -> Result<(), String> {
     if conflicts.is_empty() {
         Ok(())
     } else {
-        Err(format!(
-            "port preflight failed: {}",
-            conflicts.join(", ")
-        ))
+        Err(format!("port preflight failed: {}", conflicts.join(", ")))
     }
 }
 
@@ -5356,8 +5363,8 @@ async fn shutdown_signal() -> bool {
 
 #[cfg(windows)]
 async fn shutdown_signal() -> bool {
-    let mut sigbreak = tokio::signal::windows::ctrl_break()
-        .expect("failed to install Ctrl-Break handler");
+    let mut sigbreak =
+        tokio::signal::windows::ctrl_break().expect("failed to install Ctrl-Break handler");
     tokio::select! {
         _ = tokio::signal::ctrl_c() => true,
         _ = sigbreak.recv() => true,

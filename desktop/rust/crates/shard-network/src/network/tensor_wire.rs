@@ -99,7 +99,7 @@ fn trit_count_from_shape(shape: &[u32]) -> Option<usize> {
 }
 
 fn packed_trit_len(trit_count: usize) -> usize {
-    (trit_count + 4) / 5
+    trit_count.div_ceil(5)
 }
 
 fn pack_trits_5(trits: &[u8]) -> Result<Vec<u8>, String> {

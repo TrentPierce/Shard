@@ -140,14 +140,16 @@ async fn run_mode(
     client: &Client,
     args: &Args,
     mode: &str,
-    key: &SigningKey,
+    _key: &SigningKey,
 ) -> anyhow::Result<ModeReport> {
     let mode_owned = mode.to_string();
     let sem = Arc::new(Semaphore::new(args.concurrency));
     let started = Instant::now();
     let mut tasks = Vec::with_capacity(args.requests);
     let signed = mode == "distributed";
-    let nonce_counter = Arc::new(std::sync::atomic::AtomicU64::new((now_ms() % 1_000_000_000) as u64 * 1000));
+    let nonce_counter = Arc::new(std::sync::atomic::AtomicU64::new(
+        (now_ms() % 1_000_000_000) as u64 * 1000,
+    ));
 
     for i in 0..args.requests {
         let permit = sem.clone().acquire_owned().await?;
@@ -159,7 +161,7 @@ async fn run_mode(
             let mut sk_bytes = [0u8; 32];
             for b in 0..8 {
                 sk_bytes[b] = ((i as u64) >> (b * 8)) as u8;
-                sk_bytes[b+8] = ((now_ms() as u64) >> (b * 8)) as u8;
+                sk_bytes[b + 8] = ((now_ms() as u64) >> (b * 8)) as u8;
             }
             let key = ed25519_dalek::SigningKey::from_bytes(&sk_bytes);
 
@@ -196,7 +198,9 @@ async fn run_mode(
 
             let scout_pubkey = hex::encode(key.verifying_key().to_bytes());
             if let Ok(res) = client
-                .get(format!("{base_url}/v1/pow/challenge?peer_id={scout_pubkey}&hardware_concurrency=8"))
+                .get(format!(
+                    "{base_url}/v1/pow/challenge?peer_id={scout_pubkey}&hardware_concurrency=8"
+                ))
                 .send()
                 .await
             {
@@ -261,7 +265,7 @@ async fn run_mode(
                         println!("Submission rejected: {:?}", json["detail"]);
                     }
                 }
-            } 
+            }
             if is_submit_err {
                 return (false, start.elapsed().as_millis() as f64, 0usize);
             }

@@ -50,7 +50,11 @@ pub(crate) fn spawn_telemetry_ws_server(state: SharedState, port: u16, public_ap
             .route("/telemetry/ws", get(telemetry_ws_handler))
             .with_state(ws_state);
 
-        let bind_ip = if public_api { [0, 0, 0, 0] } else { [127, 0, 0, 1] };
+        let bind_ip = if public_api {
+            [0, 0, 0, 0]
+        } else {
+            [127, 0, 0, 1]
+        };
         let addr = SocketAddr::from((bind_ip, port));
         tracing::info!(%addr, "telemetry websocket server starting");
 

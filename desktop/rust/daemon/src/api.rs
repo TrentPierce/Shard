@@ -2811,7 +2811,7 @@ mod tests {
 }
 
 pub(crate) async fn leaderboard_handler(
-    AxumState(state): AxumState<SharedState>,
+    AxumState(_state): AxumState<SharedState>,
 ) -> Json<serde_json::Value> {
     Json(serde_json::json!({
         "ok": true,

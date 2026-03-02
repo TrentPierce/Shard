@@ -1,6 +1,8 @@
-# Shard Network 🔮
-
-**The privacy-first, distributed inference network powered by speculative decoding and WebGPU.**
+<div align="center">
+  <img src="docs/assets/logo.png" alt="Shard" width="200" />
+  <h1>Shard Network</h1>
+  <p><strong>The privacy-first, distributed inference network powered by speculative decoding and WebGPU.</strong></p>
+</div>
 
 [![CI/CD](https://github.com/TrentPierce/Shard/actions/workflows/ci.yml/badge.svg)](https://github.com/TrentPierce/Shard/actions/workflows/ci.yml)
 [![Version](https://img.shields.io/badge/version-0.6.1-blue.svg)](https://github.com/TrentPierce/Shard/releases/tag/v0.6.1)

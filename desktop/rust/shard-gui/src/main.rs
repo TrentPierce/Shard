@@ -41,10 +41,8 @@ async fn main() -> Result<()> {
             tokio::spawn(async move {
                 #[derive(serde::Deserialize)]
                 struct HealthResp {
-                    status: Option<String>,
                     rust_uptime_ms: Option<u128>,
                     connected_peers: Option<usize>,
-                    engine_loaded: Option<bool>,
                     bitnet_model: Option<String>,
                 }
 
@@ -59,7 +57,6 @@ async fn main() -> Result<()> {
                 #[derive(serde::Deserialize)]
                 struct MetricsSummary {
                     speculative_reject_rate: Option<f32>,
-                    speculative_rejected_tokens_total: Option<u64>,
                     tokens_processed_total: Option<u64>,
                     tokens_offloaded_to_scouts_total: Option<u64>,
                 }
@@ -67,24 +64,18 @@ async fn main() -> Result<()> {
                 let client = reqwest::Client::new();
 
                 loop {
-                    let health = client
-                        .get("http://127.0.0.1:9091/health")
-                        .send()
-                        .await
-                        .ok()
-                        .and_then(|r| r.json::<HealthResp>().await.ok());
-                    let topo = client
-                        .get("http://127.0.0.1:9091/v1/system/topology")
-                        .send()
-                        .await
-                        .ok()
-                        .and_then(|r| r.json::<TopologyResp>().await.ok());
-                    let metrics = client
-                        .get("http://127.0.0.1:9091/metrics/summary")
-                        .send()
-                        .await
-                        .ok()
-                        .and_then(|r| r.json::<MetricsSummary>().await.ok());
+                    let health = match client.get("http://127.0.0.1:9091/health").send().await {
+                        Ok(r) => r.json::<HealthResp>().await.ok(),
+                        Err(_) => None,
+                    };
+                    let topo = match client.get("http://127.0.0.1:9091/v1/system/topology").send().await {
+                        Ok(r) => r.json::<TopologyResp>().await.ok(),
+                        Err(_) => None,
+                    };
+                    let metrics = match client.get("http://127.0.0.1:9091/metrics/summary").send().await {
+                        Ok(r) => r.json::<MetricsSummary>().await.ok(),
+                        Err(_) => None,
+                    };
 
                     let peers = health.as_ref().and_then(|h| h.connected_peers).unwrap_or(0);
                     let uptime_ms = health.as_ref().and_then(|h| h.rust_uptime_ms).unwrap_or(0);
