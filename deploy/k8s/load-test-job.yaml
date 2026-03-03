@@ -1,0 +1,41 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: shard-scale-test
+  namespace: shard-staging
+spec:
+  completions: 1
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: orchestrator
+          image: python:3.12-slim
+          command: ["python", "benchmarks/distributed/orchestrator.py"]
+          args:
+            - "--scouts=10000"
+            - "--rate=500"
+            - "--duration=600"
+            - "--verifier-pool=$(VERIFIER_POOL)"
+            - "--out=/results/scale-test.json"
+          env:
+            - name: VERIFIER_POOL
+              valueFrom:
+                configMapKeyRef:
+                  name: shard-scale-test-config
+                  key: verifier_pool
+          volumeMounts:
+            - name: results
+              mountPath: /results
+      volumes:
+        - name: results
+          emptyDir: {}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: shard-scale-test-config
+  namespace: shard-staging
+data:
+  verifier_pool: "http://shard-verifier-0.shard:9091,http://shard-verifier-1.shard:9091"

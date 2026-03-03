@@ -93,6 +93,7 @@ pub(crate) async fn health_handler(
         "uptime_ms": now_ms() - state.daemon_start,
         "listen_addrs": topo.listen_addrs,
         "public_api": topo.is_public,
+        "private_mode": state.private_mode,
         "public_api_addr": topo.public_api_addr,
         "relay_mode": topo.relay_server_enabled,
         "contribute": topo.contribute_enabled,
@@ -176,6 +177,7 @@ pub(crate) async fn node_status_handler(
         "readiness_reason": readiness_reason,
         "engine_loaded": engine_loaded,
         "peer_id": topo.local_peer_id,
+        "private_mode": state.private_mode,
         "recent_logs": logs.iter().cloned().collect::<Vec<String>>(),
     }))
 }

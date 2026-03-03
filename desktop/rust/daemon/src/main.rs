@@ -66,7 +66,9 @@ pub mod api;
 pub mod bootstrap_ring;
 pub mod bootstrap_discovery;
 pub mod consensus;
+pub mod inference;
 pub mod ledger;
+pub mod network;
 pub mod scheduler;
 pub mod security;
 pub mod telemetry_ws;
@@ -103,6 +105,7 @@ use shard_network::network::tensor_wire::TensorWirePacket;
 use shard_scheduler::scheduler::{
     load_reputation, save_reputation, weighted_select, NodeReputation, NodeSchedulerInput,
 };
+use network::policy::{NetworkPolicy, PolicyDecision};
 use consensus::leader::{ElectionMessage, LeaderElectionConfig, LeaderElectionHandle, LeaderInput};
 
 // ─── CLI ────────────────────────────────────────────────────────────────────
@@ -408,6 +411,10 @@ struct Cli {
     /// Enable high-availability mode (leader election active)
     #[arg(long, default_value = "false")]
     ha_mode: bool,
+
+    /// Enable private mode and enforce network_policy.yaml restrictions.
+    #[arg(long, default_value = "false")]
+    private_mode: bool,
 
     /// Enable NAT traversal (circuit relay + hole punching)
     #[arg(long, default_value = "true")]
@@ -816,6 +823,8 @@ pub(crate) struct SharedState {
     /// Used to remove unreachable bootstraps after MAX_BOOTSTRAP_FAILURES
     bootstrap_failures: Arc<Mutex<HashMap<String, u32>>>,
     bootstrap_ring: Option<Arc<bootstrap_ring::BootstrapRing>>,
+    network_policy: Option<Arc<NetworkPolicy>>,
+    private_mode: bool,
     bootstrap_registry: Arc<Mutex<HashMap<String, BootstrapRegistryEntry>>>,
     bootstrap_registry_path: PathBuf,
     scheduler_decisions: Arc<Mutex<VecDeque<SchedulerDecisionLog>>>,
@@ -1651,6 +1660,19 @@ fn peer_id_from_addr_str(addr: &str) -> Option<String> {
     addr.parse::<Multiaddr>().ok().and_then(|multiaddr| {
         extract_peer_id_from_multiaddr(&multiaddr).map(|peer| peer.to_string())
     })
+}
+
+fn ip_from_addr_str(addr: &str) -> Option<IpAddr> {
+    use libp2p::multiaddr::Protocol;
+    let parsed = addr.parse::<Multiaddr>().ok()?;
+    for protocol in parsed.iter() {
+        match protocol {
+            Protocol::Ip4(ipv4) => return Some(IpAddr::V4(ipv4)),
+            Protocol::Ip6(ipv6) => return Some(IpAddr::V6(ipv6)),
+            _ => {}
+        }
+    }
+    None
 }
 
 fn transport_kind_from_text(raw: &str) -> TransportKind {
@@ -2696,6 +2718,22 @@ async fn main() -> Result<()> {
     let topo_path = data.join("topology.json");
     let known_peers_path = data.join("known_peers.json");
     let bootstrap_registry_path = data.join("bootstrap_registry.json");
+    let private_mode_enabled = cli.private_mode;
+    let network_policy = if private_mode_enabled {
+        let policy_path = std::env::var("SHARD_NETWORK_POLICY_PATH")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| PathBuf::from("network_policy.yaml"));
+        if !policy_path.exists() {
+            return Err(anyhow::anyhow!(
+                "private mode requires network policy file at {}",
+                policy_path.display()
+            ));
+        }
+        let loaded = NetworkPolicy::from_yaml(policy_path.as_path())?;
+        Some(Arc::new(loaded))
+    } else {
+        None
+    };
 
     let file_bootstrap = if let Some(path) = &cli.bootstrap_file {
         read_bootstrap_file(path).await
@@ -2791,12 +2829,18 @@ async fn main() -> Result<()> {
     bootstrap_sources.extend(persisted);
     bootstrap_sources.extend(url_bootstrap);
     bootstrap_sources.extend(registry_seed_bootstrap.clone());
+    if private_mode_enabled {
+        bootstrap_sources.clear();
+        if let Some(policy) = network_policy.as_ref() {
+            bootstrap_sources.extend(policy.allowed_bootstrap_addrs.clone());
+        }
+    }
 
     let hardcoded_mode =
         parse_hardcoded_bootstrap_mode(std::env::var("SHARD_HARDCODED_BOOTSTRAP_MODE").ok());
     let include_hardcoded =
         should_include_hardcoded_bootstrap(hardcoded_mode, !bootstrap_sources.is_empty());
-    if include_hardcoded {
+    if include_hardcoded && !private_mode_enabled {
         bootstrap_sources.extend(hardcoded_bootstrap);
     }
 
@@ -2822,8 +2866,11 @@ async fn main() -> Result<()> {
         .unwrap_or_default();
     let mut relay_addrs = default_relay;
     relay_addrs.extend(relay_sources);
-    if relay_addrs.is_empty() && include_hardcoded {
+    if relay_addrs.is_empty() && include_hardcoded && !private_mode_enabled {
         relay_addrs.extend(hardcoded_relay);
+    }
+    if private_mode_enabled {
+        relay_addrs.clear();
     }
     relay_addrs = filter_relay_addrs(relay_addrs, allow_private_relay);
     tracing::info!(
@@ -3017,6 +3064,8 @@ async fn main() -> Result<()> {
         scout_timeout_tracker: Arc::new(Mutex::new(ScoutTimeoutTracker::new())),
         bootstrap_failures: Arc::new(Mutex::new(HashMap::new())),
         bootstrap_ring,
+        network_policy: network_policy.clone(),
+        private_mode: private_mode_enabled,
         bootstrap_registry: Arc::new(Mutex::new(loaded_bootstrap_registry)),
         bootstrap_registry_path,
         scheduler_decisions: Arc::new(Mutex::new(VecDeque::new())),
@@ -4988,6 +5037,25 @@ async fn main() -> Result<()> {
                             failures.remove(&peer_id.to_string());
                         }
                         let remote_addr = endpoint.get_remote_address().to_string();
+                        if let Some(policy) = state.network_policy.as_ref() {
+                            if let Some(peer_ip) = ip_from_addr_str(remote_addr.as_str()) {
+                                match policy.check_connection(peer_ip) {
+                                    PolicyDecision::Allow => {}
+                                    PolicyDecision::Deny(reason) => {
+                                        if policy.audit_log_blocked_connections {
+                                            tracing::warn!(
+                                                %peer_id,
+                                                %peer_ip,
+                                                %reason,
+                                                "blocked incoming connection by network policy"
+                                            );
+                                        }
+                                        let _ = swarm.disconnect_peer_id(peer_id);
+                                        continue;
+                                    }
+                                }
+                            }
+                        }
                         let transport_kind = transport_kind_from_text(remote_addr.as_str());
                         record_transport_success(&state.system_metrics, transport_kind);
 
@@ -5143,6 +5211,7 @@ async fn main() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use crate::network::policy::{NetworkMode, NetworkPolicy, PolicyDecision};
     use super::{
         accept_replay_nonce, bootstrap_registry_seed_addrs, filter_bootstrap_addrs,
         is_newer_version, is_non_public_bootstrap_addr, load_bootstrap_registry,
@@ -5701,6 +5770,20 @@ mod tests {
         let path = model_local_path(Path::new("C:/tmp"), &entry);
         let display = path.display().to_string().replace('\\', "/");
         assert!(display.contains("bitnet-1.58-3b/1.0.0/bitnet.bin"));
+    }
+
+    #[test]
+    fn test_private_mode_blocks_public_ip() {
+        let policy = NetworkPolicy {
+            mode: NetworkMode::Private,
+            allowed_peer_cidrs: vec!["10.0.0.0/8".to_string()],
+            blocked_peer_cidrs: vec![],
+            allowed_bootstrap_addrs: vec![],
+            reject_public_ips: true,
+            audit_log_blocked_connections: true,
+        };
+        let decision = policy.check_connection("8.8.8.8".parse().expect("valid ip"));
+        assert!(matches!(decision, PolicyDecision::Deny(_)));
     }
 }
 
