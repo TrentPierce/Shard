@@ -1,83 +1,89 @@
 <div align="center">
-  <img src="docs/assets/logo.png" alt="Shard" width="200" />
+  <img src="docs/assets/logo.png" alt="Shard" width="180" />
   <h1>Shard Network</h1>
-  <p><strong>The privacy-first, distributed inference network powered by speculative decoding and WebGPU.</strong></p>
+  <p><strong>Distributed speculative decoding with browser scouts and verifier daemons.</strong></p>
 </div>
 
 [![CI/CD](https://github.com/TrentPierce/Shard/actions/workflows/ci.yml/badge.svg)](https://github.com/TrentPierce/Shard/actions/workflows/ci.yml)
 [![Version](https://img.shields.io/badge/version-0.6.2-blue.svg)](https://github.com/TrentPierce/Shard/releases/tag/v0.6.2)
 [![License: BSL 1.1](https://img.shields.io/badge/License-BSL%201.1-blue.svg)](LICENSE)
 
-![Shard Network Demo](docs/assets/demo.gif)
+## Overview
 
-## What is Shard?
+Shard is a full-stack distributed inference project:
 
-**Shard** is a novel architecture for running large language models across distributed networks of consumer hardware. Rather than slicing models into layers (which inherently exposes prompts to intermediary nodes), Shard utilizes **Speculative Decoding**.
+- `desktop/rust/`: verifier daemon (libp2p mesh, axum APIs, bootstrap ring, policy controls)
+- `web/`: Next.js Scout UI and telemetry integration (including WebGPU capability probe)
+- `sdk/python/`: typed Python SDK client/resources
+- `benchmarks/`: benchmark harness + distributed orchestrator
+- `integrations/`: overflow router with circuit breaker and SLA enforcer
+- `deploy/`: Docker, Terraform, Kubernetes, and monitoring assets
 
-In our network, lightweight browser-based nodes (**Scouts**) generate speculative "draft tokens". These draft tokens are routed via libp2p to high-powered verifier nodes, which use a high-fidelity bitnet model to verify the draft completely locally.
+## Current Status (v0.6.2)
 
-**Privacy Guarantee:** The initial prompt and final high-quality output never leave the primary **Verifier** hardware. Only speculative token chunks are sent over the P2P mesh network.
+Implemented:
 
-## The Architecture
+- Phase 1 core deliverables: benchmark harness, WebGPU telemetry path, verification protocol + tests
+- Phase 2 hardening: bootstrap ring config/health tooling, credit-system and failover tests
+- Phase 3 foundations: distributed orchestrator and tensor-parallel + network-policy modules/tests
+- Phase 4 integration: overflow router (`/v1/chat/completions`, `/health`, `/metrics`) with circuit breaker and SLA cooldown enforcement
 
-```mermaid
-sequenceDiagram
-    participant User
-    participant Verifier as 🛡️ Shard Daemon (Verifier)
-    participant P2P as 🌐 libp2p Gossipsub
-    participant Scout as 💻 Browser Scout (WebGPU)
-    
-    User->>Verifier: POST /v1/chat/completions (Prompt)
-    Note over Verifier: Evaluates prompt privately
-    Verifier->>P2P: Broadcasts "WorkRequest" (Context snippet)
-    P2P->>Scout: Receives WorkRequest
-    Note over Scout: Runs WebLLM to create draft tokens
-    Scout->>P2P: Submits "DraftSubmission"
-    P2P->>Verifier: Receives Drafts
-    Note over Verifier: Evaluates draft using heavy model
-    Verifier-->>User: Returns verified tokens via SSE
-    Verifier->>P2P: Verifies & issues Proof-of-Compute
-```
-
-## Roles
-
-The network has two main participants. Which one are you?
-
-| Feature | 💻 **Browser Scout** | 🛡️ **Shard Verifier** |
-| :--- | :--- | :--- |
-| **Description** | Generates lightweight draft tokens speculatively. | Secures the network by serving requests and verifying drafts. |
-| **Hardware** | Any modern laptop or PC with WebGPU support. | A dedicated server, Mac M1+, or PC with 16GB+ RAM. |
-| **Install Type** | Zero-install. Runs entirely in your browser. | Desktop App / Background Daemon. |
-| **Privacy** | Only sees scattered, tokenized context windows. | Holds the full context and generates the authentic responses. |
-| **Telemetry** | Earns PoC (Proof-of-Compute) testnet points. | Runs the Ledger to issue testnet tokens and secure the mesh. |
+Most core tests are green locally/CI; scale-gate tuning for 1000-scout drills is being actively optimized.
 
 ## Quickstart
 
-### Become a Scout
-Want to contribute idle compute without installing anything? 
-Head to **[shardnetwork.live](https://shardnetwork.live)** and click **Start**.
+Run daemon with Docker:
 
-### Run a Verifier Node
-
-#### One-Liner Install (macOS / Linux):
 ```bash
-curl -sSL https://raw.githubusercontent.com/TrentPierce/Shard/main/install.sh | bash
+docker compose up --build shard-daemon -d
+curl http://localhost:9091/health
 ```
 
-Alternatively, download our desktop installers from the [Releases Page](https://github.com/TrentPierce/Shard/releases).
+Run web app:
 
-**Using Docker:**
 ```bash
-docker build -f Dockerfile.daemon -t shard-daemon .
-docker run -p 9091:9091 -p 4001:4001 -p 9090:9090/udp -p 9092:9092/udp shard-daemon --contribute
+cd web
+npm install
+npm run dev
 ```
 
-## Contributing
+Run Python tests:
 
-We welcome contributions! Please read our [Contributing Guidelines](docs/contributing.md) to get started.
+```bash
+pytest tests/test_verification.py --cov --cov-fail-under=95
+pytest sdk/python/tests/ --cov=sdk/python/shard --cov-fail-under=90 -q
+pytest tests/integration/test_failover.py -v
+pytest tests/test_credit_system.py -v
+pytest integrations/tests/test_sla.py -v
+```
 
-- Read our [Versioning Strategy](docs/versioning.md) to understand how we keep the monorepo in sync.
-- View the [Gateway API Specs](docs/api.md) for integrating applications.
+Run Rust tests:
+
+```bash
+cd desktop/rust
+cargo test -p shard-daemon -- --nocapture
+cargo test -p shard-daemon tensor_parallel -- --nocapture
+cargo test -p shard-daemon network_policy -- --nocapture
+```
+
+Run overflow stack drill:
+
+```bash
+docker compose -f docker-compose.overflow.yml up -d --build
+curl http://localhost:8080/health
+curl http://localhost:8080/metrics
+```
+
+## Documentation
+
+- Architecture: `docs/architecture.md`
+- Deployment: `docs/deployment.md`
+- Verification protocol: `docs/verification-protocol.md`
+- Tensor parallelism: `docs/tensor-parallelism.md`
+- Enterprise VPC mode: `docs/enterprise-vpc-deployment.md`
+- SLA definition: `docs/sla.md`
+- Contributing: `docs/contributing.md`
 
 ## License
-Shard is licensed under the **Business Source License 1.1 (BSL 1.1)**. See the full license text in [LICENSE](LICENSE).
+
+Business Source License 1.1 (BSL 1.1). See `LICENSE`.

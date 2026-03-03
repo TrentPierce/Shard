@@ -1,4 +1,0 @@
-include shard/*.so
-include shard/*.dll
-include shard/*.dylib
-include shard/bin/*
