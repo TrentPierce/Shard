@@ -44,7 +44,7 @@ impl SybilDetector {
         let registrations = self
             .subnet_registrations
             .entry(subnet.clone())
-            .or_insert_with(VecDeque::new);
+            .or_default();
 
         while let Some((seen_at, _)) = registrations.front() {
             if timestamp.duration_since(*seen_at) > Duration::from_secs(3600) {

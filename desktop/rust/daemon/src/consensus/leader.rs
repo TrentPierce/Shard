@@ -204,7 +204,7 @@ pub fn spawn_leader_election(
                                     } else if role == ConsensusRole::Candidate && remote_term == term && granted && candidate_id == local_peer_id {
                                         let voter = from_peer.unwrap_or(voter_id);
                                         votes_received.insert(voter);
-                                        let quorum = ((known_peer_count + 1) / 2) + 1;
+                                        let quorum = known_peer_count.div_ceil(2) + 1;
                                         if votes_received.len() >= quorum {
                                             role = ConsensusRole::Leader;
                                             leader_id = Some(local_peer_id.clone());
@@ -254,7 +254,7 @@ pub fn spawn_leader_election(
                                 let _ = output_tx.send(request).await;
                                 election_deadline = Instant::now() + config.randomized_election_timeout();
 
-                                let quorum = ((known_peer_count + 1) / 2) + 1;
+                                let quorum = known_peer_count.div_ceil(2) + 1;
                                 if votes_received.len() >= quorum {
                                     role = ConsensusRole::Leader;
                                     leader_id = Some(local_peer_id.clone());

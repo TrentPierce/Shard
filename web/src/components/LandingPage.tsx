@@ -9,16 +9,16 @@ interface LandingPageProps {
 
 const pillars = [
     {
-        title: "Contribute in 30 seconds",
-        body: "Join as a browser Scout with WebGPU and start drafting tokens for live requests.",
+        title: "Join as a browser Scout",
+        body: "WebGPU-capable browsers can contribute draft tokens to verifier nodes in real time.",
     },
     {
-        title: "Deterministic verification",
-        body: "Shard verifier nodes validate drafts and finalize outputs with reproducible checks.",
+        title: "Verifier-backed quality",
+        body: "Verifier nodes score and validate drafts before tokens are finalized and streamed.",
     },
     {
-        title: "OpenAI-compatible API",
-        body: "Plug existing apps into a distributed inference mesh without rewrites.",
+        title: "Operational integration",
+        body: "Overflow routing, SLA metrics, and Prometheus/Grafana support are built into the stack.",
     },
 ]
 
@@ -36,24 +36,24 @@ export default function LandingPage({ onEnter }: LandingPageProps) {
             <div className="landing-modern__bg" aria-hidden="true" />
 
             <section className="landing-modern__hero">
-                <p className="landing-modern__eyebrow">Shard Network • 2026-ready architecture</p>
-                <h1>Distributed inference that feels instant.</h1>
+                <p className="landing-modern__eyebrow">Shard Network | Release 0.6.2</p>
+                <h1>Distributed inference with production controls.</h1>
                 <p className="landing-modern__lead">
-                    Shard combines browser Scouts and verifier nodes into a high-throughput, fault-tolerant AI mesh.
-                    Contribute compute, scale globally, and ship with predictable latency.
+                    Shard combines browser Scouts and verifier nodes into a fault-tolerant inference mesh with
+                    bootstrap health checks, failover paths, and OpenAI-compatible APIs.
                 </p>
 
-                <div className="landing-modern__actions" style={{ position: 'relative', zIndex: 10 }}>
+                <div className="landing-modern__actions" style={{ position: "relative", zIndex: 10 }}>
                     <button
                         type="button"
                         className="landing-modern__btn landing-modern__btn--primary"
                         onClick={handleGetStarted}
-                        style={{ cursor: 'pointer' }}
+                        style={{ cursor: "pointer" }}
                     >
                         Enter App
                     </button>
-                    <Link className="landing-modern__btn landing-modern__btn--ghost" href="/network" style={{ cursor: 'pointer' }}>
-                        View Live Network
+                    <Link className="landing-modern__btn landing-modern__btn--ghost" href="/leaderboard" style={{ cursor: "pointer" }}>
+                        View Network Stats
                     </Link>
                 </div>
             </section>

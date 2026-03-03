@@ -10,6 +10,8 @@ from shard.errors import (
     ShardError,
 )
 
+__version__ = "0.6.2"
+
 __all__ = [
     "Client",
     "ShardError",

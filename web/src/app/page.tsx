@@ -101,7 +101,7 @@ export default function HomePage() {
             )}
             <div className="mb-5 flex flex-wrap items-center gap-3">
               <p className="text-xs font-semibold uppercase tracking-[0.22em] text-accent-400">
-                Live Telemetry Dashboard
+                Shard 0.6.2 Telemetry
               </p>
               <span
                 className={`inline-flex min-h-7 items-center rounded-full border px-2.5 text-[11px] font-semibold uppercase tracking-[0.14em] ${statusClass}`}
@@ -110,10 +110,10 @@ export default function HomePage() {
               </span>
             </div>
             <h1 className="text-balance text-3xl font-semibold tracking-tight text-ink-50 sm:text-5xl">
-              Browser-powered distributed inference. Run models together.
+              Browser scouts plus verifier nodes for resilient inference.
             </h1>
             <p className="mt-5 max-w-2xl text-pretty text-base text-ink-300 sm:text-lg">
-              Coordinate verifiers and browser scouts from one clean control surface with real-time swarm metrics.
+              This release includes bootstrap-ring health checks, overflow routing, and SLA instrumentation across the mesh.
             </p>
             <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:items-center">
               <Link
