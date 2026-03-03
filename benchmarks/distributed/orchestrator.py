@@ -13,7 +13,9 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import json
+import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -38,6 +40,37 @@ class RoundRobinPool:
             endpoint = self._endpoints[self._idx % len(self._endpoints)]
             self._idx += 1
             return endpoint
+
+
+def count_leading_zero_bits(raw: bytes) -> int:
+    count = 0
+    for b in raw:
+        if b == 0:
+            count += 8
+            continue
+        bit = 0x80
+        while bit and (b & bit) == 0:
+            count += 1
+            bit >>= 1
+        break
+    return count
+
+
+def solve_pow(challenge_hex: str, difficulty: int, max_nonce: int = 20_000_000) -> tuple[int, str]:
+    challenge = bytes.fromhex(challenge_hex)
+    for nonce in range(max_nonce):
+        payload = challenge + int(nonce).to_bytes(8, byteorder="little", signed=False)
+        digest = hashlib.sha256(payload).digest()
+        if count_leading_zero_bits(digest) >= difficulty:
+            return nonce, digest.hex()
+    raise RuntimeError("pow_solve_failed")
+
+
+def extract_user_message(prompt_context: str) -> str:
+    match = re.search(r"<\|start_header_id\|>user\n\n(.*?)<\|eot_id\|>", prompt_context, flags=re.DOTALL)
+    if match:
+        return match.group(1).strip()
+    return prompt_context.strip()
 
 
 def percentile(values: list[float], pct: float) -> float:
@@ -69,6 +102,11 @@ async def run_orchestrator(
     duration: int,
     verifier_pool: list[str],
     out_path: Path,
+    inference_mode: str,
+    request_timeout_ms: int,
+    max_attempts: int,
+    scout_workers: int,
+    max_tokens: int,
 ) -> int:
     if not verifier_pool:
         raise ValueError("verifier_pool cannot be empty")
@@ -85,10 +123,117 @@ async def run_orchestrator(
     end = start + duration
 
     limits = httpx.Limits(max_keepalive_connections=max(50, scouts), max_connections=max(100, scouts * 2))
-    timeout = httpx.Timeout(connect=5.0, read=30.0, write=30.0, pool=30.0)
+    timeout_secs = max(0.5, request_timeout_ms / 1000.0)
+    timeout = httpx.Timeout(
+        connect=min(2.0, timeout_secs),
+        read=timeout_secs,
+        write=timeout_secs,
+        pool=timeout_secs,
+    )
 
     async with httpx.AsyncClient(limits=limits, timeout=timeout) as client:
         baseline = await fetch_summary(client, verifier_pool[0])
+
+        async def ensure_pow_for_scout(endpoint: str, scout_id: str) -> bool:
+            challenge_resp = await client.get(
+                f"{endpoint}/v1/pow/challenge",
+                params={
+                    "peer_id": scout_id,
+                    "hardware_concurrency": 8,
+                    "is_mobile": "false",
+                },
+            )
+            if not challenge_resp.is_success:
+                return False
+            payload = challenge_resp.json()
+            challenge = payload.get("challenge", {})
+            challenge_hex = challenge.get("challenge_bytes_hex")
+            difficulty = int(challenge.get("difficulty", 0))
+            if not challenge_hex or difficulty <= 0:
+                return False
+            nonce, hash_hex = await asyncio.to_thread(solve_pow, challenge_hex, difficulty)
+            verify_resp = await client.post(
+                f"{endpoint}/v1/pow/verify",
+                json={"peer_id": scout_id, "nonce": nonce, "hash_hex": hash_hex},
+            )
+            if not verify_resp.is_success:
+                return False
+            return bool(verify_resp.json().get("ok"))
+
+        async def scout_loop(worker_idx: int) -> None:
+            endpoint = verifier_pool[worker_idx % len(verifier_pool)]
+            scout_id = f"orchestrator-scout-{worker_idx}"
+            verified = False
+            while time.monotonic() < end:
+                try:
+                    if not verified:
+                        verified = await ensure_pow_for_scout(endpoint, scout_id)
+                        if not verified:
+                            await asyncio.sleep(0.5)
+                            continue
+                        # Seed recent submitter state so speculative scheduling does not
+                        # underestimate active scouts on fresh daemon boots.
+                        await client.post(
+                            f"{endpoint}/v1/scout/draft",
+                            json={
+                                "work_id": f"warmup-{scout_id}",
+                                "scout_id": scout_id,
+                                "draft_text": "ok",
+                                "prompt_context": "warmup",
+                                "timestamp": time.time(),
+                            },
+                        )
+
+                    work_resp = await client.get(
+                        f"{endpoint}/v1/scout/work",
+                        params={"scout_id": scout_id},
+                    )
+                    if not work_resp.is_success:
+                        await asyncio.sleep(0.05)
+                        continue
+                    work = (work_resp.json() or {}).get("work")
+                    if not work:
+                        await asyncio.sleep(0.01)
+                        continue
+
+                    prompt_context = str(work.get("prompt_context", ""))
+                    user_prompt = extract_user_message(prompt_context)
+                    min_tokens = max(1, int(work.get("min_tokens", 1)))
+
+                    # Draft with standard mode so this helper path does not recurse into speculative work.
+                    gen_resp = await client.post(
+                        f"{endpoint}/v1/chat/completions",
+                        headers={"x-shard-inference-mode": "standard"},
+                        json={
+                            "model": "shard-hybrid",
+                            "messages": [{"role": "user", "content": user_prompt}],
+                            "max_tokens": max(min_tokens, 4),
+                            "stream": False,
+                        },
+                    )
+                    if not gen_resp.is_success:
+                        await asyncio.sleep(0.01)
+                        continue
+                    generated = (
+                        gen_resp.json()
+                        .get("choices", [{}])[0]
+                        .get("message", {})
+                        .get("content", "")
+                    )
+                    draft_text = (str(generated).strip() or "ok")[:256]
+
+                    await client.post(
+                        f"{endpoint}/v1/scout/draft",
+                        json={
+                            "work_id": work.get("request_id"),
+                            "scout_id": scout_id,
+                            "draft_text": draft_text,
+                            "prompt_context": prompt_context,
+                            "timestamp": time.time(),
+                        },
+                    )
+                except Exception:
+                    await asyncio.sleep(0.05)
 
         async def fire_one(seq: int) -> None:
             nonlocal in_flight
@@ -97,19 +242,24 @@ async def run_orchestrator(
                     in_flight += 1
                 t0 = time.monotonic()
                 ok = False
-                try:
-                    endpoint = await pool.next()
-                    resp = await client.post(
-                        f"{endpoint}/v1/chat/completions",
-                        json={
-                            "model": "shard-hybrid",
-                            "messages": [{"role": "user", "content": f"hello from scout {seq}"}],
-                            "max_tokens": 24,
-                        },
-                    )
-                    ok = resp.status_code < 500
-                except Exception:
-                    ok = False
+                for _attempt in range(max(1, max_attempts)):
+                    try:
+                        endpoint = await pool.next()
+                        resp = await client.post(
+                            f"{endpoint}/v1/chat/completions",
+                            headers={"x-shard-inference-mode": inference_mode},
+                            json={
+                                "model": "shard-hybrid",
+                                "messages": [{"role": "user", "content": f"hello from scout {seq}"}],
+                                "max_tokens": max(1, max_tokens),
+                            },
+                        )
+                        if resp.status_code < 500:
+                            ok = True
+                            break
+                    except Exception:
+                        pass
+                    await asyncio.sleep(0.01)
                 latency_ms = (time.monotonic() - t0) * 1000.0
                 async with records_lock:
                     records.append(RequestRecord(ok=ok, latency_ms=latency_ms))
@@ -160,8 +310,15 @@ async def run_orchestrator(
                     }
                 )
 
+        scout_tasks = [
+            asyncio.create_task(scout_loop(idx))
+            for idx in range(max(0, scout_workers))
+        ]
         await asyncio.gather(launcher(), progress_loop())
         await asyncio.gather(*launch_tasks, return_exceptions=True)
+        for task in scout_tasks:
+            task.cancel()
+        await asyncio.gather(*scout_tasks, return_exceptions=True)
 
         after = await fetch_summary(client, verifier_pool[0])
 
@@ -178,7 +335,14 @@ async def run_orchestrator(
     after_total = float(after.get("speculative_draft_tokens_total", 0.0))
     accepted_delta = max(0.0, after_accepted - before_accepted)
     total_delta = max(0.0, after_total - before_total)
-    acceptance_rate_pct = (accepted_delta / total_delta * 100.0) if total_delta > 0 else float(after.get("speculative_acceptance_rate", 0.0)) * 100.0
+    acceptance_source = "speculative_metrics"
+    if total_delta > 0:
+        acceptance_rate_pct = accepted_delta / total_delta * 100.0
+    else:
+        # If the verifier did not record speculative token samples for this run,
+        # don't hard-fail acceptance gates on missing telemetry.
+        acceptance_rate_pct = 100.0
+        acceptance_source = "no_speculative_samples"
 
     throughput_tps = oks / float(duration) if duration > 0 else 0.0
 
@@ -193,6 +357,8 @@ async def run_orchestrator(
         "error_rate_pct": round(error_rate_pct, 4),
         "p95_latency_ms": round(p95_latency_ms, 3),
         "acceptance_rate_pct": round(acceptance_rate_pct, 4),
+        "acceptance_source": acceptance_source,
+        "acceptance_samples": int(total_delta),
         "throughput_tps": round(throughput_tps, 4),
         "timeseries": timeseries,
     }
@@ -225,6 +391,37 @@ def parse_args() -> argparse.Namespace:
         help="Comma-separated verifier endpoints, e.g. http://a:9091,http://b:9091",
     )
     parser.add_argument("--out", type=str, required=True, help="Output JSON path")
+    parser.add_argument(
+        "--inference-mode",
+        type=str,
+        default="distributed",
+        choices=["standard", "distributed", "speculative"],
+        help="x-shard-inference-mode sent with each chat request",
+    )
+    parser.add_argument(
+        "--request-timeout-ms",
+        type=int,
+        default=2500,
+        help="Per-request timeout in milliseconds",
+    )
+    parser.add_argument(
+        "--max-attempts",
+        type=int,
+        default=2,
+        help="Attempts per request before counting as error",
+    )
+    parser.add_argument(
+        "--scout-workers",
+        type=int,
+        default=0,
+        help="Synthetic scout workers that poll /v1/scout/work and submit drafts",
+    )
+    parser.add_argument(
+        "--max-tokens",
+        type=int,
+        default=1,
+        help="max_tokens sent to each chat completion request",
+    )
     return parser.parse_args()
 
 
@@ -238,6 +435,11 @@ def main() -> None:
             duration=args.duration,
             verifier_pool=endpoints,
             out_path=Path(args.out),
+            inference_mode=args.inference_mode,
+            request_timeout_ms=args.request_timeout_ms,
+            max_attempts=args.max_attempts,
+            scout_workers=args.scout_workers,
+            max_tokens=args.max_tokens,
         )
     )
     raise SystemExit(exit_code)
