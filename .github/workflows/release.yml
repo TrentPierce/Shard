@@ -99,6 +99,7 @@ jobs:
             dist/release-manifest-macos.json
   publish-python-sdk:
     runs-on: ubuntu-latest
+    continue-on-error: true
     env:
       TWINE_USERNAME: __token__
       TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
