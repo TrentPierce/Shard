@@ -1,0 +1,46 @@
+groups:
+  - name: shard_critical
+    rules:
+      - alert: BootstrapRingDegraded
+        expr: shard_bootstrap_connected_count < 2
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Bootstrap ring has fewer than 2 connected peers"
+          description: "Shard mesh will refuse inference work. Check bootstrap nodes."
+
+      - alert: OverflowCircuitBreakerOpen
+        expr: overflow_circuit_breaker_state{state="open"} == 1
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Overflow router circuit breaker is open"
+          description: "Shard is not receiving overflow traffic. Check Shard daemon health."
+
+  - name: shard_warning
+    rules:
+      - alert: LowAcceptanceRate
+        expr: rate(shard_drafts_accepted_total[5m]) / rate(shard_drafts_submitted_total[5m]) < 0.5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Draft acceptance rate below 50% for 10 minutes"
+
+      - alert: HighVerifierCPU
+        expr: process_cpu_usage{job="shard-daemon"} > 0.90
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Verifier node CPU above 90% for 5 minutes"
+
+      - alert: SLALatencyBreach
+        expr: increase(shard_sla_breach_total[1h]) > 0
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "SLA latency breach detected in the last hour"

@@ -1,0 +1,280 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": true,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "type": "row",
+      "title": "Mesh Health",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "type": "stat",
+      "title": "Bootstrap Peers Connected",
+      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 1 },
+      "targets": [{ "expr": "shard_bootstrap_connected_count", "refId": "A" }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 2 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Total Mesh Peers",
+      "gridPos": { "h": 6, "w": 6, "x": 6, "y": 1 },
+      "targets": [{ "expr": "shard_mesh_peers_total", "refId": "A" }],
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+    },
+    {
+      "type": "timeseries",
+      "title": "Peer Churn / min",
+      "gridPos": { "h": 6, "w": 12, "x": 12, "y": 1 },
+      "targets": [
+        { "expr": "increase(shard_peer_connects_total[1m])", "legendFormat": "connects", "refId": "A" },
+        { "expr": "increase(shard_peer_disconnects_total[1m])", "legendFormat": "disconnects", "refId": "B" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+    },
+    {
+      "type": "row",
+      "title": "Inference Performance",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 7 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Token Throughput (Drafted vs Verified)",
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 8 },
+      "targets": [
+        { "expr": "rate(shard_draft_tokens_submitted_total[1m])", "legendFormat": "drafted", "refId": "A" },
+        { "expr": "rate(shard_verified_tokens_total[1m])", "legendFormat": "verified", "refId": "B" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] }
+    },
+    {
+      "type": "timeseries",
+      "title": "Acceptance Rate (5m)",
+      "gridPos": { "h": 7, "w": 6, "x": 12, "y": 8 },
+      "targets": [
+        {
+          "expr": "rate(shard_drafts_accepted_total[5m]) / rate(shard_drafts_submitted_total[5m])",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 }, "overrides": [] }
+    },
+    {
+      "type": "timeseries",
+      "title": "Latency p50/p95/p99",
+      "gridPos": { "h": 7, "w": 6, "x": 18, "y": 8 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(shard_request_duration_ms_bucket[5m])))",
+          "legendFormat": "p50",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(shard_request_duration_ms_bucket[5m])))",
+          "legendFormat": "p95",
+          "refId": "B"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(shard_request_duration_ms_bucket[5m])))",
+          "legendFormat": "p99",
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ms" }, "overrides": [] }
+    },
+    {
+      "type": "stat",
+      "title": "Active Scout Count",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 15 },
+      "targets": [{ "expr": "shard_active_scout_count", "refId": "A" }],
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+    },
+    {
+      "type": "row",
+      "title": "GPU & Resources",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 19 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Verifier GPU Utilization %",
+      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 20 },
+      "targets": [{ "expr": "gpu_utilization_ratio{job=\"shard-daemon\"} * 100", "refId": "A" }],
+      "fieldConfig": { "defaults": { "unit": "percent" }, "overrides": [] }
+    },
+    {
+      "type": "gauge",
+      "title": "GPU Utilization vs Overflow Threshold",
+      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 20 },
+      "targets": [{ "expr": "overflow_gpu_utilization * 100", "refId": "A" }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 85 },
+              { "color": "red", "value": 95 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Circuit Breaker State",
+      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 20 },
+      "targets": [{ "expr": "overflow_circuit_breaker_state{state=\"open\"}", "refId": "A" }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "closed" }, "1": { "text": "open" } } }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Routing Split (Primary vs Shard)",
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 27 },
+      "targets": [
+        {
+          "expr": "sum(rate(overflow_requests_total{destination=\"primary\"}[5m])) / sum(rate(overflow_requests_total[5m]))",
+          "legendFormat": "primary",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(rate(overflow_requests_total{destination=\"shard\"}[5m])) / sum(rate(overflow_requests_total[5m]))",
+          "legendFormat": "shard",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 }, "overrides": [] }
+    },
+    {
+      "type": "row",
+      "title": "Credit Economy",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 33 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Credits Earned / min",
+      "gridPos": { "h": 6, "w": 12, "x": 0, "y": 34 },
+      "targets": [{ "expr": "increase(shard_credits_earned_total[1m])", "refId": "A" }],
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+    },
+    {
+      "type": "timeseries",
+      "title": "Credits Spent / min",
+      "gridPos": { "h": 6, "w": 12, "x": 12, "y": 34 },
+      "targets": [{ "expr": "increase(shard_credits_spent_total[1m])", "refId": "A" }],
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+    },
+    {
+      "type": "stat",
+      "title": "Active Wallets (1h)",
+      "gridPos": { "h": 5, "w": 12, "x": 0, "y": 40 },
+      "targets": [{ "expr": "shard_wallets_active_last_hour", "refId": "A" }],
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+    },
+    {
+      "type": "stat",
+      "title": "Sybil Flags (24h)",
+      "gridPos": { "h": 5, "w": 12, "x": 12, "y": 40 },
+      "targets": [{ "expr": "increase(shard_sybil_flags_total[24h])", "refId": "A" }],
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+    },
+    {
+      "type": "row",
+      "title": "Errors & Alerts",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 45 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "type": "table",
+      "title": "Last 20 Error Log Entries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 46 },
+      "targets": [
+        {
+          "expr": "topk(20, shard_error_events_total)",
+          "format": "table",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": {}, "overrides": [] }
+    },
+    {
+      "type": "stat",
+      "title": "SLA Breaches (24h)",
+      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 46 },
+      "targets": [{ "expr": "increase(shard_sla_breach_total[24h])", "refId": "A" }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Error Rate",
+      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 46 },
+      "targets": [{ "expr": "rate(shard_errors_total[5m])", "refId": "A" }],
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] }
+    }
+  ],
+  "refresh": "10s",
+  "schemaVersion": 39,
+  "style": "dark",
+  "tags": ["shard", "operations"],
+  "templating": { "list": [] },
+  "time": { "from": "now-1h", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Shard Operations",
+  "uid": "shard-operations-v2",
+  "version": 1
+}

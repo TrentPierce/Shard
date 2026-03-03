@@ -1,0 +1,37 @@
+version: "3.9"
+
+services:
+  primary-inference:
+    image: your-primary-inference-server:latest
+    ports:
+      - "8000:8000"
+    environment:
+      - MODEL_PATH=/models/primary
+
+  overflow-router:
+    build:
+      context: .
+      dockerfile: integrations/Dockerfile.overflow
+    ports:
+      - "8080:8080"
+    environment:
+      - PRIMARY_URL=http://primary-inference:8000
+      - SHARD_URL=http://shard-daemon:9091
+      - GPU_THRESHOLD=0.85
+      - CIRCUIT_BREAKER_ERROR_THRESHOLD=0.05
+      - CIRCUIT_BREAKER_OPEN_DURATION=60
+    depends_on:
+      - primary-inference
+      - shard-daemon
+
+  shard-daemon:
+    build:
+      context: .
+      dockerfile: Dockerfile.daemon
+    ports:
+      - "9091:9091"
+      - "4001:4001"
+    environment:
+      - SHARD_NODE_CONFIG=/config/shard-node.yaml
+    volumes:
+      - ./deploy/config:/config
