@@ -53,7 +53,7 @@ use std::{
     net::{IpAddr, SocketAddr},
     path::{Path, PathBuf},
     sync::{
-        atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering},
         Arc,
     },
     time::{Duration, SystemTime, UNIX_EPOCH},
@@ -64,6 +64,7 @@ use tower_http::cors::{Any, CorsLayer};
 pub mod api;
 pub mod bootstrap_ring;
 pub mod bootstrap_discovery;
+pub mod consensus;
 pub mod scheduler;
 pub mod telemetry_ws;
 use api::*;
@@ -99,6 +100,7 @@ use shard_network::network::tensor_wire::TensorWirePacket;
 use shard_scheduler::scheduler::{
     load_reputation, save_reputation, weighted_select, NodeReputation, NodeSchedulerInput,
 };
+use consensus::leader::{ElectionMessage, LeaderElectionConfig, LeaderElectionHandle, LeaderInput};
 
 // ─── CLI ────────────────────────────────────────────────────────────────────
 
@@ -399,6 +401,10 @@ struct Cli {
     /// Contribute compute to the network (run as Shard node)
     #[arg(long, default_value = "true")]
     contribute: bool,
+
+    /// Enable high-availability mode (leader election active)
+    #[arg(long, default_value = "false")]
+    ha_mode: bool,
 
     /// Enable NAT traversal (circuit relay + hole punching)
     #[arg(long, default_value = "true")]
@@ -776,6 +782,9 @@ pub(crate) struct SharedState {
     bootstrap_registry_path: PathBuf,
     scheduler_decisions: Arc<Mutex<VecDeque<SchedulerDecisionLog>>>,
     canary_rollout: Arc<Mutex<CanaryRolloutController>>,
+    shutdown: Arc<AtomicBool>,
+    in_flight_count: Arc<AtomicUsize>,
+    consensus: Option<Arc<LeaderElectionHandle>>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -2285,6 +2294,29 @@ async fn enforce_api_origin(
     next.run(req).await
 }
 
+async fn enforce_shutdown_and_track(
+    AxumState(state): AxumState<SharedState>,
+    req: Request<Body>,
+    next: Next,
+) -> Response {
+    let path = req.uri().path().to_string();
+    if state.shutdown.load(Ordering::Relaxed) && path != "/health" && path != "/v1/system/health" {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({
+                "error": "shutdown_in_progress",
+                "message": "Node is draining in-flight requests. Retry shortly."
+            })),
+        )
+            .into_response();
+    }
+
+    state.in_flight_count.fetch_add(1, Ordering::Relaxed);
+    let response = next.run(req).await;
+    state.in_flight_count.fetch_sub(1, Ordering::Relaxed);
+    response
+}
+
 fn create_router(
     state: SharedState,
     cors_origins: Vec<HeaderValue>,
@@ -2299,6 +2331,7 @@ fn create_router(
     }
 
     Router::new()
+        .layer(from_fn_with_state(state.clone(), enforce_shutdown_and_track))
         .layer(from_fn_with_state(policy, enforce_api_origin))
         .route("/health", get(health_handler))
         .route("/v1/system/health", get(health_handler))
@@ -2308,6 +2341,7 @@ fn create_router(
         .route("/v1/system/topology", get(topology_handler))
         .route("/wallet/address", get(wallet_address_handler))
         .route("/node/status", get(node_status_handler))
+        .route("/node/consensus-role", get(node_consensus_role_handler))
         .route("/node/ui", get(node_ui_handler))
         .route(
             "/node/toggle-participation",
@@ -2651,6 +2685,16 @@ async fn main() -> Result<()> {
     let signing_key = node_identity.signing_key().clone();
     let id_keys = node_identity.libp2p_keypair()?;
     let local_peer_id = PeerId::from(id_keys.public());
+    let (consensus_handle, consensus_in_tx, mut consensus_out_rx) = if cli.ha_mode {
+        let config = LeaderElectionConfig::from_config(&config_path);
+        let (handle, out_rx) =
+            consensus::leader::spawn_leader_election(local_peer_id.to_string(), config);
+        tracing::info!("HA mode enabled - leader election active");
+        let sender = handle.input_sender();
+        (Some(Arc::new(handle)), Some(sender), Some(out_rx))
+    } else {
+        (None, None, None)
+    };
     let ledger_store = Arc::new(LedgerStore::new(&data));
     let loaded_ledger = ledger_store.load_or_init()?;
     let node_reputation_path = data.join("node_reputation.json");
@@ -2791,6 +2835,9 @@ async fn main() -> Result<()> {
             cli.model_id.clone(),
             canary_rollout_cfg,
         ))),
+        shutdown: Arc::new(AtomicBool::new(false)),
+        in_flight_count: Arc::new(AtomicUsize::new(0)),
+        consensus: consensus_handle,
     };
 
     #[cfg(target_os = "windows")]
@@ -3049,6 +3096,7 @@ async fn main() -> Result<()> {
     let layer_announce_topic = IdentTopic::new("shard-layer-announcements");
     let auction_topic = IdentTopic::new("auction.prompt");
     let ban_topic = IdentTopic::new("shard-ban-list");
+    let election_topic = IdentTopic::new("shard/election/v1");
 
     swarm.behaviour_mut().gossipsub.subscribe(&work_topic)?;
     swarm.behaviour_mut().gossipsub.subscribe(&result_topic)?;
@@ -3065,6 +3113,9 @@ async fn main() -> Result<()> {
         .subscribe(&layer_announce_topic)?;
     swarm.behaviour_mut().gossipsub.subscribe(&auction_topic)?;
     swarm.behaviour_mut().gossipsub.subscribe(&ban_topic)?;
+    if cli.ha_mode {
+        swarm.behaviour_mut().gossipsub.subscribe(&election_topic)?;
+    }
 
     // ── listen addresses ──
     let tcp_addr: Multiaddr = format!("/ip4/0.0.0.0/tcp/{}", cli.tcp_port).parse()?;
@@ -3331,6 +3382,7 @@ async fn main() -> Result<()> {
     let shutdown_trigger = shutdown_tx.clone();
     tokio::spawn(async move {
         if shutdown_signal().await {
+            shutdown_state.shutdown.store(true, Ordering::Relaxed);
             let envelope = SignedEnvelope::sign(
                 NodeRegistration {
                     node_pubkey: shutdown_state.node_public_key.clone(),
@@ -3430,6 +3482,7 @@ async fn main() -> Result<()> {
     println!();
 
     let mut reconnect_tick = tokio::time::interval(Duration::from_secs(cli.reconnect_seconds));
+    let mut consensus_tick = tokio::time::interval(Duration::from_secs(1));
     let kad_bootstrap_interval_secs = std::env::var("SHARD_KAD_BOOTSTRAP_INTERVAL_SECS")
         .ok()
         .and_then(|v| v.parse::<u64>().ok())
@@ -3454,8 +3507,57 @@ async fn main() -> Result<()> {
         tokio::select! {
             _ = shutdown_rx.changed() => {
                 if *shutdown_rx.borrow() {
-                    tracing::info!("shutdown signal received; draining and exiting");
+                    tracing::info!("shutdown signal received; entering graceful drain");
+                    state.shutdown.store(true, Ordering::Relaxed);
+                    let drain_deadline = now_ms() + 30_000;
+                    loop {
+                        let in_flight = state.in_flight_count.load(Ordering::Relaxed);
+                        if in_flight == 0 || now_ms() >= drain_deadline {
+                            break;
+                        }
+                        tokio::time::sleep(Duration::from_millis(500)).await;
+                    }
+
+                    if cli.ha_mode {
+                        let leaving = ElectionMessage::NodeLeaving {
+                            node_id: state.node_public_key.clone(),
+                            peer_id: local_peer_id.to_string(),
+                        };
+                        if let Ok(payload) = serde_json::to_vec(&leaving) {
+                            let _ = swarm
+                                .behaviour_mut()
+                                .gossipsub
+                                .publish(election_topic.clone(), payload);
+                        }
+                    }
+
+                    let ledger = state.ledger.lock().await;
+                    if let Err(error) = state.ledger_store.write_snapshot(&ledger) {
+                        tracing::warn!(%error, "failed to flush ledger snapshot during shutdown");
+                    }
+                    drop(ledger);
+                    tracing::info!("Graceful shutdown complete");
                     break;
+                }
+            }
+            _ = consensus_tick.tick() => {
+                if let Some(tx) = consensus_in_tx.as_ref() {
+                    let peer_count = state.peers.lock().await.len();
+                    let _ = tx.send(LeaderInput::PeerCount(peer_count)).await;
+                }
+            }
+            Some(out_msg) = async {
+                if let Some(rx) = consensus_out_rx.as_mut() {
+                    rx.recv().await
+                } else {
+                    None
+                }
+            } => {
+                if let Ok(payload) = serde_json::to_vec(&out_msg) {
+                    let _ = swarm
+                        .behaviour_mut()
+                        .gossipsub
+                        .publish(election_topic.clone(), payload);
                 }
             }
             _ = kad_bootstrap_tick.tick() => {
@@ -4027,6 +4129,18 @@ async fn main() -> Result<()> {
                                         latency_ms: None,
                                         reason: Some(format!("Network ban: {}", ban.reason)),
                                     }, 0);
+                                }
+                            }
+                        } else if cli.ha_mode && message.topic == election_topic.hash() {
+                            if let Ok(msg) = serde_json::from_slice::<ElectionMessage>(&message.data) {
+                                if let Some(tx) = consensus_in_tx.as_ref() {
+                                    let from_peer = message.source.map(|peer| peer.to_string());
+                                    let _ = tx
+                                        .send(LeaderInput::NetworkMessage {
+                                            from_peer,
+                                            message: msg,
+                                        })
+                                        .await;
                                 }
                             }
                         } else if message.topic == forward_result_topic.hash() {

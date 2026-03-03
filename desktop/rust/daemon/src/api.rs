@@ -180,6 +180,25 @@ pub(crate) async fn node_status_handler(
     }))
 }
 
+pub(crate) async fn node_consensus_role_handler(
+    AxumState(state): AxumState<SharedState>,
+) -> Json<serde_json::Value> {
+    if let Some(handle) = state.consensus.as_ref() {
+        let snapshot = handle.snapshot().await;
+        Json(serde_json::json!({
+            "role": snapshot.role,
+            "term": snapshot.term,
+            "leader_id": snapshot.leader_id,
+        }))
+    } else {
+        Json(serde_json::json!({
+            "role": "disabled",
+            "term": 0,
+            "leader_id": serde_json::Value::Null,
+        }))
+    }
+}
+
 pub(crate) async fn node_toggle_participation_handler(
     AxumState(state): AxumState<SharedState>,
     Json(toggle): Json<ParticipationToggle>,
