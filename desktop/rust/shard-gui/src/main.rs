@@ -1,8 +1,7 @@
 use anyhow::Result;
 use eframe::egui;
 use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
-use std::sync::Arc;
-use tokio::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use tray_icon::menu::MenuEvent;
 
 mod app;
@@ -191,8 +190,7 @@ async fn main() -> Result<()> {
     .map_err(|e| anyhow::anyhow!("Eframe error: {}", e))?;
 
     // On exit, ensure child process is killed
-    let mut pm = process_manager.lock().await;
-    pm.stop()?;
+    process_manager.lock().unwrap().stop()?;
 
     Ok(())
 }

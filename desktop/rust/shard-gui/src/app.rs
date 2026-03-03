@@ -3,8 +3,7 @@ use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
-use std::sync::Arc;
-use tokio::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use crate::process::{find_daemon_binary, DAEMON_ARGS};
 use crate::tray::TrayManager;
@@ -120,7 +119,7 @@ impl ShardApp {
 
         let started = if config.auto_start {
             let binary = find_daemon_binary();
-            pm.blocking_lock().start(&binary, DAEMON_ARGS).is_ok()
+            pm.lock().unwrap().start(&binary, DAEMON_ARGS).is_ok()
         } else {
             false
         };
@@ -207,13 +206,13 @@ impl eframe::App for ShardApp {
         }
 
         if self.quit_signal.swap(false, Relaxed) {
-            self.process_manager.blocking_lock().stop().ok();
+            self.process_manager.lock().unwrap().stop().ok();
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
 
         if self.pause_signal.swap(false, Relaxed) {
             if self.is_running {
-                self.process_manager.blocking_lock().stop().ok();
+                self.process_manager.lock().unwrap().stop().ok();
                 self.is_running = false;
                 self.daemon_online = false;
                 self.status = "Idle".to_string();
@@ -221,7 +220,7 @@ impl eframe::App for ShardApp {
                 let binary = find_daemon_binary();
                 if self
                     .process_manager
-                    .blocking_lock()
+                    .lock().unwrap()
                     .start(&binary, DAEMON_ARGS)
                     .is_ok()
                 {
@@ -279,7 +278,7 @@ impl ShardApp {
         ui.horizontal(|ui| {
             if self.is_running {
                 if ui.button("Stop Node").clicked() {
-                    let mut pm = self.process_manager.blocking_lock();
+                    let mut pm = self.process_manager.lock().unwrap();
                     if pm.stop().is_ok() {
                         self.is_running = false;
                         self.daemon_online = false;
@@ -288,7 +287,7 @@ impl ShardApp {
                 }
             } else if ui.button("Start Node").clicked() {
                 let binary = find_daemon_binary();
-                let mut pm = self.process_manager.blocking_lock();
+                let mut pm = self.process_manager.lock().unwrap();
                 if pm.start(&binary, DAEMON_ARGS).is_ok() {
                     self.is_running = true;
                     self.status = "Starting...".to_string();
