@@ -1,12 +1,13 @@
-version: "3.9"
-
 services:
   primary-inference:
-    image: your-primary-inference-server:latest
+    build:
+      context: .
+      dockerfile: integrations/Dockerfile.primary
     ports:
       - "8000:8000"
     environment:
-      - MODEL_PATH=/models/primary
+      - BACKEND_NAME=primary
+      - GPU_UTILIZATION_RATIO=0.92
 
   overflow-router:
     build:
@@ -19,7 +20,7 @@ services:
       - SHARD_URL=http://shard-daemon:9091
       - GPU_THRESHOLD=0.85
       - CIRCUIT_BREAKER_ERROR_THRESHOLD=0.05
-      - CIRCUIT_BREAKER_OPEN_DURATION=60
+      - CIRCUIT_BREAKER_OPEN_DURATION=20
     depends_on:
       - primary-inference
       - shard-daemon
@@ -27,11 +28,10 @@ services:
   shard-daemon:
     build:
       context: .
-      dockerfile: Dockerfile.daemon
+      dockerfile: integrations/Dockerfile.primary
+    command: ["uvicorn", "integrations.primary_backend:app", "--host", "0.0.0.0", "--port", "9091"]
     ports:
       - "9091:9091"
-      - "4001:4001"
     environment:
-      - SHARD_NODE_CONFIG=/config/shard-node.yaml
-    volumes:
-      - ./deploy/config:/config
+      - BACKEND_NAME=shard
+      - GPU_UTILIZATION_RATIO=0.10

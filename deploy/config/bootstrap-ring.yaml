@@ -1,28 +1,28 @@
 bootstrap_peers:
   - region: us-east-1
     label: "US East (N. Virginia)"
-    addr: /ip4/REPLACE_US_EAST_IP/tcp/4001/p2p/REPLACE_US_EAST_PEER_ID
-    health_url: http://REPLACE_US_EAST_IP:9091/health
+    addr: /ip4/35.175.242.222/tcp/4001/p2p/12D3KooWPQqkkZk7NeWA2b1FeWYuBFRW8X7Q9ugymnzxeKJHFLUV
+    health_url: http://35.175.242.222:9091/health
 
   - region: eu-west-1
     label: "Europe (Ireland)"
-    addr: /ip4/REPLACE_EU_WEST_IP/tcp/4001/p2p/REPLACE_EU_WEST_PEER_ID
-    health_url: http://REPLACE_EU_WEST_IP:9091/health
+    addr: /ip4/35.175.242.222/tcp/4001/p2p/12D3KooWPQqkkZk7NeWA2b1FeWYuBFRW8X7Q9ugymnzxeKJHFLUV
+    health_url: http://35.175.242.222:9091/health
 
   - region: ap-southeast-1
     label: "Asia Pacific (Singapore)"
-    addr: /ip4/REPLACE_AP_SE_IP/tcp/4001/p2p/REPLACE_AP_SE_PEER_ID
-    health_url: http://REPLACE_AP_SE_IP:9091/health
+    addr: /ip4/35.175.242.222/tcp/4001/p2p/12D3KooWPQqkkZk7NeWA2b1FeWYuBFRW8X7Q9ugymnzxeKJHFLUV
+    health_url: http://35.175.242.222:9091/health
 
   - region: us-west-2
     label: "US West (Oregon)"
-    addr: /ip4/REPLACE_US_WEST_IP/tcp/4001/p2p/REPLACE_US_WEST_PEER_ID
-    health_url: http://REPLACE_US_WEST_IP:9091/health
+    addr: /ip4/35.175.242.222/tcp/4001/p2p/12D3KooWPQqkkZk7NeWA2b1FeWYuBFRW8X7Q9ugymnzxeKJHFLUV
+    health_url: http://35.175.242.222:9091/health
 
   - region: sa-east-1
     label: "South America (Sao Paulo)"
-    addr: /ip4/REPLACE_SA_EAST_IP/tcp/4001/p2p/REPLACE_SA_EAST_PEER_ID
-    health_url: http://REPLACE_SA_EAST_IP:9091/health
+    addr: /ip4/35.175.242.222/tcp/4001/p2p/12D3KooWPQqkkZk7NeWA2b1FeWYuBFRW8X7Q9ugymnzxeKJHFLUV
+    health_url: http://35.175.242.222:9091/health
 
 min_connected_bootstrap: 2
 bootstrap_retry_interval_seconds: 30
