@@ -696,6 +696,7 @@ pub(crate) struct SharedState {
     ledger_store: Arc<LedgerStore>,
     browser_sessions: Arc<Mutex<HashMap<String, BrowserLayerSession>>>,
     scout_client_runtime: Arc<Mutex<HashMap<String, ScoutClientRuntimeStatus>>>,
+    webgpu_stats: Arc<Mutex<WebGPUStats>>,
     browser_work: Arc<Mutex<VecDeque<BrowserLayerWorkItem>>>,
     node_wallet: String,
     model_id: String,
@@ -1200,6 +1201,31 @@ pub(crate) struct ScoutClientRuntimeStatus {
     pub last_event_detail: Option<String>,
     pub last_event_ms: u128,
     pub last_submit_success_ms: Option<u128>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct WebGPUProbeResult {
+    pub eligible: bool,
+    #[serde(default)]
+    pub reason: Option<String>,
+    pub tier: String,
+    pub estimated_vram_mb: u64,
+    pub supports_f16: bool,
+    pub browser: String,
+    pub os: String,
+    pub adapter_vendor: String,
+    pub adapter_device: String,
+}
+
+#[derive(Debug, Default, Clone)]
+pub(crate) struct WebGPUStats {
+    pub total_probes: u64,
+    pub eligible: u64,
+    pub high_performance: u64,
+    pub low_power: u64,
+    pub ineligible_reasons: HashMap<String, u64>,
+    pub browser_counts: HashMap<String, u64>,
+    pub os_counts: HashMap<String, u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -2330,6 +2356,8 @@ fn create_router(
         .route("/submit-draft", post(submit_draft_handler))
         .route("/v1/scout/draft", post(submit_draft_handler))
         .route("/v1/scout/client-event", post(scout_client_event_handler))
+        .route("/v1/telemetry/webgpu", post(webgpu_telemetry_handler))
+        .route("/metrics/webgpu-coverage", get(webgpu_coverage_handler))
         .route("/v1/pow/challenge", get(pow_challenge_handler))
         .route("/v1/pow/verify", post(pow_verify_handler))
         .route("/signed/submit-draft", post(signed_submit_draft_handler))
@@ -2668,6 +2696,7 @@ async fn main() -> Result<()> {
         ledger_store,
         browser_sessions: Arc::new(Mutex::new(HashMap::new())),
         scout_client_runtime: Arc::new(Mutex::new(HashMap::new())),
+        webgpu_stats: Arc::new(Mutex::new(WebGPUStats::default())),
         browser_work: Arc::new(Mutex::new(VecDeque::new())),
         node_wallet: node_wallet.clone(),
         model_id: cli.model_id.clone(),

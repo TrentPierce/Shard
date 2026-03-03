@@ -1,7 +1,10 @@
 "use client"
 
 import Link from "next/link"
+import { useEffect, useState } from "react"
 import { useDashboardTelemetry } from "@/hooks/useDashboardTelemetry"
+import { apiUrl } from "@/lib/config"
+import { probeWebGPU, type WebGPUProbeResult } from "@/lib/webgpu-probe"
 
 const telemetryCards = [
   { key: "verifier", label: "Active Verifier Nodes" },
@@ -27,6 +30,7 @@ const flow = [
 
 export default function HomePage() {
   const telemetry = useDashboardTelemetry()
+  const [probeResult, setProbeResult] = useState<WebGPUProbeResult | null>(null)
   const statusClass =
     telemetry.healthState === "ready"
       ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
@@ -41,11 +45,60 @@ export default function HomePage() {
     total: telemetry.totalTokensGenerated.toLocaleString(),
   }
 
+  useEffect(() => {
+    let cancelled = false
+    async function runProbe() {
+      try {
+        const result = await probeWebGPU()
+        if (cancelled) return
+        setProbeResult(result)
+        await fetch(apiUrl("/v1/telemetry/webgpu"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(result),
+          keepalive: true,
+        })
+      } catch {
+        if (!cancelled) {
+          setProbeResult({
+            eligible: false,
+            reason: "probe_error",
+            tier: "none",
+            estimated_vram_mb: 0,
+            supports_f16: false,
+            browser: "Unknown",
+            os: "Unknown",
+            adapter_vendor: "unknown",
+            adapter_device: "unknown",
+          })
+        }
+      }
+    }
+
+    void runProbe()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
   return (
     <>
       <main id="main-content" className="pb-16 pt-10 sm:pt-14">
         <section className="relative overflow-hidden rounded-3xl border border-ring bg-gradient-to-br from-base-900 to-base-800 px-6 py-12 shadow-panel sm:px-10 sm:py-16">
           <div className="relative mx-auto max-w-4xl">
+            {probeResult && (
+              <div
+                className={`mb-4 inline-flex rounded-full border px-3 py-1 text-xs font-medium ${
+                  probeResult.eligible
+                    ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
+                    : "border-slate-500/40 bg-slate-500/10 text-slate-200"
+                }`}
+              >
+                {probeResult.eligible
+                  ? "Your browser is contributing compute"
+                  : "Your browser is in viewer mode (WebGPU not available)"}
+              </div>
+            )}
             <div className="mb-5 flex flex-wrap items-center gap-3">
               <p className="text-xs font-semibold uppercase tracking-[0.22em] text-accent-400">
                 Live Telemetry Dashboard

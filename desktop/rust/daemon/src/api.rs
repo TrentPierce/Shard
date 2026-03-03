@@ -361,6 +361,78 @@ fn summarize_scout_client_runtime(
     )
 }
 
+fn round_pct(value: f64) -> f64 {
+    (value * 10.0).round() / 10.0
+}
+
+fn pct(part: u64, total: u64) -> f64 {
+    if total == 0 {
+        0.0
+    } else {
+        round_pct((part as f64 / total as f64) * 100.0)
+    }
+}
+
+impl WebGPUStats {
+    pub(crate) fn record_probe(&mut self, probe: &WebGPUProbeResult) {
+        self.total_probes = self.total_probes.saturating_add(1);
+
+        let browser = probe.browser.trim();
+        if !browser.is_empty() {
+            *self.browser_counts.entry(browser.to_string()).or_insert(0) += 1;
+        }
+        let os = probe.os.trim();
+        if !os.is_empty() {
+            *self.os_counts.entry(os.to_string()).or_insert(0) += 1;
+        }
+
+        if probe.eligible {
+            self.eligible = self.eligible.saturating_add(1);
+            let tier = probe.tier.to_ascii_lowercase();
+            if tier == "high-performance" {
+                self.high_performance = self.high_performance.saturating_add(1);
+            } else if tier == "low-power" {
+                self.low_power = self.low_power.saturating_add(1);
+            }
+        } else {
+            let reason = probe
+                .reason
+                .as_ref()
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .unwrap_or("unknown");
+            *self.ineligible_reasons.entry(reason.to_string()).or_insert(0) += 1;
+        }
+    }
+
+    pub(crate) fn coverage_summary(&self) -> serde_json::Value {
+        let ineligible = self.total_probes.saturating_sub(self.eligible);
+        let mut reason_map = serde_json::Map::new();
+        for (key, count) in &self.ineligible_reasons {
+            reason_map.insert(key.clone(), serde_json::json!(pct(*count, self.total_probes)));
+        }
+        let mut browser_map = serde_json::Map::new();
+        for (key, count) in &self.browser_counts {
+            browser_map.insert(key.clone(), serde_json::json!(pct(*count, self.total_probes)));
+        }
+        let mut os_map = serde_json::Map::new();
+        for (key, count) in &self.os_counts {
+            os_map.insert(key.clone(), serde_json::json!(pct(*count, self.total_probes)));
+        }
+
+        serde_json::json!({
+            "total_probes": self.total_probes,
+            "eligible_pct": pct(self.eligible, self.total_probes),
+            "high_performance_pct": pct(self.high_performance, self.total_probes),
+            "low_power_pct": pct(self.low_power, self.total_probes),
+            "ineligible_pct": pct(ineligible, self.total_probes),
+            "ineligible_reason_breakdown": reason_map,
+            "browser_breakdown": browser_map,
+            "os_breakdown": os_map,
+        })
+    }
+}
+
 pub(crate) async fn credits_balance_handler(
     AxumPath(wallet): AxumPath<String>,
     AxumState(state): AxumState<SharedState>,
@@ -978,6 +1050,44 @@ pub(crate) async fn scout_client_event_handler(
     }
 
     Json(serde_json::json!({ "ok": true }))
+}
+
+pub(crate) async fn webgpu_telemetry_handler(
+    AxumState(state): AxumState<SharedState>,
+    Json(probe): Json<WebGPUProbeResult>,
+) -> Json<serde_json::Value> {
+    let tier = probe.tier.to_ascii_lowercase();
+    let tier_valid = matches!(tier.as_str(), "high-performance" | "low-power" | "none");
+    if !tier_valid {
+        return Json(serde_json::json!({
+            "ok": false,
+            "detail": "tier must be one of: high-performance, low-power, none",
+        }));
+    }
+
+    if !probe.eligible
+        && probe
+            .reason
+            .as_ref()
+            .map(|r| r.trim().is_empty())
+            .unwrap_or(true)
+    {
+        return Json(serde_json::json!({
+            "ok": false,
+            "detail": "reason is required for ineligible probes",
+        }));
+    }
+
+    let mut stats = state.webgpu_stats.lock().await;
+    stats.record_probe(&probe);
+    Json(serde_json::json!({ "ok": true }))
+}
+
+pub(crate) async fn webgpu_coverage_handler(
+    AxumState(state): AxumState<SharedState>,
+) -> Json<serde_json::Value> {
+    let stats = state.webgpu_stats.lock().await;
+    Json(stats.coverage_summary())
 }
 
 pub(crate) async fn ensure_pow_verified(
@@ -2689,7 +2799,7 @@ mod tests {
     use super::{
         push_scheduler_decision_log, require_scout_id, runtime_health_state,
         sanitize_scout_draft_text, should_route_long_context, verify_spot_check_submission,
-        DraftSpotCheckProof, ScoutWorkQuery,
+        DraftSpotCheckProof, ScoutWorkQuery, WebGPUProbeResult, WebGPUStats,
     };
     use crate::SchedulerDecisionLog;
     use std::collections::VecDeque;
@@ -2806,6 +2916,59 @@ mod tests {
         assert_eq!(
             runtime_health_state(true, true, true),
             ("ok", "ready", true)
+        );
+    }
+
+    #[test]
+    fn webgpu_coverage_summary_counts_and_breakdowns() {
+        let mut stats = WebGPUStats::default();
+        stats.record_probe(&WebGPUProbeResult {
+            eligible: true,
+            reason: None,
+            tier: "high-performance".to_string(),
+            estimated_vram_mb: 8192,
+            supports_f16: true,
+            browser: "Chrome".to_string(),
+            os: "Windows".to_string(),
+            adapter_vendor: "NVIDIA".to_string(),
+            adapter_device: "RTX".to_string(),
+        });
+        stats.record_probe(&WebGPUProbeResult {
+            eligible: false,
+            reason: Some("no_adapter".to_string()),
+            tier: "none".to_string(),
+            estimated_vram_mb: 0,
+            supports_f16: false,
+            browser: "Firefox".to_string(),
+            os: "Linux".to_string(),
+            adapter_vendor: "unknown".to_string(),
+            adapter_device: "unknown".to_string(),
+        });
+        stats.record_probe(&WebGPUProbeResult {
+            eligible: false,
+            reason: Some("no_navigator_gpu".to_string()),
+            tier: "none".to_string(),
+            estimated_vram_mb: 0,
+            supports_f16: false,
+            browser: "Safari".to_string(),
+            os: "macOS".to_string(),
+            adapter_vendor: "unknown".to_string(),
+            adapter_device: "unknown".to_string(),
+        });
+
+        let summary = stats.coverage_summary();
+        assert_eq!(summary["total_probes"], serde_json::json!(3));
+        assert_eq!(summary["eligible_pct"], serde_json::json!(33.3));
+        assert_eq!(summary["high_performance_pct"], serde_json::json!(33.3));
+        assert_eq!(summary["low_power_pct"], serde_json::json!(0.0));
+        assert_eq!(summary["ineligible_pct"], serde_json::json!(66.7));
+        assert_eq!(
+            summary["ineligible_reason_breakdown"]["no_adapter"],
+            serde_json::json!(33.3)
+        );
+        assert_eq!(
+            summary["ineligible_reason_breakdown"]["no_navigator_gpu"],
+            serde_json::json!(33.3)
         );
     }
 }
