@@ -46,6 +46,7 @@ use libp2p::{
 };
 use rand::{distributions::Alphanumeric, Rng};
 use serde::{Deserialize, Serialize};
+use sha2::Digest;
 use shard_common::types::{WorkRequest, WorkResponse};
 use std::{
     collections::{BTreeMap, HashMap, HashSet, VecDeque},
@@ -445,6 +446,10 @@ enum DaemonCommand {
         #[command(subcommand)]
         command: WalletCommand,
     },
+    Model {
+        #[command(subcommand)]
+        command: ModelCommand,
+    },
 }
 
 #[derive(Subcommand, Debug, Clone)]
@@ -453,6 +458,14 @@ enum WalletCommand {
     Export(WalletExportArgs),
     Import(WalletImportArgs),
     VerifyBackup(WalletVerifyArgs),
+}
+
+#[derive(Subcommand, Debug, Clone)]
+enum ModelCommand {
+    List,
+    Pull { model_id: String },
+    Verify { model_id: String },
+    Remove { model_id: String },
 }
 
 #[derive(Args, Debug, Clone)]
@@ -493,6 +506,29 @@ struct WalletVerifyArgs {
 struct Heartbeat {
     kind: String,
     sent_at_ms: u128,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ModelManifest {
+    schema_version: String,
+    updated_at: String,
+    models: Vec<ModelManifestEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ModelManifestEntry {
+    id: String,
+    display_name: String,
+    version: String,
+    sha256: String,
+    size_bytes: u64,
+    download_url: String,
+    min_vram_gb: u64,
+    min_ram_gb: u64,
+    roles: Vec<String>,
+    quantization: String,
+    architecture: String,
+    release_notes: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1994,6 +2030,153 @@ fn handle_wallet_command(command: WalletCommand, identity_path: &Path) -> Result
     Ok(())
 }
 
+fn model_manifest_url() -> String {
+    std::env::var("SHARD_MODEL_MANIFEST_URL")
+        .unwrap_or_else(|_| "https://raw.githubusercontent.com/TrentPierce/Shard/main/deploy/models/manifest.json".to_string())
+}
+
+fn model_store_dir(base_data_dir: &Path) -> PathBuf {
+    base_data_dir.join("models")
+}
+
+async fn fetch_model_manifest() -> Result<ModelManifest> {
+    let url = model_manifest_url();
+    let response = reqwest::get(url.clone())
+        .await
+        .map_err(|e| anyhow::anyhow!("failed to fetch manifest from {url}: {e}"))?;
+    let status = response.status();
+    if !status.is_success() {
+        anyhow::bail!("manifest fetch failed with status {}", status);
+    }
+    let manifest = response
+        .json::<ModelManifest>()
+        .await
+        .map_err(|e| anyhow::anyhow!("failed to decode model manifest: {e}"))?;
+    Ok(manifest)
+}
+
+fn sha256_file(path: &Path) -> Result<String> {
+    use std::io::Read;
+    let mut file = std::fs::File::open(path)?;
+    let mut hasher = sha2::Sha256::new();
+    let mut buf = [0u8; 64 * 1024];
+    loop {
+        let read = file.read(&mut buf)?;
+        if read == 0 {
+            break;
+        }
+        sha2::Digest::update(&mut hasher, &buf[..read]);
+    }
+    Ok(hex::encode(sha2::Digest::finalize(hasher)))
+}
+
+fn model_local_path(base_data_dir: &Path, entry: &ModelManifestEntry) -> PathBuf {
+    let filename = entry
+        .download_url
+        .rsplit('/')
+        .next()
+        .filter(|s| !s.is_empty())
+        .unwrap_or("model.bin");
+    model_store_dir(base_data_dir)
+        .join(entry.id.as_str())
+        .join(entry.version.as_str())
+        .join(filename)
+}
+
+async fn handle_model_command(command: ModelCommand, data_dir: &Path) -> Result<()> {
+    match command {
+        ModelCommand::List => {
+            let manifest = fetch_model_manifest().await?;
+            println!(
+                "{:<24} {:<10} {:<12} {:<8}",
+                "MODEL ID", "VERSION", "SIZE(B)", "LOCAL"
+            );
+            for model in manifest.models {
+                let path = model_local_path(data_dir, &model);
+                let local = if path.exists() { "yes" } else { "no" };
+                println!(
+                    "{:<24} {:<10} {:<12} {:<8}",
+                    model.id, model.version, model.size_bytes, local
+                );
+            }
+        }
+        ModelCommand::Pull { model_id } => {
+            let manifest = fetch_model_manifest().await?;
+            let Some(model) = manifest.models.into_iter().find(|m| m.id == model_id) else {
+                anyhow::bail!("model '{model_id}' not found in manifest");
+            };
+            let final_path = model_local_path(data_dir, &model);
+            if final_path.exists() {
+                let existing_hash = sha256_file(final_path.as_path())?;
+                if existing_hash.eq_ignore_ascii_case(model.sha256.as_str()) {
+                    println!("model already downloaded and verified: {}", final_path.display());
+                    return Ok(());
+                }
+            }
+            if let Some(parent) = final_path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            let tmp_path = final_path.with_extension("download");
+
+            let response = reqwest::get(model.download_url.as_str()).await?;
+            if !response.status().is_success() {
+                anyhow::bail!(
+                    "download failed for {} with status {}",
+                    model.id,
+                    response.status()
+                );
+            }
+            let bytes = response.bytes().await?;
+            std::fs::write(tmp_path.as_path(), bytes.as_ref())?;
+            let got = sha256_file(tmp_path.as_path())?;
+            if !got.eq_ignore_ascii_case(model.sha256.as_str()) {
+                let _ = std::fs::remove_file(tmp_path.as_path());
+                anyhow::bail!("sha256 mismatch for model {} (expected {}, got {})", model.id, model.sha256, got);
+            }
+            std::fs::rename(tmp_path.as_path(), final_path.as_path())?;
+            println!("downloaded model {} to {}", model.id, final_path.display());
+        }
+        ModelCommand::Verify { model_id } => {
+            let manifest = fetch_model_manifest().await?;
+            let Some(model) = manifest.models.into_iter().find(|m| m.id == model_id) else {
+                anyhow::bail!("model '{model_id}' not found in manifest");
+            };
+            let path = model_local_path(data_dir, &model);
+            if !path.exists() {
+                anyhow::bail!("model not found locally: {}", path.display());
+            }
+            let got = sha256_file(path.as_path())?;
+            if got.eq_ignore_ascii_case(model.sha256.as_str()) {
+                println!("verify ok: {} {}", model.id, model.version);
+            } else {
+                anyhow::bail!("verify failed: expected {}, got {}", model.sha256, got);
+            }
+        }
+        ModelCommand::Remove { model_id } => {
+            let target = model_store_dir(data_dir).join(model_id.as_str());
+            if target.exists() {
+                std::fs::remove_dir_all(target.as_path())?;
+                println!("removed model {}", model_id);
+            } else {
+                println!("model not present: {}", model_id);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn parse_semver_like(version: &str) -> (u64, u64, u64) {
+    let mut parts = version.split('.');
+    let major = parts.next().and_then(|v| v.parse::<u64>().ok()).unwrap_or(0);
+    let minor = parts.next().and_then(|v| v.parse::<u64>().ok()).unwrap_or(0);
+    let patch = parts.next().and_then(|v| v.parse::<u64>().ok()).unwrap_or(0);
+    (major, minor, patch)
+}
+
+fn is_newer_version(current: &str, candidate: &str) -> bool {
+    parse_semver_like(candidate) > parse_semver_like(current)
+}
+
 fn unique_addrs(addrs: Vec<String>) -> Vec<String> {
     let mut seen = HashSet::new();
     let mut out = Vec::new();
@@ -2459,6 +2642,10 @@ async fn main() -> Result<()> {
                 handle_wallet_command(command, &identity_path)?;
                 return Ok(());
             }
+            DaemonCommand::Model { command } => {
+                handle_model_command(command, &data).await?;
+                return Ok(());
+            }
         }
     }
 
@@ -2903,6 +3090,31 @@ async fn main() -> Result<()> {
                 "contribute mode requires a compatible engine. Ensure BITNET_LIB points to a shard_engine library exporting shard_init_ex and BITNET_MODEL points to a valid model file"
             );
         }
+    }
+
+    {
+        let model_id = cli.model_id.clone();
+        let data_dir = data.clone();
+        tokio::spawn(async move {
+            let current_version =
+                std::env::var("SHARD_MODEL_VERSION").unwrap_or_else(|_| "0.0.0".to_string());
+            let Ok(manifest) = fetch_model_manifest().await else {
+                return;
+            };
+            if let Some(remote) = manifest.models.into_iter().find(|m| m.id == model_id) {
+                let local_path = model_local_path(data_dir.as_path(), &remote);
+                if local_path.exists() && is_newer_version(&current_version, remote.version.as_str())
+                {
+                    tracing::warn!(
+                        "model update available: {} {} -> {}. Run 'shard-daemon model pull {}' to update.",
+                        remote.id,
+                        current_version,
+                        remote.version,
+                        remote.id
+                    );
+                }
+            }
+        });
     }
 
     // ── build swarm ──
@@ -4931,17 +5143,19 @@ async fn main() -> Result<()> {
 mod tests {
     use super::{
         accept_replay_nonce, bootstrap_registry_seed_addrs, filter_bootstrap_addrs,
-        is_non_public_bootstrap_addr, load_bootstrap_registry, node_is_healthy,
+        is_newer_version, is_non_public_bootstrap_addr, load_bootstrap_registry,
+        model_local_path, node_is_healthy,
         parse_hardcoded_bootstrap_mode, peer_id_from_addr_str, prune_bootstrap_registry,
         record_bootstrap_failure, remove_known_addrs_for_peers, save_bootstrap_registry,
         should_attempt_reconnect, should_include_hardcoded_bootstrap,
         should_reject_peer_connection, unique_addrs, validate_work_request, BootstrapRegistryEntry,
         CanaryRolloutConfig, CanaryRolloutController, HardcodedBootstrapMode, LatencyHistogram,
-        ScoutPenaltyBook, ScoutPenaltyUpdate, ScoutTimeoutTracker, SpeculativeConfig, WorkRequest,
-        MAX_BOOTSTRAP_FAILURES,
+        ModelManifestEntry, ScoutPenaltyBook, ScoutPenaltyUpdate, ScoutTimeoutTracker,
+        SpeculativeConfig, WorkRequest, MAX_BOOTSTRAP_FAILURES,
     };
     use libp2p::{Multiaddr, PeerId};
     use std::collections::{HashMap, HashSet};
+    use std::path::Path;
     use std::sync::Arc;
     use tempfile::tempdir;
     use tokio::sync::Mutex;
@@ -5457,6 +5671,34 @@ mod tests {
         tracker.record_success();
         tracker.record_timeout(&config);
         assert!(!tracker.is_in_cooldown());
+    }
+
+    #[test]
+    fn model_version_compare_detects_newer() {
+        assert!(is_newer_version("1.0.0", "1.0.1"));
+        assert!(is_newer_version("1.2.9", "1.10.0"));
+        assert!(!is_newer_version("2.0.0", "1.9.9"));
+    }
+
+    #[test]
+    fn model_local_path_contains_id_and_version() {
+        let entry = ModelManifestEntry {
+            id: "bitnet-1.58-3b".to_string(),
+            display_name: "BitNet".to_string(),
+            version: "1.0.0".to_string(),
+            sha256: "abc".to_string(),
+            size_bytes: 123,
+            download_url: "https://example.com/models/bitnet.bin".to_string(),
+            min_vram_gb: 4,
+            min_ram_gb: 8,
+            roles: vec!["shard".to_string()],
+            quantization: "1.58bit".to_string(),
+            architecture: "bitnet".to_string(),
+            release_notes: "x".to_string(),
+        };
+        let path = model_local_path(Path::new("C:/tmp"), &entry);
+        let display = path.display().to_string().replace('\\', "/");
+        assert!(display.contains("bitnet-1.58-3b/1.0.0/bitnet.bin"));
     }
 }
 
