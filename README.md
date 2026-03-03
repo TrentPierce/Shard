@@ -66,6 +66,10 @@ pip install -e .
 
 Performance visualization, network map, and cost comparison:
 
+- Performance chart now uses validated benchmark summaries only.
+- Node counts without measured runs (`1`, `5`, `10`) are marked `pending validation` instead of estimated.
+- Phase 3/4 summary in the PDF reflects current recorded metrics (including failed gates when present).
+
 ![Performance vs Nodes](docs/assets/value-dashboard/performance-vs-nodes.png)
 
 ![Contribution Map](docs/assets/value-dashboard/network-map.png)

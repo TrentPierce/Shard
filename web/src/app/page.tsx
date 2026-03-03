@@ -55,9 +55,9 @@ const incentives = [
 
 const charts = [
   {
-    title: "Computation Time: 1 vs 2 vs 5 vs 10 Nodes",
+    title: "Validated p95 Response Time by Node Count",
     src: "/value-dashboard/performance-vs-nodes.png",
-    alt: "Performance chart comparing response time as active nodes increase",
+    alt: "Performance chart showing validated node-count latencies with pending counts marked",
   },
   {
     title: "Network Contribution Map (Test Data)",
@@ -212,7 +212,8 @@ export default function HomePage() {
         <section className="mt-12">
           <h2 className="text-balance text-xl font-medium text-ink-50 sm:text-2xl">Shard Value Dashboard</h2>
           <p className="mt-2 text-sm text-ink-300">
-            Visual proof of performance, participation, and cost position. Charts include staging + sample network data.
+            Visual proof of performance, participation, and cost position. Performance points are validated-only; missing
+            node counts are explicitly marked as pending validation.
           </p>
           <div className="mt-4 grid gap-4 lg:grid-cols-3">
             {charts.map((chart) => (
