@@ -93,7 +93,7 @@ class ScoutSimulator:
     async def _run_one_scout(self, client: httpx.AsyncClient, identity: ScoutIdentity) -> None:
         pow_ok = await self._register_pow(client, identity)
         if not pow_ok:
-            self.collector.record(
+            await self.collector.record(
                 draft_accepted=False,
                 latency_ms=0.0,
                 tokens_in_draft=0,
@@ -124,7 +124,7 @@ class ScoutSimulator:
                 work_id = str(work.get("request_id") or work.get("work_id") or "")
                 prompt = str(work.get("prompt") or work.get("prompt_context") or "")
                 if not work_id:
-                    self.collector.record(
+                    await self.collector.record(
                         draft_accepted=False,
                         latency_ms=(time.monotonic() - start) * 1000.0,
                         tokens_in_draft=0,
@@ -159,7 +159,7 @@ class ScoutSimulator:
                 detail = str(draft_json.get("detail") or "")
                 error = None if accepted else (detail or "draft_rejected")
 
-                self.collector.record(
+                await self.collector.record(
                     draft_accepted=accepted,
                     latency_ms=(time.monotonic() - start) * 1000.0,
                     tokens_in_draft=tokens_in_draft,
@@ -168,7 +168,7 @@ class ScoutSimulator:
                     response_bytes=resp_bytes,
                 )
             except Exception as exc:
-                self.collector.record(
+                await self.collector.record(
                     draft_accepted=False,
                     latency_ms=(time.monotonic() - start) * 1000.0,
                     tokens_in_draft=tokens_in_draft,

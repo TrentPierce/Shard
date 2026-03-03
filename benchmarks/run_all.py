@@ -57,6 +57,12 @@ async def main() -> None:
         help="Baseline single-node URL for latency comparison",
     )
     parser.add_argument("--out-dir", default="benchmarks/results", help="Output directory")
+    parser.add_argument(
+        "--tensor-parallel-degree",
+        type=int,
+        default=1,
+        help="Tensor parallel degree marker for benchmark comparison runs",
+    )
     args = parser.parse_args()
 
     out_dir = Path(args.out_dir)
@@ -89,6 +95,7 @@ async def main() -> None:
         duration_seconds=args.duration,
         base_url=args.base_url,
     )
+    results["tensor_parallel_degree"] = max(1, args.tensor_parallel_degree)
 
     results_path = out_dir / "latest.json"
     with results_path.open("w", encoding="utf-8") as f:
