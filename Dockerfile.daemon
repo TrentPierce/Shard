@@ -1,4 +1,4 @@
-FROM rust:1.78-slim as builder
+FROM rust:1.89-slim AS builder
 WORKDIR /app
 COPY desktop/rust/ ./desktop/rust/
 RUN cd desktop/rust && cargo build --release --bin shard-daemon

@@ -5643,7 +5643,7 @@ mod tests {
                 multiaddr: "/ip4/127.0.0.1/tcp/4001/p2p/12D3KooW".to_string(),
                 stability_score: 90,
                 uptime_hours: 4,
-                version: "0.6.1".to_string(),
+                version: "0.6.2".to_string(),
                 updated_at_ms: 42,
             },
         );
@@ -5669,7 +5669,7 @@ mod tests {
                 multiaddr: "/ip4/35.175.242.222/tcp/4001/p2p/12D3KooWfresh".to_string(),
                 stability_score: 92,
                 uptime_hours: 12,
-                version: "0.6.1".to_string(),
+                version: "0.6.2".to_string(),
                 updated_at_ms: now - 10_000,
             },
         );
@@ -5680,7 +5680,7 @@ mod tests {
                 multiaddr: "/ip4/35.175.242.222/tcp/4001/p2p/12D3KooWstale".to_string(),
                 stability_score: 95,
                 uptime_hours: 24,
-                version: "0.6.1".to_string(),
+                version: "0.6.2".to_string(),
                 updated_at_ms: now - 120_000,
             },
         );

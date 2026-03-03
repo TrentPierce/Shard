@@ -5,7 +5,7 @@
 </div>
 
 [![CI/CD](https://github.com/TrentPierce/Shard/actions/workflows/ci.yml/badge.svg)](https://github.com/TrentPierce/Shard/actions/workflows/ci.yml)
-[![Version](https://img.shields.io/badge/version-0.6.1-blue.svg)](https://github.com/TrentPierce/Shard/releases/tag/v0.6.1)
+[![Version](https://img.shields.io/badge/version-0.6.2-blue.svg)](https://github.com/TrentPierce/Shard/releases/tag/v0.6.2)
 [![License: BSL 1.1](https://img.shields.io/badge/License-BSL%201.1-blue.svg)](LICENSE)
 
 ![Shard Network Demo](docs/assets/demo.gif)

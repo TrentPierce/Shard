@@ -1,6 +1,6 @@
 # Model Compatibility Matrix
 
-Version: `0.6.1`
+Version: `0.6.2`
 
 This matrix defines which draft model and verifier model pairs are allowed for speculative scheduling.
 The scheduler consumes these compatibility rules through `shard_verifier::inference::is_model_pair_compatible`.

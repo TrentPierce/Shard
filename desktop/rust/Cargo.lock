@@ -6245,7 +6245,7 @@ dependencies = [
 
 [[package]]
 name = "shard-common"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "ed25519-dalek",
  "hex",
@@ -6258,7 +6258,7 @@ dependencies = [
 
 [[package]]
 name = "shard-crypto"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "anyhow",
  "argon2",
@@ -6275,7 +6275,7 @@ dependencies = [
 
 [[package]]
 name = "shard-daemon"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "anyhow",
  "argon2",
@@ -6321,7 +6321,7 @@ dependencies = [
 
 [[package]]
 name = "shard-gateway"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "reqwest",
  "serde",
@@ -6332,7 +6332,7 @@ dependencies = [
 
 [[package]]
 name = "shard-gui"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "anyhow",
  "directories",
@@ -6352,7 +6352,7 @@ dependencies = [
 
 [[package]]
 name = "shard-ledger"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "anyhow",
  "ed25519-dalek",
@@ -6366,7 +6366,7 @@ dependencies = [
 
 [[package]]
 name = "shard-metrics"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "anyhow",
  "rusqlite",
@@ -6378,7 +6378,7 @@ dependencies = [
 
 [[package]]
 name = "shard-network"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "hex",
  "libp2p",
@@ -6389,7 +6389,7 @@ dependencies = [
 
 [[package]]
 name = "shard-scheduler"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "serde",
  "serde_json",
@@ -6397,7 +6397,7 @@ dependencies = [
 
 [[package]]
 name = "shard-verifier"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "anyhow",
  "libloading 0.9.0",

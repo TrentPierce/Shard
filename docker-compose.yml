@@ -4,7 +4,7 @@ services:
       context: .
       dockerfile: Dockerfile.daemon
     container_name: shard-daemon
-    command: ["shard-daemon", "--control-port", "9091", "--tcp-port", "4001", "--webrtc-port", "9090", "--quic-port", "9092"]
+    command: ["--control-port", "9091", "--tcp-port", "4001", "--webrtc-port", "9090", "--quic-port", "9092"]
     ports:
       - "9091:9091"
       - "4001:4001"
@@ -13,8 +13,7 @@ services:
       - "9092:9092/udp"
     volumes:
       - ./models:/root/.cache/shard/models
-    environment:
-      - BITNET_MODEL=/root/.cache/shard/models/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf
+    environment: []
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:9091/health"]
       interval: 15s
