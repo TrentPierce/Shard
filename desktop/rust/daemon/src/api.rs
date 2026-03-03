@@ -1765,7 +1765,7 @@ pub(crate) async fn metrics_handler(AxumState(state): AxumState<SharedState>) ->
     let p = state.gossipsub_latency_hist.percentiles();
     let uptime_seconds = ((now_ms().saturating_sub(state.daemon_start)) / 1000) as u64;
 
-    let body = state.system_metrics.render_prometheus(PrometheusSample {
+    let mut body = state.system_metrics.render_prometheus(PrometheusSample {
         queue_depth,
         active_node_count,
         node_latency_ms,
@@ -1775,6 +1775,16 @@ pub(crate) async fn metrics_handler(AxumState(state): AxumState<SharedState>) ->
         e2e_latency_p99_ms: p.p99_ms,
         node_uptime_seconds: uptime_seconds,
     });
+    let bootstrap_connected = if let Some(ring) = state.bootstrap_ring.as_ref() {
+        ring.connected_count().await
+    } else {
+        0
+    };
+    body.push_str(
+        "# HELP shard_bootstrap_connected_count Number of bootstrap peers currently connected\n",
+    );
+    body.push_str("# TYPE shard_bootstrap_connected_count gauge\n");
+    body.push_str(format!("shard_bootstrap_connected_count {}\n", bootstrap_connected).as_str());
 
     (
         [(

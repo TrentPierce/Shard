@@ -62,6 +62,7 @@ use tokio::sync::{mpsc, Mutex, Notify};
 use tower_http::cors::{Any, CorsLayer};
 
 pub mod api;
+pub mod bootstrap_ring;
 pub mod bootstrap_discovery;
 pub mod scheduler;
 pub mod telemetry_ws;
@@ -770,6 +771,7 @@ pub(crate) struct SharedState {
     /// Bootstrap peer failure tracking (peer_id -> consecutive failures)
     /// Used to remove unreachable bootstraps after MAX_BOOTSTRAP_FAILURES
     bootstrap_failures: Arc<Mutex<HashMap<String, u32>>>,
+    bootstrap_ring: Option<Arc<bootstrap_ring::BootstrapRing>>,
     bootstrap_registry: Arc<Mutex<HashMap<String, BootstrapRegistryEntry>>>,
     bootstrap_registry_path: PathBuf,
     scheduler_decisions: Arc<Mutex<VecDeque<SchedulerDecisionLog>>>,
@@ -2621,6 +2623,28 @@ async fn main() -> Result<()> {
     let (ban_tx, mut ban_rx) = mpsc::channel::<(String, String)>(128);
     let (draft_publish_tx, mut draft_publish_rx) = mpsc::channel::<WorkResponse>(64);
     let canary_rollout_cfg = CanaryRolloutConfig::from_env(cli.model_id.as_str());
+    let bootstrap_ring_path = std::env::var("SHARD_BOOTSTRAP_RING_CONFIG")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("deploy/config/bootstrap-ring.yaml"));
+    let mut bootstrap_ring = if bootstrap_ring_path.exists() {
+        match bootstrap_ring::BootstrapRing::from_config(bootstrap_ring_path.as_path()) {
+            Ok(ring) => Some(ring),
+            Err(error) => {
+                tracing::warn!(
+                    error = %error,
+                    path = %bootstrap_ring_path.display(),
+                    "failed loading bootstrap ring config; continuing without ring health gate"
+                );
+                None
+            }
+        }
+    } else {
+        None
+    };
+    if let Some(ring) = bootstrap_ring.as_mut() {
+        ring.connect_all();
+    }
+    let bootstrap_ring = bootstrap_ring.map(Arc::new);
 
     let node_identity = NodeIdentity::load_or_create(&identity_path)?;
     let node_wallet = node_identity.wallet_address();
@@ -2759,6 +2783,7 @@ async fn main() -> Result<()> {
         draft_publish_tx,
         scout_timeout_tracker: Arc::new(Mutex::new(ScoutTimeoutTracker::new())),
         bootstrap_failures: Arc::new(Mutex::new(HashMap::new())),
+        bootstrap_ring,
         bootstrap_registry: Arc::new(Mutex::new(loaded_bootstrap_registry)),
         bootstrap_registry_path,
         scheduler_decisions: Arc::new(Mutex::new(VecDeque::new())),

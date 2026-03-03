@@ -813,6 +813,19 @@ pub(crate) async fn chat_completions_handler(
     headers: HeaderMap,
     Json(req): Json<ChatRequest>,
 ) -> impl IntoResponse {
+    if let Some(ring) = state.bootstrap_ring.as_ref() {
+        if ring.refuse_work_below_min_bootstrap && !ring.is_healthy().await {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({
+                    "error": "mesh_degraded",
+                    "message": "Insufficient bootstrap connectivity. Retry shortly.",
+                })),
+            )
+                .into_response();
+        }
+    }
+
     let route_private = headers
         .get("x-shard-route")
         .and_then(|v| v.to_str().ok())
