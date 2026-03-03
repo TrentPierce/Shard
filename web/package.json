@@ -32,7 +32,7 @@
     "@tauri-apps/plugin-shell": "^2.3.5",
     "libp2p": "^1.8.0",
     "lucide-react": "^0.575.0",
-    "next": "14.2.5",
+    "next": "14.2.35",
     "react": "18.3.1",
     "react-dom": "18.3.1"
   },
@@ -48,7 +48,7 @@
     "@webgpu/types": "^0.1.69",
     "autoprefixer": "^10.4.20",
     "eslint": "^8.57.1",
-    "eslint-config-next": "^14.2.5",
+    "eslint-config-next": "^14.2.35",
     "jest": "^30.2.0",
     "jest-environment-jsdom": "^30.2.0",
     "localtunnel": "^2.0.2",

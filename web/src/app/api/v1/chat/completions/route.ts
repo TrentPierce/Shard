@@ -14,13 +14,9 @@ function parseTimeoutMs(raw: string | undefined, fallback: number): number {
   return parsed
 }
 
-const PRIMARY_CHAT_TIMEOUT_MS = parseTimeoutMs(
+const CHAT_TIMEOUT_MS = parseTimeoutMs(
   process.env.SHARD_CHAT_PRIMARY_TIMEOUT_MS,
   65000,
-)
-const FALLBACK_CHAT_TIMEOUT_MS = parseTimeoutMs(
-  process.env.SHARD_CHAT_FALLBACK_TIMEOUT_MS,
-  90000,
 )
 
 export async function GET() {
@@ -31,50 +27,34 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
-  const primaryCandidates = shardBackendUrls("/v1/chat/completions", false)
-  const fallbackCandidates = shardBackendUrls("/v1/chat/completions", true)
-  const allCandidates = Array.from(new Set([...primaryCandidates, ...fallbackCandidates]))
+  const candidates = shardBackendUrls("/v1/chat/completions")
   const startedAt = Date.now()
 
   try {
     const bodyText = await request.text()
     const headers = forwardRequestHeaders()
     const attempts: string[] = []
-    let usedFallback = false
     let response: Response | null = null
     let backendUsed: string | null = null
     let lastFailureKind: "http_5xx" | "timeout" | "other_error" = "other_error"
     let lastBackendStatus: number | null = null
 
-    for (let i = 0; i < allCandidates.length; i += 1) {
-      const candidate = allCandidates[i]
+    for (let i = 0; i < candidates.length; i += 1) {
+      const candidate = candidates[i]
       attempts.push(candidate)
-      const isFallbackCandidate = !primaryCandidates.includes(candidate)
 
-      const timeoutMs = isFallbackCandidate
-        ? FALLBACK_CHAT_TIMEOUT_MS
-        : PRIMARY_CHAT_TIMEOUT_MS
       try {
         const candidateResponse = await fetch(candidate, {
           method: "POST",
           headers,
           body: bodyText,
-          signal: AbortSignal.timeout(timeoutMs),
+          signal: AbortSignal.timeout(CHAT_TIMEOUT_MS),
           cache: "no-store",
         })
 
-        if (candidateResponse.ok) {
+        if (candidateResponse.ok || candidateResponse.status < 500) {
           response = candidateResponse
           backendUsed = candidate
-          usedFallback = isFallbackCandidate
-          lastBackendStatus = candidateResponse.status
-          break
-        }
-
-        if (candidateResponse.status < 500) {
-          response = candidateResponse
-          backendUsed = candidate
-          usedFallback = isFallbackCandidate
           lastBackendStatus = candidateResponse.status
           break
         }
@@ -96,7 +76,7 @@ export async function POST(request: NextRequest) {
       recordChatProxyResult({
         outcome: lastFailureKind,
         attempts: attempts.length,
-        fallback_used: attempts.some((candidate) => !primaryCandidates.includes(candidate)),
+        fallback_used: false,
         latency_ms: Date.now() - startedAt,
       })
       return NextResponse.json(
@@ -112,7 +92,7 @@ export async function POST(request: NextRequest) {
     recordChatProxyResult({
       outcome: response.ok ? "success" : response.status >= 500 ? "http_5xx" : "other_error",
       attempts: attempts.length,
-      fallback_used: usedFallback,
+      fallback_used: false,
       latency_ms: Date.now() - startedAt,
     })
 
@@ -123,7 +103,6 @@ export async function POST(request: NextRequest) {
           "Content-Type": response.headers.get("content-type") || "text/event-stream",
           "Cache-Control": "no-cache",
           Connection: "keep-alive",
-          "X-Shard-Fallback": usedFallback ? "true" : "false",
           "X-Shard-Backend": backendUsed,
           "X-Shard-Backend-Attempts": String(attempts.length),
           "Access-Control-Allow-Origin": "*",
@@ -133,7 +112,7 @@ export async function POST(request: NextRequest) {
 
     const data = await response.json()
     return NextResponse.json(
-      { ...data, backend: backendUsed, backend_attempts: attempts, fallback_used: usedFallback },
+      { ...data, backend: backendUsed, backend_attempts: attempts },
       { status: response.status },
     )
   } catch (error) {
@@ -145,7 +124,7 @@ export async function POST(request: NextRequest) {
     })
     return NextResponse.json(
       {
-        error: "Chat completion failed after fallback attempt",
+        error: "Chat completion failed after failover attempts",
         details: String(error),
       },
       { status: 502 }

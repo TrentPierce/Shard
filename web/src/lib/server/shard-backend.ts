@@ -2,8 +2,8 @@ import { headers } from "next/headers"
 
 // Primary: Cloudflare Tunnel (https, no raw IP issues, browser-friendly)
 const DEFAULT_BACKEND = "https://api.shardnetwork.live"
-// Fallback: raw IP over HTTP (in case tunnel is down)
-const DEFAULT_FALLBACK = "http://35.175.242.222:9091"
+// Fallback: read from env so no IP is hardcoded in source
+const DEFAULT_FALLBACK = process.env.SHARD_FALLBACK_URL || ""
 
 function normalizeUrl(url: string): string {
   return url.trim().replace(/\/$/, "")
@@ -28,7 +28,9 @@ export function shardBackendUrls(path: string = ""): string[] {
   const single = parseUrlList(
     process.env.SHARD_BACKEND_URL || process.env.NEXT_PUBLIC_SHARD_BACKEND_URL,
   )
-  const defaults = [normalizeUrl(DEFAULT_BACKEND), normalizeUrl(DEFAULT_FALLBACK)]
+  const defaults = [DEFAULT_BACKEND, DEFAULT_FALLBACK]
+    .map(normalizeUrl)
+    .filter((u) => u.length > 0)
   return dedupe([...multi, ...single, ...defaults]).map((base) => `${base}${cleanPath}`)
 }
 

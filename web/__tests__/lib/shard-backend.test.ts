@@ -32,7 +32,6 @@ describe("server shard backend selection", () => {
       "http://b:9091/",
       "http://c:9091/",
       "https://api.shardnetwork.live/",
-      "http://35.175.242.222:9091/",
     ])
   })
 
@@ -44,7 +43,24 @@ describe("server shard backend selection", () => {
       "http://a:9091/health",
       "http://b:9091/health",
       "https://api.shardnetwork.live/health",
-      "http://35.175.242.222:9091/health",
+    ])
+  })
+
+  it("includes fallback URL when SHARD_FALLBACK_URL is set", async () => {
+    process.env.SHARD_FALLBACK_URL = "http://10.0.0.5:9091"
+    const { shardBackendUrls } = await import("@/lib/server/shard-backend")
+
+    expect(shardBackendUrls("/health")).toEqual([
+      "https://api.shardnetwork.live/health",
+      "http://10.0.0.5:9091/health",
+    ])
+  })
+
+  it("returns only default backend when no env vars are set", async () => {
+    const { shardBackendUrls } = await import("@/lib/server/shard-backend")
+
+    expect(shardBackendUrls()).toEqual([
+      "https://api.shardnetwork.live/",
     ])
   })
 })

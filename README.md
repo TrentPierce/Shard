@@ -99,6 +99,7 @@ cd web && npm test -- --passWithNoTests
 
 ## Documentation
 
+- **Run a Node**: `docs/run-a-node.md` — quickstart for new node operators
 - Architecture: `docs/architecture.md`
 - Deployment: `docs/deployment.md`
 - Verification protocol: `docs/verification-protocol.md`
