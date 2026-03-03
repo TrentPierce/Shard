@@ -28,6 +28,49 @@ const flow = [
   },
 ]
 
+const quickStart = [
+  {
+    title: "Scout (No Install)",
+    bullets: [
+      "Open shardnetwork.live",
+      "Click Join / Start Contributing",
+      "Keep tab open to contribute WebGPU compute",
+    ],
+  },
+  {
+    title: "Verifier (Docker)",
+    bullets: [
+      "git clone github.com/TrentPierce/Shard",
+      "docker compose up --build shard-daemon -d",
+      "curl localhost:9091/health",
+    ],
+  },
+]
+
+const incentives = [
+  "Compute-for-compute model: contribute capacity, draw capacity when needed.",
+  "No token required to start participating in current contribution flow.",
+  "Practical benefits: lower API spend, burst scaling, infrastructure ownership.",
+]
+
+const charts = [
+  {
+    title: "Computation Time: 1 vs 2 vs 5 vs 10 Nodes",
+    src: "/value-dashboard/performance-vs-nodes.png",
+    alt: "Performance chart comparing response time as active nodes increase",
+  },
+  {
+    title: "Network Contribution Map (Test Data)",
+    src: "/value-dashboard/network-map.png",
+    alt: "World contribution map with sample regional scout and verifier nodes",
+  },
+  {
+    title: "Cost Comparison per 1K Tokens",
+    src: "/value-dashboard/cost-comparison.png",
+    alt: "Cost chart comparing shard contribution mode with centralized API pricing",
+  },
+]
+
 export default function HomePage() {
   const telemetry = useDashboardTelemetry()
   const [probeResult, setProbeResult] = useState<WebGPUProbeResult | null>(null)
@@ -101,7 +144,7 @@ export default function HomePage() {
             )}
             <div className="mb-5 flex flex-wrap items-center gap-3">
               <p className="text-xs font-semibold uppercase tracking-[0.22em] text-accent-400">
-                Shard 0.6.2 Telemetry
+                Shard 0.6.2 | Distributed Inference Mesh
               </p>
               <span
                 className={`inline-flex min-h-7 items-center rounded-full border px-2.5 text-[11px] font-semibold uppercase tracking-[0.14em] ${statusClass}`}
@@ -110,25 +153,42 @@ export default function HomePage() {
               </span>
             </div>
             <h1 className="text-balance text-3xl font-semibold tracking-tight text-ink-50 sm:text-5xl">
-              Browser scouts plus verifier nodes for resilient inference.
+              Reduce AI cost and scale with browser scouts + verifier nodes.
             </h1>
             <p className="mt-5 max-w-2xl text-pretty text-base text-ink-300 sm:text-lg">
-              This release includes bootstrap-ring health checks, overflow routing, and SLA instrumentation across the mesh.
+              In under 10 seconds: Shard is an OpenAI-compatible distributed inference network where scouts draft,
+              verifiers validate, and operators keep ownership of runtime + policy.
             </p>
             <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:items-center">
               <Link
-                href="/chat"
+                href="/start"
                 className="inline-flex min-h-11 items-center justify-center rounded-lg bg-accent-500 px-5 py-2.5 text-sm font-medium text-base-950 transition hover:bg-accent-400"
               >
-                Test the Network
+                Join as Scout
               </Link>
               <Link
-                href="/start"
+                href="/chat"
                 className="inline-flex min-h-11 items-center justify-center rounded-lg border border-ring px-5 py-2.5 text-sm font-medium text-ink-100 transition hover:bg-base-800"
               >
-                Join the Swarm
+                Test Verifier API
               </Link>
             </div>
+          </div>
+        </section>
+
+        <section className="mt-10">
+          <h2 className="text-balance text-xl font-medium text-ink-50 sm:text-2xl">Start Contributing Fast</h2>
+          <div className="mt-4 grid gap-3 md:grid-cols-2">
+            {quickStart.map((card) => (
+              <article key={card.title} className="rounded-2xl border border-ring bg-base-900 p-5">
+                <h3 className="text-lg font-medium text-ink-50">{card.title}</h3>
+                <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-ink-300">
+                  {card.bullets.map((item) => (
+                    <li key={item}>{item}</li>
+                  ))}
+                </ul>
+              </article>
+            ))}
           </div>
         </section>
 
@@ -147,6 +207,40 @@ export default function HomePage() {
               </article>
             ))}
           </div>
+        </section>
+
+        <section className="mt-12">
+          <h2 className="text-balance text-xl font-medium text-ink-50 sm:text-2xl">Shard Value Dashboard</h2>
+          <p className="mt-2 text-sm text-ink-300">
+            Visual proof of performance, participation, and cost position. Charts include staging + sample network data.
+          </p>
+          <div className="mt-4 grid gap-4 lg:grid-cols-3">
+            {charts.map((chart) => (
+              <article key={chart.title} className="rounded-2xl border border-ring bg-base-900 p-4">
+                <h3 className="text-sm font-medium text-ink-100">{chart.title}</h3>
+                <img className="mt-3 w-full rounded-lg border border-ring" src={chart.src} alt={chart.alt} loading="lazy" />
+              </article>
+            ))}
+          </div>
+          <div className="mt-4">
+            <a
+              href="/value-dashboard/shard-value-summary.pdf"
+              className="inline-flex min-h-10 items-center rounded-lg border border-ring px-4 py-2 text-sm font-medium text-ink-100 hover:bg-base-800"
+              target="_blank"
+              rel="noreferrer"
+            >
+              Open One-Page Value Summary (PDF)
+            </a>
+          </div>
+        </section>
+
+        <section className="mt-12">
+          <h2 className="text-balance text-xl font-medium text-ink-50 sm:text-2xl">Participation Incentives</h2>
+          <ul className="mt-4 list-disc space-y-2 pl-5 text-sm text-ink-300">
+            {incentives.map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
         </section>
 
         <section className="mt-12">

@@ -1,77 +1,96 @@
 <div align="center">
   <img src="docs/assets/logo.png" alt="Shard" width="180" />
   <h1>Shard Network</h1>
-  <p><strong>Distributed speculative decoding with browser scouts and verifier daemons.</strong></p>
+  <p><strong>Distributed AI inference with browser Scouts + verifier nodes.</strong></p>
 </div>
 
 [![CI/CD](https://github.com/TrentPierce/Shard/actions/workflows/ci.yml/badge.svg)](https://github.com/TrentPierce/Shard/actions/workflows/ci.yml)
 [![Version](https://img.shields.io/badge/version-0.6.2-blue.svg)](https://github.com/TrentPierce/Shard/releases/tag/v0.6.2)
 [![License: BSL 1.1](https://img.shields.io/badge/License-BSL%201.1-blue.svg)](LICENSE)
 
-## Overview
+## 10-Second Overview
 
-Shard is a full-stack distributed inference project:
+`Shard` is a distributed inference mesh:
 
-- `desktop/rust/`: verifier daemon (libp2p mesh, axum APIs, bootstrap ring, policy controls)
-- `web/`: Next.js Scout UI and telemetry integration (including WebGPU capability probe)
-- `sdk/python/`: typed Python SDK client/resources
-- `benchmarks/`: benchmark harness + distributed orchestrator
-- `integrations/`: overflow router with circuit breaker and SLA enforcer
-- `deploy/`: Docker, Terraform, Kubernetes, and monitoring assets
+- `Scouts` (browser/WebGPU) generate fast draft tokens.
+- `Verifiers` (daemon nodes) validate and stream final responses.
+- You get OpenAI-compatible APIs with overflow + SLA controls while reducing centralized API spend.
 
-## Current Status (v0.6.2)
+## Contribute In < 60 Seconds
 
-Implemented:
+### Scout (no install)
 
-- Phase 1 core deliverables: benchmark harness, WebGPU telemetry path, verification protocol + tests
-- Phase 2 hardening: bootstrap ring config/health tooling, credit-system and failover tests
-- Phase 3 foundations: distributed orchestrator and tensor-parallel + network-policy modules/tests
-- Phase 4 integration: overflow router (`/v1/chat/completions`, `/health`, `/metrics`) with circuit breaker and SLA cooldown enforcement
+1. Open `https://shardnetwork.live`
+2. Click `Join` / `Start Contributing`
+3. Keep tab open to contribute browser compute
 
-Most core tests are green locally/CI; scale-gate tuning for 1000-scout drills is being actively optimized.
-
-## Quickstart
-
-Run daemon with Docker:
+### Verifier (Docker)
 
 ```bash
+git clone https://github.com/TrentPierce/Shard.git
+cd Shard
 docker compose up --build shard-daemon -d
 curl http://localhost:9091/health
 ```
 
-Run web app:
+Required ports for public participation: `4001/tcp`, `9091/tcp`, `9090/udp`, `9092/udp`.
 
+## Install & Setup Paths
+
+- Desktop installers: see [Releases](https://github.com/TrentPierce/Shard/releases/tag/v0.6.2)
+- Web app local:
 ```bash
 cd web
 npm install
 npm run dev
 ```
+- Python SDK:
+```bash
+cd sdk/python
+pip install -e .
+```
 
-Run Python tests:
+## Why It Matters
+
+- Cost control: contribution mode avoids per-token API billing.
+- Scale resilience: add distributed scout/verifier capacity during load spikes.
+- Ownership: run your own inference fabric and policy controls.
+
+## Compute-for-Compute Model
+
+- Contribute compute capacity (Scout or Verifier).
+- Receive network utility by drawing on shared compute when needed.
+- You can participate today without token requirements.
+
+## Shard Value Dashboard
+
+Performance visualization, network map, and cost comparison:
+
+![Performance vs Nodes](docs/assets/value-dashboard/performance-vs-nodes.png)
+
+![Contribution Map](docs/assets/value-dashboard/network-map.png)
+
+![Cost Comparison](docs/assets/value-dashboard/cost-comparison.png)
+
+One-page summary PDF: [`docs/assets/value-dashboard/shard-value-summary.pdf`](docs/assets/value-dashboard/shard-value-summary.pdf)
+
+## Repo Structure
+
+- `desktop/rust/`: verifier daemon (libp2p mesh, API, bootstrap ring, policy controls)
+- `web/`: Next.js Scout UI + telemetry
+- `sdk/python/`: typed Python SDK
+- `benchmarks/`: benchmark harness + distributed orchestrator
+- `integrations/`: overflow router (circuit breaker + SLA enforcer)
+- `deploy/`: Docker, Terraform, Kubernetes, monitoring assets
+
+## Validation Commands
 
 ```bash
+python scripts/verify_versions.py
+cd desktop/rust && cargo test --all-targets && cargo clippy -- -D warnings
 pytest tests/test_verification.py --cov --cov-fail-under=95
 pytest sdk/python/tests/ --cov=sdk/python/shard --cov-fail-under=90 -q
-pytest tests/integration/test_failover.py -v
-pytest tests/test_credit_system.py -v
-pytest integrations/tests/test_sla.py -v
-```
-
-Run Rust tests:
-
-```bash
-cd desktop/rust
-cargo test -p shard-daemon -- --nocapture
-cargo test -p shard-daemon tensor_parallel -- --nocapture
-cargo test -p shard-daemon network_policy -- --nocapture
-```
-
-Run overflow stack drill:
-
-```bash
-docker compose -f docker-compose.overflow.yml up -d --build
-curl http://localhost:8080/health
-curl http://localhost:8080/metrics
+cd web && npm test -- --passWithNoTests
 ```
 
 ## Documentation
