@@ -31,19 +31,25 @@ jobs:
           mkdir -p dist
           cp desktop/rust/target/release/shard-daemon dist/shard-daemon-linux-x86_64
           tar -C dist -czf dist/shard-daemon-linux-x86_64.tar.gz shard-daemon-linux-x86_64
-      - run: python scripts/generate_release_manifest.py --tag "${{ env.RELEASE_TAG }}" --out dist/release-manifest-linux.json --artifact dist/shard-daemon-linux-x86_64 --artifact dist/shard-daemon-linux-x86_64.tar.gz
+      - run: |
+          cp desktop/rust/target/release/shard-gui dist/shard-gui-linux-x86_64
+          tar -C dist -czf dist/shard-linux-x86_64.tar.gz shard-daemon-linux-x86_64 shard-gui-linux-x86_64
+      - run: python scripts/generate_release_manifest.py --tag "${{ env.RELEASE_TAG }}" --out dist/release-manifest-linux.json --artifact dist/shard-daemon-linux-x86_64 --artifact dist/shard-gui-linux-x86_64 --artifact dist/shard-daemon-linux-x86_64.tar.gz --artifact dist/shard-linux-x86_64.tar.gz
       - uses: actions/upload-artifact@v4
         with:
           name: release-linux-bundle
           path: |
             dist/shard-daemon-linux-x86_64
+            dist/shard-gui-linux-x86_64
             dist/shard-daemon-linux-x86_64.tar.gz
+            dist/shard-linux-x86_64.tar.gz
             dist/release-manifest-linux.json
       - if: env.DRY_RUN != 'true'
         uses: softprops/action-gh-release@v1
         with:
           files: |
             dist/shard-daemon-linux-x86_64
+            dist/shard-gui-linux-x86_64
             dist/*.tar.gz
             dist/release-manifest-linux.json
   build-windows:
@@ -61,12 +67,17 @@ jobs:
         run: python scripts/sign_release.py dist/shard-daemon-windows-x86_64.exe
         env:
           WIN_CODESIGN_CERT_BASE64: ${{ secrets.WIN_CODESIGN_CERT_BASE64 }}
-      - run: python scripts/generate_release_manifest.py --tag "${{ env.RELEASE_TAG }}" --out dist/release-manifest-windows.json --artifact dist/shard-daemon-windows-x86_64.exe
+      - run: |
+          Copy-Item desktop/rust/target/release/shard-gui.exe dist/shard-gui-windows-x86_64.exe -Force
+          Compress-Archive -Path dist/shard-daemon-windows-x86_64.exe,dist/shard-gui-windows-x86_64.exe -DestinationPath dist/shard-windows-x86_64.zip
+      - run: python scripts/generate_release_manifest.py --tag "${{ env.RELEASE_TAG }}" --out dist/release-manifest-windows.json --artifact dist/shard-daemon-windows-x86_64.exe --artifact dist/shard-gui-windows-x86_64.exe --artifact dist/shard-windows-x86_64.zip
       - uses: actions/upload-artifact@v4
         with:
           name: release-windows-bundle
           path: |
             dist/shard-daemon-windows-x86_64.exe
+            dist/shard-gui-windows-x86_64.exe
+            dist/shard-windows-x86_64.zip
             dist/release-manifest-windows.json
       - if: env.DRY_RUN != 'true'
         uses: softprops/action-gh-release@v1
@@ -82,20 +93,26 @@ jobs:
           mkdir -p dist
           cp desktop/rust/target/release/shard-daemon dist/shard-daemon-macos
           tar -C dist -czf dist/shard-daemon-macos.tar.gz shard-daemon-macos
-      - run: python scripts/generate_release_manifest.py --tag "${{ env.RELEASE_TAG }}" --out dist/release-manifest-macos.json --artifact dist/shard-daemon-macos --artifact dist/shard-daemon-macos.tar.gz
+      - run: |
+          cp desktop/rust/target/release/shard-gui dist/shard-gui-macos
+          tar -C dist -czf dist/shard-macos.tar.gz shard-daemon-macos shard-gui-macos
+      - run: python scripts/generate_release_manifest.py --tag "${{ env.RELEASE_TAG }}" --out dist/release-manifest-macos.json --artifact dist/shard-daemon-macos --artifact dist/shard-gui-macos --artifact dist/shard-daemon-macos.tar.gz --artifact dist/shard-macos.tar.gz
       - uses: actions/upload-artifact@v4
         with:
           name: release-macos-bundle
           path: |
             dist/shard-daemon-macos
+            dist/shard-gui-macos
             dist/shard-daemon-macos.tar.gz
+            dist/shard-macos.tar.gz
             dist/release-manifest-macos.json
       - if: env.DRY_RUN != 'true'
         uses: softprops/action-gh-release@v1
         with:
           files: |
             dist/shard-daemon-macos
-            dist/shard-daemon-macos.tar.gz
+            dist/shard-gui-macos
+            dist/*.tar.gz
             dist/release-manifest-macos.json
   publish-python-sdk:
     runs-on: ubuntu-latest

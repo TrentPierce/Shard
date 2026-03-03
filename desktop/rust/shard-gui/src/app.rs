@@ -2,8 +2,12 @@ use anyhow::Result;
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 use std::fs;
+use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
 use std::sync::Arc;
 use tokio::sync::Mutex;
+
+use crate::process::{find_daemon_binary, DAEMON_ARGS};
+use crate::tray::TrayManager;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct AppConfig {
@@ -23,7 +27,7 @@ impl Default for AppConfig {
             max_ram_gb: 8.0,
             max_vram_gb: 4.0,
             listen_port: 4001,
-            auto_start: false,
+            auto_start: true,
         }
     }
 }
@@ -67,30 +71,35 @@ pub struct ShardApp {
     // Telemetry
     pub node_role: String,
     pub active_peers: usize,
+    pub active_scouts: usize,
     pub tokens_generated: u64,
     pub uptime: String,
-    pub vram_alloc_gb: f32,
-    pub vram_limit_gb: f32,
     pub reject_rate: f32,
+    pub acceptance_rate: f32,
     pub nat_status: String,
     pub relay_status: String,
+    pub daemon_online: bool,
     pub process_manager: Arc<Mutex<crate::process::ProcessManager>>,
     pub telemetry_rx: Option<tokio::sync::mpsc::Receiver<TelemetryUpdate>>,
-    pub download_progress: Option<f32>,
-    pub is_downloading: bool,
+    // Tray (owned here so it lives on the main thread, satisfying !Send on macOS)
+    tray_manager: TrayManager,
+    // Signals from tray menu events
+    pub show_signal: Arc<AtomicBool>,
+    pub quit_signal: Arc<AtomicBool>,
+    pub pause_signal: Arc<AtomicBool>,
 }
 
 #[derive(Clone, Debug)]
 pub struct TelemetryUpdate {
     pub role: String,
     pub peers: usize,
+    pub active_scouts: usize,
     pub tokens: u64,
     pub uptime: String,
-    pub vram_alloc_gb: f32,
-    pub vram_limit_gb: f32,
     pub reject_rate: f32,
     pub nat_status: String,
     pub relay_status: String,
+    pub daemon_online: bool,
 }
 
 impl ShardApp {
@@ -98,30 +107,49 @@ impl ShardApp {
         cc: &eframe::CreationContext<'_>,
         pm: Arc<Mutex<crate::process::ProcessManager>>,
         rx: tokio::sync::mpsc::Receiver<TelemetryUpdate>,
+        tray_manager: TrayManager,
+        show_signal: Arc<AtomicBool>,
+        quit_signal: Arc<AtomicBool>,
+        pause_signal: Arc<AtomicBool>,
     ) -> Self {
-        // Customize look
         let mut visuals = egui::Visuals::dark();
         visuals.window_rounding = 8.0.into();
         cc.egui_ctx.set_visuals(visuals);
 
+        let config = AppConfig::load();
+
+        let started = if config.auto_start {
+            let binary = find_daemon_binary();
+            pm.blocking_lock().start(&binary, DAEMON_ARGS).is_ok()
+        } else {
+            false
+        };
+
         Self {
             view: View::Dashboard,
-            config: AppConfig::load(),
-            status: "Idle".to_string(),
-            is_running: false,
+            status: if started {
+                "Starting...".to_string()
+            } else {
+                "Idle".to_string()
+            },
+            is_running: started,
             node_role: "Scout".to_string(),
             active_peers: 0,
+            active_scouts: 0,
             tokens_generated: 0,
             uptime: "00:00:00".to_string(),
-            vram_alloc_gb: 0.0,
-            vram_limit_gb: 0.0,
             reject_rate: 0.0,
+            acceptance_rate: 0.0,
             nat_status: "unknown".to_string(),
             relay_status: "unknown".to_string(),
+            daemon_online: false,
             process_manager: pm,
             telemetry_rx: Some(rx),
-            download_progress: None,
-            is_downloading: false,
+            tray_manager,
+            show_signal,
+            quit_signal,
+            pause_signal,
+            config,
         }
     }
 
@@ -130,70 +158,78 @@ impl ShardApp {
             while let Ok(update) = rx.try_recv() {
                 self.node_role = update.role;
                 self.active_peers = update.peers;
+                self.active_scouts = update.active_scouts;
                 self.tokens_generated = update.tokens;
                 self.uptime = update.uptime;
-                self.vram_alloc_gb = update.vram_alloc_gb;
-                self.vram_limit_gb = update.vram_limit_gb;
                 self.reject_rate = update.reject_rate;
+                self.acceptance_rate = 1.0 - update.reject_rate;
                 self.nat_status = update.nat_status;
                 self.relay_status = update.relay_status;
-            }
-        }
-    }
-
-    fn ensure_assets(&mut self) -> bool {
-        let models_dir = if let Some(proj_dirs) = ProjectDirs::from("com", "shard", "Shard") {
-            let data_dir = proj_dirs.data_dir();
-            let models_dir = data_dir.join("models");
-            fs::create_dir_all(&models_dir).ok();
-            models_dir
-        } else {
-            return false;
-        };
-
-        let default_model_filename = "Llama-3.2-1B-Instruct-Q4_K_M.gguf";
-        let model_path = models_dir.join(default_model_filename);
-
-        if !model_path.exists() {
-            if !self.is_downloading {
-                self.start_download(
-                    "https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q4_K_M.gguf",
-                    model_path.clone()
-                );
-            }
-            return false;
-        }
-
-        if self.config.bitnet_model_path.is_empty() {
-            self.config.bitnet_model_path = model_path.display().to_string();
-            let _ = self.config.save();
-        }
-
-        true
-    }
-
-    fn start_download(&mut self, url: &str, dest: std::path::PathBuf) {
-        self.is_downloading = true;
-        self.status = "Downloading assets...".to_string();
-        self.download_progress = Some(0.0);
-
-        // In a real implementation, we'd use a more sophisticated download task
-        // for now, we'll simulate it or use reqwest in a thread
-        let url = url.to_string();
-        tokio::spawn(async move {
-            if let Ok(response) = reqwest::get(url).await {
-                if let Ok(bytes) = response.bytes().await {
-                    let _ = fs::write(dest, bytes);
+                self.daemon_online = update.daemon_online;
+                if update.daemon_online && self.is_running {
+                    self.status = "Contributing".to_string();
                 }
             }
-        });
+        }
+    }
+
+    fn update_tray_tooltip(&self) {
+        let tooltip = if self.daemon_online {
+            format!(
+                "Shard Node \u{2014} Contributing ({} peers)",
+                self.active_peers
+            )
+        } else if self.is_running {
+            "Shard Node \u{2014} Starting...".to_string()
+        } else {
+            "Shard Node".to_string()
+        };
+        self.tray_manager.update_tooltip(&tooltip);
     }
 }
 
 impl eframe::App for ShardApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.poll_telemetry();
+        self.update_tray_tooltip();
         ctx.request_repaint_after(std::time::Duration::from_millis(500));
+
+        // Close → minimize to tray instead of quitting
+        if ctx.input(|i| i.viewport().close_requested()) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+        }
+
+        // Act on tray signals
+        if self.show_signal.swap(false, Relaxed) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+        }
+
+        if self.quit_signal.swap(false, Relaxed) {
+            self.process_manager.blocking_lock().stop().ok();
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        }
+
+        if self.pause_signal.swap(false, Relaxed) {
+            if self.is_running {
+                self.process_manager.blocking_lock().stop().ok();
+                self.is_running = false;
+                self.daemon_online = false;
+                self.status = "Idle".to_string();
+            } else {
+                let binary = find_daemon_binary();
+                if self
+                    .process_manager
+                    .blocking_lock()
+                    .start(&binary, DAEMON_ARGS)
+                    .is_ok()
+                {
+                    self.is_running = true;
+                    self.status = "Starting...".to_string();
+                }
+            }
+        }
 
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.horizontal(|ui| {
@@ -223,103 +259,73 @@ impl eframe::App for ShardApp {
 
 impl ShardApp {
     fn ui_dashboard(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Node Dashboard");
+        // Status banner
+        let (dot_color, status_label) = if self.daemon_online {
+            (egui::Color32::from_rgb(0x22, 0xC5, 0x5E), "Contributing")
+        } else if self.is_running {
+            (egui::Color32::from_rgb(0xEA, 0xB3, 0x08), "Starting...")
+        } else {
+            (egui::Color32::from_rgb(0xEF, 0x44, 0x44), "Stopped")
+        };
+
+        ui.horizontal(|ui| {
+            ui.colored_label(dot_color, "\u{25CF}"); // filled circle ●
+            ui.label(egui::RichText::new(status_label).strong().color(dot_color));
+        });
+
         ui.add_space(10.0);
 
-        if self.is_downloading {
-            ui.vertical_centered(|ui| {
-                ui.label("Downloading default model (Llama-3.2-1B)...");
-                if let Some(p) = self.download_progress {
-                    ui.add(egui::ProgressBar::new(p).show_percentage());
-                } else {
-                    ui.spinner();
-                }
-                ui.label("This may take a few minutes depending on your connection.");
-            });
-            ui.add_space(10.0);
-
-            // Simple check to see if download finished
-            if let Some(proj_dirs) = ProjectDirs::from("com", "shard", "Shard") {
-                let model_path = proj_dirs
-                    .data_dir()
-                    .join("models")
-                    .join("Llama-3.2-1B-Instruct-Q4_K_M.gguf");
-                if model_path.exists() {
-                    self.is_downloading = false;
-                    self.status = "Idle".to_string();
-                    self.config.bitnet_model_path = model_path.display().to_string();
-                    let _ = self.config.save();
-                }
-            }
-        }
-
+        // Start / Stop controls
         ui.horizontal(|ui| {
             if self.is_running {
                 if ui.button("Stop Node").clicked() {
                     let mut pm = self.process_manager.blocking_lock();
                     if pm.stop().is_ok() {
                         self.is_running = false;
+                        self.daemon_online = false;
                         self.status = "Idle".to_string();
                     }
                 }
-            } else if ui.button("Start Node").clicked() && self.ensure_assets() {
+            } else if ui.button("Start Node").clicked() {
+                let binary = find_daemon_binary();
                 let mut pm = self.process_manager.blocking_lock();
-                // Example: start the daemon
-                if pm
-                    .start("shard-daemon.exe", &["--control-port", "9091"])
-                    .is_ok()
-                {
+                if pm.start(&binary, DAEMON_ARGS).is_ok() {
                     self.is_running = true;
-                    self.status = "Running".to_string();
+                    self.status = "Starting...".to_string();
                 }
             }
-            ui.label(format!("Status: {}", self.status));
         });
 
-        ui.add_space(20.0);
+        ui.add_space(16.0);
 
+        // Stats grid
         egui::Grid::new("metrics_grid")
             .num_columns(2)
             .spacing([40.0, 10.0])
             .striped(true)
             .show(ui, |ui| {
-                ui.label("Node Role:");
-                ui.label(&self.node_role);
+                ui.label("Connected Peers:");
+                ui.label(self.active_peers.to_string());
                 ui.end_row();
 
-                ui.label("Active Mesh Peers:");
-                ui.label(self.active_peers.to_string());
+                ui.label("Active Scouts:");
+                ui.label(self.active_scouts.to_string());
                 ui.end_row();
 
                 ui.label("Tokens Generated:");
                 ui.label(self.tokens_generated.to_string());
                 ui.end_row();
 
+                ui.label("Acceptance Rate:");
+                ui.label(format!("{:.1}%", self.acceptance_rate * 100.0));
+                ui.end_row();
+
                 ui.label("Uptime:");
                 ui.label(&self.uptime);
                 ui.end_row();
 
-                ui.label("VRAM Alloc (GB):");
-                if self.vram_limit_gb > 0.0 {
-                    ui.label(format!(
-                        "{:.2} / {:.2}",
-                        self.vram_alloc_gb, self.vram_limit_gb
-                    ));
-                } else {
-                    ui.label(format!("{:.2}", self.vram_alloc_gb));
-                }
-                ui.end_row();
-
-                ui.label("Reject Rate:");
-                ui.label(format!("{:.1}%", self.reject_rate * 100.0));
-                ui.end_row();
-
                 ui.label("NAT Status:");
                 ui.label(&self.nat_status);
-                ui.end_row();
-
-                ui.label("Relay Status:");
-                ui.label(&self.relay_status);
                 ui.end_row();
             });
     }
@@ -364,6 +370,10 @@ impl ShardApp {
 
                 ui.label("Listen Port:");
                 ui.add(egui::DragValue::new(&mut self.config.listen_port).range(1024..=65535));
+                ui.end_row();
+
+                ui.label("Auto-start on launch:");
+                ui.checkbox(&mut self.config.auto_start, "");
                 ui.end_row();
             });
 
