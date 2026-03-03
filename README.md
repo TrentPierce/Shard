@@ -1,30 +1,32 @@
 <div align="center">
   <img src="docs/assets/logo.png" alt="Shard" width="180" />
   <h1>Shard Network</h1>
-  <p><strong>Distributed AI inference with browser Scouts + verifier nodes.</strong></p>
+  <p><strong>Distributed AI inference — browser Scouts generate drafts, Verifier nodes validate and stream responses.</strong></p>
 </div>
 
 [![CI/CD](https://github.com/TrentPierce/Shard/actions/workflows/ci.yml/badge.svg)](https://github.com/TrentPierce/Shard/actions/workflows/ci.yml)
 [![Version](https://img.shields.io/badge/version-0.6.2-blue.svg)](https://github.com/TrentPierce/Shard/releases/tag/v0.6.2)
 [![License: BSL 1.1](https://img.shields.io/badge/License-BSL%201.1-blue.svg)](LICENSE)
 
-## 10-Second Overview
+---
 
-`Shard` is a distributed inference mesh:
+## How It Works
 
-- `Scouts` (browser/WebGPU) generate fast draft tokens.
-- `Verifiers` (daemon nodes) validate and stream final responses.
-- You get OpenAI-compatible APIs with overflow + SLA controls while reducing centralized API spend.
+1. **Scout** (browser, WebGPU) — joins the network via `shardnetwork.live`, generates speculative draft tokens.
+2. **Verifier** (daemon node) — validates drafts using KL-divergence, completes generation, streams the response.
+3. Clients call a standard **OpenAI-compatible API** (`/v1/chat/completions`).
 
-## Contribute In < 60 Seconds
+---
 
-### Scout (no install)
+## Contribute in Under 60 Seconds
 
-1. Open `https://shardnetwork.live`
-2. Click `Join` / `Start Contributing`
-3. Keep tab open to contribute browser compute
+### Scout — no install required
 
-### Verifier (Docker)
+1. Open [shardnetwork.live](https://shardnetwork.live)
+2. Click **Join** or **Start Contributing**
+3. Keep the tab open to contribute browser GPU compute
+
+### Verifier Node — Docker
 
 ```bash
 git clone https://github.com/TrentPierce/Shard.git
@@ -33,81 +35,87 @@ docker compose up --build shard-daemon -d
 curl http://localhost:9091/health
 ```
 
-Required ports for public participation: `4001/tcp`, `9091/tcp`, `9090/udp`, `9092/udp`.
+Required open ports: `4001/tcp`, `9091/tcp`, `9090/udp`, `9092/udp`
 
-## Install & Setup Paths
+See [docs/run-a-node.md](docs/run-a-node.md) for the full quickstart, including binary install and health verification.
 
-- Desktop installers: see [Releases](https://github.com/TrentPierce/Shard/releases/tag/v0.6.2)
-- Web app local:
+---
+
+## Development
+
 ```bash
-cd web
-npm install
-npm run dev
+make setup      # install all dependencies (Rust + web)
+make dev        # start daemon + web UI locally
+make test       # run all test suites (Rust + web + Python)
+make lint       # run all linters
+make docker     # start full stack via Docker Compose
 ```
-- Python SDK:
+
+Individual targets:
+
 ```bash
-cd sdk/python
-pip install -e .
+make dev-daemon   # Rust daemon only (port 9091)
+make dev-web      # Next.js UI only (port 3000)
+make test-rust    # cargo test
+make test-web     # jest
 ```
 
-## Why It Matters
-
-- Cost control: contribution mode avoids per-token API billing.
-- Scale resilience: add distributed scout/verifier capacity during load spikes.
-- Ownership: run your own inference fabric and policy controls.
-
-## Compute-for-Compute Model
-
-- Contribute compute capacity (Scout or Verifier).
-- Receive network utility by drawing on shared compute when needed.
-- You can participate today without token requirements.
-
-## Shard Value Dashboard
-
-Performance visualization, network map, and cost comparison:
-
-- Performance chart now uses validated benchmark summaries only.
-- Node counts without measured runs (`1`, `5`, `10`) are marked `pending validation` instead of estimated.
-- Phase 3/4 summary in the PDF reflects current recorded metrics (including failed gates when present).
-
-![Performance vs Nodes](docs/assets/value-dashboard/performance-vs-nodes.png)
-
-![Contribution Map](docs/assets/value-dashboard/network-map.png)
-
-![Cost Comparison](docs/assets/value-dashboard/cost-comparison.png)
-
-One-page summary PDF: [`docs/assets/value-dashboard/shard-value-summary.pdf`](docs/assets/value-dashboard/shard-value-summary.pdf)
+---
 
 ## Repo Structure
 
-- `desktop/rust/`: verifier daemon (libp2p mesh, API, bootstrap ring, policy controls)
-- `web/`: Next.js Scout UI + telemetry
-- `sdk/python/`: typed Python SDK
-- `benchmarks/`: benchmark harness + distributed orchestrator
-- `integrations/`: overflow router (circuit breaker + SLA enforcer)
-- `deploy/`: Docker, Terraform, Kubernetes, monitoring assets
+```
+desktop/rust/       Verifier daemon — libp2p mesh, API, bootstrap ring, canary rollout
+  crates/           Modular crates: common, crypto, gateway, ledger, metrics, network, scheduler, verifier
+  daemon/           Binary entrypoint
+web/                Next.js Scout UI + OpenAI-compatible proxy API routes
+sdk/python/         Typed Python client (OpenAI-compatible, httpx + pydantic)
+cpp/                llama.cpp inference library + C bridge
+integrations/       Overflow router with circuit breaker and SLA enforcement
+benchmarks/         Distributed benchmark harness and scenario runner
+deploy/             Docker Compose, Terraform, Kubernetes, Prometheus + Grafana configs
+installers/         Platform packages: Linux, macOS, Windows, Homebrew, winget
+scripts/            Build, release, version sync, and signing automation
+tests/              Root-level Python tests (verification engine, credit system)
+docs/               Architecture, deployment, API, and operations documentation
+```
 
-## Validation Commands
+---
+
+## Python SDK
 
 ```bash
-python scripts/verify_versions.py
-cd desktop/rust && cargo test --all-targets && cargo clippy -- -D warnings
-pytest tests/test_verification.py --cov --cov-fail-under=95
-pytest sdk/python/tests/ --cov=sdk/python/shard --cov-fail-under=90 -q
-cd web && npm test -- --passWithNoTests
+pip install -e sdk/python
 ```
+
+```python
+from shard import ShardClient
+
+client = ShardClient(base_url="http://localhost:9091")
+response = client.chat.completions.create(
+    model="default",
+    messages=[{"role": "user", "content": "Hello"}],
+)
+print(response.choices[0].message.content)
+```
+
+---
 
 ## Documentation
 
-- **Run a Node**: `docs/run-a-node.md` — quickstart for new node operators
-- Architecture: `docs/architecture.md`
-- Deployment: `docs/deployment.md`
-- Verification protocol: `docs/verification-protocol.md`
-- Tensor parallelism: `docs/tensor-parallelism.md`
-- Enterprise VPC mode: `docs/enterprise-vpc-deployment.md`
-- SLA definition: `docs/sla.md`
-- Contributing: `docs/contributing.md`
+| Guide | Description |
+|-------|-------------|
+| [run-a-node.md](docs/run-a-node.md) | Quickstart for new node operators |
+| [architecture.md](docs/architecture.md) | System design and request flow |
+| [deployment.md](docs/deployment.md) | Environment variables and HA setup |
+| [api.md](docs/api.md) | API reference |
+| [verification-protocol.md](docs/verification-protocol.md) | Draft token validation protocol |
+| [contributing.md](docs/contributing.md) | Contribution guidelines |
+| [sla.md](docs/sla.md) | SLA definition and thresholds |
+| [enterprise-vpc-deployment.md](docs/enterprise-vpc-deployment.md) | Private VPC deployment |
+
+---
 
 ## License
 
-Business Source License 1.1 (BSL 1.1). See `LICENSE`.
+Business Source License 1.1 (BSL 1.1). See [LICENSE](LICENSE).

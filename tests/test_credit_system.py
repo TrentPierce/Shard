@@ -5,7 +5,7 @@ import time
 
 import pytest
 
-from credit_system import InvalidPoW, SybilDetector, WalletRateLimiter
+from shard.credit import InvalidPoW, SybilDetector, WalletRateLimiter
 
 
 def test_normal_earning_succeeds():

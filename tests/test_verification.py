@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from unittest.mock import Mock, patch
 
-from verification import VerificationEngine
+from shard.verification import VerificationEngine
 
 
 def _peaked_logits(index: int, size: int = 8, peak: float = 8.0, other: float = -2.0) -> list[float]:
@@ -91,7 +91,7 @@ def test_golden_ticket_audit_triggered():
 
     engine = VerificationEngine(audit_probability=0.1)
 
-    with patch("verification.random.random", return_value=0.01):
+    with patch("shard.verification.random.random", return_value=0.01):
         triggered = engine.maybe_run_golden_ticket_audit("wallet-a", "p", [1, 2, 4], verifier)
 
     assert triggered is True
@@ -105,7 +105,7 @@ def test_golden_ticket_wallet_flagging():
     verifier.generate_full.return_value = [7, 7, 7, 7]
     engine = VerificationEngine(audit_probability=1.0, audit_min_score_pct=80.0)
 
-    with patch("verification.random.random", return_value=0.0):
+    with patch("shard.verification.random.random", return_value=0.0):
         for _ in range(3):
             engine.maybe_run_golden_ticket_audit("wallet-b", "prompt", [1, 1, 1, 1], verifier)
 
