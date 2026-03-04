@@ -142,6 +142,9 @@ export default function HomePage() {
                   : "Your browser is in viewer mode (WebGPU not available)"}
               </div>
             )}
+            <div className="mb-6 flex justify-center sm:justify-start">
+              <img src="/icon-192.png" alt="Shard Network" className="h-16 w-16 rounded-2xl sm:h-20 sm:w-20" />
+            </div>
             <div className="mb-5 flex flex-wrap items-center gap-3">
               <p className="text-xs font-semibold uppercase tracking-[0.22em] text-accent-400">
                 Shard 0.6.2 | Distributed Inference Mesh
