@@ -14,6 +14,7 @@ export interface DraftResponse {
   status?: number
   retried?: number
   transient_error?: boolean
+  retry_after_ms?: number
 }
 
 export interface ScoutConfig {
@@ -335,6 +336,7 @@ export function getScoutId(): string {
 function shouldRetrySubmission(result: DraftResponse): boolean {
   if (result.ok) return false
   if (result.transient_error) return true
+  if ((result.status ?? 0) === 429 || (result.status ?? 0) === 503) return true
   if ((result.status ?? 0) >= 500) return true
   return isTransientDetail(result.detail ?? "")
 }
@@ -362,7 +364,13 @@ async function submitDraftOnce(
     if (!response.ok) {
       const error = (await response.json().catch(() => ({}))) as DraftResponse
       const detail = error.detail || `HTTP ${response.status}`
-      const transientError = Boolean(error.transient_error) || response.status >= 500 || isTransientDetail(detail)
+      const retryAfterMs = Number(error.retry_after_ms ?? 0) || undefined
+      const transientError =
+        Boolean(error.transient_error) ||
+        response.status === 429 ||
+        response.status === 503 ||
+        response.status >= 500 ||
+        isTransientDetail(detail)
       void reportScoutClientEvent(
         "submit_http_error",
         detail,
@@ -374,6 +382,7 @@ async function submitDraftOnce(
         detail,
         status: response.status,
         transient_error: transientError,
+        retry_after_ms: retryAfterMs,
       }
     }
 
@@ -435,7 +444,9 @@ async function submitWithRetry(
         retried: attempt,
       }
     }
-    await sleep(getJitteredBackoff(cfg.retryBackoffMs, attempt, cfg.maxRetryBackoffMs))
+    const serverDelay = Math.max(0, Number(result.retry_after_ms ?? 0))
+    const clientDelay = getJitteredBackoff(cfg.retryBackoffMs, attempt, cfg.maxRetryBackoffMs)
+    await sleep(Math.max(serverDelay, clientDelay))
     attempt += 1
   }
   return { ok: false, detail: "Draft submission retry budget exhausted", retried: cfg.maxRetries }
@@ -546,6 +557,7 @@ export interface WorkItem {
   } | null
   transient_error?: boolean
   detail?: string
+  retry_after_ms?: number
 }
 
 export async function pollForWork(
@@ -579,16 +591,27 @@ export async function pollForWork(
       )
       clearTimeout(timeoutId)
       if (!response.ok) {
-        if (response.status >= 500 && attempt < cfg.pollRetries) {
-          await sleep(getJitteredBackoff(cfg.pollRetryBackoffMs, attempt, cfg.pollMaxRetryBackoffMs))
+        const payload = (await response.json().catch(() => ({}))) as WorkItem
+        const retryAfterMs = Math.max(0, Number(payload.retry_after_ms ?? 0))
+        const transientStatus = response.status === 429 || response.status === 503 || response.status >= 500
+        if (transientStatus && attempt < cfg.pollRetries) {
+          const clientDelay = getJitteredBackoff(cfg.pollRetryBackoffMs, attempt, cfg.pollMaxRetryBackoffMs)
+          await sleep(Math.max(retryAfterMs, clientDelay))
           attempt += 1
           continue
         }
-        return { work: null, detail: `HTTP ${response.status}`, transient_error: response.status >= 500 }
+        return {
+          work: null,
+          detail: payload.detail || `HTTP ${response.status}`,
+          transient_error: transientStatus,
+          retry_after_ms: retryAfterMs || undefined,
+        }
       }
       const payload = (await response.json()) as WorkItem
       if (payload.transient_error && attempt < cfg.pollRetries) {
-        await sleep(getJitteredBackoff(cfg.pollRetryBackoffMs, attempt, cfg.pollMaxRetryBackoffMs))
+        const serverDelay = Math.max(0, Number(payload.retry_after_ms ?? 0))
+        const clientDelay = getJitteredBackoff(cfg.pollRetryBackoffMs, attempt, cfg.pollMaxRetryBackoffMs)
+        await sleep(Math.max(serverDelay, clientDelay))
         attempt += 1
         continue
       }

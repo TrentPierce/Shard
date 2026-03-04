@@ -315,6 +315,25 @@ const DEFAULT_SCOUT_BACKPRESSURE_MEDIUM_QUEUE_DEPTH: usize = 512;
 const DEFAULT_SCOUT_BACKPRESSURE_HIGH_QUEUE_DEPTH: usize = 768;
 const DEFAULT_SCOUT_BACKPRESSURE_LATENCY_WARN_MS: u64 = 3_000;
 const DEFAULT_SCOUT_BACKPRESSURE_LATENCY_SEVERE_MS: u64 = 6_000;
+const DEFAULT_SCOUT_ADMISSION_QUEUE_DEPTH: usize = 5;
+const DEFAULT_SCOUT_ADMISSION_QUEUE_HARD_DEPTH: usize = 10;
+const DEFAULT_SCOUT_ADMISSION_LATENCY_SOFT_MS: u64 = 4_500;
+const DEFAULT_SCOUT_ADMISSION_LATENCY_HARD_MS: u64 = 6_000;
+const DEFAULT_SCOUT_ADMISSION_RETRY_MIN_MS: u64 = 250;
+const DEFAULT_SCOUT_ADMISSION_RETRY_MAX_MS: u64 = 4_000;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ScoutAdmissionMode {
+    Allow,
+    SoftBackpressure,
+    HardCircuit,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct ScoutAdmissionDecision {
+    mode: ScoutAdmissionMode,
+    retry_after_ms: u64,
+}
 
 fn scout_work_max_age_ms() -> u128 {
     static MAX_AGE_MS: std::sync::OnceLock<u128> = std::sync::OnceLock::new();
@@ -409,6 +428,82 @@ fn scout_backpressure_latency_severe_ms() -> u64 {
         .and_then(|v| v.trim().parse::<u64>().ok())
         .filter(|v| *v > 0)
         .unwrap_or(DEFAULT_SCOUT_BACKPRESSURE_LATENCY_SEVERE_MS)
+}
+
+fn scout_admission_queue_depth() -> usize {
+    std::env::var("SHARD_SCOUT_ADMISSION_QUEUE_DEPTH")
+        .ok()
+        .and_then(|v| v.trim().parse::<usize>().ok())
+        .filter(|v| *v > 0)
+        .unwrap_or(DEFAULT_SCOUT_ADMISSION_QUEUE_DEPTH)
+}
+
+fn scout_admission_queue_hard_depth() -> usize {
+    std::env::var("SHARD_SCOUT_ADMISSION_QUEUE_HARD_DEPTH")
+        .ok()
+        .and_then(|v| v.trim().parse::<usize>().ok())
+        .filter(|v| *v > 0)
+        .unwrap_or(DEFAULT_SCOUT_ADMISSION_QUEUE_HARD_DEPTH)
+}
+
+fn scout_admission_latency_soft_ms() -> u64 {
+    std::env::var("SHARD_SCOUT_ADMISSION_LATENCY_SOFT_MS")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .filter(|v| *v > 0)
+        .unwrap_or(DEFAULT_SCOUT_ADMISSION_LATENCY_SOFT_MS)
+}
+
+fn scout_admission_latency_hard_ms() -> u64 {
+    std::env::var("SHARD_SCOUT_ADMISSION_LATENCY_HARD_MS")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .filter(|v| *v > 0)
+        .unwrap_or(DEFAULT_SCOUT_ADMISSION_LATENCY_HARD_MS)
+}
+
+fn scout_admission_retry_after_ms(
+    queue_depth: usize,
+    avg_latency_ms: u64,
+    p95_latency_ms: u64,
+) -> u64 {
+    let min_retry = DEFAULT_SCOUT_ADMISSION_RETRY_MIN_MS;
+    let max_retry = DEFAULT_SCOUT_ADMISSION_RETRY_MAX_MS;
+    let queue_penalty = queue_depth.saturating_mul(120) as u64;
+    let lat_penalty = ((avg_latency_ms.max(p95_latency_ms)) / 8).min(3_000);
+    min_retry
+        .saturating_add(queue_penalty)
+        .saturating_add(lat_penalty)
+        .clamp(min_retry, max_retry)
+}
+
+fn scout_admission_decision(
+    queue_depth: usize,
+    avg_latency_ms: u64,
+    p95_latency_ms: u64,
+) -> ScoutAdmissionDecision {
+    let soft_queue = scout_admission_queue_depth();
+    let hard_queue = scout_admission_queue_hard_depth().max(soft_queue);
+    let soft_latency = scout_admission_latency_soft_ms();
+    let hard_latency = scout_admission_latency_hard_ms().max(soft_latency);
+
+    let mode = if queue_depth >= hard_queue
+        || avg_latency_ms >= hard_latency
+        || p95_latency_ms >= hard_latency
+    {
+        ScoutAdmissionMode::HardCircuit
+    } else if queue_depth >= soft_queue
+        || avg_latency_ms >= soft_latency
+        || p95_latency_ms >= soft_latency
+    {
+        ScoutAdmissionMode::SoftBackpressure
+    } else {
+        ScoutAdmissionMode::Allow
+    };
+    ScoutAdmissionDecision {
+        mode,
+        retry_after_ms: scout_admission_retry_after_ms(queue_depth, avg_latency_ms, p95_latency_ms),
+    }
 }
 
 fn deterministic_sample_bucket(scout_id: &str, window: u128, modulus: u64) -> u64 {
@@ -1198,20 +1293,51 @@ pub(crate) async fn ensure_pow_verified(
 pub(crate) async fn pop_work_handler(
     AxumState(state): AxumState<SharedState>,
     Query(query): Query<ScoutWorkQuery>,
-) -> Json<serde_json::Value> {
+) -> Result<Json<serde_json::Value>, (axum::http::StatusCode, Json<serde_json::Value>)> {
     let scout_id = match require_scout_id(&query) {
         Ok(value) => value,
-        Err(response) => return response,
+        Err(response) => return Err((axum::http::StatusCode::BAD_REQUEST, response)),
     };
     if let Err(response) = ensure_pow_verified(&state, scout_id).await {
-        return response;
+        return Err((axum::http::StatusCode::FORBIDDEN, response));
     }
     state.system_metrics.inc_scout_work_poll();
     let mut queue = state.scout_work.lock().await;
     let now = now_ms();
     let queue_depth = queue.len();
-    let avg_latency_ms = state.avg_latency_ms.load(Ordering::Relaxed);
-    if scout_assignment_backpressured(scout_id, queue_depth, avg_latency_ms as u64, now) {
+    let avg_latency_ms = state.avg_latency_ms.load(Ordering::Relaxed) as u64;
+    let p95_latency_ms = state.gossipsub_latency_hist.percentiles().p95_ms;
+    let admission = scout_admission_decision(queue_depth, avg_latency_ms, p95_latency_ms);
+    if admission.mode != ScoutAdmissionMode::Allow {
+        state.system_metrics.inc_scout_work_empty_poll();
+        let detail = if admission.mode == ScoutAdmissionMode::HardCircuit {
+            "scout_circuit_open"
+        } else {
+            "scout_backpressure_active"
+        };
+        tracing::debug!(
+            scout_id = %scout_id,
+            queue_depth,
+            avg_latency_ms,
+            p95_latency_ms,
+            retry_after_ms = admission.retry_after_ms,
+            detail,
+            "rejecting scout work poll due to verifier load"
+        );
+        return Err((
+            axum::http::StatusCode::TOO_MANY_REQUESTS,
+            Json(serde_json::json!({
+                "work": null,
+                "transient_error": true,
+                "detail": detail,
+                "queue_depth": queue_depth,
+                "average_latency_ms": avg_latency_ms,
+                "p95_latency_ms": p95_latency_ms,
+                "retry_after_ms": admission.retry_after_ms,
+            })),
+        ));
+    }
+    if scout_assignment_backpressured(scout_id, queue_depth, avg_latency_ms, now) {
         state.system_metrics.inc_scout_work_empty_poll();
         tracing::debug!(
             scout_id = %scout_id,
@@ -1219,12 +1345,13 @@ pub(crate) async fn pop_work_handler(
             avg_latency_ms,
             "backpressure active for scout assignment; returning empty work"
         );
-        return Json(serde_json::json!({
+        return Ok(Json(serde_json::json!({
             "work": null,
             "transient_error": true,
             "detail": "backpressure_active",
             "queue_depth": queue_depth,
-        }));
+            "retry_after_ms": 250,
+        })));
     }
     let max_age_ms = scout_work_max_age_ms();
     while let Some(work) = queue.pop_front() {
@@ -1238,7 +1365,7 @@ pub(crate) async fn pop_work_handler(
                 queue_depth = queue.len(),
                 "assigned scout work item"
             );
-            return Json(serde_json::json!({ "work": work }));
+            return Ok(Json(serde_json::json!({ "work": work })));
         }
         tracing::debug!(
             request_id = %work.request_id,
@@ -1248,26 +1375,26 @@ pub(crate) async fn pop_work_handler(
         );
     }
     state.system_metrics.inc_scout_work_empty_poll();
-    Json(serde_json::json!({ "work": null }))
+    Ok(Json(serde_json::json!({ "work": null })))
 }
 
 pub(crate) async fn submit_draft_handler(
     AxumState(state): AxumState<SharedState>,
     Json(submission): Json<DraftResultSubmission>,
-) -> Json<serde_json::Value> {
+) -> Result<Json<serde_json::Value>, (axum::http::StatusCode, Json<serde_json::Value>)> {
     process_draft_submission(&state, submission).await
 }
 
 pub(crate) async fn signed_submit_draft_handler(
     AxumState(state): AxumState<SharedState>,
     Json(req): Json<SignedRequest<DraftResultSubmission>>,
-) -> Json<serde_json::Value> {
+) -> Result<Json<serde_json::Value>, (axum::http::StatusCode, Json<serde_json::Value>)> {
     let signer = req.envelope.signer_pubkey_hex.clone();
     if let Err(detail) = req.envelope.verify() {
         record_signature_alert(&state, false).await;
         state.system_metrics.inc_signature_verification_failures();
         mark_node_failure(&state, &signer).await;
-        return Json(serde_json::json!({ "ok": false, "detail": detail }));
+        return Ok(Json(serde_json::json!({ "ok": false, "detail": detail })));
     }
     if !accept_replay_nonce(
         &state.replay_nonces,
@@ -1278,7 +1405,7 @@ pub(crate) async fn signed_submit_draft_handler(
     {
         state.system_metrics.inc_node_identity_auth_failures();
         mark_node_failure(&state, &signer).await;
-        return Json(serde_json::json!({ "ok": false, "detail": "stale or replayed nonce" }));
+        return Ok(Json(serde_json::json!({ "ok": false, "detail": "stale or replayed nonce" })));
     }
     record_signature_alert(&state, true).await;
     process_draft_submission(&state, req.envelope.payload).await
@@ -1287,10 +1414,46 @@ pub(crate) async fn signed_submit_draft_handler(
 pub(crate) async fn process_draft_submission(
     state: &SharedState,
     mut submission: DraftResultSubmission,
-) -> Json<serde_json::Value> {
+) -> Result<Json<serde_json::Value>, (axum::http::StatusCode, Json<serde_json::Value>)> {
     submission.work_id = submission.work_id.trim().to_string();
     submission.scout_id = submission.scout_id.trim().to_string();
     state.system_metrics.inc_scout_draft_submission();
+    let scout_queue_depth = state.scout_work.lock().await.len();
+    let pending_queue_depth = state.speculative_pending.lock().await.len();
+    let effective_queue_depth = scout_queue_depth.max(pending_queue_depth);
+    let avg_latency_ms = state.avg_latency_ms.load(Ordering::Relaxed) as u64;
+    let p95_latency_ms = state.gossipsub_latency_hist.percentiles().p95_ms;
+    let admission = scout_admission_decision(effective_queue_depth, avg_latency_ms, p95_latency_ms);
+    if admission.mode != ScoutAdmissionMode::Allow {
+        let detail = if admission.mode == ScoutAdmissionMode::HardCircuit {
+            "scout_draft_circuit_open"
+        } else {
+            "scout_draft_backpressure_active"
+        };
+        tracing::debug!(
+            scout_id = %submission.scout_id,
+            work_id = %submission.work_id,
+            scout_queue_depth,
+            pending_queue_depth,
+            avg_latency_ms,
+            p95_latency_ms,
+            retry_after_ms = admission.retry_after_ms,
+            detail,
+            "rejecting scout draft due to verifier load"
+        );
+        return Err((
+            axum::http::StatusCode::TOO_MANY_REQUESTS,
+            Json(serde_json::json!({
+                "ok": false,
+                "transient_error": true,
+                "detail": detail,
+                "queue_depth": effective_queue_depth,
+                "average_latency_ms": avg_latency_ms,
+                "p95_latency_ms": p95_latency_ms,
+                "retry_after_ms": admission.retry_after_ms,
+            })),
+        ));
+    }
     let pending_age_ms = {
         let pending = state.speculative_pending.lock().await;
         pending
@@ -1323,26 +1486,26 @@ pub(crate) async fn process_draft_submission(
         if !submission.scout_id.trim().is_empty() {
             mark_node_failure(state, submission.scout_id.as_str()).await;
         }
-        return Json(serde_json::json!({
+        return Ok(Json(serde_json::json!({
             "ok": false,
             "detail": "work_id and scout_id are required",
-        }));
+        })));
     }
     if let Err(response) = ensure_pow_verified(state, submission.scout_id.as_str()).await {
         state.system_metrics.inc_task_failures();
         state.system_metrics.inc_scout_draft_reject_pow();
         mark_node_failure(state, submission.scout_id.as_str()).await;
-        return response;
+        return Err((axum::http::StatusCode::FORBIDDEN, response));
     }
     if let Some(spot_check) = submission.spot_check.as_ref() {
         if let Err(detail) = verify_spot_check_submission(spot_check) {
             state.system_metrics.inc_task_failures();
             state.system_metrics.inc_scout_draft_reject_spotcheck();
             mark_node_failure(state, submission.scout_id.as_str()).await;
-            return Json(serde_json::json!({
+            return Ok(Json(serde_json::json!({
                 "ok": false,
                 "detail": detail,
-            }));
+            })));
         }
     }
 
@@ -1366,10 +1529,10 @@ pub(crate) async fn process_draft_submission(
             );
             state.system_metrics.inc_task_failures();
             mark_node_failure(state, submission.scout_id.as_str()).await;
-            return Json(serde_json::json!({
+            return Ok(Json(serde_json::json!({
                 "ok": false,
                 "detail": "draft rejected: echo-back of prompt tail detected",
-            }));
+            })));
         }
     }
 
@@ -1390,10 +1553,10 @@ pub(crate) async fn process_draft_submission(
         state.system_metrics.inc_task_failures();
         state.system_metrics.inc_scout_draft_reject_empty_tokens();
         mark_node_failure(state, submission.scout_id.as_str()).await;
-        return Json(serde_json::json!({
+        return Ok(Json(serde_json::json!({
             "ok": false,
             "detail": "draft_tokens required or server tokenization must produce non-empty tokens",
-        }));
+        })));
     }
 
     let created_at_ms = submission
@@ -1415,10 +1578,10 @@ pub(crate) async fn process_draft_submission(
         if by_id.contains_key(response.request_id.as_str()) {
             state.system_metrics.inc_scout_draft_duplicate();
             mark_node_success(state, response.peer_id.as_str(), 0.0).await;
-            return Json(serde_json::json!({
+            return Ok(Json(serde_json::json!({
                 "ok": true,
                 "detail": "duplicate draft ignored (idempotent)",
-            }));
+            })));
         }
         by_id.insert(response.request_id.clone(), response.clone());
     }
@@ -1468,27 +1631,27 @@ pub(crate) async fn process_draft_submission(
     match state.scout_draft_tx.try_send(draft_for_channel) {
         Ok(_) => {
             state.system_metrics.inc_scout_draft_channel_enqueued();
-            Json(serde_json::json!({ "ok": true, "detail": "draft queued" }))
+            Ok(Json(serde_json::json!({ "ok": true, "detail": "draft queued" })))
         }
         Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
             state
                 .system_metrics
                 .inc_scout_draft_channel_enqueue_failure();
             tracing::warn!("scout draft channel full; using mailbox fallback");
-            Json(serde_json::json!({
+            Ok(Json(serde_json::json!({
                 "ok": true,
                 "detail": "draft queued (mailbox fallback; channel saturated)",
-            }))
+            })))
         }
         Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
             state
                 .system_metrics
                 .inc_scout_draft_channel_enqueue_failure();
             tracing::warn!("scout draft channel closed; using mailbox fallback");
-            Json(serde_json::json!({
+            Ok(Json(serde_json::json!({
                 "ok": true,
                 "detail": "draft queued (mailbox fallback; channel unavailable)",
-            }))
+            })))
         }
     }
 }
@@ -2913,9 +3076,9 @@ pub(crate) async fn register_bootstrap_handler(
 mod tests {
     use super::{
         push_scheduler_decision_log, require_scout_id, runtime_health_state,
-        sanitize_scout_draft_text, should_route_long_context, verify_spot_check_submission,
-        scout_assignment_backpressured, DraftSpotCheckProof, ScoutWorkQuery, WebGPUProbeResult,
-        WebGPUStats,
+        sanitize_scout_draft_text, scout_admission_decision, scout_assignment_backpressured,
+        should_route_long_context, verify_spot_check_submission, DraftSpotCheckProof,
+        ScoutAdmissionMode, ScoutWorkQuery, WebGPUProbeResult, WebGPUStats,
     };
     use crate::SchedulerDecisionLog;
     use std::collections::VecDeque;
@@ -3035,6 +3198,19 @@ mod tests {
             })
             .count();
         assert!(blocked_count > 0);
+    }
+
+    #[test]
+    fn scout_admission_opens_under_healthy_conditions() {
+        let decision = scout_admission_decision(2, 1200, 1800);
+        assert_eq!(decision.mode, ScoutAdmissionMode::Allow);
+    }
+
+    #[test]
+    fn scout_admission_hard_circuit_on_high_p95() {
+        let decision = scout_admission_decision(3, 1200, 7000);
+        assert_eq!(decision.mode, ScoutAdmissionMode::HardCircuit);
+        assert!(decision.retry_after_ms >= 250);
     }
 
     #[test]
