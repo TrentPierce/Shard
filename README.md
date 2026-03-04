@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="assets/logo.png" alt="Shard Network" width="160" />
+  <img src="docs/assets/logo.png" alt="Shard Network" width="160" />
   <h1>Shard Network</h1>
   <p><strong>Distributed AI inference — browser Scouts generate speculative drafts, Verifier nodes validate and stream responses.</strong></p>
 
