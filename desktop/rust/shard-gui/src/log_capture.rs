@@ -48,6 +48,9 @@ pub struct LogMakeWriter(pub LogBuffer);
 impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for LogMakeWriter {
     type Writer = LogEventWriter;
     fn make_writer(&'a self) -> Self::Writer {
-        LogEventWriter { buffer: self.0.clone(), bytes: Vec::new() }
+        LogEventWriter {
+            buffer: self.0.clone(),
+            bytes: Vec::new(),
+        }
     }
 }

@@ -27,7 +27,12 @@ pub struct SystemMetrics {
     scout_work_polls_total: AtomicU64,
     scout_work_assignments_total: AtomicU64,
     scout_work_empty_polls_total: AtomicU64,
+    scout_work_rate_limited_total: AtomicU64,
+    scout_work_overload_reject_total: AtomicU64,
+    scout_work_active_cap_reject_total: AtomicU64,
     scout_draft_submissions_total: AtomicU64,
+    scout_draft_rate_limited_total: AtomicU64,
+    scout_draft_overload_reject_total: AtomicU64,
     scout_draft_reject_missing_identity_total: AtomicU64,
     scout_draft_reject_pow_total: AtomicU64,
     scout_draft_reject_spotcheck_total: AtomicU64,
@@ -84,7 +89,12 @@ pub struct SystemMetricsSnapshot {
     pub scout_work_polls_total: u64,
     pub scout_work_assignments_total: u64,
     pub scout_work_empty_polls_total: u64,
+    pub scout_work_rate_limited_total: u64,
+    pub scout_work_overload_reject_total: u64,
+    pub scout_work_active_cap_reject_total: u64,
     pub scout_draft_submissions_total: u64,
+    pub scout_draft_rate_limited_total: u64,
+    pub scout_draft_overload_reject_total: u64,
     pub scout_draft_reject_missing_identity_total: u64,
     pub scout_draft_reject_pow_total: u64,
     pub scout_draft_reject_spotcheck_total: u64,
@@ -249,8 +259,33 @@ impl SystemMetrics {
             .fetch_add(1, Ordering::Relaxed);
     }
 
+    pub fn inc_scout_work_rate_limited(&self) {
+        self.scout_work_rate_limited_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn inc_scout_work_overload_reject(&self) {
+        self.scout_work_overload_reject_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn inc_scout_work_active_cap_reject(&self) {
+        self.scout_work_active_cap_reject_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
     pub fn inc_scout_draft_submission(&self) {
         self.scout_draft_submissions_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn inc_scout_draft_rate_limited(&self) {
+        self.scout_draft_rate_limited_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn inc_scout_draft_overload_reject(&self) {
+        self.scout_draft_overload_reject_total
             .fetch_add(1, Ordering::Relaxed);
     }
 
@@ -736,6 +771,34 @@ impl SystemMetrics {
             self.transport_relay_success_total.load(Ordering::Relaxed),
             self.transport_relay_failure_total.load(Ordering::Relaxed),
         ));
+        output.push_str(&format!(
+            concat!(
+                "# HELP shard_scout_work_rate_limited_total Scout work polls rejected by per-scout rate limiting.\n",
+                "# TYPE shard_scout_work_rate_limited_total counter\n",
+                "shard_scout_work_rate_limited_total {}\n",
+                "# HELP shard_scout_work_overload_reject_total Scout work polls rejected due to verifier overload/circuit breaker.\n",
+                "# TYPE shard_scout_work_overload_reject_total counter\n",
+                "shard_scout_work_overload_reject_total {}\n",
+                "# HELP shard_scout_work_active_cap_reject_total Scout work polls rejected due to per-verifier active scout cap.\n",
+                "# TYPE shard_scout_work_active_cap_reject_total counter\n",
+                "shard_scout_work_active_cap_reject_total {}\n",
+                "# HELP shard_scout_draft_rate_limited_total Scout draft submissions rejected by per-scout rate limiting.\n",
+                "# TYPE shard_scout_draft_rate_limited_total counter\n",
+                "shard_scout_draft_rate_limited_total {}\n",
+                "# HELP shard_scout_draft_overload_reject_total Scout draft submissions rejected due to verifier overload/circuit breaker.\n",
+                "# TYPE shard_scout_draft_overload_reject_total counter\n",
+                "shard_scout_draft_overload_reject_total {}\n",
+            ),
+            self.scout_work_rate_limited_total.load(Ordering::Relaxed),
+            self.scout_work_overload_reject_total
+                .load(Ordering::Relaxed),
+            self.scout_work_active_cap_reject_total
+                .load(Ordering::Relaxed),
+            self.scout_draft_rate_limited_total
+                .load(Ordering::Relaxed),
+            self.scout_draft_overload_reject_total
+                .load(Ordering::Relaxed),
+        ));
         output
     }
 
@@ -777,8 +840,23 @@ impl SystemMetrics {
             scout_work_polls_total: self.scout_work_polls_total.load(Ordering::Relaxed),
             scout_work_assignments_total: self.scout_work_assignments_total.load(Ordering::Relaxed),
             scout_work_empty_polls_total: self.scout_work_empty_polls_total.load(Ordering::Relaxed),
+            scout_work_rate_limited_total: self
+                .scout_work_rate_limited_total
+                .load(Ordering::Relaxed),
+            scout_work_overload_reject_total: self
+                .scout_work_overload_reject_total
+                .load(Ordering::Relaxed),
+            scout_work_active_cap_reject_total: self
+                .scout_work_active_cap_reject_total
+                .load(Ordering::Relaxed),
             scout_draft_submissions_total: self
                 .scout_draft_submissions_total
+                .load(Ordering::Relaxed),
+            scout_draft_rate_limited_total: self
+                .scout_draft_rate_limited_total
+                .load(Ordering::Relaxed),
+            scout_draft_overload_reject_total: self
+                .scout_draft_overload_reject_total
                 .load(Ordering::Relaxed),
             scout_draft_reject_missing_identity_total: self
                 .scout_draft_reject_missing_identity_total
@@ -885,7 +963,12 @@ mod tests {
         metrics.inc_scout_work_poll();
         metrics.inc_scout_work_assignment();
         metrics.inc_scout_work_empty_poll();
+        metrics.inc_scout_work_rate_limited();
+        metrics.inc_scout_work_overload_reject();
+        metrics.inc_scout_work_active_cap_reject();
         metrics.inc_scout_draft_submission();
+        metrics.inc_scout_draft_rate_limited();
+        metrics.inc_scout_draft_overload_reject();
         metrics.inc_scout_draft_reject_missing_identity();
         metrics.inc_scout_draft_reject_pow();
         metrics.inc_scout_draft_reject_spotcheck();
@@ -933,7 +1016,12 @@ mod tests {
         assert_eq!(snap.scout_work_polls_total, 1);
         assert_eq!(snap.scout_work_assignments_total, 1);
         assert_eq!(snap.scout_work_empty_polls_total, 1);
+        assert_eq!(snap.scout_work_rate_limited_total, 1);
+        assert_eq!(snap.scout_work_overload_reject_total, 1);
+        assert_eq!(snap.scout_work_active_cap_reject_total, 1);
         assert_eq!(snap.scout_draft_submissions_total, 1);
+        assert_eq!(snap.scout_draft_rate_limited_total, 1);
+        assert_eq!(snap.scout_draft_overload_reject_total, 1);
         assert_eq!(snap.scout_draft_reject_missing_identity_total, 1);
         assert_eq!(snap.scout_draft_reject_pow_total, 1);
         assert_eq!(snap.scout_draft_reject_spotcheck_total, 1);

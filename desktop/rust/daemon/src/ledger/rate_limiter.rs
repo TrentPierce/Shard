@@ -113,7 +113,7 @@ impl WalletRateLimiter {
 
 #[cfg(test)]
 mod tests {
-    use super::{WalletRateLimiter, WalletId};
+    use super::{WalletId, WalletRateLimiter};
     use std::time::{Duration, Instant};
 
     #[test]
@@ -125,7 +125,9 @@ mod tests {
         limiter
             .check_and_record_at(wallet.clone(), 7.0, start)
             .expect("first event should fit");
-        assert!(limiter.check_and_record_at(wallet.clone(), 4.0, start).is_err());
+        assert!(limiter
+            .check_and_record_at(wallet.clone(), 4.0, start)
+            .is_err());
 
         let later = start + Duration::from_secs(3601);
         limiter

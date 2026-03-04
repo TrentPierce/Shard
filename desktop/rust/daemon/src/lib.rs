@@ -63,8 +63,8 @@ use tokio::sync::{mpsc, Mutex, Notify};
 use tower_http::cors::{Any, CorsLayer};
 
 pub mod api;
-pub mod bootstrap_ring;
 pub mod bootstrap_discovery;
+pub mod bootstrap_ring;
 pub mod consensus;
 pub mod inference;
 pub mod ledger;
@@ -85,6 +85,8 @@ use shard_gateway::gateway::fallback::{
 };
 use shard_gateway::gateway::validate_work_request;
 // use shard_gateway::rate_limiter::{RateLimitConfig, RateLimitStatus, RateLimiter};
+use consensus::leader::{ElectionMessage, LeaderElectionConfig, LeaderElectionHandle, LeaderInput};
+use network::policy::{NetworkPolicy, PolicyDecision};
 use shard_ledger::ledger::state::{ComputeCreditTx, LedgerState};
 use shard_ledger::ledger::store::LedgerStore;
 use shard_ledger::ledger::sync::{hash_probe_segments, LedgerSyncRequest, LedgerSyncResponse};
@@ -105,8 +107,6 @@ use shard_network::network::tensor_wire::TensorWirePacket;
 use shard_scheduler::scheduler::{
     load_reputation, save_reputation, weighted_select, NodeReputation, NodeSchedulerInput,
 };
-use network::policy::{NetworkPolicy, PolicyDecision};
-use consensus::leader::{ElectionMessage, LeaderElectionConfig, LeaderElectionHandle, LeaderInput};
 
 // ─── CLI ────────────────────────────────────────────────────────────────────
 
@@ -748,6 +748,8 @@ pub(crate) struct SharedState {
     ledger_store: Arc<LedgerStore>,
     browser_sessions: Arc<Mutex<HashMap<String, BrowserLayerSession>>>,
     scout_client_runtime: Arc<Mutex<HashMap<String, ScoutClientRuntimeStatus>>>,
+    scout_work_last_poll: Arc<Mutex<HashMap<String, u128>>>,
+    scout_draft_last_submit: Arc<Mutex<HashMap<String, u128>>>,
     webgpu_stats: Arc<Mutex<WebGPUStats>>,
     browser_work: Arc<Mutex<VecDeque<BrowserLayerWorkItem>>>,
     node_wallet: String,
@@ -2055,8 +2057,10 @@ fn handle_wallet_command(command: WalletCommand, identity_path: &Path) -> Result
 }
 
 fn model_manifest_url() -> String {
-    std::env::var("SHARD_MODEL_MANIFEST_URL")
-        .unwrap_or_else(|_| "https://raw.githubusercontent.com/TrentPierce/Shard/main/deploy/models/manifest.json".to_string())
+    std::env::var("SHARD_MODEL_MANIFEST_URL").unwrap_or_else(|_| {
+        "https://raw.githubusercontent.com/TrentPierce/Shard/main/deploy/models/manifest.json"
+            .to_string()
+    })
 }
 
 fn model_store_dir(base_data_dir: &Path) -> PathBuf {
@@ -2133,7 +2137,10 @@ async fn handle_model_command(command: ModelCommand, data_dir: &Path) -> Result<
             if final_path.exists() {
                 let existing_hash = sha256_file(final_path.as_path())?;
                 if existing_hash.eq_ignore_ascii_case(model.sha256.as_str()) {
-                    println!("model already downloaded and verified: {}", final_path.display());
+                    println!(
+                        "model already downloaded and verified: {}",
+                        final_path.display()
+                    );
                     return Ok(());
                 }
             }
@@ -2155,7 +2162,12 @@ async fn handle_model_command(command: ModelCommand, data_dir: &Path) -> Result<
             let got = sha256_file(tmp_path.as_path())?;
             if !got.eq_ignore_ascii_case(model.sha256.as_str()) {
                 let _ = std::fs::remove_file(tmp_path.as_path());
-                anyhow::bail!("sha256 mismatch for model {} (expected {}, got {})", model.id, model.sha256, got);
+                anyhow::bail!(
+                    "sha256 mismatch for model {} (expected {}, got {})",
+                    model.id,
+                    model.sha256,
+                    got
+                );
             }
             std::fs::rename(tmp_path.as_path(), final_path.as_path())?;
             println!("downloaded model {} to {}", model.id, final_path.display());
@@ -2191,9 +2203,18 @@ async fn handle_model_command(command: ModelCommand, data_dir: &Path) -> Result<
 
 fn parse_semver_like(version: &str) -> (u64, u64, u64) {
     let mut parts = version.split('.');
-    let major = parts.next().and_then(|v| v.parse::<u64>().ok()).unwrap_or(0);
-    let minor = parts.next().and_then(|v| v.parse::<u64>().ok()).unwrap_or(0);
-    let patch = parts.next().and_then(|v| v.parse::<u64>().ok()).unwrap_or(0);
+    let major = parts
+        .next()
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(0);
+    let minor = parts
+        .next()
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(0);
+    let patch = parts
+        .next()
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(0);
     (major, minor, patch)
 }
 
@@ -2538,7 +2559,10 @@ fn create_router(
     }
 
     Router::new()
-        .layer(from_fn_with_state(state.clone(), enforce_shutdown_and_track))
+        .layer(from_fn_with_state(
+            state.clone(),
+            enforce_shutdown_and_track,
+        ))
         .layer(from_fn_with_state(policy, enforce_api_origin))
         .route("/health", get(health_handler))
         .route("/v1/system/health", get(health_handler))
@@ -2575,6 +2599,7 @@ fn create_router(
             "/v1/system/model-rollout/reset-rollback",
             post(model_rollout_reset_handler),
         )
+        .route("/v1/system/scout-config", get(scout_config_handler))
         .route(
             "/browser-layer/register",
             post(browser_layer_register_handler),
@@ -3005,6 +3030,8 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
         ledger_store,
         browser_sessions: Arc::new(Mutex::new(HashMap::new())),
         scout_client_runtime: Arc::new(Mutex::new(HashMap::new())),
+        scout_work_last_poll: Arc::new(Mutex::new(HashMap::new())),
+        scout_draft_last_submit: Arc::new(Mutex::new(HashMap::new())),
         webgpu_stats: Arc::new(Mutex::new(WebGPUStats::default())),
         browser_work: Arc::new(Mutex::new(VecDeque::new())),
         node_wallet: node_wallet.clone(),
@@ -3159,7 +3186,8 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
             };
             if let Some(remote) = manifest.models.into_iter().find(|m| m.id == model_id) {
                 let local_path = model_local_path(data_dir.as_path(), &remote);
-                if local_path.exists() && is_newer_version(&current_version, remote.version.as_str())
+                if local_path.exists()
+                    && is_newer_version(&current_version, remote.version.as_str())
                 {
                     tracing::warn!(
                         "model update available: {} {} -> {}. Run 'shard-daemon model pull {}' to update.",
@@ -5230,19 +5258,18 @@ pub async fn run_until_stopped(
 
 #[cfg(test)]
 mod tests {
-    use crate::network::policy::{NetworkMode, NetworkPolicy, PolicyDecision};
     use super::{
         accept_replay_nonce, bootstrap_registry_seed_addrs, filter_bootstrap_addrs,
-        is_newer_version, is_non_public_bootstrap_addr, load_bootstrap_registry,
-        model_local_path, node_is_healthy,
-        parse_hardcoded_bootstrap_mode, peer_id_from_addr_str, prune_bootstrap_registry,
-        record_bootstrap_failure, remove_known_addrs_for_peers, save_bootstrap_registry,
-        should_attempt_reconnect, should_include_hardcoded_bootstrap,
+        is_newer_version, is_non_public_bootstrap_addr, load_bootstrap_registry, model_local_path,
+        node_is_healthy, parse_hardcoded_bootstrap_mode, peer_id_from_addr_str,
+        prune_bootstrap_registry, record_bootstrap_failure, remove_known_addrs_for_peers,
+        save_bootstrap_registry, should_attempt_reconnect, should_include_hardcoded_bootstrap,
         should_reject_peer_connection, unique_addrs, validate_work_request, BootstrapRegistryEntry,
         CanaryRolloutConfig, CanaryRolloutController, HardcodedBootstrapMode, LatencyHistogram,
         ModelManifestEntry, ScoutPenaltyBook, ScoutPenaltyUpdate, ScoutTimeoutTracker,
         SpeculativeConfig, WorkRequest, MAX_BOOTSTRAP_FAILURES,
     };
+    use crate::network::policy::{NetworkMode, NetworkPolicy, PolicyDecision};
     use libp2p::{Multiaddr, PeerId};
     use std::collections::{HashMap, HashSet};
     use std::path::Path;

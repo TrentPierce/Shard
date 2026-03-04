@@ -5,13 +5,14 @@ This checklist is the go/no-go control document for public release.
 ## Scope Freeze
 
 - [ ] RC branch created (example: `release/rc1`) and only blocker fixes allowed.
-- [ ] Verifier and scout runtime settings frozen for RC window.
+- [ ] Verifier and scout runtime settings frozen for RC window (`deploy/release/rc1.env`).
 - [ ] One canonical deployment config is used for both local and EC2 verifiers.
 
 ## Environment Parity
 
 - [ ] Both verifier nodes run the same git commit.
 - [ ] Both verifier nodes expose healthy `/health` and `/metrics/summary`.
+- [ ] Both verifier nodes report the same effective scout runtime config at `/v1/system/scout-config`.
 - [ ] Model + engine pair are identical across nodes (or documented if intentionally different).
 
 ## Mandatory RC Matrix
@@ -58,7 +59,7 @@ Expected outputs in `reports/release-rc/release-rc-<timestamp>/`:
 ## Documentation and Operator Experience
 
 - [ ] README performance snapshot matches latest RC matrix.
-- [ ] Runbook includes rollback conditions and exact commands.
+- [ ] `docs/release-rc-runbook.md` is updated with rollback conditions and exact commands.
 - [ ] Node setup docs validated end-to-end by a clean operator run.
 
 ## Final Signoff

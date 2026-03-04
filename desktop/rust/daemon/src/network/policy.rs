@@ -78,10 +78,7 @@ fn is_public_ip(ip: IpAddr) -> bool {
                 || v4.is_unspecified())
         }
         IpAddr::V6(v6) => {
-            !(v6.is_loopback()
-                || v6.is_unspecified()
-                || v6.is_multicast()
-                || v6.is_unique_local())
+            !(v6.is_loopback() || v6.is_unspecified() || v6.is_multicast() || v6.is_unique_local())
         }
     }
 }
@@ -108,7 +105,11 @@ fn v4_in_cidr(ip: Ipv4Addr, network: Ipv4Addr, prefix: u8) -> bool {
     }
     let ip_u = u32::from(ip);
     let net_u = u32::from(network);
-    let mask = if prefix == 0 { 0 } else { u32::MAX << (32 - prefix) };
+    let mask = if prefix == 0 {
+        0
+    } else {
+        u32::MAX << (32 - prefix)
+    };
     (ip_u & mask) == (net_u & mask)
 }
 
@@ -118,7 +119,11 @@ fn v6_in_cidr(ip: Ipv6Addr, network: Ipv6Addr, prefix: u8) -> bool {
     }
     let ip_u = u128::from(ip);
     let net_u = u128::from(network);
-    let mask = if prefix == 0 { 0 } else { u128::MAX << (128 - prefix) };
+    let mask = if prefix == 0 {
+        0
+    } else {
+        u128::MAX << (128 - prefix)
+    };
     (ip_u & mask) == (net_u & mask)
 }
 

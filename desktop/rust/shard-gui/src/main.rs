@@ -98,22 +98,46 @@ async fn main() -> Result<()> {
                     Ok(r) => r.json::<HealthResp>().await.ok(),
                     Err(_) => None,
                 };
-                let topo = match client.get("http://127.0.0.1:9091/v1/system/topology").send().await {
+                let topo = match client
+                    .get("http://127.0.0.1:9091/v1/system/topology")
+                    .send()
+                    .await
+                {
                     Ok(r) => r.json::<TopologyResp>().await.ok(),
                     Err(_) => None,
                 };
-                let metrics = match client.get("http://127.0.0.1:9091/metrics/summary").send().await {
+                let metrics = match client
+                    .get("http://127.0.0.1:9091/metrics/summary")
+                    .send()
+                    .await
+                {
                     Ok(r) => r.json::<MetricsSummary>().await.ok(),
                     Err(_) => None,
                 };
-                let ledger = match client.get("http://127.0.0.1:9091/ledger/stats").send().await {
+                let ledger = match client
+                    .get("http://127.0.0.1:9091/ledger/stats")
+                    .send()
+                    .await
+                {
                     Ok(r) => r.json::<LedgerStats>().await.ok(),
                     Err(_) => None,
                 };
-                let wallet = health.as_ref().and_then(|h| h.wallet.clone()).unwrap_or_default();
+                let wallet = health
+                    .as_ref()
+                    .and_then(|h| h.wallet.clone())
+                    .unwrap_or_default();
                 let credits = if !wallet.is_empty() {
-                    match client.get(format!("http://127.0.0.1:9091/credits/{wallet}")).send().await {
-                        Ok(r) => r.json::<CreditsResp>().await.ok().and_then(|c| c.balance).unwrap_or(0),
+                    match client
+                        .get(format!("http://127.0.0.1:9091/credits/{wallet}"))
+                        .send()
+                        .await
+                    {
+                        Ok(r) => r
+                            .json::<CreditsResp>()
+                            .await
+                            .ok()
+                            .and_then(|c| c.balance)
+                            .unwrap_or(0),
                         Err(_) => 0,
                     }
                 } else {
@@ -153,24 +177,32 @@ async fn main() -> Result<()> {
                     .as_ref()
                     .and_then(|m| m.speculative_reject_rate)
                     .unwrap_or(0.0);
-                let total_tokens = metrics.as_ref().and_then(|m| m.tokens_processed_total).unwrap_or(0)
-                    + metrics.as_ref().and_then(|m| m.tokens_offloaded_to_scouts_total).unwrap_or(0);
+                let total_tokens = metrics
+                    .as_ref()
+                    .and_then(|m| m.tokens_processed_total)
+                    .unwrap_or(0)
+                    + metrics
+                        .as_ref()
+                        .and_then(|m| m.tokens_offloaded_to_scouts_total)
+                        .unwrap_or(0);
                 let receipts = ledger.and_then(|l| l.receipt_count).unwrap_or(0);
 
-                let _ = tx.send(app::TelemetryUpdate {
-                    role: role.to_string(),
-                    peers,
-                    active_scouts,
-                    tokens: total_tokens,
-                    uptime,
-                    reject_rate,
-                    nat_status,
-                    relay_status,
-                    daemon_online,
-                    credits,
-                    receipts,
-                    wallet,
-                }).await;
+                let _ = tx
+                    .send(app::TelemetryUpdate {
+                        role: role.to_string(),
+                        peers,
+                        active_scouts,
+                        tokens: total_tokens,
+                        uptime,
+                        reject_rate,
+                        nat_status,
+                        relay_status,
+                        daemon_online,
+                        credits,
+                        receipts,
+                        wallet,
+                    })
+                    .await;
 
                 tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
             }
@@ -255,7 +287,11 @@ fn load_icon_data() -> egui::IconData {
         .expect("bundled icon.png is valid")
         .to_rgba8();
     let (width, height) = img.dimensions();
-    egui::IconData { rgba: img.into_raw(), width, height }
+    egui::IconData {
+        rgba: img.into_raw(),
+        width,
+        height,
+    }
 }
 
 /// Return the same image decoded as a tray-icon Icon.

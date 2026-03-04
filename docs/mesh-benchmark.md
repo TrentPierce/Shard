@@ -8,8 +8,17 @@ This guide runs a local Shard mesh in Docker so you can compare throughput/laten
 - `shard-node` workers (scale up/down with Docker Compose)
 
 Both run with:
-- `SHARD_REQUIRE_ENGINE_FOR_CONTRIBUTE=false` (so nodes can join without local BitNet engine wiring)
+- `SHARD_REQUIRE_ENGINE_FOR_CONTRIBUTE=true` (real engine/model required for contribution)
 - private bootstrap allowed for local bridge networking
+- RC scheduler profile from `deploy/release/rc1.env`
+
+## Model Requirement
+
+The mesh compose stack expects the model at:
+
+- `models/Llama-3.2-1B-Instruct-Q4_K_M.gguf`
+
+The file is mounted read-only into containers as `/models/Llama-3.2-1B-Instruct-Q4_K_M.gguf`.
 
 ## Quick Start (Windows PowerShell)
 

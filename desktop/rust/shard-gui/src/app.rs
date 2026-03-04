@@ -60,7 +60,10 @@ impl AppConfig {
     pub fn save(&self) -> Result<()> {
         if let Some(dirs) = proj_dirs() {
             fs::create_dir_all(dirs.config_dir())?;
-            fs::write(dirs.config_dir().join("config.json"), serde_json::to_string_pretty(self)?)?;
+            fs::write(
+                dirs.config_dir().join("config.json"),
+                serde_json::to_string_pretty(self)?,
+            )?;
         }
         Ok(())
     }
@@ -74,7 +77,11 @@ fn proj_dirs() -> Option<ProjectDirs> {
 
 pub enum DownloadState {
     Idle,
-    InProgress { downloaded: u64, total: u64, filename: String },
+    InProgress {
+        downloaded: u64,
+        total: u64,
+        filename: String,
+    },
     Done,
     /// Error message, plus whether the user has dismissed the banner.
     Error(String, bool),
@@ -169,7 +176,11 @@ impl ShardApp {
         let download_state = if config.bitnet_model_path.is_empty()
             || !std::path::Path::new(&config.bitnet_model_path).exists()
         {
-            DownloadState::InProgress { downloaded: 0, total: 0, filename: "Fetching manifest…".to_string() }
+            DownloadState::InProgress {
+                downloaded: 0,
+                total: 0,
+                filename: "Fetching manifest…".to_string(),
+            }
         } else {
             DownloadState::Idle
         };
@@ -245,9 +256,16 @@ impl ShardApp {
         }
         for msg in msgs {
             match msg {
-                DownloadMsg::Progress { downloaded, total, filename } => {
-                    self.download_state =
-                        DownloadState::InProgress { downloaded, total, filename };
+                DownloadMsg::Progress {
+                    downloaded,
+                    total,
+                    filename,
+                } => {
+                    self.download_state = DownloadState::InProgress {
+                        downloaded,
+                        total,
+                        filename,
+                    };
                 }
                 DownloadMsg::Done(path) => {
                     self.config.bitnet_model_path = path.display().to_string();
@@ -357,12 +375,7 @@ impl ShardApp {
                     // Status dot + label
                     let (dot, label) = self.status_display();
                     ui.colored_label(dot, "●");
-                    ui.label(
-                        egui::RichText::new(label)
-                            .strong()
-                            .size(15.0)
-                            .color(dot),
-                    );
+                    ui.label(egui::RichText::new(label).strong().size(15.0).color(dot));
 
                     // Role chip
                     if self.daemon_online {
@@ -379,24 +392,22 @@ impl ShardApp {
 
     fn ui_toggle_button(&mut self, ui: &mut egui::Ui) {
         if self.is_running {
-            let btn = egui::Button::new(
-                egui::RichText::new("Stop Node").color(egui::Color32::WHITE),
-            )
-            .fill(egui::Color32::from_rgb(0x7F, 0x1D, 0x1D))
-            .rounding(6.0)
-            .min_size(egui::vec2(90.0, 28.0));
+            let btn =
+                egui::Button::new(egui::RichText::new("Stop Node").color(egui::Color32::WHITE))
+                    .fill(egui::Color32::from_rgb(0x7F, 0x1D, 0x1D))
+                    .rounding(6.0)
+                    .min_size(egui::vec2(90.0, 28.0));
             if ui.add(btn).clicked() {
                 self.daemon_task.lock().unwrap().stop();
                 self.is_running = false;
                 self.daemon_online = false;
             }
         } else {
-            let btn = egui::Button::new(
-                egui::RichText::new("Start Node").color(egui::Color32::WHITE),
-            )
-            .fill(egui::Color32::from_rgb(0x06, 0x5F, 0x46))
-            .rounding(6.0)
-            .min_size(egui::vec2(90.0, 28.0));
+            let btn =
+                egui::Button::new(egui::RichText::new("Start Node").color(egui::Color32::WHITE))
+                    .fill(egui::Color32::from_rgb(0x06, 0x5F, 0x46))
+                    .rounding(6.0)
+                    .min_size(egui::vec2(90.0, 28.0));
             if ui.add(btn).clicked() {
                 self.start_daemon();
             }
@@ -455,7 +466,11 @@ impl ShardApp {
             }
 
             match &self.download_state {
-                DownloadState::InProgress { downloaded, total, filename } => {
+                DownloadState::InProgress {
+                    downloaded,
+                    total,
+                    filename,
+                } => {
                     self.ui_download(ui, *downloaded, *total, filename.clone());
                 }
                 _ => {
@@ -472,7 +487,12 @@ impl ShardApp {
     fn ui_download(&self, ui: &mut egui::Ui, downloaded: u64, total: u64, filename: String) {
         ui.add_space(20.0);
         ui.vertical_centered(|ui| {
-            ui.label(egui::RichText::new("Downloading AI Model").size(16.0).strong().color(BLUE));
+            ui.label(
+                egui::RichText::new("Downloading AI Model")
+                    .size(16.0)
+                    .strong()
+                    .color(BLUE),
+            );
             ui.add_space(6.0);
             ui.label(
                 egui::RichText::new("Shard requires a BitNet model to contribute compute.")
@@ -485,7 +505,11 @@ impl ShardApp {
                 ui.label(egui::RichText::new(&filename).monospace().color(LOG_TEXT));
                 ui.add_space(8.0);
 
-                let progress = if total > 0 { downloaded as f32 / total as f32 } else { 0.0 };
+                let progress = if total > 0 {
+                    downloaded as f32 / total as f32
+                } else {
+                    0.0
+                };
                 let bar = egui::ProgressBar::new(progress)
                     .desired_width(frame_w)
                     .animate(true);
@@ -504,7 +528,11 @@ impl ShardApp {
                         .size(12.0),
                     );
                 } else {
-                    ui.label(egui::RichText::new("Fetching manifest…").color(MUTED).size(12.0));
+                    ui.label(
+                        egui::RichText::new("Fetching manifest…")
+                            .color(MUTED)
+                            .size(12.0),
+                    );
                 }
             });
         });
@@ -519,9 +547,7 @@ impl ShardApp {
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.colored_label(YELLOW, "⚠");
-                    ui.label(
-                        egui::RichText::new(error).color(YELLOW).size(12.0),
-                    );
+                    ui.label(egui::RichText::new(error).color(YELLOW).size(12.0));
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui.small_button("✕").clicked() {
                             if let DownloadState::Error(_, dismissed) = &mut self.download_state {
@@ -565,7 +591,11 @@ impl ShardApp {
                 stat_row(ui, "Tokens", &fmt_large(self.tokens_generated));
                 stat_row(ui, "Receipts", &self.receipts_count.to_string());
                 stat_row(ui, "Compute Credits", &self.compute_credits.to_string());
-                stat_row(ui, "Acceptance Rate", &format!("{:.1}%", self.acceptance_rate * 100.0));
+                stat_row(
+                    ui,
+                    "Acceptance Rate",
+                    &format!("{:.1}%", self.acceptance_rate * 100.0),
+                );
                 if !self.node_wallet.is_empty() {
                     let short = wallet_short(&self.node_wallet);
                     stat_row(ui, "Wallet", &short);

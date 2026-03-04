@@ -8,7 +8,10 @@ pub struct DaemonTask {
 
 impl DaemonTask {
     pub fn new() -> Self {
-        Self { thread: None, stop_tx: None }
+        Self {
+            thread: None,
+            stop_tx: None,
+        }
     }
 
     pub fn start(&mut self, bitnet_lib: &str, bitnet_model: &str, listen_port: u16) {
@@ -51,19 +54,22 @@ impl DaemonTask {
         let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
         self.stop_tx = Some(stop_tx);
 
-        self.thread = Some(std::thread::Builder::new()
-            .name("shard-daemon".to_string())
-            .spawn(move || {
-                let rt = tokio::runtime::Builder::new_multi_thread()
-                    .enable_all()
-                    .build()
-                    .expect("daemon tokio runtime");
-                // block_on does not require the future to be Send, so the
-                // daemon's non-Send future (raw C pointers in ShardInitConfig)
-                // runs fine here.
-                rt.block_on(shard_daemon::run_until_stopped(args, stop_rx)).ok();
-            })
-            .expect("daemon thread"));
+        self.thread = Some(
+            std::thread::Builder::new()
+                .name("shard-daemon".to_string())
+                .spawn(move || {
+                    let rt = tokio::runtime::Builder::new_multi_thread()
+                        .enable_all()
+                        .build()
+                        .expect("daemon tokio runtime");
+                    // block_on does not require the future to be Send, so the
+                    // daemon's non-Send future (raw C pointers in ShardInitConfig)
+                    // runs fine here.
+                    rt.block_on(shard_daemon::run_until_stopped(args, stop_rx))
+                        .ok();
+                })
+                .expect("daemon thread"),
+        );
     }
 
     pub fn stop(&mut self) {
@@ -74,7 +80,10 @@ impl DaemonTask {
     }
 
     pub fn is_running(&self) -> bool {
-        self.thread.as_ref().map(|t| !t.is_finished()).unwrap_or(false)
+        self.thread
+            .as_ref()
+            .map(|t| !t.is_finished())
+            .unwrap_or(false)
     }
 
     /// Returns the path to `shard_engine.dll` bundled next to this executable,
@@ -89,7 +98,11 @@ impl DaemonTask {
         #[cfg(not(any(target_os = "windows", target_os = "macos")))]
         let lib_name = "libshard_engine.so";
         let candidate = dir.join(lib_name);
-        if candidate.exists() { Some(candidate) } else { None }
+        if candidate.exists() {
+            Some(candidate)
+        } else {
+            None
+        }
     }
 }
 

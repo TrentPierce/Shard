@@ -24,6 +24,7 @@
   - zero-token drift despite successful requests
   - scout submit success-rate degradation
   - chat proxy 5xx spike while backend reports healthy
+  - scout ingress overload and rate-limit spikes
 
 ### Paging Thresholds
 - `ShardHighTaskFailureRate`: page if task failures > 20/5m for 5m.
@@ -33,6 +34,12 @@
 - `ShardZeroTokenDrift`: page if successful chat completions occur but total token counters remain zero for 5m.
 - `ShardScoutSubmitDegraded`: warn if scout submit success rate drops below 20% over 10m with at least 20 submit attempts.
 - `ShardChatProxy5xxHighWhileBackendHealthy`: page if chat proxy 5xx rate exceeds 5% over 5m with at least 20 requests and backend health-ready gauge is 1.
+- Scout ingress pressure (operator watch):
+  - `increase(shard_scout_work_overload_reject_total[10m])`
+  - `increase(shard_scout_draft_overload_reject_total[10m])`
+  - `increase(shard_scout_work_rate_limited_total[10m])`
+  - `increase(shard_scout_draft_rate_limited_total[10m])`
+  - `increase(shard_scout_work_active_cap_reject_total[10m])`
 
 ### Alert-to-Runbook Mapping
 - Ops alerts -> `docs/operations.md`
@@ -45,9 +52,10 @@
 3. Check browser contribution telemetry event stream (`shard:contribution-status`) and session state for non-contributing reason codes.
 4. Validate token drift alert inputs: `shard_chat_completion_success_total` and `shard_tokens_processed_total + shard_tokens_offloaded_to_scouts_total`.
 5. Validate scout ingress health: submit attempt/success/failure counters and active draft-capable scout counts.
-6. Drain failing nodes from scheduling path.
-7. Roll back release if SLO breach persists.
-8. Record timeline and corrective actions.
+6. Check `GET /v1/system/scout-config` for current admission mode and active-scout cap.
+7. Drain failing nodes from scheduling path.
+8. Roll back release if SLO breach persists.
+9. Record timeline and corrective actions.
 
 ## Runbooks
 - Incident response: `docs/runbooks/incident-response.md`

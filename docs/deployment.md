@@ -12,6 +12,19 @@
 - `SHARD_ADMIN_KEY` (admin API key management endpoint)
 - `SHARD_SCOUT_TIMEOUT_MS`
 - `SHARD_SCOUT_WORK_QUEUE_MAX` (optional queue cap for scout work fan-out; default `1024`, clamp `64..4096`)
+- `SHARD_SCOUT_BACKPRESSURE_START_QUEUE_DEPTH` (default `256`)
+- `SHARD_SCOUT_BACKPRESSURE_LATENCY_WARN_MS` (default `3000`)
+- `SHARD_SCOUT_BACKPRESSURE_LATENCY_SEVERE_MS` (default `6000`)
+- `SHARD_SCOUT_ADMISSION_QUEUE_DEPTH` (default `5`)
+- `SHARD_SCOUT_ADMISSION_QUEUE_HARD_DEPTH` (default `10`)
+- `SHARD_SCOUT_ADMISSION_LATENCY_SOFT_MS` (default `4500`)
+- `SHARD_SCOUT_ADMISSION_LATENCY_HARD_MS` (default `6000`)
+- `SHARD_SCOUT_POLL_MIN_INTERVAL_MS` (default `75`)
+- `SHARD_SCOUT_DRAFT_MIN_INTERVAL_MS` (default `50`)
+- `SHARD_SCOUT_ACTIVE_CAP` (default `8`)
+- `SHARD_SCOUT_ACTIVE_CAP_SOFT` (default `4`)
+- `SHARD_SCOUT_ACTIVE_CAP_HARD` (default `2`)
+- `SHARD_RELEASE_PROFILE` (optional label shown by `/v1/system/scout-config`)
 - `SHARD_HEARTBEAT_TIMEOUT_MS`
 - `SHARD_ALLOW_PRIVATE_BOOTSTRAP` (`true|false`, default `false`; allows dialing private/loopback bootstrap multiaddrs)
 - `SHARD_HARDCODED_BOOTSTRAP_MODE` (`fallback|always|disabled`, default `fallback`; `fallback` only uses built-in bootstrap when no user/bootstrap-url/persisted peers exist)
@@ -43,6 +56,43 @@
 - Daemon health: `GET /health`
 - Metrics summary: `GET /metrics/summary`
 - Prometheus metrics: `GET /metrics`
+- Scout runtime config and admission state: `GET /v1/system/scout-config`
+
+## Release Candidate Config Freeze
+- Canonical RC profile: `deploy/release/rc1.env`
+- Keep local and EC2 verifier nodes on the same commit and same RC env file while running the RC matrix.
+
+### Apply frozen config in local Docker mesh
+The mesh compose file already loads `deploy/release/rc1.env` via `env_file`.
+
+```bash
+docker compose -f deploy/demo/docker-compose.mesh.yml up -d --build bootstrap
+docker compose -f deploy/demo/docker-compose.mesh.yml up -d --scale shard-node=2 shard-node
+curl http://localhost:19091/v1/system/scout-config
+```
+
+### Apply frozen config on EC2 systemd daemon
+```bash
+sudo mkdir -p /etc/shard
+sudo cp deploy/release/rc1.env /etc/shard/rc1.env
+sudo chmod 0644 /etc/shard/rc1.env
+sudo systemctl edit shard-daemon
+```
+
+Use this override:
+
+```ini
+[Service]
+EnvironmentFile=/etc/shard/rc1.env
+```
+
+Then reload and verify:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl restart shard-daemon
+curl http://127.0.0.1:9091/v1/system/scout-config
+```
 
 ## Release Rule
 - Release version comes only from root `VERSION`.

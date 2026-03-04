@@ -1,6 +1,6 @@
 use anyhow::Result;
 use tray_icon::{
-    menu::{Menu, MenuEvent, MenuItem, MenuId, PredefinedMenuItem},
+    menu::{Menu, MenuEvent, MenuId, MenuItem, PredefinedMenuItem},
     TrayIcon, TrayIconBuilder,
 };
 
@@ -54,5 +54,4 @@ impl TrayManager {
             let _ = tray.set_tooltip(Some(status));
         }
     }
-
 }

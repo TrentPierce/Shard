@@ -321,6 +321,12 @@ const DEFAULT_SCOUT_ADMISSION_LATENCY_SOFT_MS: u64 = 4_500;
 const DEFAULT_SCOUT_ADMISSION_LATENCY_HARD_MS: u64 = 6_000;
 const DEFAULT_SCOUT_ADMISSION_RETRY_MIN_MS: u64 = 250;
 const DEFAULT_SCOUT_ADMISSION_RETRY_MAX_MS: u64 = 4_000;
+const DEFAULT_SCOUT_POLL_MIN_INTERVAL_MS: u128 = 75;
+const DEFAULT_SCOUT_DRAFT_MIN_INTERVAL_MS: u128 = 50;
+const DEFAULT_SCOUT_RATE_LIMIT_RETENTION_MS: u128 = 10 * 60 * 1000;
+const DEFAULT_SCOUT_ACTIVE_CAP: usize = 8;
+const DEFAULT_SCOUT_ACTIVE_CAP_SOFT: usize = 4;
+const DEFAULT_SCOUT_ACTIVE_CAP_HARD: usize = 2;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ScoutAdmissionMode {
@@ -462,6 +468,46 @@ fn scout_admission_latency_hard_ms() -> u64 {
         .unwrap_or(DEFAULT_SCOUT_ADMISSION_LATENCY_HARD_MS)
 }
 
+fn scout_poll_min_interval_ms() -> u128 {
+    std::env::var("SHARD_SCOUT_POLL_MIN_INTERVAL_MS")
+        .ok()
+        .and_then(|v| v.trim().parse::<u128>().ok())
+        .filter(|v| *v > 0)
+        .unwrap_or(DEFAULT_SCOUT_POLL_MIN_INTERVAL_MS)
+}
+
+fn scout_draft_min_interval_ms() -> u128 {
+    std::env::var("SHARD_SCOUT_DRAFT_MIN_INTERVAL_MS")
+        .ok()
+        .and_then(|v| v.trim().parse::<u128>().ok())
+        .filter(|v| *v > 0)
+        .unwrap_or(DEFAULT_SCOUT_DRAFT_MIN_INTERVAL_MS)
+}
+
+fn scout_active_cap() -> usize {
+    std::env::var("SHARD_SCOUT_ACTIVE_CAP")
+        .ok()
+        .and_then(|v| v.trim().parse::<usize>().ok())
+        .filter(|v| *v > 0)
+        .unwrap_or(DEFAULT_SCOUT_ACTIVE_CAP)
+}
+
+fn scout_active_cap_soft() -> usize {
+    std::env::var("SHARD_SCOUT_ACTIVE_CAP_SOFT")
+        .ok()
+        .and_then(|v| v.trim().parse::<usize>().ok())
+        .filter(|v| *v > 0)
+        .unwrap_or(DEFAULT_SCOUT_ACTIVE_CAP_SOFT)
+}
+
+fn scout_active_cap_hard() -> usize {
+    std::env::var("SHARD_SCOUT_ACTIVE_CAP_HARD")
+        .ok()
+        .and_then(|v| v.trim().parse::<usize>().ok())
+        .filter(|v| *v > 0)
+        .unwrap_or(DEFAULT_SCOUT_ACTIVE_CAP_HARD)
+}
+
 fn scout_admission_retry_after_ms(
     queue_depth: usize,
     avg_latency_ms: u64,
@@ -513,6 +559,55 @@ fn deterministic_sample_bucket(scout_id: &str, window: u128, modulus: u64) -> u6
     window.hash(&mut hasher);
     let m = modulus.max(1);
     hasher.finish() % m
+}
+
+fn scout_active_cap_for_mode(mode: ScoutAdmissionMode) -> usize {
+    let base = scout_active_cap();
+    let soft = scout_active_cap_soft().min(base.max(1));
+    let hard = scout_active_cap_hard().min(soft.max(1));
+    match mode {
+        ScoutAdmissionMode::Allow => base,
+        ScoutAdmissionMode::SoftBackpressure => soft,
+        ScoutAdmissionMode::HardCircuit => hard,
+    }
+}
+
+fn apply_scout_rate_limit(
+    table: &mut HashMap<String, u128>,
+    scout_id: &str,
+    now: u128,
+    min_interval_ms: u128,
+) -> Option<u64> {
+    table.retain(|_, ts| now.saturating_sub(*ts) <= DEFAULT_SCOUT_RATE_LIMIT_RETENTION_MS);
+    if min_interval_ms == 0 {
+        table.insert(scout_id.to_string(), now);
+        return None;
+    }
+    if let Some(last_seen) = table.get(scout_id) {
+        let elapsed = now.saturating_sub(*last_seen);
+        if elapsed < min_interval_ms {
+            let retry = min_interval_ms.saturating_sub(elapsed) as u64;
+            return Some(retry.max(1));
+        }
+    }
+    table.insert(scout_id.to_string(), now);
+    None
+}
+
+async fn recent_active_scouts(state: &SharedState, now: u128) -> std::collections::HashSet<String> {
+    let cutoff = now.saturating_sub(SCOUT_CLIENT_ACTIVE_WINDOW_MS);
+    let results = state.results.lock().await;
+    results
+        .iter()
+        .filter_map(|entry| {
+            let ts = entry.created_at_ms.unwrap_or(0);
+            if ts >= cutoff {
+                Some(entry.peer_id.clone())
+            } else {
+                None
+            }
+        })
+        .collect()
 }
 
 fn scout_assignment_backpressured(
@@ -584,7 +679,10 @@ impl WebGPUStats {
                 .map(|s| s.trim())
                 .filter(|s| !s.is_empty())
                 .unwrap_or("unknown");
-            *self.ineligible_reasons.entry(reason.to_string()).or_insert(0) += 1;
+            *self
+                .ineligible_reasons
+                .entry(reason.to_string())
+                .or_insert(0) += 1;
         }
     }
 
@@ -592,15 +690,24 @@ impl WebGPUStats {
         let ineligible = self.total_probes.saturating_sub(self.eligible);
         let mut reason_map = serde_json::Map::new();
         for (key, count) in &self.ineligible_reasons {
-            reason_map.insert(key.clone(), serde_json::json!(pct(*count, self.total_probes)));
+            reason_map.insert(
+                key.clone(),
+                serde_json::json!(pct(*count, self.total_probes)),
+            );
         }
         let mut browser_map = serde_json::Map::new();
         for (key, count) in &self.browser_counts {
-            browser_map.insert(key.clone(), serde_json::json!(pct(*count, self.total_probes)));
+            browser_map.insert(
+                key.clone(),
+                serde_json::json!(pct(*count, self.total_probes)),
+            );
         }
         let mut os_map = serde_json::Map::new();
         for (key, count) in &self.os_counts {
-            os_map.insert(key.clone(), serde_json::json!(pct(*count, self.total_probes)));
+            os_map.insert(
+                key.clone(),
+                serde_json::json!(pct(*count, self.total_probes)),
+            );
         }
 
         serde_json::json!({
@@ -1273,6 +1380,69 @@ pub(crate) async fn webgpu_coverage_handler(
     Json(stats.coverage_summary())
 }
 
+fn scout_config_snapshot_json() -> serde_json::Value {
+    serde_json::json!({
+        "profile": std::env::var("SHARD_RELEASE_PROFILE").unwrap_or_else(|_| "default".to_string()),
+        "scout_work_max_age_ms": scout_work_max_age_ms(),
+        "scout_client_runtime_ttl_ms": SCOUT_CLIENT_RUNTIME_TTL_MS,
+        "scout_client_active_window_ms": SCOUT_CLIENT_ACTIVE_WINDOW_MS,
+        "backpressure": {
+            "start_queue_depth": scout_backpressure_start_queue_depth(),
+            "medium_queue_depth": DEFAULT_SCOUT_BACKPRESSURE_MEDIUM_QUEUE_DEPTH,
+            "high_queue_depth": DEFAULT_SCOUT_BACKPRESSURE_HIGH_QUEUE_DEPTH,
+            "latency_warn_ms": scout_backpressure_latency_warn_ms(),
+            "latency_severe_ms": scout_backpressure_latency_severe_ms(),
+        },
+        "admission": {
+            "queue_depth_soft": scout_admission_queue_depth(),
+            "queue_depth_hard": scout_admission_queue_hard_depth(),
+            "latency_soft_ms": scout_admission_latency_soft_ms(),
+            "latency_hard_ms": scout_admission_latency_hard_ms(),
+            "retry_min_ms": DEFAULT_SCOUT_ADMISSION_RETRY_MIN_MS,
+            "retry_max_ms": DEFAULT_SCOUT_ADMISSION_RETRY_MAX_MS,
+        },
+        "rate_limit": {
+            "poll_min_interval_ms": scout_poll_min_interval_ms(),
+            "draft_min_interval_ms": scout_draft_min_interval_ms(),
+            "retention_ms": DEFAULT_SCOUT_RATE_LIMIT_RETENTION_MS,
+        },
+        "active_cap": {
+            "base": scout_active_cap(),
+            "soft": scout_active_cap_soft(),
+            "hard": scout_active_cap_hard(),
+        },
+    })
+}
+
+pub(crate) async fn scout_config_handler(
+    AxumState(state): AxumState<SharedState>,
+) -> Json<serde_json::Value> {
+    let now = now_ms();
+    let queue_depth = state.scout_work.lock().await.len();
+    let avg_latency_ms = state.avg_latency_ms.load(Ordering::Relaxed) as u64;
+    let p95_latency_ms = state.gossipsub_latency_hist.percentiles().p95_ms;
+    let admission = scout_admission_decision(queue_depth, avg_latency_ms, p95_latency_ms);
+    let active_scouts = recent_active_scouts(&state, now).await;
+    let active_cap = scout_active_cap_for_mode(admission.mode);
+    Json(serde_json::json!({
+        "ok": true,
+        "config": scout_config_snapshot_json(),
+        "runtime": {
+            "queue_depth": queue_depth,
+            "average_latency_ms": avg_latency_ms,
+            "p95_latency_ms": p95_latency_ms,
+            "admission_mode": match admission.mode {
+                ScoutAdmissionMode::Allow => "allow",
+                ScoutAdmissionMode::SoftBackpressure => "soft_backpressure",
+                ScoutAdmissionMode::HardCircuit => "hard_circuit",
+            },
+            "retry_after_ms": admission.retry_after_ms,
+            "active_scouts_recent": active_scouts.len(),
+            "active_cap_current": active_cap,
+        }
+    }))
+}
+
 pub(crate) async fn ensure_pow_verified(
     state: &SharedState,
     scout_id: &str,
@@ -1302,13 +1472,30 @@ pub(crate) async fn pop_work_handler(
         return Err((axum::http::StatusCode::FORBIDDEN, response));
     }
     state.system_metrics.inc_scout_work_poll();
-    let mut queue = state.scout_work.lock().await;
     let now = now_ms();
-    let queue_depth = queue.len();
+    {
+        let mut polls = state.scout_work_last_poll.lock().await;
+        if let Some(retry_after_ms) =
+            apply_scout_rate_limit(&mut polls, scout_id, now, scout_poll_min_interval_ms())
+        {
+            state.system_metrics.inc_scout_work_rate_limited();
+            return Err((
+                axum::http::StatusCode::TOO_MANY_REQUESTS,
+                Json(serde_json::json!({
+                    "work": null,
+                    "transient_error": true,
+                    "detail": "scout_poll_rate_limited",
+                    "retry_after_ms": retry_after_ms,
+                })),
+            ));
+        }
+    }
+    let queue_depth = state.scout_work.lock().await.len();
     let avg_latency_ms = state.avg_latency_ms.load(Ordering::Relaxed) as u64;
     let p95_latency_ms = state.gossipsub_latency_hist.percentiles().p95_ms;
     let admission = scout_admission_decision(queue_depth, avg_latency_ms, p95_latency_ms);
     if admission.mode != ScoutAdmissionMode::Allow {
+        state.system_metrics.inc_scout_work_overload_reject();
         state.system_metrics.inc_scout_work_empty_poll();
         let detail = if admission.mode == ScoutAdmissionMode::HardCircuit {
             "scout_circuit_open"
@@ -1337,6 +1524,22 @@ pub(crate) async fn pop_work_handler(
             })),
         ));
     }
+    let active_scouts = recent_active_scouts(&state, now).await;
+    let active_cap = scout_active_cap_for_mode(admission.mode);
+    if active_cap > 0 && active_scouts.len() >= active_cap && !active_scouts.contains(scout_id) {
+        state.system_metrics.inc_scout_work_active_cap_reject();
+        return Err((
+            axum::http::StatusCode::TOO_MANY_REQUESTS,
+            Json(serde_json::json!({
+                "work": null,
+                "transient_error": true,
+                "detail": "scout_active_cap_reached",
+                "active_scouts": active_scouts.len(),
+                "active_cap": active_cap,
+                "retry_after_ms": admission.retry_after_ms.max(250),
+            })),
+        ));
+    }
     if scout_assignment_backpressured(scout_id, queue_depth, avg_latency_ms, now) {
         state.system_metrics.inc_scout_work_empty_poll();
         tracing::debug!(
@@ -1353,6 +1556,7 @@ pub(crate) async fn pop_work_handler(
             "retry_after_ms": 250,
         })));
     }
+    let mut queue = state.scout_work.lock().await;
     let max_age_ms = scout_work_max_age_ms();
     while let Some(work) = queue.pop_front() {
         let created_at_ms = work.created_at_ms.unwrap_or(now);
@@ -1405,7 +1609,9 @@ pub(crate) async fn signed_submit_draft_handler(
     {
         state.system_metrics.inc_node_identity_auth_failures();
         mark_node_failure(&state, &signer).await;
-        return Ok(Json(serde_json::json!({ "ok": false, "detail": "stale or replayed nonce" })));
+        return Ok(Json(
+            serde_json::json!({ "ok": false, "detail": "stale or replayed nonce" }),
+        ));
     }
     record_signature_alert(&state, true).await;
     process_draft_submission(&state, req.envelope.payload).await
@@ -1418,6 +1624,27 @@ pub(crate) async fn process_draft_submission(
     submission.work_id = submission.work_id.trim().to_string();
     submission.scout_id = submission.scout_id.trim().to_string();
     state.system_metrics.inc_scout_draft_submission();
+    let now = now_ms();
+    {
+        let mut drafts = state.scout_draft_last_submit.lock().await;
+        if let Some(retry_after_ms) = apply_scout_rate_limit(
+            &mut drafts,
+            submission.scout_id.as_str(),
+            now,
+            scout_draft_min_interval_ms(),
+        ) {
+            state.system_metrics.inc_scout_draft_rate_limited();
+            return Err((
+                axum::http::StatusCode::TOO_MANY_REQUESTS,
+                Json(serde_json::json!({
+                    "ok": false,
+                    "transient_error": true,
+                    "detail": "scout_draft_rate_limited",
+                    "retry_after_ms": retry_after_ms,
+                })),
+            ));
+        }
+    }
     let scout_queue_depth = state.scout_work.lock().await.len();
     let pending_queue_depth = state.speculative_pending.lock().await.len();
     let effective_queue_depth = scout_queue_depth.max(pending_queue_depth);
@@ -1425,6 +1652,7 @@ pub(crate) async fn process_draft_submission(
     let p95_latency_ms = state.gossipsub_latency_hist.percentiles().p95_ms;
     let admission = scout_admission_decision(effective_queue_depth, avg_latency_ms, p95_latency_ms);
     if admission.mode != ScoutAdmissionMode::Allow {
+        state.system_metrics.inc_scout_draft_overload_reject();
         let detail = if admission.mode == ScoutAdmissionMode::HardCircuit {
             "scout_draft_circuit_open"
         } else {
@@ -1459,7 +1687,7 @@ pub(crate) async fn process_draft_submission(
         pending
             .get(submission.work_id.as_str())
             .copied()
-            .map(|issued_at| now_ms().saturating_sub(issued_at) as u64)
+            .map(|issued_at| now.saturating_sub(issued_at) as u64)
     };
     if pending_age_ms.is_none() {
         state
@@ -1631,7 +1859,9 @@ pub(crate) async fn process_draft_submission(
     match state.scout_draft_tx.try_send(draft_for_channel) {
         Ok(_) => {
             state.system_metrics.inc_scout_draft_channel_enqueued();
-            Ok(Json(serde_json::json!({ "ok": true, "detail": "draft queued" })))
+            Ok(Json(
+                serde_json::json!({ "ok": true, "detail": "draft queued" }),
+            ))
         }
         Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
             state
@@ -2662,8 +2892,28 @@ pub(crate) async fn metrics_summary_handler(
         serde_json::json!(counters.scout_work_empty_polls_total),
     );
     payload.insert(
+        "scout_work_rate_limited_total".to_string(),
+        serde_json::json!(counters.scout_work_rate_limited_total),
+    );
+    payload.insert(
+        "scout_work_overload_reject_total".to_string(),
+        serde_json::json!(counters.scout_work_overload_reject_total),
+    );
+    payload.insert(
+        "scout_work_active_cap_reject_total".to_string(),
+        serde_json::json!(counters.scout_work_active_cap_reject_total),
+    );
+    payload.insert(
         "scout_draft_submissions_total".to_string(),
         serde_json::json!(counters.scout_draft_submissions_total),
+    );
+    payload.insert(
+        "scout_draft_rate_limited_total".to_string(),
+        serde_json::json!(counters.scout_draft_rate_limited_total),
+    );
+    payload.insert(
+        "scout_draft_overload_reject_total".to_string(),
+        serde_json::json!(counters.scout_draft_overload_reject_total),
     );
     payload.insert(
         "scout_draft_reject_missing_identity_total".to_string(),

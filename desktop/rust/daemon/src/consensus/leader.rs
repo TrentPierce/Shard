@@ -24,15 +24,24 @@ pub struct ConsensusSnapshot {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ElectionMessage {
-    RequestVote { term: u64, candidate_id: String },
+    RequestVote {
+        term: u64,
+        candidate_id: String,
+    },
     Vote {
         term: u64,
         voter_id: String,
         candidate_id: String,
         granted: bool,
     },
-    Heartbeat { term: u64, leader_id: String },
-    NodeLeaving { node_id: String, peer_id: String },
+    Heartbeat {
+        term: u64,
+        leader_id: String,
+    },
+    NodeLeaving {
+        node_id: String,
+        peer_id: String,
+    },
 }
 
 #[derive(Debug, Deserialize)]
@@ -274,10 +283,7 @@ pub fn spawn_leader_election(
         }
     });
 
-    (
-        LeaderElectionHandle { snapshot, input_tx },
-        output_rx,
-    )
+    (LeaderElectionHandle { snapshot, input_tx }, output_rx)
 }
 
 #[cfg(test)]
@@ -292,7 +298,10 @@ mod tests {
         let _ = tx.send(LeaderInput::PeerCount(0)).await;
         sleep(Duration::from_millis(400)).await;
         let snap = handle.snapshot().await;
-        assert!(matches!(snap.role, ConsensusRole::Leader | ConsensusRole::Candidate));
+        assert!(matches!(
+            snap.role,
+            ConsensusRole::Leader | ConsensusRole::Candidate
+        ));
     }
 
     #[tokio::test]

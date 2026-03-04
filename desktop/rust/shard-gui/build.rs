@@ -23,7 +23,7 @@ fn main() {
         .to_path_buf();
 
     let dll_sources: &[(&str, &str)] = &[
-        ("cpp/shard-bridge/build/Release",     "shard_engine.dll"),
+        ("cpp/shard-bridge/build/Release", "shard_engine.dll"),
         ("cpp/shard-bridge/build/bin/Release", "llama.dll"),
         ("cpp/shard-bridge/build/bin/Release", "ggml.dll"),
         ("cpp/shard-bridge/build/bin/Release", "ggml-base.dll"),
@@ -35,7 +35,12 @@ fn main() {
         let dst = profile_dir.join(dll_name);
         if src.exists() {
             if let Err(e) = std::fs::copy(&src, &dst) {
-                eprintln!("cargo:warning=Failed to copy {} → {}: {}", src.display(), dst.display(), e);
+                eprintln!(
+                    "cargo:warning=Failed to copy {} → {}: {}",
+                    src.display(),
+                    dst.display(),
+                    e
+                );
             }
             println!("cargo:rerun-if-changed={}", src.display());
         } else {

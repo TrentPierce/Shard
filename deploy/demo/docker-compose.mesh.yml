@@ -13,15 +13,19 @@ services:
       - "--quic-port"
       - "9092"
       - "--public-api"
-      - "true"
       - "--relay-mode"
-      - "true"
       - "--stability-threshold-hours"
       - "0"
+    env_file:
+      - ../release/rc1.env
     environment:
-      SHARD_REQUIRE_ENGINE_FOR_CONTRIBUTE: "false"
+      SHARD_REQUIRE_ENGINE_FOR_CONTRIBUTE: "true"
       SHARD_ALLOW_PRIVATE_BOOTSTRAP: "true"
       SHARD_ALLOW_PRIVATE_RELAY: "true"
+      BITNET_LIB: "/opt/shard/lib/libshard_engine.so"
+      BITNET_MODEL: "/models/Llama-3.2-1B-Instruct-Q4_K_M.gguf"
+    volumes:
+      - ../../models:/models:ro
     ports:
       - "19091:9091"
       - "14001:4001"
@@ -52,9 +56,15 @@ services:
       - "9092"
       - "--bootstrap-node"
       - "${SHARD_BOOTSTRAP_NODE}"
+    env_file:
+      - ../release/rc1.env
     environment:
-      SHARD_REQUIRE_ENGINE_FOR_CONTRIBUTE: "false"
+      SHARD_REQUIRE_ENGINE_FOR_CONTRIBUTE: "true"
       SHARD_ALLOW_PRIVATE_BOOTSTRAP: "true"
+      BITNET_LIB: "/opt/shard/lib/libshard_engine.so"
+      BITNET_MODEL: "/models/Llama-3.2-1B-Instruct-Q4_K_M.gguf"
+    volumes:
+      - ../../models:/models:ro
     depends_on:
       bootstrap:
         condition: service_healthy

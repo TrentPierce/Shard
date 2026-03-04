@@ -86,7 +86,9 @@ impl<C: CoVerifierClient> TensorParallelCoordinator<C> {
         co_verifiers: Vec<String>,
     ) -> VerificationResult {
         if co_verifiers.is_empty() {
-            return self.fallback_single(request, Some("no_co_verifiers".to_string())).await;
+            return self
+                .fallback_single(request, Some("no_co_verifiers".to_string()))
+                .await;
         }
 
         let shard_count = co_verifiers.len() + 1;
@@ -250,7 +252,11 @@ mod tests {
             Ok(self.peers.clone())
         }
 
-        async fn send_layer_shard(&self, _peer_id: &str, _shard: LayerShard) -> Result<Vec<Vec<f32>>> {
+        async fn send_layer_shard(
+            &self,
+            _peer_id: &str,
+            _shard: LayerShard,
+        ) -> Result<Vec<Vec<f32>>> {
             let mut guard = self.sent_protocols.lock().await;
             guard.push(TENSOR_PARALLEL_PROTOCOL.to_string());
             drop(guard);
@@ -268,7 +274,11 @@ mod tests {
     #[tokio::test]
     async fn discovers_up_to_degree_minus_one() {
         let client = MockClient {
-            peers: vec!["peer-a".to_string(), "peer-b".to_string(), "peer-c".to_string()],
+            peers: vec![
+                "peer-a".to_string(),
+                "peer-b".to_string(),
+                "peer-c".to_string(),
+            ],
             local: vec![vec![0.9, 0.1]],
             remote: vec![vec![0.8, 0.2]],
             fail_remote: false,
@@ -314,6 +324,9 @@ mod tests {
             .verify_parallel(request, vec!["peer-a".to_string()])
             .await;
         assert!(!result.used_parallel);
-        assert!(result.fallback_reason.unwrap_or_default().contains("co_verifier_error"));
+        assert!(result
+            .fallback_reason
+            .unwrap_or_default()
+            .contains("co_verifier_error"));
     }
 }

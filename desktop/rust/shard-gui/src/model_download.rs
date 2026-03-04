@@ -22,7 +22,11 @@ struct ModelEntry {
 
 #[derive(Debug, Clone)]
 pub enum DownloadMsg {
-    Progress { downloaded: u64, total: u64, filename: String },
+    Progress {
+        downloaded: u64,
+        total: u64,
+        filename: String,
+    },
     Done(PathBuf),
     Error(String),
 }

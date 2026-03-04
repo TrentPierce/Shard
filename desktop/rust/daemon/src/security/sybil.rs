@@ -41,10 +41,7 @@ impl SybilDetector {
 
     pub fn record_new_node(&mut self, wallet: WalletId, ip: IpAddr, timestamp: Instant) {
         let subnet = subnet_from_ip(ip);
-        let registrations = self
-            .subnet_registrations
-            .entry(subnet.clone())
-            .or_default();
+        let registrations = self.subnet_registrations.entry(subnet.clone()).or_default();
 
         while let Some((seen_at, _)) = registrations.front() {
             if timestamp.duration_since(*seen_at) > Duration::from_secs(3600) {
@@ -149,7 +146,10 @@ fn subnet_from_ip(ip: IpAddr) -> String {
         }
         IpAddr::V6(v6) => {
             let segments = v6.segments();
-            format!("{:x}:{:x}:{:x}:{:x}", segments[0], segments[1], segments[2], segments[3])
+            format!(
+                "{:x}:{:x}:{:x}:{:x}",
+                segments[0], segments[1], segments[2], segments[3]
+            )
         }
     }
 }
@@ -199,7 +199,8 @@ mod tests {
 
         let weak = PowSolution {
             nonce: 1,
-            hash_hex: "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff".to_string(),
+            hash_hex: "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+                .to_string(),
         };
         assert!(detector
             .record_pow_solution("wallet-a".to_string(), &weak)
@@ -207,7 +208,8 @@ mod tests {
 
         let strong = PowSolution {
             nonce: 2,
-            hash_hex: "0000ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff".to_string(),
+            hash_hex: "0000ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+                .to_string(),
         };
         assert!(detector
             .record_pow_solution("wallet-a".to_string(), &strong)
