@@ -310,6 +310,11 @@ const BROWSER_SESSION_TTL_MS: u128 = 5 * 60 * 1000;
 pub(crate) const SCOUT_CLIENT_RUNTIME_TTL_MS: u128 = 10 * 60 * 1000;
 pub(crate) const SCOUT_CLIENT_ACTIVE_WINDOW_MS: u128 = 3 * 60 * 1000;
 const DEFAULT_SCOUT_WORK_MAX_AGE_MS: u128 = 180_000;
+const DEFAULT_SCOUT_BACKPRESSURE_START_QUEUE_DEPTH: usize = 256;
+const DEFAULT_SCOUT_BACKPRESSURE_MEDIUM_QUEUE_DEPTH: usize = 512;
+const DEFAULT_SCOUT_BACKPRESSURE_HIGH_QUEUE_DEPTH: usize = 768;
+const DEFAULT_SCOUT_BACKPRESSURE_LATENCY_WARN_MS: u64 = 3_000;
+const DEFAULT_SCOUT_BACKPRESSURE_LATENCY_SEVERE_MS: u64 = 6_000;
 
 fn scout_work_max_age_ms() -> u128 {
     static MAX_AGE_MS: std::sync::OnceLock<u128> = std::sync::OnceLock::new();
@@ -380,6 +385,68 @@ fn summarize_scout_client_runtime(
         wasm_total,
         last_submit_success_ms,
     )
+}
+
+fn scout_backpressure_start_queue_depth() -> usize {
+    std::env::var("SHARD_SCOUT_BACKPRESSURE_START_QUEUE_DEPTH")
+        .ok()
+        .and_then(|v| v.trim().parse::<usize>().ok())
+        .filter(|v| *v > 0)
+        .unwrap_or(DEFAULT_SCOUT_BACKPRESSURE_START_QUEUE_DEPTH)
+}
+
+fn scout_backpressure_latency_warn_ms() -> u64 {
+    std::env::var("SHARD_SCOUT_BACKPRESSURE_LATENCY_WARN_MS")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .filter(|v| *v > 0)
+        .unwrap_or(DEFAULT_SCOUT_BACKPRESSURE_LATENCY_WARN_MS)
+}
+
+fn scout_backpressure_latency_severe_ms() -> u64 {
+    std::env::var("SHARD_SCOUT_BACKPRESSURE_LATENCY_SEVERE_MS")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .filter(|v| *v > 0)
+        .unwrap_or(DEFAULT_SCOUT_BACKPRESSURE_LATENCY_SEVERE_MS)
+}
+
+fn deterministic_sample_bucket(scout_id: &str, window: u128, modulus: u64) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    scout_id.hash(&mut hasher);
+    window.hash(&mut hasher);
+    let m = modulus.max(1);
+    hasher.finish() % m
+}
+
+fn scout_assignment_backpressured(
+    scout_id: &str,
+    queue_depth: usize,
+    avg_latency_ms: u64,
+    now: u128,
+) -> bool {
+    let start_depth = scout_backpressure_start_queue_depth();
+    let latency_warn_ms = scout_backpressure_latency_warn_ms();
+    let latency_severe_ms = scout_backpressure_latency_severe_ms();
+    if queue_depth < start_depth && avg_latency_ms < latency_warn_ms {
+        return false;
+    }
+
+    let modulus = if queue_depth >= DEFAULT_SCOUT_BACKPRESSURE_HIGH_QUEUE_DEPTH
+        || avg_latency_ms >= latency_severe_ms
+    {
+        6
+    } else if queue_depth >= DEFAULT_SCOUT_BACKPRESSURE_MEDIUM_QUEUE_DEPTH
+        || avg_latency_ms >= latency_warn_ms
+    {
+        4
+    } else {
+        2
+    };
+    // Windowing keeps assignment deterministic for a short interval and avoids stampedes.
+    let window = now / 1_000;
+    deterministic_sample_bucket(scout_id, window, modulus) != 0
 }
 
 fn round_pct(value: f64) -> f64 {
@@ -1142,6 +1209,23 @@ pub(crate) async fn pop_work_handler(
     state.system_metrics.inc_scout_work_poll();
     let mut queue = state.scout_work.lock().await;
     let now = now_ms();
+    let queue_depth = queue.len();
+    let avg_latency_ms = state.avg_latency_ms.load(Ordering::Relaxed);
+    if scout_assignment_backpressured(scout_id, queue_depth, avg_latency_ms as u64, now) {
+        state.system_metrics.inc_scout_work_empty_poll();
+        tracing::debug!(
+            scout_id = %scout_id,
+            queue_depth,
+            avg_latency_ms,
+            "backpressure active for scout assignment; returning empty work"
+        );
+        return Json(serde_json::json!({
+            "work": null,
+            "transient_error": true,
+            "detail": "backpressure_active",
+            "queue_depth": queue_depth,
+        }));
+    }
     let max_age_ms = scout_work_max_age_ms();
     while let Some(work) = queue.pop_front() {
         let created_at_ms = work.created_at_ms.unwrap_or(now);
@@ -2830,7 +2914,8 @@ mod tests {
     use super::{
         push_scheduler_decision_log, require_scout_id, runtime_health_state,
         sanitize_scout_draft_text, should_route_long_context, verify_spot_check_submission,
-        DraftSpotCheckProof, ScoutWorkQuery, WebGPUProbeResult, WebGPUStats,
+        scout_assignment_backpressured, DraftSpotCheckProof, ScoutWorkQuery, WebGPUProbeResult,
+        WebGPUStats,
     };
     use crate::SchedulerDecisionLog;
     use std::collections::VecDeque;
@@ -2928,6 +3013,28 @@ mod tests {
     fn scout_draft_text_sanitization_stops_on_control_markers() {
         let raw = "Hello there<|eot_id|>user<|start_header_id|>assistant";
         assert_eq!(sanitize_scout_draft_text(raw), "Hello there");
+    }
+
+    #[test]
+    fn scout_backpressure_disabled_when_queue_and_latency_are_low() {
+        let blocked = scout_assignment_backpressured("scout-a", 32, 1200, 1_000_000);
+        assert!(!blocked);
+    }
+
+    #[test]
+    fn scout_backpressure_engages_under_heavy_load() {
+        // Probe multiple consecutive windows to avoid hash-bucket flukes.
+        let blocked_count = (0..20)
+            .filter(|offset| {
+                scout_assignment_backpressured(
+                    "scout-heavy",
+                    900,
+                    9000,
+                    1_000_000 + (*offset as u128 * 1_000),
+                )
+            })
+            .count();
+        assert!(blocked_count > 0);
     }
 
     #[test]

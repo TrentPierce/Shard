@@ -1,0 +1,38 @@
+services:
+  shard-local-bridge:
+    build:
+      context: ../..
+      dockerfile: Dockerfile.daemon
+    image: shard-daemon:ec2-bridge
+    container_name: shard-local-bridge
+    restart: unless-stopped
+    environment:
+      BITNET_LIB: /opt/shard/lib/libshard_engine.so
+      BITNET_MODEL: /models/Llama-3.2-1B-Instruct-Q4_K_M.gguf
+      SHARD_ALLOW_PRIVATE_BOOTSTRAP: "true"
+      SHARD_REQUIRE_ENGINE_FOR_CONTRIBUTE: "true"
+      LD_LIBRARY_PATH: /opt/shard/lib
+    command:
+      [
+        "shard-daemon",
+        "--relay-mode",
+        "--control-port",
+        "9091",
+        "--tcp-port",
+        "4001",
+        "--webrtc-port",
+        "9090",
+        "--quic-port",
+        "9092",
+        "--telemetry-ws-port",
+        "9093",
+        "--bootstrap-node",
+        "/dns4/api.shardnetwork.live/tcp/4001/p2p/12D3KooWPQqkkZk7NeWA2b1FeWYuBFRW8X7Q9ugymnzxeKJHFLUV"
+      ]
+    ports:
+      - "29091:9091"
+      - "14001:4001"
+      - "19090:9090/udp"
+      - "19092:9092/udp"
+    volumes:
+      - ../../models:/models:ro

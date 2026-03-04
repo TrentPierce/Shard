@@ -29,17 +29,83 @@ class RequestRecord:
     latency_ms: float
 
 
-class RoundRobinPool:
+@dataclass
+class EndpointState:
+    endpoint: str
+    inflight: int = 0
+    ewma_latency_ms: float = 1200.0
+    error_ewma: float = 0.0
+    queue_depth: float = 0.0
+    load: float = 0.0
+    last_refresh_monotonic: float = 0.0
+
+
+class LoadAwarePool:
     def __init__(self, endpoints: list[str]) -> None:
-        self._endpoints = [ep.rstrip("/") for ep in endpoints if ep.strip()]
-        self._idx = 0
+        self._states = {
+            ep.rstrip("/"): EndpointState(endpoint=ep.rstrip("/"))
+            for ep in endpoints
+            if ep.strip()
+        }
         self._lock = asyncio.Lock()
 
-    async def next(self) -> str:
+    async def next(self, client: httpx.AsyncClient) -> str:
+        await self.refresh(client)
         async with self._lock:
-            endpoint = self._endpoints[self._idx % len(self._endpoints)]
-            self._idx += 1
+            if not self._states:
+                raise RuntimeError("no verifier endpoints configured")
+            ranked = sorted(self._states.values(), key=self._score)
+            endpoint = ranked[0].endpoint
+            self._states[endpoint].inflight += 1
             return endpoint
+
+    async def note_result(self, endpoint: str, ok: bool, latency_ms: float) -> None:
+        async with self._lock:
+            state = self._states.get(endpoint.rstrip("/"))
+            if state is None:
+                return
+            state.inflight = max(0, state.inflight - 1)
+            alpha = 0.2
+            state.ewma_latency_ms = ((1.0 - alpha) * state.ewma_latency_ms) + (alpha * max(0.0, latency_ms))
+            err_sample = 0.0 if ok else 1.0
+            state.error_ewma = ((1.0 - alpha) * state.error_ewma) + (alpha * err_sample)
+
+    async def refresh(self, client: httpx.AsyncClient, min_interval_s: float = 2.0) -> None:
+        now = time.monotonic()
+        async with self._lock:
+            candidates = list(self._states.values())
+        stale = [s for s in candidates if now - s.last_refresh_monotonic >= min_interval_s]
+        if not stale:
+            return
+        for state in stale:
+            queue_depth = state.queue_depth
+            load = state.load
+            try:
+                resp = await client.get(f"{state.endpoint}/metrics/summary")
+                if resp.is_success:
+                    data = resp.json()
+                    queue_depth = float(data.get("queue_depth", queue_depth) or 0.0)
+                    load = float(data.get("load", load) or 0.0)
+            except Exception:
+                pass
+            async with self._lock:
+                current = self._states.get(state.endpoint)
+                if current is None:
+                    continue
+                current.queue_depth = max(0.0, queue_depth)
+                current.load = max(0.0, load)
+                current.last_refresh_monotonic = now
+
+    @staticmethod
+    def _score(state: EndpointState) -> float:
+        # Lower score is better.
+        return (
+            (state.inflight * 12.0)
+            + state.ewma_latency_ms
+            + (state.queue_depth * 25.0)
+            + (state.load * 15.0)
+            + (state.error_ewma * 3000.0)
+        )
 
 
 def count_leading_zero_bits(raw: bytes) -> int:
@@ -111,7 +177,7 @@ async def run_orchestrator(
     if not verifier_pool:
         raise ValueError("verifier_pool cannot be empty")
 
-    pool = RoundRobinPool(verifier_pool)
+    pool = LoadAwarePool(verifier_pool)
     semaphore = asyncio.Semaphore(max(1, scouts))
     records: list[RequestRecord] = []
     records_lock = asyncio.Lock()
@@ -243,8 +309,9 @@ async def run_orchestrator(
                 t0 = time.monotonic()
                 ok = False
                 for _attempt in range(max(1, max_attempts)):
+                    endpoint = None
                     try:
-                        endpoint = await pool.next()
+                        endpoint = await pool.next(client)
                         resp = await client.post(
                             f"{endpoint}/v1/chat/completions",
                             headers={"x-shard-inference-mode": inference_mode},
@@ -254,11 +321,22 @@ async def run_orchestrator(
                                 "max_tokens": max(1, max_tokens),
                             },
                         )
-                        if resp.status_code < 500:
+                        attempt_ok = resp.status_code < 500
+                        await pool.note_result(
+                            endpoint=endpoint,
+                            ok=attempt_ok,
+                            latency_ms=(time.monotonic() - t0) * 1000.0,
+                        )
+                        if attempt_ok:
                             ok = True
                             break
                     except Exception:
-                        pass
+                        if endpoint:
+                            await pool.note_result(
+                                endpoint=endpoint,
+                                ok=False,
+                                latency_ms=(time.monotonic() - t0) * 1000.0,
+                            )
                     await asyncio.sleep(0.01)
                 latency_ms = (time.monotonic() - t0) * 1000.0
                 async with records_lock:
