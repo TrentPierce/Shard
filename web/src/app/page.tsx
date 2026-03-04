@@ -53,22 +53,37 @@ const incentives = [
   "Practical benefits: lower API spend, burst scaling, infrastructure ownership.",
 ]
 
-const charts = [
+const benchmarkRows = [
   {
-    title: "Validated p95 Response Time by Node Count",
-    src: "/value-dashboard/performance-vs-nodes.png",
-    alt: "Performance chart showing validated node-count latencies with pending counts marked",
+    scenario: "1 node, no scouts",
+    p95Ms: 5047.905,
+    tps: 3.45,
+    errorPct: 13.3891,
   },
   {
-    title: "Network Contribution Map (Test Data)",
-    src: "/value-dashboard/network-map.png",
-    alt: "World contribution map with sample regional scout and verifier nodes",
+    scenario: "1 node, with scouts",
+    p95Ms: 6463.169,
+    tps: 3.9333,
+    errorPct: 1.2552,
   },
   {
-    title: "Cost Comparison per 1K Tokens",
-    src: "/value-dashboard/cost-comparison.png",
-    alt: "Cost chart comparing shard contribution mode with centralized API pricing",
+    scenario: "2 nodes, no scouts",
+    p95Ms: 4924.837,
+    tps: 3.7833,
+    errorPct: 5.0209,
   },
+  {
+    scenario: "2 nodes, with scouts",
+    p95Ms: 8884.42,
+    tps: 3.7167,
+    errorPct: 7.0833,
+  },
+]
+
+const oldVsNew = [
+  "2-node no-scouts vs earlier baseline: p95 latency -45.86%, throughput +28.98%, errors -21.95 points.",
+  "2-node with scouts vs earlier baseline: p95 latency -34.73%, throughput +12.63%, errors -10.76 points.",
+  "1-node no-scouts vs earlier baseline: p95 latency -44.11%, throughput +4.55%, errors -4.45 points.",
 ]
 
 export default function HomePage() {
@@ -213,29 +228,38 @@ export default function HomePage() {
         </section>
 
         <section className="mt-12">
-          <h2 className="text-balance text-xl font-medium text-ink-50 sm:text-2xl">Shard Value Dashboard</h2>
+          <h2 className="text-balance text-xl font-medium text-ink-50 sm:text-2xl">March 4, 2026 Benchmark Snapshot</h2>
           <p className="mt-2 text-sm text-ink-300">
-            Visual proof of performance, participation, and cost position. Performance points are validated-only; missing
-            node counts are explicitly marked as pending validation.
+            Real benchmark matrix from today using the distributed orchestrator (24 scouts, 4 req/s, 60s runs).
+            Verifier pool tested as single-node and two-node (local verifier + EC2 verifier).
           </p>
-          <div className="mt-4 grid gap-4 lg:grid-cols-3">
-            {charts.map((chart) => (
-              <article key={chart.title} className="rounded-2xl border border-ring bg-base-900 p-4">
-                <h3 className="text-sm font-medium text-ink-100">{chart.title}</h3>
-                <img className="mt-3 w-full rounded-lg border border-ring" src={chart.src} alt={chart.alt} loading="lazy" />
-              </article>
+          <div className="mt-4 overflow-x-auto rounded-2xl border border-ring bg-base-900">
+            <table className="min-w-full text-left text-sm">
+              <thead className="border-b border-ring text-ink-300">
+                <tr>
+                  <th className="px-4 py-3 font-medium">Scenario</th>
+                  <th className="px-4 py-3 font-medium">p95 Latency (ms)</th>
+                  <th className="px-4 py-3 font-medium">Throughput (TPS)</th>
+                  <th className="px-4 py-3 font-medium">Error Rate (%)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {benchmarkRows.map((row) => (
+                  <tr key={row.scenario} className="border-b border-ring/60 text-ink-100">
+                    <td className="px-4 py-3">{row.scenario}</td>
+                    <td className="px-4 py-3">{row.p95Ms.toLocaleString(undefined, { maximumFractionDigits: 3 })}</td>
+                    <td className="px-4 py-3">{row.tps.toLocaleString(undefined, { maximumFractionDigits: 4 })}</td>
+                    <td className="px-4 py-3">{row.errorPct.toLocaleString(undefined, { maximumFractionDigits: 4 })}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <ul className="mt-4 list-disc space-y-1 pl-5 text-sm text-ink-300">
+            {oldVsNew.map((line) => (
+              <li key={line}>{line}</li>
             ))}
-          </div>
-          <div className="mt-4">
-            <a
-              href="/value-dashboard/shard-value-summary.pdf"
-              className="inline-flex min-h-10 items-center rounded-lg border border-ring px-4 py-2 text-sm font-medium text-ink-100 hover:bg-base-800"
-              target="_blank"
-              rel="noreferrer"
-            >
-              Open One-Page Value Summary (PDF)
-            </a>
-          </div>
+          </ul>
         </section>
 
         <section className="mt-12">

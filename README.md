@@ -62,6 +62,27 @@ Full guide: [docs/mesh-benchmark.md](docs/mesh-benchmark.md)
 
 ---
 
+## Performance Snapshot (March 4, 2026)
+
+Latest benchmark matrix (distributed orchestrator, 24 scouts, 4 req/s, 60s runs):
+
+| Scenario | p95 latency (ms) | Throughput (TPS) | Error rate (%) |
+|---------|-------------------|------------------|----------------|
+| 1 node, no scouts | 5047.905 | 3.4500 | 13.3891 |
+| 1 node, with scouts | 6463.169 | 3.9333 | 1.2552 |
+| 2 nodes, no scouts | 4924.837 | 3.7833 | 5.0209 |
+| 2 nodes, with scouts | 8884.420 | 3.7167 | 7.0833 |
+
+Compared to the earlier EC2 matrix baseline from the same day:
+
+- 2-node no-scouts: p95 latency `-45.86%`, throughput `+28.98%`, error rate `-21.95` points.
+- 2-node with-scouts: p95 latency `-34.73%`, throughput `+12.63%`, error rate `-10.76` points.
+- 1-node no-scouts: p95 latency `-44.11%`, throughput `+4.55%`, error rate `-4.45` points.
+
+Primary inference from today: scaling to 2 verifier nodes substantially improved reliability and throughput versus the earlier baseline, while scout-assisted runs still need tuning to improve tail latency under load.
+
+---
+
 ## Key Features
 
 | Feature | Description |
