@@ -43,6 +43,7 @@ async fn main() -> Result<()> {
     let show_signal = Arc::new(AtomicBool::new(false));
     let quit_signal = Arc::new(AtomicBool::new(false));
     let pause_signal = Arc::new(AtomicBool::new(false));
+    let ui_ctx: Arc<Mutex<Option<egui::Context>>> = Arc::new(Mutex::new(None));
 
     // ── Auto-download model if not configured ────────────────────────────────
     let config = app::AppConfig::load();
@@ -181,13 +182,27 @@ async fn main() -> Result<()> {
         let show_sig = show_signal.clone();
         let quit_sig = quit_signal.clone();
         let pause_sig = pause_signal.clone();
+        let ui_ctx = ui_ctx.clone();
         tokio::spawn(async move {
             let tray_receiver = MenuEvent::receiver();
             loop {
                 while let Ok(event) = tray_receiver.try_recv() {
-                    if event.id == show_id { show_sig.store(true, Relaxed); }
-                    else if event.id == quit_id { quit_sig.store(true, Relaxed); }
-                    else if event.id == pause_id { pause_sig.store(true, Relaxed); }
+                    if event.id == show_id {
+                        show_sig.store(true, Relaxed);
+                        if let Some(ctx) = ui_ctx.lock().unwrap().clone() {
+                            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+                            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+                            ctx.request_repaint();
+                        }
+                    } else if event.id == quit_id {
+                        quit_sig.store(true, Relaxed);
+                        if let Some(ctx) = ui_ctx.lock().unwrap().clone() {
+                            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                            ctx.request_repaint();
+                        }
+                    } else if event.id == pause_id {
+                        pause_sig.store(true, Relaxed);
+                    }
                 }
                 tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
             }
@@ -208,6 +223,7 @@ async fn main() -> Result<()> {
         "Shard Node",
         options,
         Box::new(|cc| {
+            *ui_ctx.lock().unwrap() = Some(cc.egui_ctx.clone());
             let app = ShardApp::new(
                 cc,
                 daemon_task.clone(),

@@ -92,6 +92,7 @@ async function fetchRealTelemetry(): Promise<SwarmTelemetrySnapshot> {
   const connectedPeers = Math.max(0, peerCountFromPeersEndpoint || 0, connectedPeersFromHealth)
   
   const activeScoutsFromHealth = Number(health?.active_scouts ?? 0) || 0
+  const activeBrowserSessionsFromHealth = Number(health?.active_browser_sessions ?? 0) || 0
   const capacity = health?.capacity ?? topo?.capacity ?? 100
   const load = health?.load ?? topo?.load ?? 0
   const rustConnected = health?.rust_sidecar === "connected"
@@ -105,11 +106,12 @@ async function fetchRealTelemetry(): Promise<SwarmTelemetrySnapshot> {
     Number(health?.shard_count ?? 0),
     Number(topo?.shard_count ?? 0),
   )
-  const inferredShardCount = (localShardOnline ? 1 : 0) + connectedPeers
+  // Do not infer verifier nodes from connected peers: browser scouts are peers too.
+  const inferredShardCount = localShardOnline ? 1 : 0
   const shardCount = Math.max(reportedShardCount, inferredShardCount)
 
-  // Scout count comes from API-reported active browser/WebLLM workers.
-  const scoutCount = Math.max(0, activeScoutsFromHealth)
+  // Show browser scout presence from either explicit active scouts or active browser sessions.
+  const scoutCount = Math.max(0, activeScoutsFromHealth, activeBrowserSessionsFromHealth)
 
   // TFLOPs estimate: base capacity from the Shard + scout contributions
   // Even with 0 scouts, the Shard itself has compute capacity

@@ -294,10 +294,13 @@ impl eframe::App for ShardApp {
 
         // Close → minimize to tray
         if ctx.input(|i| i.viewport().close_requested()) {
-            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+            if !self.quit_signal.load(Relaxed) {
+                ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+                ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+            }
         }
         if self.show_signal.swap(false, Relaxed) {
+            self.view = View::Dashboard;
             ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
             ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
         }

@@ -22,7 +22,6 @@ import { bootstrap } from '@libp2p/bootstrap';
 import type { Libp2p } from 'libp2p';
 import type { GossipSub } from '@chainsafe/libp2p-gossipsub';
 import type { Message } from '@libp2p/interface';
-import { multiaddr as createMultiaddr } from '@multiformats/multiaddr';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -319,9 +318,8 @@ function shuffleArray<T>(input: T[]): T[] {
 }
 
 async function dialWithTimeout(node: Libp2p, peer: string, timeoutMs: number): Promise<void> {
-  const ma = createMultiaddr(peer);
   await Promise.race([
-    node.dial(ma as any) as Promise<unknown>,
+    node.dial(peer as any) as Promise<unknown>,
     (async () => {
       await sleep(timeoutMs);
       throw new Error(`dial_timeout_${timeoutMs}ms`);
@@ -337,15 +335,15 @@ async function reconnectBootstrapPeers(): Promise<void> {
   // Previously stopped reconnecting at 1 peer, which left the node
   // vulnerable to single-peer failure.
   try {
-    const MIN_MESH_PEERS = 2;
-    if (p2pNode.getPeers().length >= MIN_MESH_PEERS) return;
-
     const reconnectCandidates = sanitizeBootstrapPeers(
       mergeBootstrapPeers(bootstrapPeersSnapshot, readPersistedBootstrapPeers())
     );
     if (reconnectCandidates.length === 0) {
       return;
     }
+    // If we only have one reachable bootstrap endpoint, keeping >=1 peer is sufficient.
+    const targetMeshPeers = Math.max(1, Math.min(2, reconnectCandidates.length));
+    if (p2pNode.getPeers().length >= targetMeshPeers) return;
 
     const MAX_RECONNECT_DIALS_PER_TICK = 3;
     for (const peer of shuffleArray(reconnectCandidates).slice(0, MAX_RECONNECT_DIALS_PER_TICK)) {
