@@ -329,7 +329,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--request-timeout-ms", type=int, default=2500)
     parser.add_argument("--max-attempts", type=int, default=2)
-    parser.add_argument("--max-tokens", type=int, default=1)
+    parser.add_argument("--max-tokens", type=int, default=32)
     parser.add_argument("--out-dir", type=str, default="reports/release-rc")
     parser.add_argument("--tag", type=str, default="")
     return parser.parse_args()
@@ -344,4 +344,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

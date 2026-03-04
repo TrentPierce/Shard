@@ -7,6 +7,14 @@ pub struct WorkRequest {
     pub min_tokens: i32,
     #[serde(default)]
     pub created_at_ms: Option<u128>,
+    #[serde(default)]
+    pub lease_id: Option<String>,
+    #[serde(default)]
+    pub lease_expires_at_ms: Option<u128>,
+    #[serde(default)]
+    pub assigned_scout_id: Option<String>,
+    #[serde(default)]
+    pub preferred_endpoint: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

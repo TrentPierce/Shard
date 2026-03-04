@@ -504,6 +504,10 @@ async fn fetch_speculative_draft(
         prompt_context: prompt.to_string(),
         min_tokens: config.draft_token_count as i32,
         created_at_ms: Some(now_ms()),
+        lease_id: None,
+        lease_expires_at_ms: None,
+        assigned_scout_id: None,
+        preferred_endpoint: None,
     };
 
     let scout_timeout_ms = effective_speculative_timeout_ms(state, config).await;
@@ -578,6 +582,10 @@ async fn clear_speculative_work_state(state: &SharedState, work_id: &str) {
     {
         let mut pending = state.speculative_pending.lock().await;
         pending.remove(work_id);
+    }
+    {
+        let mut leases = state.scout_work_leases.lock().await;
+        leases.remove(work_id);
     }
     {
         let mut mailbox = state.scout_draft_mailbox.lock().await;
@@ -1032,12 +1040,22 @@ pub(crate) async fn chat_completions_handler(
                                 {
                                     let p95 = state.gossipsub_latency_hist.percentiles().p95_ms;
                                     let mut penalties = state.scout_penalties.lock().await;
+                                    let acceptance_ratio = if draft_count == 0 {
+                                        0.0
+                                    } else {
+                                        accepted_count as f64 / draft_count as f64
+                                    };
                                     let status = penalties.apply_update(ScoutPenaltyUpdate {
                                         peer_id: draft.scout_id.clone(),
-                                        accepted: result.first_rejection_idx.is_none(),
+                                        accepted: acceptance_ratio >= 0.5,
                                         probability_bound: 0.0,
                                         latency_ms: Some(draft.latency_ms),
-                                        reason: result.first_rejection_idx.map(|idx| format!("Rejected at token {}", idx)),
+                                        reason: result.first_rejection_idx.map(|idx| {
+                                            format!(
+                                                "Rejected at token {idx} (acceptance {:.0}%)",
+                                                acceptance_ratio * 100.0
+                                            )
+                                        }),
                                     }, p95);
 
                                     if status.blackholed {
@@ -1251,15 +1269,23 @@ pub(crate) async fn chat_completions_handler(
                             {
                                 let p95 = state.gossipsub_latency_hist.percentiles().p95_ms;
                                 let mut penalties = state.scout_penalties.lock().await;
+                                let acceptance_ratio = if draft_count == 0 {
+                                    0.0
+                                } else {
+                                    accepted_count as f64 / draft_count as f64
+                                };
                                 let status = penalties.apply_update(
                                     ScoutPenaltyUpdate {
                                         peer_id: draft.scout_id.clone(),
-                                        accepted: result.first_rejection_idx.is_none(),
+                                        accepted: acceptance_ratio >= 0.5,
                                         probability_bound: 0.0,
                                         latency_ms: Some(draft.latency_ms),
-                                        reason: result
-                                            .first_rejection_idx
-                                            .map(|idx| format!("Rejected at token {}", idx)),
+                                        reason: result.first_rejection_idx.map(|idx| {
+                                            format!(
+                                                "Rejected at token {idx} (acceptance {:.0}%)",
+                                                acceptance_ratio * 100.0
+                                            )
+                                        }),
                                     },
                                     p95,
                                 );
@@ -1469,6 +1495,10 @@ mod tests {
                     prompt_context: "p".to_string(),
                     min_tokens: 8,
                     created_at_ms: None,
+                    lease_id: None,
+                    lease_expires_at_ms: None,
+                    assigned_scout_id: None,
+                    preferred_endpoint: None,
                 },
             );
         }

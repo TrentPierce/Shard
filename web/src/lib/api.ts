@@ -7,8 +7,6 @@
 
 import { apiUrl } from "./config"
 import { DEFAULT_MODEL_ID } from "./model"
-import { generateDraftTokens, isWebLLMReady } from "./webllm"
-import { submitDraft } from "./scout-draft"
 import { canUseLocalDaemonFallback, localDaemonUrl } from "./runtime"
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -106,43 +104,11 @@ function generateWorkId(): string {
  * Falls back gracefully if WebLLM is not available.
  */
 async function trySubmitDraft(prompt: string, workId: string): Promise<boolean> {
-    // Check if WebLLM is ready
-    if (!isWebLLMReady()) {
-        console.debug("[Scout] WebLLM not ready, skipping draft submission")
-        return false
-    }
-
-    try {
-        // Generate draft tokens using WebLLM with greedy decoding
-        // to maximize acceptance by the verifier (which checks argmax).
-        const draftResult = await generateDraftTokens(prompt, {
-            maxTokens: 4, // K=4 draft tokens for speculative decoding
-            temperature: 0,  // Greedy — maximize match with verifier's argmax
-            topP: 1,
-        })
-
-        if (!draftResult.success || !draftResult.text) {
-            console.debug("[Scout] Draft generation failed, skipping submission")
-            return false
-        }
-
-        // Submit to verifier
-        const submitResult = await submitDraft(workId, draftResult.text, {
-            timeoutMs: 45000, // Allow WAN + PoW + tokenization roundtrip
-            maxRetries: 0,
-        })
-
-        if (submitResult.ok) {
-            console.debug("[Scout] Draft submitted successfully")
-            return true
-        } else {
-            console.debug("[Scout] Draft submission rejected:", submitResult.detail)
-            return false
-        }
-    } catch (error) {
-        console.debug("[Scout] Draft submission error:", error)
-        return false
-    }
+    // Draft submissions now require verifier-issued leases from /v1/scout/work.
+    // This ad-hoc chat-side path has no lease and would always be rejected.
+    void prompt
+    void workId
+    return false
 }
 
 // ─── Streaming Chat ─────────────────────────────────────────────────────────
@@ -330,3 +296,4 @@ export async function checkHealth(): Promise<{
         return { ok: false, rustSidecar: "unreachable", bitnetLoaded: false }
     }
 }
+

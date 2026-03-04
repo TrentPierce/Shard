@@ -3,6 +3,7 @@ import { apiUrl } from "./config"
 export interface DraftSubmission {
   work_id: string
   scout_id: string
+  lease_id?: string
   draft_text: string
   prompt_context?: string
   timestamp?: number
@@ -40,6 +41,7 @@ export interface ScoutConfig {
 
 export interface SubmitDraftOptions extends Partial<ScoutConfig> {
   promptContext?: string
+  leaseId?: string
 }
 
 const DEFAULT_CONFIG: ScoutConfig = {
@@ -494,7 +496,7 @@ export async function submitDraft(
   draftText: string,
   options: SubmitDraftOptions = {}
 ): Promise<DraftResponse> {
-  const { promptContext, ...config } = options
+  const { promptContext, leaseId, ...config } = options
   const cfg = { ...DEFAULT_CONFIG, ...config }
   if (!workId.trim()) {
     void reportScoutClientEvent("submit_network_error", "work_id_missing")
@@ -517,6 +519,7 @@ export async function submitDraft(
   const submission: DraftSubmission = {
     work_id: workId,
     scout_id: getScoutId(),
+    lease_id: leaseId,
     draft_text: draftText,
     prompt_context: promptContext,
     timestamp: Date.now() / 1000,
@@ -554,6 +557,10 @@ export interface WorkItem {
     max_tokens?: number
     min_tokens?: number
     created_at_ms?: number
+    lease_id?: string
+    lease_expires_at_ms?: number
+    assigned_scout_id?: string
+    preferred_endpoint?: string
   } | null
   transient_error?: boolean
   detail?: string

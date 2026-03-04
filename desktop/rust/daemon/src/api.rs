@@ -327,12 +327,27 @@ const DEFAULT_SCOUT_RATE_LIMIT_RETENTION_MS: u128 = 10 * 60 * 1000;
 const DEFAULT_SCOUT_ACTIVE_CAP: usize = 8;
 const DEFAULT_SCOUT_ACTIVE_CAP_SOFT: usize = 4;
 const DEFAULT_SCOUT_ACTIVE_CAP_HARD: usize = 2;
+const DEFAULT_SCOUT_LEASE_TTL_MS: u128 = 12_000;
+const DEFAULT_SCOUT_BLACKOUT_TRIGGER_MS: u128 = 15_000;
+const DEFAULT_SCOUT_BLACKOUT_DURATION_MS: u128 = 20_000;
+const DEFAULT_SCOUT_REOPEN_STAGE_MS: u128 = 12_000;
+const DEFAULT_SCOUT_MIN_QUALITY_SCORE: i32 = 35;
+const DEFAULT_SCOUT_MIN_QUALITY_SAMPLES: usize = 6;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ScoutAdmissionMode {
     Allow,
     SoftBackpressure,
     HardCircuit,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ScoutBlackoutMode {
+    Open,
+    Blackout,
+    ReopenStage1,
+    ReopenStage2,
+    ReopenStage3,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -508,6 +523,54 @@ fn scout_active_cap_hard() -> usize {
         .unwrap_or(DEFAULT_SCOUT_ACTIVE_CAP_HARD)
 }
 
+fn scout_lease_ttl_ms() -> u128 {
+    std::env::var("SHARD_SCOUT_LEASE_TTL_MS")
+        .ok()
+        .and_then(|v| v.trim().parse::<u128>().ok())
+        .map(|v| v.clamp(1_000, 120_000))
+        .unwrap_or(DEFAULT_SCOUT_LEASE_TTL_MS)
+}
+
+fn scout_blackout_trigger_ms() -> u128 {
+    std::env::var("SHARD_SCOUT_BLACKOUT_TRIGGER_MS")
+        .ok()
+        .and_then(|v| v.trim().parse::<u128>().ok())
+        .map(|v| v.clamp(1_000, 120_000))
+        .unwrap_or(DEFAULT_SCOUT_BLACKOUT_TRIGGER_MS)
+}
+
+fn scout_blackout_duration_ms() -> u128 {
+    std::env::var("SHARD_SCOUT_BLACKOUT_DURATION_MS")
+        .ok()
+        .and_then(|v| v.trim().parse::<u128>().ok())
+        .map(|v| v.clamp(1_000, 120_000))
+        .unwrap_or(DEFAULT_SCOUT_BLACKOUT_DURATION_MS)
+}
+
+fn scout_reopen_stage_ms() -> u128 {
+    std::env::var("SHARD_SCOUT_REOPEN_STAGE_MS")
+        .ok()
+        .and_then(|v| v.trim().parse::<u128>().ok())
+        .map(|v| v.clamp(1_000, 120_000))
+        .unwrap_or(DEFAULT_SCOUT_REOPEN_STAGE_MS)
+}
+
+fn scout_min_quality_score() -> i32 {
+    std::env::var("SHARD_SCOUT_MIN_QUALITY_SCORE")
+        .ok()
+        .and_then(|v| v.trim().parse::<i32>().ok())
+        .map(|v| v.clamp(0, 100))
+        .unwrap_or(DEFAULT_SCOUT_MIN_QUALITY_SCORE)
+}
+
+fn scout_min_quality_samples() -> usize {
+    std::env::var("SHARD_SCOUT_MIN_QUALITY_SAMPLES")
+        .ok()
+        .and_then(|v| v.trim().parse::<usize>().ok())
+        .map(|v| v.clamp(1, 64))
+        .unwrap_or(DEFAULT_SCOUT_MIN_QUALITY_SAMPLES)
+}
+
 fn scout_admission_retry_after_ms(
     queue_depth: usize,
     avg_latency_ms: u64,
@@ -569,6 +632,108 @@ fn scout_active_cap_for_mode(mode: ScoutAdmissionMode) -> usize {
         ScoutAdmissionMode::Allow => base,
         ScoutAdmissionMode::SoftBackpressure => soft,
         ScoutAdmissionMode::HardCircuit => hard,
+    }
+}
+
+fn scout_blackout_mode(state: &ScoutBlackoutState, now: u128) -> ScoutBlackoutMode {
+    if now < state.blackout_until_ms {
+        return ScoutBlackoutMode::Blackout;
+    }
+    if let Some(reopen_started_ms) = state.reopen_started_ms {
+        let stage_ms = scout_reopen_stage_ms();
+        let elapsed = now.saturating_sub(reopen_started_ms);
+        if elapsed < stage_ms {
+            return ScoutBlackoutMode::ReopenStage1;
+        }
+        if elapsed < stage_ms.saturating_mul(2) {
+            return ScoutBlackoutMode::ReopenStage2;
+        }
+        if elapsed < stage_ms.saturating_mul(3) {
+            return ScoutBlackoutMode::ReopenStage3;
+        }
+    }
+    ScoutBlackoutMode::Open
+}
+
+fn scout_active_cap_for_blackout(mode: ScoutBlackoutMode, cap: usize) -> usize {
+    match mode {
+        ScoutBlackoutMode::Open => cap,
+        ScoutBlackoutMode::Blackout => 0,
+        ScoutBlackoutMode::ReopenStage1 => cap.min(1),
+        ScoutBlackoutMode::ReopenStage2 => cap.min(2),
+        ScoutBlackoutMode::ReopenStage3 => cap.min((cap.max(2) + 1) / 2),
+    }
+}
+
+async fn update_scout_blackout_state(
+    state: &SharedState,
+    queue_depth: usize,
+    p95_latency_ms: u64,
+    now: u128,
+) -> ScoutBlackoutMode {
+    let mut snapshot = state.scout_blackout.lock().await;
+    let hard_queue = scout_admission_queue_hard_depth();
+    let hard_latency = scout_admission_latency_hard_ms();
+    let overloaded = queue_depth >= hard_queue || p95_latency_ms >= hard_latency;
+
+    if now < snapshot.blackout_until_ms {
+        if overloaded {
+            // Keep blackout active while overload persists to avoid immediate thrash.
+            snapshot.blackout_until_ms = now.saturating_add(scout_blackout_duration_ms());
+        }
+        return ScoutBlackoutMode::Blackout;
+    }
+
+    if overloaded {
+        match snapshot.overload_since_ms {
+            Some(since) if now.saturating_sub(since) >= scout_blackout_trigger_ms() => {
+                snapshot.blackout_until_ms = now.saturating_add(scout_blackout_duration_ms());
+                snapshot.overload_since_ms = None;
+                snapshot.reopen_started_ms = None;
+                drop(snapshot);
+                state.system_metrics.inc_scout_blackout_enter();
+                return ScoutBlackoutMode::Blackout;
+            }
+            Some(_) => {}
+            None => {
+                snapshot.overload_since_ms = Some(now);
+            }
+        }
+    } else {
+        snapshot.overload_since_ms = None;
+    }
+
+    if snapshot.blackout_until_ms > 0 {
+        if snapshot.reopen_started_ms.is_none() {
+            snapshot.reopen_started_ms = Some(now);
+            drop(snapshot);
+            state.system_metrics.inc_scout_blackout_exit();
+            return ScoutBlackoutMode::ReopenStage1;
+        }
+        let mode = scout_blackout_mode(&*snapshot, now);
+        if mode == ScoutBlackoutMode::Open {
+            snapshot.blackout_until_ms = 0;
+            snapshot.reopen_started_ms = None;
+        }
+        return mode;
+    }
+
+    ScoutBlackoutMode::Open
+}
+
+fn prune_expired_scout_leases(leases: &mut HashMap<String, ScoutWorkLease>, now: u128) -> usize {
+    let before = leases.len();
+    leases.retain(|_, lease| now < lease.expires_at_ms);
+    before.saturating_sub(leases.len())
+}
+
+async fn prune_expired_scout_leases_for_state(state: &SharedState, now: u128) {
+    let expired = {
+        let mut leases = state.scout_work_leases.lock().await;
+        prune_expired_scout_leases(&mut leases, now)
+    };
+    for _ in 0..expired {
+        state.system_metrics.inc_scout_work_lease_expired();
     }
 }
 
@@ -1411,6 +1576,18 @@ fn scout_config_snapshot_json() -> serde_json::Value {
             "soft": scout_active_cap_soft(),
             "hard": scout_active_cap_hard(),
         },
+        "lease": {
+            "ttl_ms": scout_lease_ttl_ms(),
+        },
+        "blackout": {
+            "trigger_ms": scout_blackout_trigger_ms(),
+            "duration_ms": scout_blackout_duration_ms(),
+            "reopen_stage_ms": scout_reopen_stage_ms(),
+        },
+        "quality": {
+            "min_score": scout_min_quality_score(),
+            "min_samples": scout_min_quality_samples(),
+        },
     })
 }
 
@@ -1422,8 +1599,11 @@ pub(crate) async fn scout_config_handler(
     let avg_latency_ms = state.avg_latency_ms.load(Ordering::Relaxed) as u64;
     let p95_latency_ms = state.gossipsub_latency_hist.percentiles().p95_ms;
     let admission = scout_admission_decision(queue_depth, avg_latency_ms, p95_latency_ms);
+    let blackout_mode = update_scout_blackout_state(&state, queue_depth, p95_latency_ms, now).await;
     let active_scouts = recent_active_scouts(&state, now).await;
-    let active_cap = scout_active_cap_for_mode(admission.mode);
+    let active_cap =
+        scout_active_cap_for_blackout(blackout_mode, scout_active_cap_for_mode(admission.mode));
+    let lease_count = state.scout_work_leases.lock().await.len();
     Json(serde_json::json!({
         "ok": true,
         "config": scout_config_snapshot_json(),
@@ -1439,6 +1619,14 @@ pub(crate) async fn scout_config_handler(
             "retry_after_ms": admission.retry_after_ms,
             "active_scouts_recent": active_scouts.len(),
             "active_cap_current": active_cap,
+            "blackout_mode": match blackout_mode {
+                ScoutBlackoutMode::Open => "open",
+                ScoutBlackoutMode::Blackout => "blackout",
+                ScoutBlackoutMode::ReopenStage1 => "reopen_stage_1",
+                ScoutBlackoutMode::ReopenStage2 => "reopen_stage_2",
+                ScoutBlackoutMode::ReopenStage3 => "reopen_stage_3",
+            },
+            "active_leases": lease_count,
         }
     }))
 }
@@ -1473,6 +1661,7 @@ pub(crate) async fn pop_work_handler(
     }
     state.system_metrics.inc_scout_work_poll();
     let now = now_ms();
+    prune_expired_scout_leases_for_state(&state, now).await;
     {
         let mut polls = state.scout_work_last_poll.lock().await;
         if let Some(retry_after_ms) =
@@ -1490,9 +1679,54 @@ pub(crate) async fn pop_work_handler(
             ));
         }
     }
+    {
+        let mut penalties = state.scout_penalties.lock().await;
+        if penalties.is_blackholed(scout_id) {
+            return Err((
+                axum::http::StatusCode::FORBIDDEN,
+                Json(serde_json::json!({
+                    "work": null,
+                    "transient_error": true,
+                    "detail": "scout_blackholed",
+                    "retry_after_ms": scout_blackout_duration_ms().min(5_000) as u64,
+                })),
+            ));
+        }
+        if let Some((score, samples)) = penalties.quality_snapshot(scout_id) {
+            if samples >= scout_min_quality_samples() && score < scout_min_quality_score() {
+                return Err((
+                    axum::http::StatusCode::TOO_MANY_REQUESTS,
+                    Json(serde_json::json!({
+                        "work": null,
+                        "transient_error": true,
+                        "detail": "scout_quality_backoff",
+                        "quality_score": score,
+                        "quality_samples": samples,
+                        "retry_after_ms": 1000,
+                    })),
+                ));
+            }
+        }
+    }
     let queue_depth = state.scout_work.lock().await.len();
     let avg_latency_ms = state.avg_latency_ms.load(Ordering::Relaxed) as u64;
     let p95_latency_ms = state.gossipsub_latency_hist.percentiles().p95_ms;
+    let blackout_mode = update_scout_blackout_state(&state, queue_depth, p95_latency_ms, now).await;
+    if blackout_mode == ScoutBlackoutMode::Blackout {
+        state.system_metrics.inc_scout_work_overload_reject();
+        state.system_metrics.inc_scout_work_empty_poll();
+        return Err((
+            axum::http::StatusCode::TOO_MANY_REQUESTS,
+            Json(serde_json::json!({
+                "work": null,
+                "transient_error": true,
+                "detail": "scout_blackout_active",
+                "queue_depth": queue_depth,
+                "p95_latency_ms": p95_latency_ms,
+                "retry_after_ms": scout_blackout_duration_ms().min(u64::MAX as u128) as u64,
+            })),
+        ));
+    }
     let admission = scout_admission_decision(queue_depth, avg_latency_ms, p95_latency_ms);
     if admission.mode != ScoutAdmissionMode::Allow {
         state.system_metrics.inc_scout_work_overload_reject();
@@ -1525,7 +1759,20 @@ pub(crate) async fn pop_work_handler(
         ));
     }
     let active_scouts = recent_active_scouts(&state, now).await;
-    let active_cap = scout_active_cap_for_mode(admission.mode);
+    let active_cap =
+        scout_active_cap_for_blackout(blackout_mode, scout_active_cap_for_mode(admission.mode));
+    if active_cap == 0 {
+        state.system_metrics.inc_scout_work_overload_reject();
+        return Err((
+            axum::http::StatusCode::TOO_MANY_REQUESTS,
+            Json(serde_json::json!({
+                "work": null,
+                "transient_error": true,
+                "detail": "scout_reopen_gate_active",
+                "retry_after_ms": 500,
+            })),
+        ));
+    }
     if active_cap > 0 && active_scouts.len() >= active_cap && !active_scouts.contains(scout_id) {
         state.system_metrics.inc_scout_work_active_cap_reject();
         return Err((
@@ -1558,10 +1805,28 @@ pub(crate) async fn pop_work_handler(
     }
     let mut queue = state.scout_work.lock().await;
     let max_age_ms = scout_work_max_age_ms();
-    while let Some(work) = queue.pop_front() {
+    while let Some(mut work) = queue.pop_front() {
         let created_at_ms = work.created_at_ms.unwrap_or(now);
         let age_ms = now.saturating_sub(created_at_ms);
         if age_ms <= max_age_ms {
+            let lease_id = uuid::Uuid::new_v4().to_string();
+            let lease_expires_at_ms = now.saturating_add(scout_lease_ttl_ms());
+            work.lease_id = Some(lease_id.clone());
+            work.lease_expires_at_ms = Some(lease_expires_at_ms);
+            work.assigned_scout_id = Some(scout_id.to_string());
+
+            {
+                let mut leases = state.scout_work_leases.lock().await;
+                leases.insert(
+                    work.request_id.clone(),
+                    ScoutWorkLease {
+                        lease_id,
+                        scout_id: scout_id.to_string(),
+                        expires_at_ms: lease_expires_at_ms,
+                    },
+                );
+            }
+            state.system_metrics.inc_scout_work_lease_issued();
             state.system_metrics.inc_scout_work_assignment();
             tracing::debug!(
                 request_id = %work.request_id,
@@ -1623,8 +1888,15 @@ pub(crate) async fn process_draft_submission(
 ) -> Result<Json<serde_json::Value>, (axum::http::StatusCode, Json<serde_json::Value>)> {
     submission.work_id = submission.work_id.trim().to_string();
     submission.scout_id = submission.scout_id.trim().to_string();
+    submission.lease_id = submission
+        .lease_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_string());
     state.system_metrics.inc_scout_draft_submission();
     let now = now_ms();
+    prune_expired_scout_leases_for_state(state, now).await;
     {
         let mut drafts = state.scout_draft_last_submit.lock().await;
         if let Some(retry_after_ms) = apply_scout_rate_limit(
@@ -1650,6 +1922,22 @@ pub(crate) async fn process_draft_submission(
     let effective_queue_depth = scout_queue_depth.max(pending_queue_depth);
     let avg_latency_ms = state.avg_latency_ms.load(Ordering::Relaxed) as u64;
     let p95_latency_ms = state.gossipsub_latency_hist.percentiles().p95_ms;
+    let blackout_mode =
+        update_scout_blackout_state(state, effective_queue_depth, p95_latency_ms, now).await;
+    if blackout_mode == ScoutBlackoutMode::Blackout {
+        state.system_metrics.inc_scout_draft_overload_reject();
+        return Err((
+            axum::http::StatusCode::TOO_MANY_REQUESTS,
+            Json(serde_json::json!({
+                "ok": false,
+                "transient_error": true,
+                "detail": "scout_draft_blackout_active",
+                "queue_depth": effective_queue_depth,
+                "p95_latency_ms": p95_latency_ms,
+                "retry_after_ms": scout_blackout_duration_ms().min(u64::MAX as u128) as u64,
+            })),
+        ));
+    }
     let admission = scout_admission_decision(effective_queue_depth, avg_latency_ms, p95_latency_ms);
     if admission.mode != ScoutAdmissionMode::Allow {
         state.system_metrics.inc_scout_draft_overload_reject();
@@ -1718,6 +2006,94 @@ pub(crate) async fn process_draft_submission(
             "ok": false,
             "detail": "work_id and scout_id are required",
         })));
+    }
+    let duplicate_submission = {
+        let by_id = state.idempotent_results.lock().await;
+        by_id.contains_key(submission.work_id.as_str())
+    };
+    if duplicate_submission {
+        state.system_metrics.inc_scout_draft_duplicate();
+        mark_node_success(state, submission.scout_id.as_str(), 0.0).await;
+        return Ok(Json(serde_json::json!({
+            "ok": true,
+            "detail": "duplicate draft ignored (idempotent)",
+        })));
+    }
+    let pending_exists = {
+        let pending = state.speculative_pending.lock().await;
+        pending.contains_key(submission.work_id.as_str())
+    };
+    let lease_id = submission.lease_id.clone().unwrap_or_default();
+    let lease_validation_error = {
+        let mut leases = state.scout_work_leases.lock().await;
+        match leases.get(submission.work_id.as_str()) {
+            Some(lease) => {
+                if now >= lease.expires_at_ms {
+                    leases.remove(submission.work_id.as_str());
+                    Some((
+                        "scout_lease_expired",
+                        axum::http::StatusCode::GONE,
+                        true,
+                        "expired",
+                    ))
+                } else if lease_id.is_empty() {
+                    Some((
+                        "scout_lease_required",
+                        axum::http::StatusCode::BAD_REQUEST,
+                        false,
+                        "missing",
+                    ))
+                } else if lease.lease_id != lease_id {
+                    Some((
+                        "scout_lease_mismatch",
+                        axum::http::StatusCode::FORBIDDEN,
+                        false,
+                        "mismatch",
+                    ))
+                } else if lease.scout_id != submission.scout_id {
+                    Some((
+                        "scout_lease_wrong_scout",
+                        axum::http::StatusCode::FORBIDDEN,
+                        false,
+                        "mismatch",
+                    ))
+                } else {
+                    None
+                }
+            }
+            None => {
+                if pending_exists {
+                    Some((
+                        "scout_lease_not_found",
+                        axum::http::StatusCode::CONFLICT,
+                        false,
+                        "missing",
+                    ))
+                } else {
+                    None
+                }
+            }
+        }
+    };
+    if let Some((detail, status, transient_error, kind)) = lease_validation_error {
+        state.system_metrics.inc_task_failures();
+        match kind {
+            "missing" => state.system_metrics.inc_scout_draft_reject_lease_missing(),
+            "expired" => {
+                state.system_metrics.inc_scout_draft_reject_lease_expired();
+                state.system_metrics.inc_scout_work_lease_expired();
+            }
+            _ => state.system_metrics.inc_scout_draft_reject_lease_mismatch(),
+        }
+        mark_node_failure(state, submission.scout_id.as_str()).await;
+        return Err((
+            status,
+            Json(serde_json::json!({
+                "ok": false,
+                "transient_error": transient_error,
+                "detail": detail,
+            })),
+        ));
     }
     if let Err(response) = ensure_pow_verified(state, submission.scout_id.as_str()).await {
         state.system_metrics.inc_task_failures();
@@ -1801,17 +2177,26 @@ pub(crate) async fn process_draft_submission(
         created_at_ms: Some(created_at_ms),
     };
 
-    {
+    let duplicate_after_processing = {
         let mut by_id = state.idempotent_results.lock().await;
         if by_id.contains_key(response.request_id.as_str()) {
-            state.system_metrics.inc_scout_draft_duplicate();
-            mark_node_success(state, response.peer_id.as_str(), 0.0).await;
-            return Ok(Json(serde_json::json!({
-                "ok": true,
-                "detail": "duplicate draft ignored (idempotent)",
-            })));
+            true
+        } else {
+            by_id.insert(response.request_id.clone(), response.clone());
+            false
         }
-        by_id.insert(response.request_id.clone(), response.clone());
+    };
+    if duplicate_after_processing {
+        state.system_metrics.inc_scout_draft_duplicate();
+        mark_node_success(state, response.peer_id.as_str(), 0.0).await;
+        return Ok(Json(serde_json::json!({
+            "ok": true,
+            "detail": "duplicate draft ignored (idempotent)",
+        })));
+    }
+    {
+        let mut leases = state.scout_work_leases.lock().await;
+        leases.remove(response.request_id.as_str());
     }
 
     state
@@ -2138,6 +2523,10 @@ pub(crate) async fn ws_generate_stream(mut socket: WebSocket, state: SharedState
         prompt_context: prompt_context.clone(),
         min_tokens: 1,
         created_at_ms: Some(now_ms()),
+        lease_id: None,
+        lease_expires_at_ms: None,
+        assigned_scout_id: None,
+        preferred_endpoint: None,
     };
 
     if let Err(detail) = validate_work_request(&work) {
@@ -2711,6 +3100,12 @@ pub(crate) async fn metrics_summary_handler(
     let p = state.gossipsub_latency_hist.percentiles();
     let now = now_ms();
     let queue_depth = state.scout_work.lock().await.len();
+    prune_expired_scout_leases_for_state(&state, now).await;
+    let active_leases = state.scout_work_leases.lock().await.len();
+    let blackout_mode = {
+        let blackout = state.scout_blackout.lock().await;
+        scout_blackout_mode(&*blackout, now)
+    };
     let mut reports = state.node_metric_reports.lock().await;
     let mut active_nodes = 0usize;
     let mut healthy_nodes = 0usize;
@@ -2797,6 +3192,20 @@ pub(crate) async fn metrics_summary_handler(
         serde_json::json!(unhealthy_nodes),
     );
     payload.insert("queue_depth".to_string(), serde_json::json!(queue_depth));
+    payload.insert(
+        "active_leases".to_string(),
+        serde_json::json!(active_leases),
+    );
+    payload.insert(
+        "scout_blackout_mode".to_string(),
+        serde_json::json!(match blackout_mode {
+            ScoutBlackoutMode::Open => "open",
+            ScoutBlackoutMode::Blackout => "blackout",
+            ScoutBlackoutMode::ReopenStage1 => "reopen_stage_1",
+            ScoutBlackoutMode::ReopenStage2 => "reopen_stage_2",
+            ScoutBlackoutMode::ReopenStage3 => "reopen_stage_3",
+        }),
+    );
     payload.insert(
         "node_identity_status".to_string(),
         serde_json::json!(if unhealthy_nodes == 0 {
@@ -2904,6 +3313,14 @@ pub(crate) async fn metrics_summary_handler(
         serde_json::json!(counters.scout_work_active_cap_reject_total),
     );
     payload.insert(
+        "scout_work_lease_issued_total".to_string(),
+        serde_json::json!(counters.scout_work_lease_issued_total),
+    );
+    payload.insert(
+        "scout_work_lease_expired_total".to_string(),
+        serde_json::json!(counters.scout_work_lease_expired_total),
+    );
+    payload.insert(
         "scout_draft_submissions_total".to_string(),
         serde_json::json!(counters.scout_draft_submissions_total),
     );
@@ -2930,6 +3347,18 @@ pub(crate) async fn metrics_summary_handler(
     payload.insert(
         "scout_draft_reject_empty_tokens_total".to_string(),
         serde_json::json!(counters.scout_draft_reject_empty_tokens_total),
+    );
+    payload.insert(
+        "scout_draft_reject_lease_missing_total".to_string(),
+        serde_json::json!(counters.scout_draft_reject_lease_missing_total),
+    );
+    payload.insert(
+        "scout_draft_reject_lease_mismatch_total".to_string(),
+        serde_json::json!(counters.scout_draft_reject_lease_mismatch_total),
+    );
+    payload.insert(
+        "scout_draft_reject_lease_expired_total".to_string(),
+        serde_json::json!(counters.scout_draft_reject_lease_expired_total),
     );
     payload.insert(
         "scout_draft_duplicates_total".to_string(),
@@ -3070,6 +3499,14 @@ pub(crate) async fn metrics_summary_handler(
     payload.insert(
         "node_identity_auth_failures_total".to_string(),
         serde_json::json!(counters.node_identity_auth_failures_total),
+    );
+    payload.insert(
+        "scout_blackout_enter_total".to_string(),
+        serde_json::json!(counters.scout_blackout_enter_total),
+    );
+    payload.insert(
+        "scout_blackout_exit_total".to_string(),
+        serde_json::json!(counters.scout_blackout_exit_total),
     );
     payload.insert(
         "nodes".to_string(),
@@ -3325,13 +3762,15 @@ pub(crate) async fn register_bootstrap_handler(
 #[cfg(test)]
 mod tests {
     use super::{
-        push_scheduler_decision_log, require_scout_id, runtime_health_state,
-        sanitize_scout_draft_text, scout_admission_decision, scout_assignment_backpressured,
+        prune_expired_scout_leases, push_scheduler_decision_log, require_scout_id,
+        runtime_health_state, sanitize_scout_draft_text, scout_admission_decision,
+        scout_assignment_backpressured, scout_blackout_mode, scout_reopen_stage_ms,
         should_route_long_context, verify_spot_check_submission, DraftSpotCheckProof,
-        ScoutAdmissionMode, ScoutWorkQuery, WebGPUProbeResult, WebGPUStats,
+        ScoutAdmissionMode, ScoutBlackoutMode, ScoutBlackoutState, ScoutWorkLease,
+        ScoutWorkQuery, WebGPUProbeResult, WebGPUStats,
     };
     use crate::SchedulerDecisionLog;
-    use std::collections::VecDeque;
+    use std::collections::{HashMap, VecDeque};
 
     #[test]
     fn scout_work_requires_identity() {
@@ -3461,6 +3900,53 @@ mod tests {
         let decision = scout_admission_decision(3, 1200, 7000);
         assert_eq!(decision.mode, ScoutAdmissionMode::HardCircuit);
         assert!(decision.retry_after_ms >= 250);
+    }
+
+    #[test]
+    fn scout_lease_pruning_removes_only_expired_entries() {
+        let now = 10_000u128;
+        let mut leases = HashMap::new();
+        leases.insert(
+            "work-expired".to_string(),
+            ScoutWorkLease {
+                lease_id: "lease-expired".to_string(),
+                scout_id: "scout-a".to_string(),
+                expires_at_ms: now - 1,
+            },
+        );
+        leases.insert(
+            "work-active".to_string(),
+            ScoutWorkLease {
+                lease_id: "lease-active".to_string(),
+                scout_id: "scout-b".to_string(),
+                expires_at_ms: now + 5_000,
+            },
+        );
+
+        let removed = prune_expired_scout_leases(&mut leases, now);
+        assert_eq!(removed, 1);
+        assert!(leases.contains_key("work-active"));
+        assert!(!leases.contains_key("work-expired"));
+    }
+
+    #[test]
+    fn scout_blackout_mode_transitions_through_reopen_stages() {
+        let mut blackout = ScoutBlackoutState::default();
+        blackout.blackout_until_ms = 2_000;
+        blackout.reopen_started_ms = Some(2_000);
+
+        assert_eq!(
+            scout_blackout_mode(&blackout, 1_500),
+            ScoutBlackoutMode::Blackout
+        );
+        assert_eq!(
+            scout_blackout_mode(&blackout, 2_000),
+            ScoutBlackoutMode::ReopenStage1
+        );
+        assert!(matches!(
+            scout_blackout_mode(&blackout, 2_000 + scout_reopen_stage_ms()),
+            ScoutBlackoutMode::ReopenStage2
+        ));
     }
 
     #[test]

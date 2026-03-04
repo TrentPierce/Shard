@@ -750,6 +750,8 @@ pub(crate) struct SharedState {
     scout_client_runtime: Arc<Mutex<HashMap<String, ScoutClientRuntimeStatus>>>,
     scout_work_last_poll: Arc<Mutex<HashMap<String, u128>>>,
     scout_draft_last_submit: Arc<Mutex<HashMap<String, u128>>>,
+    scout_work_leases: Arc<Mutex<HashMap<String, ScoutWorkLease>>>,
+    scout_blackout: Arc<Mutex<ScoutBlackoutState>>,
     webgpu_stats: Arc<Mutex<WebGPUStats>>,
     browser_work: Arc<Mutex<VecDeque<BrowserLayerWorkItem>>>,
     node_wallet: String,
@@ -915,6 +917,20 @@ impl ScoutTimeoutTracker {
     fn is_in_cooldown(&self) -> bool {
         now_ms() < self.cooldown_until_ms
     }
+}
+
+#[derive(Clone, Debug)]
+struct ScoutWorkLease {
+    lease_id: String,
+    scout_id: String,
+    expires_at_ms: u128,
+}
+
+#[derive(Clone, Debug, Default)]
+struct ScoutBlackoutState {
+    overload_since_ms: Option<u128>,
+    blackout_until_ms: u128,
+    reopen_started_ms: Option<u128>,
 }
 
 /// A draft submission from a Scout browser node.
@@ -1099,6 +1115,8 @@ struct ScoutPenaltyUpdate {
 struct DraftResultSubmission {
     work_id: String,
     scout_id: String,
+    #[serde(default)]
+    lease_id: Option<String>,
     draft_text: String,
     #[serde(default)]
     prompt_context: Option<String>,
@@ -1460,6 +1478,15 @@ impl ScoutPenaltyBook {
             }
         }
         false
+    }
+
+    pub(crate) fn quality_snapshot(&self, peer_id: &str) -> Option<(i32, usize)> {
+        self.entries.get(peer_id).map(|entry| {
+            (
+                (Self::success_rate(entry) * 100.0).round() as i32,
+                entry.recent.len(),
+            )
+        })
     }
 
     fn all_statuses(&self) -> Vec<ScoutPenaltyStatus> {
@@ -3032,6 +3059,8 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
         scout_client_runtime: Arc::new(Mutex::new(HashMap::new())),
         scout_work_last_poll: Arc::new(Mutex::new(HashMap::new())),
         scout_draft_last_submit: Arc::new(Mutex::new(HashMap::new())),
+        scout_work_leases: Arc::new(Mutex::new(HashMap::new())),
+        scout_blackout: Arc::new(Mutex::new(ScoutBlackoutState::default())),
         webgpu_stats: Arc::new(Mutex::new(WebGPUStats::default())),
         browser_work: Arc::new(Mutex::new(VecDeque::new())),
         node_wallet: node_wallet.clone(),
@@ -5333,6 +5362,10 @@ mod tests {
             prompt_context: "hello".into(),
             min_tokens: 4,
             created_at_ms: None,
+            lease_id: None,
+            lease_expires_at_ms: None,
+            assigned_scout_id: None,
+            preferred_endpoint: None,
         };
         assert!(validate_work_request(&ok).is_ok());
 
@@ -5341,6 +5374,10 @@ mod tests {
             prompt_context: "hello".into(),
             min_tokens: 0,
             created_at_ms: None,
+            lease_id: None,
+            lease_expires_at_ms: None,
+            assigned_scout_id: None,
+            preferred_endpoint: None,
         };
         assert!(validate_work_request(&bad).is_err());
     }

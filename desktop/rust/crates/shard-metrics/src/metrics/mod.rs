@@ -30,6 +30,8 @@ pub struct SystemMetrics {
     scout_work_rate_limited_total: AtomicU64,
     scout_work_overload_reject_total: AtomicU64,
     scout_work_active_cap_reject_total: AtomicU64,
+    scout_work_lease_issued_total: AtomicU64,
+    scout_work_lease_expired_total: AtomicU64,
     scout_draft_submissions_total: AtomicU64,
     scout_draft_rate_limited_total: AtomicU64,
     scout_draft_overload_reject_total: AtomicU64,
@@ -37,6 +39,9 @@ pub struct SystemMetrics {
     scout_draft_reject_pow_total: AtomicU64,
     scout_draft_reject_spotcheck_total: AtomicU64,
     scout_draft_reject_empty_tokens_total: AtomicU64,
+    scout_draft_reject_lease_missing_total: AtomicU64,
+    scout_draft_reject_lease_mismatch_total: AtomicU64,
+    scout_draft_reject_lease_expired_total: AtomicU64,
     scout_draft_duplicates_total: AtomicU64,
     scout_draft_channel_enqueued_total: AtomicU64,
     scout_draft_channel_enqueue_failures_total: AtomicU64,
@@ -65,6 +70,8 @@ pub struct SystemMetrics {
     transport_relay_success_total: AtomicU64,
     transport_relay_failure_total: AtomicU64,
     speculative_bypass_total: AtomicU64,
+    scout_blackout_enter_total: AtomicU64,
+    scout_blackout_exit_total: AtomicU64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -92,6 +99,8 @@ pub struct SystemMetricsSnapshot {
     pub scout_work_rate_limited_total: u64,
     pub scout_work_overload_reject_total: u64,
     pub scout_work_active_cap_reject_total: u64,
+    pub scout_work_lease_issued_total: u64,
+    pub scout_work_lease_expired_total: u64,
     pub scout_draft_submissions_total: u64,
     pub scout_draft_rate_limited_total: u64,
     pub scout_draft_overload_reject_total: u64,
@@ -99,6 +108,9 @@ pub struct SystemMetricsSnapshot {
     pub scout_draft_reject_pow_total: u64,
     pub scout_draft_reject_spotcheck_total: u64,
     pub scout_draft_reject_empty_tokens_total: u64,
+    pub scout_draft_reject_lease_missing_total: u64,
+    pub scout_draft_reject_lease_mismatch_total: u64,
+    pub scout_draft_reject_lease_expired_total: u64,
     pub scout_draft_duplicates_total: u64,
     pub scout_draft_channel_enqueued_total: u64,
     pub scout_draft_channel_enqueue_failures_total: u64,
@@ -127,6 +139,8 @@ pub struct SystemMetricsSnapshot {
     pub transport_relay_success_total: u64,
     pub transport_relay_failure_total: u64,
     pub speculative_bypass_total: u64,
+    pub scout_blackout_enter_total: u64,
+    pub scout_blackout_exit_total: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -274,6 +288,16 @@ impl SystemMetrics {
             .fetch_add(1, Ordering::Relaxed);
     }
 
+    pub fn inc_scout_work_lease_issued(&self) {
+        self.scout_work_lease_issued_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn inc_scout_work_lease_expired(&self) {
+        self.scout_work_lease_expired_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
     pub fn inc_scout_draft_submission(&self) {
         self.scout_draft_submissions_total
             .fetch_add(1, Ordering::Relaxed);
@@ -306,6 +330,21 @@ impl SystemMetrics {
 
     pub fn inc_scout_draft_reject_empty_tokens(&self) {
         self.scout_draft_reject_empty_tokens_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn inc_scout_draft_reject_lease_missing(&self) {
+        self.scout_draft_reject_lease_missing_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn inc_scout_draft_reject_lease_mismatch(&self) {
+        self.scout_draft_reject_lease_mismatch_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn inc_scout_draft_reject_lease_expired(&self) {
+        self.scout_draft_reject_lease_expired_total
             .fetch_add(1, Ordering::Relaxed);
     }
 
@@ -446,6 +485,16 @@ impl SystemMetrics {
 
     pub fn inc_speculative_bypass(&self) {
         self.speculative_bypass_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn inc_scout_blackout_enter(&self) {
+        self.scout_blackout_enter_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn inc_scout_blackout_exit(&self) {
+        self.scout_blackout_exit_total
             .fetch_add(1, Ordering::Relaxed);
     }
 
@@ -788,6 +837,27 @@ impl SystemMetrics {
                 "# HELP shard_scout_draft_overload_reject_total Scout draft submissions rejected due to verifier overload/circuit breaker.\n",
                 "# TYPE shard_scout_draft_overload_reject_total counter\n",
                 "shard_scout_draft_overload_reject_total {}\n",
+                "# HELP shard_scout_work_lease_issued_total Scout work leases issued.\n",
+                "# TYPE shard_scout_work_lease_issued_total counter\n",
+                "shard_scout_work_lease_issued_total {}\n",
+                "# HELP shard_scout_work_lease_expired_total Scout work leases expired before submission.\n",
+                "# TYPE shard_scout_work_lease_expired_total counter\n",
+                "shard_scout_work_lease_expired_total {}\n",
+                "# HELP shard_scout_draft_reject_lease_missing_total Scout draft rejects due to missing lease_id.\n",
+                "# TYPE shard_scout_draft_reject_lease_missing_total counter\n",
+                "shard_scout_draft_reject_lease_missing_total {}\n",
+                "# HELP shard_scout_draft_reject_lease_mismatch_total Scout draft rejects due to lease mismatch/wrong scout.\n",
+                "# TYPE shard_scout_draft_reject_lease_mismatch_total counter\n",
+                "shard_scout_draft_reject_lease_mismatch_total {}\n",
+                "# HELP shard_scout_draft_reject_lease_expired_total Scout draft rejects due to expired leases.\n",
+                "# TYPE shard_scout_draft_reject_lease_expired_total counter\n",
+                "shard_scout_draft_reject_lease_expired_total {}\n",
+                "# HELP shard_scout_blackout_enter_total Scout blackout periods entered.\n",
+                "# TYPE shard_scout_blackout_enter_total counter\n",
+                "shard_scout_blackout_enter_total {}\n",
+                "# HELP shard_scout_blackout_exit_total Scout blackout periods exited into gradual reopen.\n",
+                "# TYPE shard_scout_blackout_exit_total counter\n",
+                "shard_scout_blackout_exit_total {}\n",
             ),
             self.scout_work_rate_limited_total.load(Ordering::Relaxed),
             self.scout_work_overload_reject_total
@@ -798,6 +868,16 @@ impl SystemMetrics {
                 .load(Ordering::Relaxed),
             self.scout_draft_overload_reject_total
                 .load(Ordering::Relaxed),
+            self.scout_work_lease_issued_total.load(Ordering::Relaxed),
+            self.scout_work_lease_expired_total.load(Ordering::Relaxed),
+            self.scout_draft_reject_lease_missing_total
+                .load(Ordering::Relaxed),
+            self.scout_draft_reject_lease_mismatch_total
+                .load(Ordering::Relaxed),
+            self.scout_draft_reject_lease_expired_total
+                .load(Ordering::Relaxed),
+            self.scout_blackout_enter_total.load(Ordering::Relaxed),
+            self.scout_blackout_exit_total.load(Ordering::Relaxed),
         ));
         output
     }
@@ -849,6 +929,12 @@ impl SystemMetrics {
             scout_work_active_cap_reject_total: self
                 .scout_work_active_cap_reject_total
                 .load(Ordering::Relaxed),
+            scout_work_lease_issued_total: self
+                .scout_work_lease_issued_total
+                .load(Ordering::Relaxed),
+            scout_work_lease_expired_total: self
+                .scout_work_lease_expired_total
+                .load(Ordering::Relaxed),
             scout_draft_submissions_total: self
                 .scout_draft_submissions_total
                 .load(Ordering::Relaxed),
@@ -867,6 +953,15 @@ impl SystemMetrics {
                 .load(Ordering::Relaxed),
             scout_draft_reject_empty_tokens_total: self
                 .scout_draft_reject_empty_tokens_total
+                .load(Ordering::Relaxed),
+            scout_draft_reject_lease_missing_total: self
+                .scout_draft_reject_lease_missing_total
+                .load(Ordering::Relaxed),
+            scout_draft_reject_lease_mismatch_total: self
+                .scout_draft_reject_lease_mismatch_total
+                .load(Ordering::Relaxed),
+            scout_draft_reject_lease_expired_total: self
+                .scout_draft_reject_lease_expired_total
                 .load(Ordering::Relaxed),
             scout_draft_duplicates_total: self.scout_draft_duplicates_total.load(Ordering::Relaxed),
             scout_draft_channel_enqueued_total: self
@@ -938,6 +1033,8 @@ impl SystemMetrics {
                 .transport_relay_failure_total
                 .load(Ordering::Relaxed),
             speculative_bypass_total: self.speculative_bypass_total.load(Ordering::Relaxed),
+            scout_blackout_enter_total: self.scout_blackout_enter_total.load(Ordering::Relaxed),
+            scout_blackout_exit_total: self.scout_blackout_exit_total.load(Ordering::Relaxed),
         }
     }
 }
@@ -966,6 +1063,8 @@ mod tests {
         metrics.inc_scout_work_rate_limited();
         metrics.inc_scout_work_overload_reject();
         metrics.inc_scout_work_active_cap_reject();
+        metrics.inc_scout_work_lease_issued();
+        metrics.inc_scout_work_lease_expired();
         metrics.inc_scout_draft_submission();
         metrics.inc_scout_draft_rate_limited();
         metrics.inc_scout_draft_overload_reject();
@@ -973,6 +1072,9 @@ mod tests {
         metrics.inc_scout_draft_reject_pow();
         metrics.inc_scout_draft_reject_spotcheck();
         metrics.inc_scout_draft_reject_empty_tokens();
+        metrics.inc_scout_draft_reject_lease_missing();
+        metrics.inc_scout_draft_reject_lease_mismatch();
+        metrics.inc_scout_draft_reject_lease_expired();
         metrics.inc_scout_draft_duplicate();
         metrics.inc_scout_draft_channel_enqueued();
         metrics.inc_scout_draft_channel_enqueue_failure();
@@ -1000,6 +1102,8 @@ mod tests {
         metrics.inc_transport_webrtc_failure();
         metrics.inc_transport_relay_success();
         metrics.inc_transport_relay_failure();
+        metrics.inc_scout_blackout_enter();
+        metrics.inc_scout_blackout_exit();
 
         let snap = metrics.snapshot();
         assert_eq!(snap.chat_completion_success_total, 1);
@@ -1019,6 +1123,8 @@ mod tests {
         assert_eq!(snap.scout_work_rate_limited_total, 1);
         assert_eq!(snap.scout_work_overload_reject_total, 1);
         assert_eq!(snap.scout_work_active_cap_reject_total, 1);
+        assert_eq!(snap.scout_work_lease_issued_total, 1);
+        assert_eq!(snap.scout_work_lease_expired_total, 1);
         assert_eq!(snap.scout_draft_submissions_total, 1);
         assert_eq!(snap.scout_draft_rate_limited_total, 1);
         assert_eq!(snap.scout_draft_overload_reject_total, 1);
@@ -1026,6 +1132,9 @@ mod tests {
         assert_eq!(snap.scout_draft_reject_pow_total, 1);
         assert_eq!(snap.scout_draft_reject_spotcheck_total, 1);
         assert_eq!(snap.scout_draft_reject_empty_tokens_total, 1);
+        assert_eq!(snap.scout_draft_reject_lease_missing_total, 1);
+        assert_eq!(snap.scout_draft_reject_lease_mismatch_total, 1);
+        assert_eq!(snap.scout_draft_reject_lease_expired_total, 1);
         assert_eq!(snap.scout_draft_duplicates_total, 1);
         assert_eq!(snap.scout_draft_channel_enqueued_total, 1);
         assert_eq!(snap.scout_draft_channel_enqueue_failures_total, 1);
@@ -1053,5 +1162,7 @@ mod tests {
         assert_eq!(snap.transport_webrtc_failure_total, 1);
         assert_eq!(snap.transport_relay_success_total, 1);
         assert_eq!(snap.transport_relay_failure_total, 1);
+        assert_eq!(snap.scout_blackout_enter_total, 1);
+        assert_eq!(snap.scout_blackout_exit_total, 1);
     }
 }

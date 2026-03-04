@@ -59,13 +59,29 @@ class LoadAwarePool:
             self._states[endpoint].inflight += 1
             return endpoint
 
-    async def best_endpoint_for_scout(self, client: httpx.AsyncClient) -> str:
+    async def best_endpoint_for_scout(
+        self, client: httpx.AsyncClient, preferred: list[str] | None = None
+    ) -> str:
         await self.refresh(client)
         async with self._lock:
             if not self._states:
                 raise RuntimeError("no verifier endpoints configured")
-            ranked = sorted(self._states.values(), key=self._score)
+            candidates = list(self._states.values())
+            if preferred:
+                preferred_set = {item.rstrip("/") for item in preferred if item}
+                filtered = [state for state in candidates if state.endpoint in preferred_set]
+                if filtered:
+                    candidates = filtered
+            ranked = sorted(candidates, key=self._score)
             return ranked[0].endpoint
+
+    async def score_for(self, endpoint: str, client: httpx.AsyncClient) -> float:
+        await self.refresh(client)
+        async with self._lock:
+            state = self._states.get(endpoint.rstrip("/"))
+            if state is None:
+                return float("inf")
+            return self._score(state)
 
     async def note_result(self, endpoint: str, ok: bool, latency_ms: float) -> None:
         async with self._lock:
@@ -165,9 +181,12 @@ def adaptive_scout_target(
     configured_max: int,
     max_queue_depth: float,
     max_p95_latency_ms: float,
+    blackout_endpoints: int,
 ) -> int:
     if configured_max <= 0:
         return 0
+    if blackout_endpoints > 0:
+        return 1
     # Fast downshift on overload.
     if max_queue_depth >= 10.0 or max_p95_latency_ms >= 6000.0:
         return 1
@@ -197,6 +216,15 @@ async def fetch_pool_summaries(client: httpx.AsyncClient, verifier_pool: list[st
             summary["_endpoint"] = endpoint
             summaries.append(summary)
     return summaries
+
+
+def aggregate_speculative_totals(summaries: list[dict]) -> tuple[float, float]:
+    accepted = 0.0
+    total = 0.0
+    for summary in summaries:
+        accepted += float(summary.get("speculative_accepted_tokens_total", 0.0) or 0.0)
+        total += float(summary.get("speculative_draft_tokens_total", 0.0) or 0.0)
+    return accepted, total
 
 
 async def run_orchestrator(
@@ -235,7 +263,8 @@ async def run_orchestrator(
     )
 
     async with httpx.AsyncClient(limits=limits, timeout=timeout) as client:
-        baseline = await fetch_summary(client, verifier_pool[0])
+        baseline_summaries = await fetch_pool_summaries(client, verifier_pool)
+        baseline_accepted, baseline_total = aggregate_speculative_totals(baseline_summaries)
         scout_target = max(0, scout_workers)
         scout_target_lock = asyncio.Lock()
 
@@ -278,31 +307,35 @@ async def run_orchestrator(
         async def scout_loop(worker_idx: int) -> None:
             scout_id = f"orchestrator-scout-{worker_idx}"
             verified_endpoints: set[str] = set()
+            sticky_endpoint: str | None = None
             while time.monotonic() < end:
                 try:
                     target = await get_scout_target()
                     if worker_idx >= target:
                         await asyncio.sleep(0.2)
                         continue
-                    endpoint = await pool.best_endpoint_for_scout(client)
+                    if sticky_endpoint:
+                        sticky_score = await pool.score_for(sticky_endpoint, client)
+                        if sticky_score == float("inf"):
+                            sticky_endpoint = None
+                        else:
+                            best_score = await pool.score_for(
+                                await pool.best_endpoint_for_scout(client), client
+                            )
+                            # Keep affinity unless it is materially worse than current best.
+                            if sticky_score > (best_score * 1.35):
+                                sticky_endpoint = None
+
+                    preferred_candidates = [sticky_endpoint] if sticky_endpoint else None
+                    endpoint = await pool.best_endpoint_for_scout(client, preferred_candidates)
+                    sticky_endpoint = endpoint
                     if endpoint not in verified_endpoints:
                         verified = await ensure_pow_for_scout(endpoint, scout_id)
                         if not verified:
+                            sticky_endpoint = None
                             await asyncio.sleep(0.5)
                             continue
                         verified_endpoints.add(endpoint)
-                        # Seed recent submitter state so speculative scheduling does not
-                        # underestimate active scouts on fresh daemon boots.
-                        await client.post(
-                            f"{endpoint}/v1/scout/draft",
-                            json={
-                                "work_id": f"warmup-{scout_id}",
-                                "scout_id": scout_id,
-                                "draft_text": "ok",
-                                "prompt_context": "warmup",
-                                "timestamp": time.time(),
-                            },
-                        )
 
                     work_resp = await client.get(
                         f"{endpoint}/v1/scout/work",
@@ -310,22 +343,33 @@ async def run_orchestrator(
                     )
                     if not work_resp.is_success:
                         retry_after_ms = 0
+                        preferred_endpoint = None
                         try:
                             payload = work_resp.json() or {}
                             retry_after_ms = int(payload.get("retry_after_ms", 0) or 0)
+                            preferred_endpoint = payload.get("preferred_endpoint")
                         except Exception:
                             retry_after_ms = 0
+                        if isinstance(preferred_endpoint, str) and preferred_endpoint.strip():
+                            sticky_endpoint = preferred_endpoint.rstrip("/")
+                        elif work_resp.status_code in (429, 503):
+                            sticky_endpoint = None
                         await asyncio.sleep(max(0.05, retry_after_ms / 1000.0))
                         continue
-                    work = (work_resp.json() or {}).get("work")
+                    payload = work_resp.json() or {}
+                    work = payload.get("work")
                     if not work:
-                        retry_after_ms = int((work_resp.json() or {}).get("retry_after_ms", 0) or 0)
+                        retry_after_ms = int(payload.get("retry_after_ms", 0) or 0)
                         await asyncio.sleep(max(0.01, retry_after_ms / 1000.0))
                         continue
+                    preferred_endpoint = work.get("preferred_endpoint")
+                    if isinstance(preferred_endpoint, str) and preferred_endpoint.strip():
+                        sticky_endpoint = preferred_endpoint.rstrip("/")
 
                     prompt_context = str(work.get("prompt_context", ""))
                     user_prompt = extract_user_message(prompt_context)
                     min_tokens = max(1, int(work.get("min_tokens", 1)))
+                    lease_id = work.get("lease_id")
 
                     # Draft with standard mode so this helper path does not recurse into speculative work.
                     gen_resp = await client.post(
@@ -354,6 +398,7 @@ async def run_orchestrator(
                         json={
                             "work_id": work.get("request_id"),
                             "scout_id": scout_id,
+                            "lease_id": lease_id,
                             "draft_text": draft_text,
                             "prompt_context": prompt_context,
                             "timestamp": time.time(),
@@ -382,7 +427,7 @@ async def run_orchestrator(
                                 "max_tokens": max(1, max_tokens),
                             },
                         )
-                        attempt_ok = resp.status_code < 500
+                        attempt_ok = resp.status_code < 400
                         await pool.note_result(
                             endpoint=endpoint,
                             ok=attempt_ok,
@@ -442,12 +487,18 @@ async def run_orchestrator(
                     (float(s.get("p95_latency_ms", 0.0) or 0.0) for s in pool_summaries),
                     default=0.0,
                 )
+                blackout_endpoints = sum(
+                    1
+                    for s in pool_summaries
+                    if str(s.get("scout_blackout_mode", "open")).lower() == "blackout"
+                )
                 current_target = await get_scout_target()
                 next_target = adaptive_scout_target(
                     current=current_target,
                     configured_max=max(0, scout_workers),
                     max_queue_depth=max_queue_depth,
                     max_p95_latency_ms=max_p95_latency_ms,
+                    blackout_endpoints=blackout_endpoints,
                 )
                 await set_scout_target(next_target)
                 async with in_flight_lock:
@@ -456,7 +507,8 @@ async def run_orchestrator(
                 print(
                     f"[{elapsed}s/{duration}s] Scouts: {active} active | p95: {p95/1000.0:.2f}s | "
                     f"accept: {acceptance:.1f}% | errors: {err_rate:.2f}% | "
-                    f"scout_target: {active_scout_target} | max_q: {max_queue_depth:.1f} | max_p95: {max_p95_latency_ms:.0f}ms"
+                    f"scout_target: {active_scout_target} | max_q: {max_queue_depth:.1f} | max_p95: {max_p95_latency_ms:.0f}ms | "
+                    f"blackout_nodes: {blackout_endpoints}"
                 )
                 timeseries.append(
                     {
@@ -465,6 +517,7 @@ async def run_orchestrator(
                         "scout_target": active_scout_target,
                         "max_queue_depth": round(max_queue_depth, 3),
                         "max_pool_p95_latency_ms": round(max_p95_latency_ms, 3),
+                        "blackout_endpoints": blackout_endpoints,
                         "p95_latency_ms": round(p95, 3),
                         "acceptance_rate_pct": round(acceptance, 3),
                         "error_rate_pct": round(err_rate, 4),
@@ -481,7 +534,8 @@ async def run_orchestrator(
             task.cancel()
         await asyncio.gather(*scout_tasks, return_exceptions=True)
 
-        after = await fetch_summary(client, verifier_pool[0])
+        after_summaries = await fetch_pool_summaries(client, verifier_pool)
+        after_accepted, after_total = aggregate_speculative_totals(after_summaries)
 
     latencies = [r.latency_ms for r in records]
     total = len(records)
@@ -490,12 +544,8 @@ async def run_orchestrator(
     error_rate_pct = (errs / total * 100.0) if total else 100.0
     p95_latency_ms = percentile(latencies, 0.95)
 
-    before_accepted = float(baseline.get("speculative_accepted_tokens_total", 0.0))
-    before_total = float(baseline.get("speculative_draft_tokens_total", 0.0))
-    after_accepted = float(after.get("speculative_accepted_tokens_total", 0.0))
-    after_total = float(after.get("speculative_draft_tokens_total", 0.0))
-    accepted_delta = max(0.0, after_accepted - before_accepted)
-    total_delta = max(0.0, after_total - before_total)
+    accepted_delta = max(0.0, after_accepted - baseline_accepted)
+    total_delta = max(0.0, after_total - baseline_total)
     acceptance_source = "speculative_metrics"
     if total_delta > 0:
         acceptance_rate_pct = accepted_delta / total_delta * 100.0
@@ -580,7 +630,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--max-tokens",
         type=int,
-        default=1,
+        default=32,
         help="max_tokens sent to each chat completion request",
     )
     return parser.parse_args()

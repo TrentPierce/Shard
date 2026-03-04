@@ -44,10 +44,13 @@ export type WorkRequest = {
     request_id: string
     min_tokens: number
     created_at_ms?: number
+    lease_id?: string
+    lease_expires_at_ms?: number
 }
 
 export type WorkResult = {
     work_id: string
+    lease_id?: string
     draft_text: string
     prompt_context: string
     scout_id: string
@@ -318,6 +321,7 @@ export async function handleScoutWork(work: WorkRequest): Promise<ScoutSubmissio
 
         const result: WorkResult = {
             work_id: work.request_id,
+            lease_id: work.lease_id,
             draft_text: draftText,
             prompt_context: work.prompt_context,
             scout_id: scoutId,
@@ -350,6 +354,7 @@ async function submitDraftResult(result: WorkResult): Promise<ScoutSubmissionRes
         void reportScoutClientEvent("submit_attempt", "handleScoutWork_pre_submit")
         const response = await submitDraft(result.work_id, result.draft_text, {
             promptContext: result.prompt_context,
+            leaseId: result.lease_id,
             // Browser scouts can need several seconds for PoW + HTTP + tokenization.
             timeoutMs: 45000,
             maxRetries: 0,
@@ -404,6 +409,8 @@ export async function requestWork(): Promise<WorkPollResult> {
                 prompt_context: polled.work.prompt_context ?? polled.work.prompt ?? "",
                 min_tokens: polled.work.min_tokens ?? polled.work.max_tokens ?? 4,
                 created_at_ms: polled.work.created_at_ms,
+                lease_id: polled.work.lease_id,
+                lease_expires_at_ms: polled.work.lease_expires_at_ms,
             },
             transientError: false,
         }
