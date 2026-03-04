@@ -48,6 +48,18 @@ Required open ports: `4001/tcp`, `9091/tcp`, `9090/udp`, `9092/udp`
 
 See [docs/run-a-node.md](docs/run-a-node.md) for the full quickstart, including binary install and health checks.
 
+### Local Mesh Scale Test (Docker)
+
+Use the local mesh profile to compare `1` vs `2` vs `N` verifier nodes:
+
+```powershell
+.\deploy\demo\mesh-up.ps1 -Nodes 1
+.\deploy\demo\mesh-up.ps1 -Nodes 2
+.\deploy\demo\mesh-up.ps1 -Nodes 5
+```
+
+Full guide: [docs/mesh-benchmark.md](docs/mesh-benchmark.md)
+
 ---
 
 ## Key Features
@@ -156,6 +168,8 @@ docs/               Architecture, deployment, API, and operations documentation
 | Guide | Description |
 |-------|-------------|
 | [run-a-node.md](docs/run-a-node.md) | Quickstart for new node operators |
+| [mesh-benchmark.md](docs/mesh-benchmark.md) | Local Docker mesh scaling and performance comparison |
+| [gui-audit.md](docs/gui-audit.md) | GUI readiness audit and remediation summary |
 | [architecture.md](docs/architecture.md) | System design and request flow |
 | [deployment.md](docs/deployment.md) | Environment variables and HA setup |
 | [api.md](docs/api.md) | API reference |

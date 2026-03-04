@@ -43,6 +43,10 @@ curl http://localhost:9091/v1/chat/completions \
   -d '{"model": "default", "messages": [{"role": "user", "content": "Hello"}]}'
 ```
 
+## Model Provisioning Note
+
+The repository model manifest currently ships placeholder download metadata (`deploy/models/manifest.json`), so GUI auto-download may require manual configuration until a production model URL/hash is published. If auto-download fails, set the local model path in GUI Settings.
+
 ## Required Ports
 
 | Port | Protocol | Purpose |
@@ -57,3 +61,4 @@ curl http://localhost:9091/v1/chat/completions \
 - [Architecture overview](architecture.md) — how Scouts and Verifiers interact
 - [Deployment guide](deployment.md) — environment variables, HA setup, monitoring
 - [Verification protocol](verification-protocol.md) — how draft tokens are validated
+- [Mesh benchmark](mesh-benchmark.md) — compare throughput/latency with 1, 2, or more local Docker nodes

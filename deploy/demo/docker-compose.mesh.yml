@@ -1,0 +1,73 @@
+services:
+  bootstrap:
+    build:
+      context: ../..
+      dockerfile: Dockerfile.daemon
+    command:
+      - "--control-port"
+      - "9091"
+      - "--tcp-port"
+      - "4001"
+      - "--webrtc-port"
+      - "9090"
+      - "--quic-port"
+      - "9092"
+      - "--public-api"
+      - "true"
+      - "--relay-mode"
+      - "true"
+      - "--stability-threshold-hours"
+      - "0"
+    environment:
+      SHARD_REQUIRE_ENGINE_FOR_CONTRIBUTE: "false"
+      SHARD_ALLOW_PRIVATE_BOOTSTRAP: "true"
+      SHARD_ALLOW_PRIVATE_RELAY: "true"
+    ports:
+      - "19091:9091"
+      - "14001:4001"
+      - "14090:9090/udp"
+      - "14092:9092/udp"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9091/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+    networks:
+      - shard-mesh
+    restart: unless-stopped
+
+  shard-node:
+    build:
+      context: ../..
+      dockerfile: Dockerfile.daemon
+    command:
+      - "--control-port"
+      - "9091"
+      - "--tcp-port"
+      - "4001"
+      - "--webrtc-port"
+      - "9090"
+      - "--quic-port"
+      - "9092"
+      - "--bootstrap-node"
+      - "${SHARD_BOOTSTRAP_NODE}"
+    environment:
+      SHARD_REQUIRE_ENGINE_FOR_CONTRIBUTE: "false"
+      SHARD_ALLOW_PRIVATE_BOOTSTRAP: "true"
+    depends_on:
+      bootstrap:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9091/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+    networks:
+      - shard-mesh
+    restart: unless-stopped
+
+networks:
+  shard-mesh:
+    driver: bridge

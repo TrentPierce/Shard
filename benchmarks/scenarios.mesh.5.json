@@ -1,0 +1,9 @@
+{
+  "scenarios": [
+    {
+      "name": "mesh-5-nodes",
+      "node_count": 5,
+      "base_url": "http://127.0.0.1:19091"
+    }
+  ]
+}

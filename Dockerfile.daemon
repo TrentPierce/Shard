@@ -4,7 +4,7 @@ COPY desktop/rust/ ./desktop/rust/
 RUN cd desktop/rust && cargo build --release --bin shard-daemon
 
 FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y ca-certificates wget && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /app/desktop/rust/target/release/shard-daemon /usr/local/bin/
 EXPOSE 9091 4001 9090/udp 9092/udp
 ENTRYPOINT ["shard-daemon"]
