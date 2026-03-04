@@ -19,8 +19,9 @@ export async function POST(request: NextRequest) {
       headers: forwardRequestHeaders(),
       body,
       timeoutMs: 1_200,
-      totalTimeoutMs: 1_800,
-      maxAttempts: 1,
+      totalTimeoutMs: 2_800,
+      // Allow one failover hop so misconfigured primaries do not drop scout telemetry.
+      maxAttempts: 2,
       failoverOnStatuses: [500, 502, 503, 504, 521, 530],
     })
     const data = await response.json().catch(() => ({}))
