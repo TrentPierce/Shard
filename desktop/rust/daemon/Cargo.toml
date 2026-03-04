@@ -3,6 +3,10 @@ name = "shard-daemon"
 version = "0.6.2"
 edition = "2021"
 
+[lib]
+name = "shard_daemon"
+path = "src/lib.rs"
+
 [dependencies]
 anyhow.workspace = true
 argon2.workspace = true

@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(xargs grep:*)",
+      "Bash(grep:*)",
+      "Bash(npm info:*)",
+      "Bash(npm install:*)",
+      "Bash(npx jest:*)",
+      "Bash(npm audit:*)",
+      "Bash(python:*)",
+      "Bash(cargo check:*)",
+      "Bash(cargo build:*)",
+      "Bash(Start-Process:*)",
+      "Bash(cmd:*)",
+      "Bash(./shard-gui.exe:*)",
+      "Bash(ls:*)"
+    ]
+  }
+}

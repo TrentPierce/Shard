@@ -18,3 +18,10 @@ reqwest = { workspace = true, features = ["stream"] }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 shard-common = { workspace = true }
+shard-daemon = { path = "../daemon" }
+dirs = { workspace = true }
+futures = { workspace = true }
+image = { version = "0.25", default-features = false, features = ["png"] }
+
+[target.'cfg(windows)'.dependencies]
+winreg = "0.50"

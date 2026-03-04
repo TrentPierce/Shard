@@ -1,88 +1,100 @@
-use anyhow::Result;
-use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
-use tracing::{error, info};
-
-#[cfg(target_os = "windows")]
-use std::os::windows::process::CommandExt;
-
-pub const DAEMON_ARGS: &[&str] = &[
-    "--control-port",
-    "9091",
-    "--tcp-port",
-    "4001",
-    "--webrtc-port",
-    "9090",
-    "--quic-port",
-    "9092",
-];
-
-pub fn find_daemon_binary() -> PathBuf {
-    #[cfg(target_os = "windows")]
-    let binary_name = "shard-daemon.exe";
-    #[cfg(not(target_os = "windows"))]
-    let binary_name = "shard-daemon";
-
-    // Check directory of own executable first
-    if let Ok(mut exe_path) = std::env::current_exe() {
-        exe_path.pop(); // Remove filename, keep dir
-        let candidate = exe_path.join(binary_name);
-        if candidate.exists() {
-            return candidate;
-        }
-    }
-
-    // Fall back to PATH
-    PathBuf::from(binary_name)
+/// Manages the in-process daemon running on a dedicated OS thread with its own
+/// Tokio runtime. This avoids the `Send` requirement that `tokio::spawn` imposes,
+/// since the daemon future holds raw C pointers across await points.
+pub struct DaemonTask {
+    thread: Option<std::thread::JoinHandle<()>>,
+    stop_tx: Option<tokio::sync::oneshot::Sender<()>>,
 }
 
-pub struct ProcessManager {
-    child: Option<Child>,
-}
-
-impl ProcessManager {
+impl DaemonTask {
     pub fn new() -> Self {
-        Self { child: None }
+        Self { thread: None, stop_tx: None }
     }
 
-    pub fn start(&mut self, program: &Path, args: &[&str]) -> Result<()> {
-        if self.child.is_some() {
-            self.stop()?;
+    pub fn start(&mut self, bitnet_lib: &str, bitnet_model: &str, listen_port: u16) {
+        self.stop();
+
+        // Resolve the engine library path:
+        // 1. Use whatever the user explicitly configured.
+        // 2. Fall back to shard_engine.dll bundled next to this executable.
+        let resolved_lib = if !bitnet_lib.is_empty() {
+            bitnet_lib.to_string()
+        } else {
+            Self::bundled_engine_path()
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_default()
+        };
+
+        if !resolved_lib.is_empty() {
+            std::env::set_var("BITNET_LIB", &resolved_lib);
+        }
+        if !bitnet_model.is_empty() {
+            std::env::set_var("BITNET_MODEL", bitnet_model);
+        }
+        // If either piece is still missing, run as Scout (no compute contribution).
+        if resolved_lib.is_empty() || bitnet_model.is_empty() {
+            std::env::set_var("SHARD_REQUIRE_ENGINE_FOR_CONTRIBUTE", "false");
         }
 
-        info!("Starting child process: {:?} {:?}", program, args);
+        let args = vec![
+            "shard-desktop".to_string(),
+            "--control-port".to_string(),
+            "9091".to_string(),
+            "--tcp-port".to_string(),
+            listen_port.to_string(),
+            "--webrtc-port".to_string(),
+            "9090".to_string(),
+            "--quic-port".to_string(),
+            "9092".to_string(),
+        ];
 
-        let mut cmd = Command::new(program);
-        cmd.args(args).stdout(Stdio::piped()).stderr(Stdio::piped());
+        let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
+        self.stop_tx = Some(stop_tx);
 
+        self.thread = Some(std::thread::Builder::new()
+            .name("shard-daemon".to_string())
+            .spawn(move || {
+                let rt = tokio::runtime::Builder::new_multi_thread()
+                    .enable_all()
+                    .build()
+                    .expect("daemon tokio runtime");
+                // block_on does not require the future to be Send, so the
+                // daemon's non-Send future (raw C pointers in ShardInitConfig)
+                // runs fine here.
+                rt.block_on(shard_daemon::run_until_stopped(args, stop_rx)).ok();
+            })
+            .expect("daemon thread"));
+    }
+
+    pub fn stop(&mut self) {
+        // Sending () (or dropping sender) causes run_until_stopped to return.
+        drop(self.stop_tx.take());
+        // Drop the thread handle — the daemon thread will exit shortly.
+        drop(self.thread.take());
+    }
+
+    pub fn is_running(&self) -> bool {
+        self.thread.as_ref().map(|t| !t.is_finished()).unwrap_or(false)
+    }
+
+    /// Returns the path to `shard_engine.dll` bundled next to this executable,
+    /// if it exists. Returns `None` if not found (e.g. dev build without DLLs).
+    fn bundled_engine_path() -> Option<std::path::PathBuf> {
+        let exe = std::env::current_exe().ok()?;
+        let dir = exe.parent()?;
         #[cfg(target_os = "windows")]
-        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
-
-        let child = cmd.spawn()?;
-        self.child = Some(child);
-        Ok(())
-    }
-
-    pub fn stop(&mut self) -> Result<()> {
-        if let Some(mut child) = self.child.take() {
-            info!("Stopping child process (PID: {:?})", child.id());
-            match child.kill() {
-                Ok(_) => {
-                    let _ = child.wait(); // Prevent zombies
-                    info!("Child process terminated.");
-                }
-                Err(e) => {
-                    error!("Failed to kill child process: {}", e);
-                    return Err(e.into());
-                }
-            }
-        }
-        Ok(())
+        let lib_name = "shard_engine.dll";
+        #[cfg(target_os = "macos")]
+        let lib_name = "libshard_engine.dylib";
+        #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+        let lib_name = "libshard_engine.so";
+        let candidate = dir.join(lib_name);
+        if candidate.exists() { Some(candidate) } else { None }
     }
 }
 
-impl Drop for ProcessManager {
+impl Drop for DaemonTask {
     fn drop(&mut self) {
-        let _ = self.stop();
+        self.stop();
     }
 }

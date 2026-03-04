@@ -6336,18 +6336,23 @@ version = "0.6.2"
 dependencies = [
  "anyhow",
  "directories",
+ "dirs 5.0.1",
  "eframe",
  "egui",
+ "futures",
+ "image",
  "muda",
  "reqwest",
  "rfd",
  "serde",
  "serde_json",
  "shard-common",
+ "shard-daemon",
  "tokio",
  "tracing",
  "tracing-subscriber",
  "tray-icon",
+ "winreg",
 ]
 
 [[package]]
