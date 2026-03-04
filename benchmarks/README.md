@@ -4,6 +4,7 @@ Use these tools for real, reproducible performance claims:
 
 - `benchmarks/mesh_scale_benchmark.py`
 - `benchmarks/run_pipeline_scale.py`
+- `benchmarks/distributed/run_release_matrix.py` (release-candidate go/no-go)
 
 ## Principles
 
@@ -54,6 +55,26 @@ This script:
 - Waits for health readiness
 - Runs the same benchmark protocol across all scenarios
 - Tears down the stack at the end
+
+## Option C: Release Candidate Go/No-Go Matrix
+
+Use this when preparing public release signoff. It runs repeated 1-node/2-node
+scenarios with and without scouts, then emits a single recommendation.
+
+```bash
+python benchmarks/distributed/run_release_matrix.py \
+  --one-node-pool http://127.0.0.1:9191 \
+  --two-node-pool http://127.0.0.1:9191,http://35.175.242.222:9091 \
+  --runs-per-scenario 3 \
+  --scouts 24 \
+  --rate 4 \
+  --duration 60 \
+  --scout-workers 4
+```
+
+Outputs:
+- `go-no-go-summary.json` (machine-readable gate decisions)
+- `go-no-go-report.md` (human-readable release signoff report)
 
 ## Output Artifacts
 

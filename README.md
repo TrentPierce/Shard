@@ -191,6 +191,7 @@ docs/               Architecture, deployment, API, and operations documentation
 |-------|-------------|
 | [run-a-node.md](docs/run-a-node.md) | Quickstart for new node operators |
 | [mesh-benchmark.md](docs/mesh-benchmark.md) | Local Docker mesh scaling and performance comparison |
+| [release-rc-checklist.md](docs/release-rc-checklist.md) | Public release go/no-go checklist and RC matrix command |
 | [gui-audit.md](docs/gui-audit.md) | GUI readiness audit and remediation summary |
 | [architecture.md](docs/architecture.md) | System design and request flow |
 | [deployment.md](docs/deployment.md) | Environment variables and HA setup |

@@ -1,0 +1,347 @@
+#!/usr/bin/env python3
+"""
+Release-candidate benchmark matrix runner with go/no-go output.
+
+Runs repeated orchestrator scenarios and emits:
+  - go-no-go-summary.json
+  - go-no-go-report.md
+
+Usage example:
+  python benchmarks/distributed/run_release_matrix.py \
+    --one-node-pool http://127.0.0.1:9191 \
+    --two-node-pool http://127.0.0.1:9191,http://35.175.242.222:9091 \
+    --runs-per-scenario 3
+"""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import json
+import statistics
+import subprocess
+import sys
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
+
+if __package__ is None or __package__ == "":
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from benchmarks.distributed.orchestrator import run_orchestrator
+
+
+@dataclass(frozen=True)
+class Scenario:
+    name: str
+    use_scout_workers: bool
+    pool_kind: str  # one_node | two_node
+
+
+SCENARIOS: list[Scenario] = [
+    Scenario(name="one-node-no-scouts", use_scout_workers=False, pool_kind="one_node"),
+    Scenario(name="one-node-with-scouts", use_scout_workers=True, pool_kind="one_node"),
+    Scenario(name="two-node-no-scouts", use_scout_workers=False, pool_kind="two_node"),
+    Scenario(name="two-node-with-scouts", use_scout_workers=True, pool_kind="two_node"),
+]
+
+
+def parse_pool(raw: str) -> list[str]:
+    endpoints = [item.strip() for item in raw.split(",") if item.strip()]
+    if not endpoints:
+        raise ValueError("verifier pool cannot be empty")
+    return endpoints
+
+
+def median_metric(rows: list[dict[str, Any]], key: str) -> float:
+    values = [float(row.get(key, 0.0) or 0.0) for row in rows]
+    if not values:
+        return 0.0
+    return float(statistics.median(values))
+
+
+def mean_metric(rows: list[dict[str, Any]], key: str) -> float:
+    values = [float(row.get(key, 0.0) or 0.0) for row in rows]
+    if not values:
+        return 0.0
+    return float(statistics.fmean(values))
+
+
+def git_short_head() -> str:
+    try:
+        return (
+            subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], text=True)
+            .strip()
+        )
+    except Exception:
+        return "unknown"
+
+
+def evaluate_release_gates(aggregates: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+    two_with = aggregates.get("two-node-with-scouts", {})
+    two_no = aggregates.get("two-node-no-scouts", {})
+    p95_with = float(two_with.get("p95_latency_ms_median", 0.0))
+    err_with = float(two_with.get("error_rate_pct_median", 100.0))
+    tps_with = float(two_with.get("throughput_tps_median", 0.0))
+    p95_no = float(two_no.get("p95_latency_ms_median", 0.0))
+    tps_no = float(two_no.get("throughput_tps_median", 0.0))
+
+    gates: list[dict[str, Any]] = [
+        {
+            "name": "two_node_with_scouts_p95_ms",
+            "description": "2-node with scouts p95 latency must be <= 4500ms",
+            "actual": round(p95_with, 3),
+            "expected_op": "<=",
+            "expected": 4500.0,
+            "pass": p95_with <= 4500.0,
+        },
+        {
+            "name": "two_node_with_scouts_error_pct",
+            "description": "2-node with scouts error rate must be <= 3%",
+            "actual": round(err_with, 4),
+            "expected_op": "<=",
+            "expected": 3.0,
+            "pass": err_with <= 3.0,
+        },
+        {
+            "name": "two_node_with_scouts_tps",
+            "description": "2-node with scouts throughput must be >= 3.75 TPS",
+            "actual": round(tps_with, 4),
+            "expected_op": ">=",
+            "expected": 3.75,
+            "pass": tps_with >= 3.75,
+        },
+    ]
+
+    # Relative gates are only valid if two-node no-scouts has non-zero reference values.
+    if tps_no > 0:
+        gates.append(
+            {
+                "name": "two_node_with_scouts_tps_vs_no_scouts",
+                "description": "2-node with scouts TPS must be >= 105% of 2-node no-scouts",
+                "actual": round(tps_with, 4),
+                "expected_op": ">=",
+                "expected": round(tps_no * 1.05, 4),
+                "pass": tps_with >= (tps_no * 1.05),
+            }
+        )
+    else:
+        gates.append(
+            {
+                "name": "two_node_with_scouts_tps_vs_no_scouts",
+                "description": "2-node with scouts TPS must be >= 105% of 2-node no-scouts",
+                "actual": round(tps_with, 4),
+                "expected_op": "n/a",
+                "expected": None,
+                "pass": False,
+            }
+        )
+
+    if p95_no > 0:
+        gates.append(
+            {
+                "name": "two_node_with_scouts_p95_vs_no_scouts",
+                "description": "2-node with scouts p95 must be <= 110% of 2-node no-scouts",
+                "actual": round(p95_with, 3),
+                "expected_op": "<=",
+                "expected": round(p95_no * 1.10, 3),
+                "pass": p95_with <= (p95_no * 1.10),
+            }
+        )
+    else:
+        gates.append(
+            {
+                "name": "two_node_with_scouts_p95_vs_no_scouts",
+                "description": "2-node with scouts p95 must be <= 110% of 2-node no-scouts",
+                "actual": round(p95_with, 3),
+                "expected_op": "n/a",
+                "expected": None,
+                "pass": False,
+            }
+        )
+
+    return gates
+
+
+def markdown_report(summary: dict[str, Any]) -> str:
+    lines: list[str] = []
+    lines.append("# Release RC Go/No-Go Report")
+    lines.append("")
+    lines.append(f"- Generated (UTC): `{summary['generated_at_utc']}`")
+    lines.append(f"- Commit: `{summary['git_commit']}`")
+    lines.append(f"- Recommendation: **{summary['recommendation']}**")
+    lines.append("")
+    lines.append("## Scenario Medians")
+    lines.append("")
+    lines.append("| Scenario | p95 (ms) | TPS | Error (%) | Runs |")
+    lines.append("|---|---:|---:|---:|---:|")
+    for scenario in SCENARIOS:
+        row = summary["aggregates"][scenario.name]
+        lines.append(
+            f"| {scenario.name} | {row['p95_latency_ms_median']:.3f} | "
+            f"{row['throughput_tps_median']:.4f} | {row['error_rate_pct_median']:.4f} | "
+            f"{row['runs']} |"
+        )
+    lines.append("")
+    lines.append("## Gate Evaluation")
+    lines.append("")
+    lines.append("| Gate | Actual | Target | Pass |")
+    lines.append("|---|---:|---:|---|")
+    for gate in summary["gates"]:
+        target = (
+            "n/a"
+            if gate["expected"] is None
+            else f"{gate['expected_op']} {gate['expected']}"
+        )
+        status = "PASS" if gate["pass"] else "FAIL"
+        lines.append(f"| {gate['name']} | {gate['actual']} | {target} | {status} |")
+    lines.append("")
+    lines.append("## Notes")
+    lines.append("")
+    lines.append("- Recommendation is **GO** only if all gates pass.")
+    lines.append("- Use this report with raw JSON run artifacts for release signoff.")
+    lines.append("")
+    return "\n".join(lines)
+
+
+async def execute(args: argparse.Namespace) -> dict[str, Any]:
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    suffix = f"-{args.tag.strip()}" if args.tag and args.tag.strip() else ""
+    run_dir = Path(args.out_dir) / f"release-rc-{stamp}{suffix}"
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    one_pool = parse_pool(args.one_node_pool)
+    two_pool = parse_pool(args.two_node_pool)
+    by_scenario: dict[str, list[dict[str, Any]]] = {scenario.name: [] for scenario in SCENARIOS}
+
+    for scenario in SCENARIOS:
+        pool = one_pool if scenario.pool_kind == "one_node" else two_pool
+        workers = args.scout_workers if scenario.use_scout_workers else 0
+        for run_idx in range(1, args.runs_per_scenario + 1):
+            out_path = run_dir / f"{scenario.name}-run{run_idx}.json"
+            print(
+                f"Running {scenario.name} (run {run_idx}/{args.runs_per_scenario}) "
+                f"pool={','.join(pool)} scout_workers={workers}"
+            )
+            exit_code = await run_orchestrator(
+                scouts=args.scouts,
+                rate=args.rate,
+                duration=args.duration,
+                verifier_pool=pool,
+                out_path=out_path,
+                inference_mode=args.inference_mode,
+                request_timeout_ms=args.request_timeout_ms,
+                max_attempts=args.max_attempts,
+                scout_workers=workers,
+                max_tokens=args.max_tokens,
+            )
+            try:
+                data = json.loads(out_path.read_text(encoding="utf-8"))
+            except Exception as exc:
+                data = {
+                    "error_rate_pct": 100.0,
+                    "p95_latency_ms": 0.0,
+                    "throughput_tps": 0.0,
+                    "run_error": f"failed_to_read_output: {exc}",
+                }
+            data["orchestrator_exit_code"] = exit_code
+            data["output_file"] = str(out_path.as_posix())
+            by_scenario[scenario.name].append(data)
+
+    aggregates: dict[str, dict[str, Any]] = {}
+    for scenario in SCENARIOS:
+        rows = by_scenario.get(scenario.name, [])
+        aggregates[scenario.name] = {
+            "runs": len(rows),
+            "p95_latency_ms_median": round(median_metric(rows, "p95_latency_ms"), 3),
+            "throughput_tps_median": round(median_metric(rows, "throughput_tps"), 4),
+            "error_rate_pct_median": round(median_metric(rows, "error_rate_pct"), 4),
+            "p95_latency_ms_mean": round(mean_metric(rows, "p95_latency_ms"), 3),
+            "throughput_tps_mean": round(mean_metric(rows, "throughput_tps"), 4),
+            "error_rate_pct_mean": round(mean_metric(rows, "error_rate_pct"), 4),
+            "all_orchestrator_runs_passed": all(
+                int(row.get("orchestrator_exit_code", 1)) == 0 for row in rows
+            ),
+        }
+
+    gates = evaluate_release_gates(aggregates)
+    all_pass = all(bool(gate.get("pass")) for gate in gates)
+    recommendation = "GO" if all_pass else "NO_GO"
+
+    summary: dict[str, Any] = {
+        "generated_at_utc": datetime.now(UTC).isoformat(),
+        "git_commit": git_short_head(),
+        "recommendation": recommendation,
+        "config": {
+            "scouts": args.scouts,
+            "rate": args.rate,
+            "duration": args.duration,
+            "runs_per_scenario": args.runs_per_scenario,
+            "scout_workers_with_scouts": args.scout_workers,
+            "inference_mode": args.inference_mode,
+            "request_timeout_ms": args.request_timeout_ms,
+            "max_attempts": args.max_attempts,
+            "max_tokens": args.max_tokens,
+            "one_node_pool": one_pool,
+            "two_node_pool": two_pool,
+        },
+        "aggregates": aggregates,
+        "gates": gates,
+        "raw_runs": by_scenario,
+    }
+
+    summary_path = run_dir / "go-no-go-summary.json"
+    summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    report_path = run_dir / "go-no-go-report.md"
+    report_path.write_text(markdown_report(summary), encoding="utf-8")
+
+    print(f"Go/No-Go summary: {summary_path}")
+    print(f"Go/No-Go report: {report_path}")
+    print(f"Recommendation: {recommendation}")
+    return summary
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Run repeated RC matrix and emit go/no-go summary"
+    )
+    parser.add_argument(
+        "--one-node-pool",
+        required=True,
+        help="Comma-separated verifier pool for one-node scenarios",
+    )
+    parser.add_argument(
+        "--two-node-pool",
+        required=True,
+        help="Comma-separated verifier pool for two-node scenarios",
+    )
+    parser.add_argument("--runs-per-scenario", type=int, default=3)
+    parser.add_argument("--scouts", type=int, default=24)
+    parser.add_argument("--rate", type=int, default=4)
+    parser.add_argument("--duration", type=int, default=60)
+    parser.add_argument("--scout-workers", type=int, default=4)
+    parser.add_argument(
+        "--inference-mode",
+        type=str,
+        default="distributed",
+        choices=["standard", "distributed", "speculative"],
+    )
+    parser.add_argument("--request-timeout-ms", type=int, default=2500)
+    parser.add_argument("--max-attempts", type=int, default=2)
+    parser.add_argument("--max-tokens", type=int, default=1)
+    parser.add_argument("--out-dir", type=str, default="reports/release-rc")
+    parser.add_argument("--tag", type=str, default="")
+    return parser.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
+    summary = asyncio.run(execute(args))
+    if summary.get("recommendation") != "GO":
+        raise SystemExit(1)
+
+
+if __name__ == "__main__":
+    main()
+
