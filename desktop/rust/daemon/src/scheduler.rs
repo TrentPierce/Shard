@@ -369,12 +369,9 @@ async fn schedule_local_scout_fallback(state: &SharedState, work: &WorkRequest) 
     }
     // Hybrid fallback: give remote scouts first chance, then trigger local draft
     // generation to cap tail latency.
-    let has_remote_peers = {
-        let peers = state.peers.lock().await;
-        !peers.is_empty()
-    };
+    let has_remote_scouts = estimate_remote_active_scouts(state).await > 0;
 
-    let delay_ms = if has_remote_peers {
+    let delay_ms = if has_remote_scouts {
         local_scout_fallback_remote_delay_ms()
     } else {
         local_scout_fallback_delay_ms()
@@ -431,12 +428,38 @@ fn compute_effective_scout_timeout_ms(
     bounded_base.min(400)
 }
 
-async fn estimate_active_scouts(state: &SharedState) -> usize {
+#[derive(Debug, Clone, Copy)]
+struct ScoutSupplyEstimate {
+    browser_draft_capable: usize,
+    recent_pollers: usize,
+    recent_submitters: usize,
+    recent_result_submitters: usize,
+    healthy_scout_reports: usize,
+}
+
+impl ScoutSupplyEstimate {
+    fn remote_active_scouts(self) -> usize {
+        // Only trust signals that imply real draft production capacity.
+        // Poll/submit attempts can occur while verifier admission rejects work.
+        self.healthy_scout_reports
+            .max(self.browser_draft_capable)
+            .max(self.recent_result_submitters)
+    }
+
+    fn effective_active_scouts(self) -> usize {
+        self.remote_active_scouts()
+    }
+}
+
+async fn estimate_scout_supply(state: &SharedState) -> ScoutSupplyEstimate {
     const SCOUT_RUNTIME_TTL_MS: u128 = 10 * 60 * 1000;
     const SCOUT_ACTIVE_WINDOW_MS: u128 = 3 * 60 * 1000;
+    const SCOUT_POLL_ACTIVE_WINDOW_MS: u128 = 60 * 1000;
+    const SCOUT_SUBMIT_ACTIVE_WINDOW_MS: u128 = 90 * 1000;
+    const SCOUT_RESULT_ACTIVE_WINDOW_MS: u128 = 90 * 1000;
+    let now = now_ms();
 
     let browser_draft_capable = {
-        let now = now_ms();
         let mut runtime = state.scout_client_runtime.lock().await;
         runtime
             .retain(|_, status| now.saturating_sub(status.last_event_ms) <= SCOUT_RUNTIME_TTL_MS);
@@ -453,39 +476,71 @@ async fn estimate_active_scouts(state: &SharedState) -> usize {
             .count()
     };
 
-    let connected_peer_count = {
-        let peers = state.peers.lock().await;
-        peers.len()
+    let recent_pollers = {
+        let mut polls = state.scout_work_last_poll.lock().await;
+        polls.retain(|_, ts| now.saturating_sub(*ts) <= SCOUT_RUNTIME_TTL_MS);
+        polls
+            .values()
+            .filter(|ts| now.saturating_sub(**ts) <= SCOUT_POLL_ACTIVE_WINDOW_MS)
+            .count()
+    };
+
+    let recent_submitters = {
+        let mut submits = state.scout_draft_last_submit.lock().await;
+        submits.retain(|_, ts| now.saturating_sub(*ts) <= SCOUT_RUNTIME_TTL_MS);
+        submits
+            .values()
+            .filter(|ts| now.saturating_sub(**ts) <= SCOUT_SUBMIT_ACTIVE_WINDOW_MS)
+            .count()
     };
 
     let healthy_scout_reports = {
         let reports = state.node_metric_reports.lock().await;
         reports
             .values()
-            .filter(|snapshot| snapshot.healthy && snapshot.role.eq_ignore_ascii_case("scout"))
+            .filter(|snapshot| {
+                snapshot.role.eq_ignore_ascii_case("scout")
+                    && node_is_healthy(snapshot.last_report_ms, now, state.heartbeat_timeout_ms)
+            })
             .count()
     };
 
-    let recent_submitters = {
+    let local_peer_id = {
+        let topo = state.topology.lock().await;
+        topo.local_peer_id.clone()
+    };
+
+    let recent_result_submitters = {
         let results = state.results.lock().await;
-        let cutoff = now_ms().saturating_sub(3 * 60 * 1000);
+        let cutoff = now.saturating_sub(SCOUT_RESULT_ACTIVE_WINDOW_MS);
         let mut unique = std::collections::HashSet::new();
         for entry in results.iter() {
-            if entry.created_at_ms.unwrap_or(0) >= cutoff {
+            if entry.created_at_ms.unwrap_or(0) >= cutoff
+                && !entry.peer_id.trim().is_empty()
+                && entry.peer_id != local_peer_id
+            {
                 unique.insert(entry.peer_id.clone());
             }
         }
         unique.len()
     };
 
-    browser_draft_capable
-        .max(recent_submitters)
-        .max(healthy_scout_reports)
-        .max(connected_peer_count)
+    ScoutSupplyEstimate {
+        browser_draft_capable,
+        recent_pollers,
+        recent_submitters,
+        recent_result_submitters,
+        healthy_scout_reports,
+    }
+}
+
+async fn estimate_remote_active_scouts(state: &SharedState) -> usize {
+    estimate_scout_supply(state).await.remote_active_scouts()
 }
 
 async fn effective_speculative_timeout_ms(state: &SharedState, config: &SpeculativeConfig) -> u64 {
-    let active_scouts = estimate_active_scouts(state).await;
+    let supply = estimate_scout_supply(state).await;
+    let active_scouts = supply.effective_active_scouts();
     let queue_depth = {
         let queue = state.scout_work.lock().await;
         queue.len()
@@ -493,7 +548,14 @@ async fn effective_speculative_timeout_ms(state: &SharedState, config: &Speculat
     let mut timeout_ms =
         compute_effective_scout_timeout_ms(config.scout_timeout_ms, active_scouts, queue_depth);
     if timeout_ms == 0 {
-        tracing::debug!("speculative dispatch skipped: no active scouts");
+        tracing::debug!(
+            browser_draft_capable = supply.browser_draft_capable,
+            recent_pollers = supply.recent_pollers,
+            recent_submitters = supply.recent_submitters,
+            recent_result_submitters = supply.recent_result_submitters,
+            healthy_scout_reports = supply.healthy_scout_reports,
+            "speculative dispatch skipped: no effective scout supply"
+        );
         return 0;
     }
 
@@ -1470,7 +1532,8 @@ mod tests {
     use super::{
         auth_required, compute_effective_scout_timeout_ms, enqueue_scout_work,
         infer_client_ip, model_pair_acceptance_rates, request_host_is_local, resolve_inference_mode,
-        should_abort_on_degenerate_output, strip_control_tokens, InferenceMode, WorkRequest,
+        should_abort_on_degenerate_output, strip_control_tokens, InferenceMode,
+        ScoutSupplyEstimate, WorkRequest,
     };
     use axum::http::{HeaderMap, HeaderValue};
     use std::collections::VecDeque;
@@ -1562,6 +1625,29 @@ mod tests {
         assert_eq!(compute_effective_scout_timeout_ms(30_000, 1, 0), 600);
         assert_eq!(compute_effective_scout_timeout_ms(30_000, 2, 0), 500);
         assert_eq!(compute_effective_scout_timeout_ms(30_000, 8, 900), 1_200);
+    }
+
+    #[test]
+    fn scout_supply_counts_only_remote_activity() {
+        let empty = ScoutSupplyEstimate {
+            browser_draft_capable: 0,
+            recent_pollers: 0,
+            recent_submitters: 0,
+            recent_result_submitters: 0,
+            healthy_scout_reports: 0,
+        };
+        assert_eq!(empty.remote_active_scouts(), 0);
+        assert_eq!(empty.effective_active_scouts(), 0);
+
+        let remote_present = ScoutSupplyEstimate {
+            browser_draft_capable: 2,
+            recent_pollers: 3,
+            recent_submitters: 1,
+            recent_result_submitters: 0,
+            healthy_scout_reports: 2,
+        };
+        assert_eq!(remote_present.remote_active_scouts(), 2);
+        assert_eq!(remote_present.effective_active_scouts(), 2);
     }
 
     #[test]
