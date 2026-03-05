@@ -439,11 +439,9 @@ struct ScoutSupplyEstimate {
 
 impl ScoutSupplyEstimate {
     fn remote_active_scouts(self) -> usize {
-        // Only trust signals that imply real draft production capacity.
-        // Poll/submit attempts can occur while verifier admission rejects work.
-        self.healthy_scout_reports
-            .max(self.browser_draft_capable)
-            .max(self.recent_result_submitters)
+        // Only trust explicit scout-capable runtime/heartbeat signals.
+        // Submission/poll traces can be noisy under overload and cause false positives.
+        self.healthy_scout_reports.max(self.browser_draft_capable)
     }
 
     fn effective_active_scouts(self) -> usize {
