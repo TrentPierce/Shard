@@ -619,6 +619,14 @@ fn scout_probe_timeout_ms() -> u64 {
         .unwrap_or(200)
 }
 
+fn scout_probe_queue_max() -> usize {
+    std::env::var("SHARD_SCOUT_PROBE_QUEUE_MAX")
+        .ok()
+        .and_then(|v| v.trim().parse::<usize>().ok())
+        .map(|v| v.clamp(2, 64))
+        .unwrap_or(12)
+}
+
 fn probe_allowed_for_request(request_id: &str, modulus: u64) -> bool {
     if modulus <= 1 {
         return true;
@@ -648,12 +656,17 @@ async fn effective_speculative_timeout_ms(
         // scout candidates, with a very short timeout budget.
         let candidate_scouts = supply.candidate_remote_scouts();
         let probe_modulus = scout_probe_every_n_requests();
-        if candidate_scouts > 0 && queue_depth <= 4 && probe_allowed_for_request(request_id, probe_modulus) {
+        let probe_queue_max = scout_probe_queue_max();
+        if candidate_scouts > 0
+            && queue_depth <= probe_queue_max
+            && probe_allowed_for_request(request_id, probe_modulus)
+        {
             let probe_timeout = scout_probe_timeout_ms();
             tracing::debug!(
                 probe_timeout,
                 candidate_scouts,
                 probe_modulus,
+                probe_queue_max,
                 "speculative probe enabled with no productive scouts yet"
             );
             return probe_timeout;
