@@ -310,9 +310,9 @@ const BROWSER_SESSION_TTL_MS: u128 = 5 * 60 * 1000;
 pub(crate) const SCOUT_CLIENT_RUNTIME_TTL_MS: u128 = 10 * 60 * 1000;
 pub(crate) const SCOUT_CLIENT_ACTIVE_WINDOW_MS: u128 = 3 * 60 * 1000;
 const DEFAULT_SCOUT_WORK_MAX_AGE_MS: u128 = 180_000;
-const DEFAULT_SCOUT_BACKPRESSURE_START_QUEUE_DEPTH: usize = 256;
-const DEFAULT_SCOUT_BACKPRESSURE_MEDIUM_QUEUE_DEPTH: usize = 512;
-const DEFAULT_SCOUT_BACKPRESSURE_HIGH_QUEUE_DEPTH: usize = 768;
+const DEFAULT_SCOUT_BACKPRESSURE_START_QUEUE_DEPTH: usize = 4;
+const DEFAULT_SCOUT_BACKPRESSURE_MEDIUM_QUEUE_DEPTH: usize = 8;
+const DEFAULT_SCOUT_BACKPRESSURE_HIGH_QUEUE_DEPTH: usize = 12;
 const DEFAULT_SCOUT_BACKPRESSURE_LATENCY_WARN_MS: u64 = 3_000;
 const DEFAULT_SCOUT_BACKPRESSURE_LATENCY_SEVERE_MS: u64 = 6_000;
 const DEFAULT_SCOUT_ADMISSION_QUEUE_DEPTH: usize = 5;
@@ -324,9 +324,9 @@ const DEFAULT_SCOUT_ADMISSION_RETRY_MAX_MS: u64 = 4_000;
 const DEFAULT_SCOUT_POLL_MIN_INTERVAL_MS: u128 = 75;
 const DEFAULT_SCOUT_DRAFT_MIN_INTERVAL_MS: u128 = 50;
 const DEFAULT_SCOUT_RATE_LIMIT_RETENTION_MS: u128 = 10 * 60 * 1000;
-const DEFAULT_SCOUT_ACTIVE_CAP: usize = 8;
-const DEFAULT_SCOUT_ACTIVE_CAP_SOFT: usize = 4;
-const DEFAULT_SCOUT_ACTIVE_CAP_HARD: usize = 2;
+const DEFAULT_SCOUT_ACTIVE_CAP: usize = 4;
+const DEFAULT_SCOUT_ACTIVE_CAP_SOFT: usize = 2;
+const DEFAULT_SCOUT_ACTIVE_CAP_HARD: usize = 1;
 const DEFAULT_SCOUT_LEASE_TTL_MS: u128 = 12_000;
 const DEFAULT_SCOUT_BLACKOUT_TRIGGER_MS: u128 = 15_000;
 const DEFAULT_SCOUT_BLACKOUT_DURATION_MS: u128 = 20_000;
@@ -817,13 +817,13 @@ fn scout_assignment_backpressured(
     let modulus = if queue_depth >= DEFAULT_SCOUT_BACKPRESSURE_HIGH_QUEUE_DEPTH
         || avg_latency_ms >= latency_severe_ms
     {
-        6
+        8
     } else if queue_depth >= DEFAULT_SCOUT_BACKPRESSURE_MEDIUM_QUEUE_DEPTH
         || avg_latency_ms >= latency_warn_ms
     {
-        4
+        6
     } else {
-        2
+        4
     };
     // Windowing keeps assignment deterministic for a short interval and avoids stampedes.
     let window = now / 1_000;
@@ -3127,9 +3127,12 @@ pub(crate) async fn signed_deregister_node_handler(
 pub(crate) async fn metrics_summary_handler(
     AxumState(state): AxumState<SharedState>,
 ) -> Json<serde_json::Value> {
-    let p = state.gossipsub_latency_hist.percentiles();
+    let gossipsub = state.gossipsub_latency_hist.percentiles();
     let now = now_ms();
-    let queue_depth = effective_scout_queue_depth(&state, state.scout_work.lock().await.len(), 0);
+    let scout_queue_depth = state.scout_work.lock().await.len();
+    let pending_queue_depth = state.speculative_pending.lock().await.len();
+    let queue_depth = effective_scout_queue_depth(&state, scout_queue_depth, pending_queue_depth);
+    let (avg_latency_ms, verifier_p95_latency_ms) = verifier_latency_snapshot(&state);
     prune_expired_scout_leases_for_state(&state, now).await;
     let active_leases = state.scout_work_leases.lock().await.len();
     let blackout_mode = {
@@ -3255,10 +3258,20 @@ pub(crate) async fn metrics_summary_handler(
     );
     payload.insert(
         "average_latency_ms".to_string(),
-        serde_json::json!(state.avg_latency_ms.load(Ordering::Relaxed)),
+        serde_json::json!(avg_latency_ms),
     );
-    payload.insert("p95_latency_ms".to_string(), serde_json::json!(p.p95_ms));
-    payload.insert("p99_latency_ms".to_string(), serde_json::json!(p.p99_ms));
+    payload.insert(
+        "p95_latency_ms".to_string(),
+        serde_json::json!(verifier_p95_latency_ms),
+    );
+    payload.insert(
+        "p99_latency_ms".to_string(),
+        serde_json::json!(gossipsub.p99_ms.max(verifier_p95_latency_ms)),
+    );
+    payload.insert(
+        "gossipsub_p95_latency_ms".to_string(),
+        serde_json::json!(gossipsub.p95_ms),
+    );
     payload.insert(
         "draft_capable_scouts".to_string(),
         serde_json::json!(draft_capable_scout_count),
@@ -3908,8 +3921,23 @@ mod tests {
 
     #[test]
     fn scout_backpressure_disabled_when_queue_and_latency_are_low() {
-        let blocked = scout_assignment_backpressured("scout-a", 32, 1200, 1_000_000);
+        let blocked = scout_assignment_backpressured("scout-a", 1, 1200, 1_000_000);
         assert!(!blocked);
+    }
+
+    #[test]
+    fn scout_backpressure_engages_under_moderate_queue_growth() {
+        let blocked_count = (0..20)
+            .filter(|offset| {
+                scout_assignment_backpressured(
+                    "scout-mid",
+                    8,
+                    2800,
+                    1_000_000 + (*offset as u128 * 1_000),
+                )
+            })
+            .count();
+        assert!(blocked_count > 0);
     }
 
     #[test]

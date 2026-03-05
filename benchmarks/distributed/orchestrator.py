@@ -192,9 +192,9 @@ def adaptive_scout_target(
         return 0
     # Fast downshift on overload.
     if max_queue_depth >= 10.0 or max_p95_latency_ms >= 6000.0:
-        return max(1, configured_max // 4)
+        return 0
     if max_queue_depth >= 5.0 or max_p95_latency_ms >= 4500.0:
-        return max(1, configured_max // 2)
+        return max(1, configured_max // 4)
     # Hysteresis for scale-up: require clearly healthy metrics.
     if max_queue_depth <= 2.0 and max_p95_latency_ms <= 3500.0:
         return configured_max
@@ -238,6 +238,12 @@ def aggregate_speculative_totals(summaries: list[dict]) -> tuple[float, float]:
         accepted += float(summary.get("speculative_accepted_tokens_total", 0.0) or 0.0)
         total += float(summary.get("speculative_draft_tokens_total", 0.0) or 0.0)
     return accepted, total
+
+
+def summary_latency_signal_ms(summary: dict) -> float:
+    p95 = float(summary.get("p95_latency_ms", 0.0) or 0.0)
+    avg = float(summary.get("average_latency_ms", 0.0) or 0.0)
+    return max(p95, avg)
 
 
 async def wait_for_pool_readiness(
@@ -592,7 +598,7 @@ async def run_orchestrator(
                     default=0.0,
                 )
                 max_p95_latency_ms = max(
-                    (float(s.get("p95_latency_ms", 0.0) or 0.0) for s in pool_summaries),
+                    (summary_latency_signal_ms(s) for s in pool_summaries),
                     default=0.0,
                 )
                 blackout_endpoints = sum(

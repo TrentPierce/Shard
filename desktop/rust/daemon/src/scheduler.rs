@@ -256,6 +256,53 @@ fn local_scout_fallback_remote_delay_ms() -> u64 {
     })
 }
 
+fn local_scout_fallback_remote_inflight_cap() -> usize {
+    static CAP: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *CAP.get_or_init(|| {
+        std::env::var("SHARD_LOCAL_SCOUT_FALLBACK_REMOTE_INFLIGHT_CAP")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .map(|v| v.clamp(1, 512))
+            .unwrap_or(6)
+    })
+}
+
+fn local_scout_fallback_remote_pending_cap() -> usize {
+    static CAP: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *CAP.get_or_init(|| {
+        std::env::var("SHARD_LOCAL_SCOUT_FALLBACK_REMOTE_PENDING_CAP")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .map(|v| v.clamp(1, 512))
+            .unwrap_or(8)
+    })
+}
+
+fn local_scout_fallback_remote_latency_cap_ms() -> u64 {
+    static CAP: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+    *CAP.get_or_init(|| {
+        std::env::var("SHARD_LOCAL_SCOUT_FALLBACK_REMOTE_LATENCY_CAP_MS")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .map(|v| v.clamp(250, 60_000))
+            .unwrap_or(2_500)
+    })
+}
+
+fn local_scout_fallback_allowed(
+    has_remote_scouts: bool,
+    in_flight: usize,
+    pending_depth: usize,
+    avg_latency_ms: u64,
+) -> bool {
+    if !has_remote_scouts {
+        return true;
+    }
+    in_flight <= local_scout_fallback_remote_inflight_cap()
+        && pending_depth <= local_scout_fallback_remote_pending_cap()
+        && avg_latency_ms <= local_scout_fallback_remote_latency_cap_ms()
+}
+
 async fn local_daemon_draft_capable(state: &SharedState) -> bool {
     let contribute_enabled = {
         let topo = state.topology.lock().await;
@@ -275,12 +322,28 @@ async fn generate_local_daemon_draft(
     if !local_daemon_draft_capable(state).await {
         return None;
     }
+    let still_pending = {
+        let pending = state.speculative_pending.lock().await;
+        pending.contains_key(work.request_id.as_str())
+    };
+    if !still_pending {
+        return None;
+    }
     let local_peer_id = {
         let topo = state.topology.lock().await;
         topo.local_peer_id.clone()
     };
     let draft_start = now_ms();
-    let mut engine_guard = state.engine.lock().await;
+    let mut engine_guard = match state.engine.try_lock() {
+        Ok(guard) => guard,
+        Err(_) => {
+            tracing::debug!(
+                request_id = %work.request_id,
+                "skipping local scout fallback draft because engine is busy"
+            );
+            return None;
+        }
+    };
     let engine = engine_guard.as_mut()?;
 
     let mut tokens = engine.tokenize(&work.prompt_context, 4096).ok()?;
@@ -370,6 +433,20 @@ async fn schedule_local_scout_fallback(state: &SharedState, work: &WorkRequest) 
     // Hybrid fallback: give remote scouts first chance, then trigger local draft
     // generation to cap tail latency.
     let has_remote_scouts = estimate_remote_active_scouts(state).await > 0;
+    let in_flight = state.in_flight_count.load(Ordering::Relaxed);
+    let pending_depth = state.speculative_pending.lock().await.len();
+    let avg_latency_ms = state.avg_latency_ms.load(Ordering::Relaxed) as u64;
+    if !local_scout_fallback_allowed(has_remote_scouts, in_flight, pending_depth, avg_latency_ms) {
+        tracing::debug!(
+            request_id = %work.request_id,
+            has_remote_scouts,
+            in_flight,
+            pending_depth,
+            avg_latency_ms,
+            "skipping local scout fallback due to verifier load"
+        );
+        return;
+    }
 
     let delay_ms = if has_remote_scouts {
         local_scout_fallback_remote_delay_ms()
@@ -387,6 +464,17 @@ async fn schedule_local_scout_fallback(state: &SharedState, work: &WorkRequest) 
             pending.contains_key(work_clone.request_id.as_str())
         };
         if !still_pending {
+            return;
+        }
+        let in_flight = state_clone.in_flight_count.load(Ordering::Relaxed);
+        let pending_depth = state_clone.speculative_pending.lock().await.len();
+        let avg_latency_ms = state_clone.avg_latency_ms.load(Ordering::Relaxed) as u64;
+        if !local_scout_fallback_allowed(
+            has_remote_scouts,
+            in_flight,
+            pending_depth,
+            avg_latency_ms,
+        ) {
             return;
         }
         if let Some(response) = generate_local_daemon_draft(&state_clone, &work_clone).await {
@@ -1659,8 +1747,8 @@ mod tests {
     use super::{
         auth_required, compute_effective_scout_timeout_ms, enqueue_scout_work,
         infer_client_ip, model_pair_acceptance_rates, request_host_is_local, resolve_inference_mode,
-        probe_allowed_for_request, should_abort_on_degenerate_output, strip_control_tokens,
-        InferenceMode,
+        local_scout_fallback_allowed, probe_allowed_for_request,
+        should_abort_on_degenerate_output, strip_control_tokens, InferenceMode,
         ScoutSupplyEstimate, WorkRequest,
     };
     use axum::http::{HeaderMap, HeaderValue};
@@ -1756,6 +1844,15 @@ mod tests {
         assert_eq!(compute_effective_scout_timeout_ms(30_000, 8, 8), 800);
         assert_eq!(compute_effective_scout_timeout_ms(30_000, 8, 14), 600);
         assert_eq!(compute_effective_scout_timeout_ms(30_000, 8, 24), 0);
+    }
+
+    #[test]
+    fn remote_local_fallback_is_blocked_under_load() {
+        assert!(local_scout_fallback_allowed(false, 100, 100, 10_000));
+        assert!(local_scout_fallback_allowed(true, 2, 3, 800));
+        assert!(!local_scout_fallback_allowed(true, 9, 3, 800));
+        assert!(!local_scout_fallback_allowed(true, 2, 12, 800));
+        assert!(!local_scout_fallback_allowed(true, 2, 3, 3_200));
     }
 
     #[test]
