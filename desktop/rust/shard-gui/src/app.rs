@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use crate::autostart;
 use crate::log_capture::LogBuffer;
@@ -23,6 +24,8 @@ const LOG_TEXT: egui::Color32 = egui::Color32::from_rgb(0xCB, 0xD5, 0xE1);
 const LOG_WARN: egui::Color32 = egui::Color32::from_rgb(0xFB, 0xD3, 0x8D);
 const LOG_ERROR: egui::Color32 = egui::Color32::from_rgb(0xF8, 0x71, 0x71);
 const LOG_DIM: egui::Color32 = egui::Color32::from_rgb(0x47, 0x55, 0x69);
+const POST_DOWNLOAD_RESTART_MAX_ATTEMPTS: u8 = 2;
+const POST_DOWNLOAD_RETRY_DELAY: Duration = Duration::from_secs(8);
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 
@@ -135,6 +138,8 @@ pub struct ShardApp {
     // Download
     pub download_state: DownloadState,
     pub download_rx: Option<tokio::sync::mpsc::Receiver<DownloadMsg>>,
+    post_download_restart_attempts: u8,
+    post_download_next_retry: Option<Instant>,
     // Channels
     pub daemon_task: Arc<Mutex<DaemonTask>>,
     pub telemetry_rx: Option<tokio::sync::mpsc::Receiver<TelemetryUpdate>>,
@@ -214,6 +219,8 @@ impl ShardApp {
             node_wallet: String::new(),
             download_state,
             download_rx: Some(download_rx),
+            post_download_restart_attempts: 0,
+            post_download_next_retry: None,
             daemon_task,
             telemetry_rx: Some(telemetry_rx),
             log_buffer,
@@ -271,13 +278,9 @@ impl ShardApp {
                     self.config.bitnet_model_path = path.display().to_string();
                     let _ = self.config.save();
                     // Restart daemon with the freshly downloaded model.
-                    let mut task = self.daemon_task.lock().unwrap();
-                    task.start(
-                        &self.config.bitnet_lib_path,
-                        &self.config.bitnet_model_path,
-                        self.config.listen_port,
-                    );
-                    self.is_running = true;
+                    self.start_daemon();
+                    self.post_download_restart_attempts = 0;
+                    self.post_download_next_retry = Some(Instant::now() + POST_DOWNLOAD_RETRY_DELAY);
                     self.download_state = DownloadState::Done;
                     drop(self.download_rx.take()); // channel no longer needed
                 }
@@ -299,6 +302,35 @@ impl ShardApp {
         };
         self.tray_manager.update_tooltip(&tooltip);
     }
+
+    /// If the post-download daemon restart failed silently, retry a couple of times
+    /// so users do not have to click "Save & Restart Node" manually.
+    fn recover_post_download_startup(&mut self) {
+        let Some(next_retry) = self.post_download_next_retry else {
+            return;
+        };
+
+        if !matches!(self.download_state, DownloadState::Done) || self.daemon_online {
+            self.post_download_next_retry = None;
+            return;
+        }
+        if !self.is_running {
+            // User intentionally stopped the node.
+            self.post_download_next_retry = None;
+            return;
+        }
+        if Instant::now() < next_retry {
+            return;
+        }
+        if self.post_download_restart_attempts >= POST_DOWNLOAD_RESTART_MAX_ATTEMPTS {
+            self.post_download_next_retry = None;
+            return;
+        }
+
+        self.post_download_restart_attempts += 1;
+        self.start_daemon();
+        self.post_download_next_retry = Some(Instant::now() + POST_DOWNLOAD_RETRY_DELAY);
+    }
 }
 
 // ─── eframe::App ─────────────────────────────────────────────────────────────
@@ -307,6 +339,7 @@ impl eframe::App for ShardApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.poll_telemetry();
         self.poll_download();
+        self.recover_post_download_startup();
         self.update_tray();
         ctx.request_repaint_after(std::time::Duration::from_millis(500));
 
@@ -401,6 +434,7 @@ impl ShardApp {
                 self.daemon_task.lock().unwrap().stop();
                 self.is_running = false;
                 self.daemon_online = false;
+                self.post_download_next_retry = None;
             }
         } else {
             let btn =
@@ -445,6 +479,7 @@ impl ShardApp {
             self.daemon_task.lock().unwrap().stop();
             self.is_running = false;
             self.daemon_online = false;
+            self.post_download_next_retry = None;
         } else {
             self.start_daemon();
         }

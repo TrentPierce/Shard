@@ -11,6 +11,15 @@ type MetricsSnapshot = {
   updated_at_ms: number
 }
 
+type HealthSummary = {
+  connected_peers?: number
+  active_browser_sessions?: number
+}
+
+type PeersSummary = {
+  count?: number
+}
+
 const MAX_STALE_METRICS_MS = 2 * 60 * 1000
 let lastMetricsSnapshot: MetricsSnapshot | null = null
 
@@ -34,6 +43,80 @@ function readFreshMetricsSnapshot(): MetricsSnapshot | null {
   return ageMs <= MAX_STALE_METRICS_MS ? lastMetricsSnapshot : null
 }
 
+function toNonNegativeInt(value: unknown): number {
+  const n = Number(value)
+  if (!Number.isFinite(n)) return 0
+  return Math.max(0, Math.floor(n))
+}
+
+function backendBase(url: string): string {
+  try {
+    const parsed = new URL(url)
+    return `${parsed.protocol}//${parsed.host}`
+  } catch {
+    return ""
+  }
+}
+
+async function fetchJsonWithTimeout<T>(url: string, timeoutMs: number): Promise<T | null> {
+  try {
+    const response = await fetch(url, {
+      method: "GET",
+      cache: "no-store",
+      signal: AbortSignal.timeout(timeoutMs),
+    })
+    if (!response.ok) return null
+    return (await response.json()) as T
+  } catch {
+    return null
+  }
+}
+
+async function deriveActiveNodeEstimate(
+  backendUrl: string,
+  reportedActiveNodes: number,
+): Promise<{
+  activeNodes: number
+  activeNodesReported: number
+  activeNodesEstimated: number
+  activeNodesEstimateSource: "reported" | "peers_minus_browser_sessions"
+}> {
+  const base = backendBase(backendUrl)
+  if (!base) {
+    return {
+      activeNodes: reportedActiveNodes,
+      activeNodesReported: reportedActiveNodes,
+      activeNodesEstimated: reportedActiveNodes,
+      activeNodesEstimateSource: "reported",
+    }
+  }
+
+  const [health, peers] = await Promise.all([
+    fetchJsonWithTimeout<HealthSummary>(`${base}/health`, 2500),
+    fetchJsonWithTimeout<PeersSummary>(`${base}/v1/system/peers`, 2500),
+  ])
+
+  const peerCount = Math.max(
+    toNonNegativeInt(peers?.count),
+    toNonNegativeInt(health?.connected_peers),
+  )
+  const activeBrowserSessions = toNonNegativeInt(health?.active_browser_sessions)
+
+  // Estimate verifier-like nodes as:
+  // self + max(0, connected peers - browser scout sessions)
+  const estimatedFromPeers = Math.max(1, 1 + Math.max(0, peerCount - activeBrowserSessions))
+  const activeNodes = Math.max(reportedActiveNodes, estimatedFromPeers)
+  const source: "reported" | "peers_minus_browser_sessions" =
+    activeNodes > reportedActiveNodes ? "peers_minus_browser_sessions" : "reported"
+
+  return {
+    activeNodes,
+    activeNodesReported: reportedActiveNodes,
+    activeNodesEstimated: estimatedFromPeers,
+    activeNodesEstimateSource: source,
+  }
+}
+
 export async function GET() {
   // The Rust daemon exposes metrics at `/metrics/summary` (no `/v1` prefix).
   // We proxy that here for the web app and dashboards.
@@ -45,8 +128,17 @@ export async function GET() {
       timeoutMs: 6_000,
       failoverOnStatuses: [500, 502, 503, 504, 521, 530],
     })
-    const data = await response.json().catch(() => ({}))
-    updateMetricsSnapshot(data)
+    const data = await response.json().catch(() => ({} as Record<string, unknown>))
+    const reportedActiveNodes = toNonNegativeInt((data as any)?.active_nodes)
+    const activeNodeEstimate = await deriveActiveNodeEstimate(backend, reportedActiveNodes)
+    const mergedData = {
+      ...data,
+      active_nodes: activeNodeEstimate.activeNodes,
+      active_nodes_reported: activeNodeEstimate.activeNodesReported,
+      active_nodes_estimated: activeNodeEstimate.activeNodesEstimated,
+      active_nodes_estimate_source: activeNodeEstimate.activeNodesEstimateSource,
+    }
+    updateMetricsSnapshot(mergedData)
     const healthState = deriveHealthState(data, response.ok)
     if (!response.ok) {
       const cached = readFreshMetricsSnapshot()
@@ -81,8 +173,8 @@ export async function GET() {
     }
     return NextResponse.json(
       {
-        ...data,
-        status: data?.status ?? healthStateToLegacyStatus(healthState),
+        ...mergedData,
+        status: (mergedData as any)?.status ?? healthStateToLegacyStatus(healthState),
         health_state: healthState,
         backend,
         backend_attempts: attempts,

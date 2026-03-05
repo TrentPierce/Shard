@@ -45,7 +45,7 @@ curl http://localhost:9091/v1/chat/completions \
 
 ## Model Provisioning Note
 
-On first launch, ShardGUI auto-downloads the default verifier model from `deploy/models/manifest.json` and verifies its SHA-256 hash before enabling contribution. If the manifest endpoint is unavailable, ShardGUI falls back to a built-in default model URL.
+On first launch, ShardGUI auto-downloads the default verifier model from `deploy/models/manifest.json` and verifies its SHA-256 hash before enabling contribution. If the manifest endpoint is unavailable, ShardGUI falls back to a built-in default model URL. After download completes, ShardGUI restarts the node automatically and retries startup if the first restart does not come online.
 
 ## Required Ports
 
