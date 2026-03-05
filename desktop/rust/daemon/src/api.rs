@@ -587,6 +587,67 @@ fn verifier_latency_snapshot(state: &SharedState) -> (u64, u64) {
     (avg_latency_ms, p95_latency_ms)
 }
 
+fn speculative_pending_max_age_ms() -> u128 {
+    static MAX_AGE_MS: std::sync::OnceLock<u128> = std::sync::OnceLock::new();
+    *MAX_AGE_MS.get_or_init(|| {
+        std::env::var("SHARD_SPECULATIVE_PENDING_MAX_AGE_MS")
+            .ok()
+            .and_then(|value| value.trim().parse::<u128>().ok())
+            .map(|value| value.clamp(5_000, 120_000))
+            .unwrap_or(20_000)
+    })
+}
+
+pub(crate) async fn prune_stale_speculative_pending(state: &SharedState, now: u128) -> usize {
+    let max_age_ms = speculative_pending_max_age_ms();
+    let stale_ids = {
+        let pending = state.speculative_pending.lock().await;
+        pending
+            .iter()
+            .filter_map(|(work_id, issued_at_ms)| {
+                (now.saturating_sub(*issued_at_ms) > max_age_ms).then(|| work_id.clone())
+            })
+            .collect::<Vec<_>>()
+    };
+
+    if stale_ids.is_empty() {
+        return 0;
+    }
+
+    {
+        let mut pending = state.speculative_pending.lock().await;
+        for work_id in &stale_ids {
+            pending.remove(work_id);
+        }
+    }
+    {
+        let mut leases = state.scout_work_leases.lock().await;
+        for work_id in &stale_ids {
+            leases.remove(work_id);
+        }
+    }
+    {
+        let mut mailbox = state.scout_draft_mailbox.lock().await;
+        for work_id in &stale_ids {
+            mailbox.remove(work_id);
+        }
+    }
+    {
+        let mut by_id = state.idempotent_results.lock().await;
+        for work_id in &stale_ids {
+            by_id.remove(work_id);
+        }
+    }
+    {
+        let mut notifiers = state.scout_draft_notifiers.lock().await;
+        for work_id in &stale_ids {
+            notifiers.remove(work_id);
+        }
+    }
+
+    stale_ids.len()
+}
+
 fn effective_scout_queue_depth(
     state: &SharedState,
     scout_queue_depth: usize,
@@ -1686,6 +1747,7 @@ pub(crate) async fn pop_work_handler(
     }
     state.system_metrics.inc_scout_work_poll();
     let now = now_ms();
+    prune_stale_speculative_pending(&state, now).await;
     prune_expired_scout_leases_for_state(&state, now).await;
     {
         let mut polls = state.scout_work_last_poll.lock().await;
@@ -1920,6 +1982,7 @@ pub(crate) async fn process_draft_submission(
         .map(|value| value.to_string());
     state.system_metrics.inc_scout_draft_submission();
     let now = now_ms();
+    prune_stale_speculative_pending(state, now).await;
     prune_expired_scout_leases_for_state(state, now).await;
     {
         let mut drafts = state.scout_draft_last_submit.lock().await;
@@ -3129,6 +3192,7 @@ pub(crate) async fn metrics_summary_handler(
 ) -> Json<serde_json::Value> {
     let gossipsub = state.gossipsub_latency_hist.percentiles();
     let now = now_ms();
+    prune_stale_speculative_pending(&state, now).await;
     let scout_queue_depth = state.scout_work.lock().await.len();
     let pending_queue_depth = state.speculative_pending.lock().await.len();
     let queue_depth = effective_scout_queue_depth(&state, scout_queue_depth, pending_queue_depth);
@@ -3818,8 +3882,8 @@ mod tests {
         runtime_health_state, sanitize_scout_draft_text, scout_admission_decision,
         scout_assignment_backpressured, scout_blackout_mode, scout_reopen_stage_ms,
         should_route_long_context, verify_spot_check_submission, DraftSpotCheckProof,
-        ScoutAdmissionMode, ScoutBlackoutMode, ScoutBlackoutState, ScoutWorkLease,
-        ScoutWorkQuery, WebGPUProbeResult, WebGPUStats,
+        ScoutAdmissionMode, ScoutBlackoutMode, ScoutBlackoutState, ScoutWorkLease, ScoutWorkQuery,
+        WebGPUProbeResult, WebGPUStats,
     };
     use crate::SchedulerDecisionLog;
     use std::collections::{HashMap, VecDeque};

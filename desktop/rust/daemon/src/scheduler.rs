@@ -181,7 +181,11 @@ fn mesh_forward_current_hop(headers: &HeaderMap) -> u8 {
         .unwrap_or(0)
 }
 
-fn should_attempt_mesh_forward(headers: &HeaderMap, route_private: bool, stream_mode: bool) -> bool {
+fn should_attempt_mesh_forward(
+    headers: &HeaderMap,
+    route_private: bool,
+    stream_mode: bool,
+) -> bool {
     if route_private || stream_mode || !mesh_forward_enabled() {
         return false;
     }
@@ -1607,18 +1611,16 @@ pub(crate) async fn chat_completions_handler(
                 match request_builder.send().await {
                     Ok(resp) => {
                         let status = resp.status();
-                        let content_type = resp
-                            .headers()
-                            .get(reqwest::header::CONTENT_TYPE)
-                            .cloned();
+                        let content_type =
+                            resp.headers().get(reqwest::header::CONTENT_TYPE).cloned();
                         let body = resp.bytes().await.unwrap_or_default();
                         if status.is_success()
-                            || (status.is_client_error() && status != reqwest::StatusCode::TOO_MANY_REQUESTS)
+                            || (status.is_client_error()
+                                && status != reqwest::StatusCode::TOO_MANY_REQUESTS)
                         {
                             let mut out_headers = HeaderMap::new();
                             if let Some(content_type) = content_type {
-                                if let Ok(parsed) =
-                                    HeaderValue::from_bytes(content_type.as_bytes())
+                                if let Ok(parsed) = HeaderValue::from_bytes(content_type.as_bytes())
                                 {
                                     out_headers.insert(axum::http::header::CONTENT_TYPE, parsed);
                                 }
@@ -2184,14 +2186,12 @@ pub(crate) async fn chat_completions_handler(
 #[cfg(test)]
 mod tests {
     use super::{
-        auth_required, compute_effective_scout_timeout_ms, enqueue_scout_work,
-        endpoint_from_multiaddr,
-        infer_client_ip, model_pair_acceptance_rates, request_host_is_local, resolve_inference_mode,
-        should_attempt_mesh_forward, should_forward_to_mesh, normalize_endpoint, mesh_forward_score,
-        local_scout_fallback_allowed, probe_allowed_for_request,
-        should_abort_on_degenerate_output, should_refuse_mesh_degraded, strip_control_tokens,
-        InferenceMode,
-        ScoutSupplyEstimate, WorkRequest,
+        auth_required, compute_effective_scout_timeout_ms, endpoint_from_multiaddr,
+        enqueue_scout_work, infer_client_ip, local_scout_fallback_allowed, mesh_forward_score,
+        model_pair_acceptance_rates, normalize_endpoint, probe_allowed_for_request,
+        request_host_is_local, resolve_inference_mode, should_abort_on_degenerate_output,
+        should_attempt_mesh_forward, should_forward_to_mesh, should_refuse_mesh_degraded,
+        strip_control_tokens, InferenceMode, ScoutSupplyEstimate, WorkRequest,
     };
     use axum::http::{HeaderMap, HeaderValue};
     use std::collections::VecDeque;
@@ -2415,9 +2415,7 @@ mod tests {
     fn endpoint_derivation_skips_relay_and_uses_public_host() {
         let peer = "12D3KooWPQqkkZk7NeWA2b1FeWYuBFRW8X7Q9ugymnzxeKJHFLUV";
         let direct = format!("/ip4/35.175.242.222/tcp/4001/p2p/{peer}");
-        let relay = format!(
-            "/ip4/35.175.242.222/tcp/4001/p2p/{peer}/p2p-circuit/p2p/{peer}"
-        );
+        let relay = format!("/ip4/35.175.242.222/tcp/4001/p2p/{peer}/p2p-circuit/p2p/{peer}");
         assert_eq!(
             endpoint_from_multiaddr(direct.as_str(), 9091).as_deref(),
             Some("http://35.175.242.222:9091")

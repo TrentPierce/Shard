@@ -46,10 +46,7 @@ impl BootstrapRing {
             .map(|peer| peer.addr.clone())
             .collect();
         if unique_addrs.is_empty() {
-            anyhow::bail!(
-                "bootstrap ring config has no peers: {}",
-                path.display()
-            );
+            anyhow::bail!("bootstrap ring config has no peers: {}", path.display());
         }
         if parsed.min_connected_bootstrap == 0 {
             anyhow::bail!(

@@ -74,6 +74,8 @@ pub mod security;
 pub mod telemetry_ws;
 use api::*;
 use canary::*;
+use consensus::leader::{ElectionMessage, LeaderElectionConfig, LeaderElectionHandle, LeaderInput};
+use network::policy::{NetworkPolicy, PolicyDecision};
 use scheduler::*;
 use shard_common::common::node_config::{NodeRole, NodeRuntimeConfig};
 use shard_common::common::pow_challenge::PowChallengeManager;
@@ -85,8 +87,6 @@ use shard_gateway::gateway::fallback::{
     execute_centralized_fallback, ActiveRequestState, FallbackConfig,
 };
 use shard_gateway::gateway::validate_work_request;
-use consensus::leader::{ElectionMessage, LeaderElectionConfig, LeaderElectionHandle, LeaderInput};
-use network::policy::{NetworkPolicy, PolicyDecision};
 use shard_ledger::ledger::state::{ComputeCreditTx, LedgerState};
 use shard_ledger::ledger::store::LedgerStore;
 use shard_ledger::ledger::sync::{hash_probe_segments, LedgerSyncRequest, LedgerSyncResponse};
@@ -2365,10 +2365,50 @@ async fn enforce_shutdown_and_track(
             .into_response();
     }
 
-    state.in_flight_count.fetch_add(1, Ordering::Relaxed);
+    let _in_flight_guard =
+        InFlightRequestGuard::new(track_in_flight_path(path.as_str(), &state.in_flight_count));
     let response = next.run(req).await;
-    state.in_flight_count.fetch_sub(1, Ordering::Relaxed);
     response
+}
+
+fn track_in_flight_path(path: &str, counter: &Arc<AtomicUsize>) -> Option<Arc<AtomicUsize>> {
+    should_track_in_flight_path(path).then(|| Arc::clone(counter))
+}
+
+fn should_track_in_flight_path(path: &str) -> bool {
+    matches!(
+        path,
+        "/v1/chat/completions"
+            | "/ws/generate"
+            | "/pipeline/forward"
+            | "/broadcast-work"
+            | "/signed/broadcast-work"
+            | "/submit-draft"
+            | "/v1/scout/draft"
+            | "/signed/submit-draft"
+            | "/browser-layer/submit"
+    )
+}
+
+struct InFlightRequestGuard {
+    counter: Option<Arc<AtomicUsize>>,
+}
+
+impl InFlightRequestGuard {
+    fn new(counter: Option<Arc<AtomicUsize>>) -> Self {
+        if let Some(counter_ref) = counter.as_ref() {
+            counter_ref.fetch_add(1, Ordering::Relaxed);
+        }
+        Self { counter }
+    }
+}
+
+impl Drop for InFlightRequestGuard {
+    fn drop(&mut self) {
+        if let Some(counter) = self.counter.as_ref() {
+            counter.fetch_sub(1, Ordering::Relaxed);
+        }
+    }
 }
 
 fn create_router(
@@ -5142,8 +5182,9 @@ mod tests {
         node_is_healthy, parse_hardcoded_bootstrap_mode, peer_id_from_addr_str,
         prune_bootstrap_registry, record_bootstrap_failure, remove_known_addrs_for_peers,
         save_bootstrap_registry, should_attempt_reconnect, should_include_hardcoded_bootstrap,
-        should_reject_peer_connection, unique_addrs, validate_work_request, BootstrapRegistryEntry,
-        CanaryRolloutConfig, CanaryRolloutController, HardcodedBootstrapMode, LatencyHistogram,
+        should_reject_peer_connection, should_track_in_flight_path, track_in_flight_path,
+        unique_addrs, validate_work_request, BootstrapRegistryEntry, CanaryRolloutConfig,
+        CanaryRolloutController, HardcodedBootstrapMode, InFlightRequestGuard, LatencyHistogram,
         ModelManifestEntry, ScoutPenaltyBook, ScoutPenaltyUpdate, ScoutTimeoutTracker,
         SpeculativeConfig, WorkRequest, MAX_BOOTSTRAP_FAILURES,
     };
@@ -5395,6 +5436,52 @@ mod tests {
     fn node_health_timeout_marks_stale_unhealthy() {
         assert!(node_is_healthy(10_000, 15_000, 5_000));
         assert!(!node_is_healthy(10_000, 20_001, 5_000));
+    }
+
+    #[test]
+    fn in_flight_tracking_only_counts_compute_paths() {
+        for path in [
+            "/v1/chat/completions",
+            "/ws/generate",
+            "/pipeline/forward",
+            "/broadcast-work",
+            "/signed/broadcast-work",
+            "/submit-draft",
+            "/v1/scout/draft",
+            "/signed/submit-draft",
+            "/browser-layer/submit",
+        ] {
+            assert!(should_track_in_flight_path(path), "{path}");
+        }
+
+        for path in [
+            "/health",
+            "/v1/system/health",
+            "/metrics",
+            "/metrics/summary",
+            "/v1/system/topology",
+            "/v1/system/scout-config",
+            "/v1/scout/work",
+            "/browser-layer/work",
+            "/signed/heartbeat",
+            "/signed/register-node",
+        ] {
+            assert!(!should_track_in_flight_path(path), "{path}");
+        }
+    }
+
+    #[test]
+    fn in_flight_guard_releases_counter_on_drop() {
+        let counter = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        {
+            let _guard =
+                InFlightRequestGuard::new(track_in_flight_path("/v1/chat/completions", &counter));
+            assert_eq!(counter.load(std::sync::atomic::Ordering::Relaxed), 1);
+        }
+        assert_eq!(counter.load(std::sync::atomic::Ordering::Relaxed), 0);
+
+        let _guard = InFlightRequestGuard::new(track_in_flight_path("/health", &counter));
+        assert_eq!(counter.load(std::sync::atomic::Ordering::Relaxed), 0);
     }
 
     #[test]

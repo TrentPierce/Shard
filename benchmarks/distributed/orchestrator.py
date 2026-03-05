@@ -465,7 +465,10 @@ async def run_orchestrator(
                     # Draft with standard mode so this helper path does not recurse into speculative work.
                     gen_resp = await client.post(
                         f"{endpoint}/v1/chat/completions",
-                        headers={"x-shard-inference-mode": "standard"},
+                        headers={
+                            "x-shard-inference-mode": "standard",
+                            "x-shard-mesh-forward": "false",
+                        },
                         json={
                             "model": "shard-hybrid",
                             "messages": [{"role": "user", "content": user_prompt}],
@@ -513,7 +516,10 @@ async def run_orchestrator(
                         endpoint = await pool.next(client)
                         resp = await client.post(
                             f"{endpoint}/v1/chat/completions",
-                            headers={"x-shard-inference-mode": inference_mode},
+                            headers={
+                                "x-shard-inference-mode": inference_mode,
+                                "x-shard-mesh-forward": "false",
+                            },
                             json={
                                 "model": "shard-hybrid",
                                 "messages": [{"role": "user", "content": f"hello from scout {seq}"}],
@@ -649,9 +655,22 @@ async def run_orchestrator(
         ]
         await asyncio.gather(launcher(), progress_loop())
         await asyncio.gather(*launch_tasks, return_exceptions=True)
-        for task in scout_tasks:
-            task.cancel()
-        await asyncio.gather(*scout_tasks, return_exceptions=True)
+        if scout_tasks:
+            scout_shutdown_grace_s = max(5.0, timeout_secs + 2.0)
+            done, pending = await asyncio.wait(
+                scout_tasks,
+                timeout=scout_shutdown_grace_s,
+            )
+            if pending:
+                print(
+                    f"[scout-drain] canceling {len(pending)} scout workers after "
+                    f"{scout_shutdown_grace_s:.1f}s grace period"
+                )
+                for task in pending:
+                    task.cancel()
+                await asyncio.gather(*pending, return_exceptions=True)
+            if done:
+                await asyncio.gather(*done, return_exceptions=True)
 
         after_summaries = await fetch_pool_summaries(client, verifier_pool)
         after_accepted, after_total = aggregate_speculative_totals(after_summaries)
