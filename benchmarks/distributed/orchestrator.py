@@ -189,10 +189,10 @@ def adaptive_scout_target(
     if configured_max <= 0:
         return 0
     if blackout_endpoints > 0:
-        return 1
+        return 0
     # Fast downshift on overload.
     if max_queue_depth >= 10.0 or max_p95_latency_ms >= 6000.0:
-        return 1
+        return 0
     if max_queue_depth >= 5.0 or max_p95_latency_ms >= 4500.0:
         return max(1, configured_max // 2)
     # Hysteresis for scale-up: require clearly healthy metrics.
