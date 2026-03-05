@@ -360,7 +360,7 @@ def parse_args() -> argparse.Namespace:
         choices=["standard", "distributed", "speculative"],
     )
     parser.add_argument("--request-timeout-ms", type=int, default=10000)
-    parser.add_argument("--max-attempts", type=int, default=2)
+    parser.add_argument("--max-attempts", type=int, default=1)
     parser.add_argument("--max-tokens", type=int, default=32)
     parser.add_argument("--readiness-timeout-s", type=int, default=120)
     parser.add_argument("--ready-queue-depth-max", type=float, default=8.0)

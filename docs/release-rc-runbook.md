@@ -52,6 +52,23 @@ sudo systemctl restart shard-daemon
 sudo systemctl status shard-daemon --no-pager
 ```
 
+### Optional benchmark overrides (recommended for matrix runs)
+
+To measure verifier/scout behavior without policy-throttling noise, apply
+`deploy/release/benchmark.env` on both nodes in addition to `rc1.env`.
+
+```bash
+sudo cp deploy/release/benchmark.env /etc/shard/benchmark.env
+sudo systemctl edit shard-daemon
+```
+
+Add:
+
+```ini
+[Service]
+EnvironmentFile=/etc/shard/benchmark.env
+```
+
 ## 3. Run Release Matrix
 
 ```bash

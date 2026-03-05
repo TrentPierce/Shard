@@ -322,7 +322,7 @@ async def run_orchestrator(
     limits = httpx.Limits(max_keepalive_connections=max(50, scouts), max_connections=max(100, scouts * 2))
     timeout_secs = max(0.5, request_timeout_ms / 1000.0)
     timeout = httpx.Timeout(
-        connect=min(2.0, timeout_secs),
+        connect=min(5.0, timeout_secs),
         read=timeout_secs,
         write=timeout_secs,
         pool=timeout_secs,
@@ -732,7 +732,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--max-attempts",
         type=int,
-        default=2,
+        default=1,
         help="Attempts per request before counting as error",
     )
     parser.add_argument(
