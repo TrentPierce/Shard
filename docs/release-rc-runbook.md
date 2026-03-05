@@ -20,12 +20,15 @@ curl http://127.0.0.1:9091/v1/system/scout-config
 
 ### Local Docker mesh
 
-`deploy/demo/docker-compose.mesh.yml` already loads `deploy/release/rc1.env`.
+`deploy/demo/docker-compose.mesh.yml` is the canonical local verifier path and
+already loads both:
+
+- `deploy/release/rc1.env`
+- `deploy/release/benchmark.env`
 
 ```bash
 docker compose -f deploy/demo/docker-compose.mesh.yml down -v
-docker compose -f deploy/demo/docker-compose.mesh.yml up -d --build bootstrap
-docker compose -f deploy/demo/docker-compose.mesh.yml up -d --scale shard-node=2 shard-node
+pwsh -File deploy/demo/mesh-up.ps1 -Nodes 2
 ```
 
 ### EC2 systemd verifier
@@ -34,40 +37,52 @@ docker compose -f deploy/demo/docker-compose.mesh.yml up -d --scale shard-node=2
 sudo mkdir -p /etc/shard
 sudo cp deploy/release/rc1.env /etc/shard/rc1.env
 sudo chmod 0644 /etc/shard/rc1.env
-sudo systemctl edit shard-daemon
-```
-
-Add:
-
-```ini
+sudo cp deploy/release/benchmark.env /etc/shard/benchmark.env
+sudo chmod 0644 /etc/shard/benchmark.env
+sudo mkdir -p /etc/systemd/system/shard-daemon.service.d
+sudo tee /etc/systemd/system/shard-daemon.service.d/10-model.conf >/dev/null <<'EOF'
+[Service]
+Environment=BITNET_MODEL=/opt/shard/models/Llama-3.2-1B-Instruct-Q4_K_M.gguf
+Environment=BITNET_LIB=/opt/shard/lib/libshard_engine.so
+Environment=LD_LIBRARY_PATH=/opt/shard/lib
+Environment=RUST_LOG=info
+EOF
+sudo tee /etc/systemd/system/shard-daemon.service.d/20-rc1.conf >/dev/null <<'EOF'
 [Service]
 EnvironmentFile=/etc/shard/rc1.env
-```
-
-Then:
-
-```bash
+EOF
+sudo tee /etc/systemd/system/shard-daemon.service.d/30-benchmark.conf >/dev/null <<'EOF'
+[Service]
+EnvironmentFile=/etc/shard/benchmark.env
+EOF
+sudo rm -f \
+  /etc/systemd/system/shard-daemon.service.d/20-scout-runtime.conf \
+  /etc/systemd/system/shard-daemon.service.d/20-scout-timeout.conf \
+  /etc/systemd/system/shard-daemon.service.d/30-debug-temp.conf \
+  /etc/systemd/system/shard-daemon.service.d/40-scout-timeout-fast.conf \
+  /etc/systemd/system/shard-daemon.service.d/50-model-llama.conf \
+  /etc/systemd/system/shard-daemon.service.d/70-benchmark-rate-limit.conf \
+  /etc/systemd/system/shard-daemon.service.d/99-runtime-debug.conf \
+  /etc/systemd/system/shard-daemon.service.d/override.conf \
+  /etc/systemd/system/shard-daemon.service.d/zz-benchmark-env.conf \
+  /etc/systemd/system/shard-daemon.service.d/zz-model-llama.conf \
+  /etc/systemd/system/shard-daemon.service.d/zz-scout-timeout-fast.conf
 sudo systemctl daemon-reload
 sudo systemctl restart shard-daemon
 sudo systemctl status shard-daemon --no-pager
 ```
 
-### Optional benchmark overrides (recommended for matrix runs)
+### Parity check
 
-To measure verifier/scout behavior without policy-throttling noise, apply
-`deploy/release/benchmark.env` on both nodes in addition to `rc1.env`.
+After both verifiers are up, compare runtime-sensitive fields directly:
 
 ```bash
-sudo cp deploy/release/benchmark.env /etc/shard/benchmark.env
-sudo systemctl edit shard-daemon
+pwsh -File scripts/dev/check_verifier_parity.ps1 \
+  -LocalUrl http://127.0.0.1:19091 \
+  -RemoteUrl http://35.175.242.222:9091
 ```
 
-Add:
-
-```ini
-[Service]
-EnvironmentFile=/etc/shard/benchmark.env
-```
+The parity check must report `ok: true` before matrix runs.
 
 ## 3. Run Release Matrix
 
