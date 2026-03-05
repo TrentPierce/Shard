@@ -18,6 +18,14 @@ pub(crate) fn auth_required(require_api_key: bool, route_private: bool) -> bool 
     require_api_key || route_private
 }
 
+fn should_refuse_mesh_degraded(
+    refuse_work_below_min_bootstrap: bool,
+    mesh_healthy: bool,
+    local_request: bool,
+) -> bool {
+    refuse_work_below_min_bootstrap && !mesh_healthy && !local_request
+}
+
 fn host_is_local(host: &str) -> bool {
     let raw = host.trim().trim_start_matches('[').trim_end_matches(']');
     let host_only = raw.split(':').next().unwrap_or(raw);
@@ -1133,8 +1141,13 @@ pub(crate) async fn chat_completions_handler(
     headers: HeaderMap,
     Json(req): Json<ChatRequest>,
 ) -> impl IntoResponse {
+    let local_request = request_host_is_local(&headers);
     if let Some(ring) = state.bootstrap_ring.as_ref() {
-        if ring.refuse_work_below_min_bootstrap && !ring.is_healthy().await {
+        if should_refuse_mesh_degraded(
+            ring.refuse_work_below_min_bootstrap,
+            ring.is_healthy().await,
+            local_request,
+        ) {
             return (
                 StatusCode::SERVICE_UNAVAILABLE,
                 Json(serde_json::json!({
@@ -1748,7 +1761,8 @@ mod tests {
         auth_required, compute_effective_scout_timeout_ms, enqueue_scout_work,
         infer_client_ip, model_pair_acceptance_rates, request_host_is_local, resolve_inference_mode,
         local_scout_fallback_allowed, probe_allowed_for_request,
-        should_abort_on_degenerate_output, strip_control_tokens, InferenceMode,
+        should_abort_on_degenerate_output, should_refuse_mesh_degraded, strip_control_tokens,
+        InferenceMode,
         ScoutSupplyEstimate, WorkRequest,
     };
     use axum::http::{HeaderMap, HeaderValue};
@@ -1905,6 +1919,14 @@ mod tests {
         let mut remote = HeaderMap::new();
         remote.insert("host", HeaderValue::from_static("api.shardnetwork.live"));
         assert!(!request_host_is_local(&remote));
+    }
+
+    #[test]
+    fn mesh_degraded_refusal_skips_local_requests() {
+        assert!(!should_refuse_mesh_degraded(true, false, true));
+        assert!(should_refuse_mesh_degraded(true, false, false));
+        assert!(!should_refuse_mesh_degraded(true, true, false));
+        assert!(!should_refuse_mesh_degraded(false, false, false));
     }
 
     #[test]
