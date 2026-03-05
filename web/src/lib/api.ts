@@ -94,22 +94,6 @@ async function sendMessageNonStreaming(
     if (content) onToken(content)
 }
 
-// Generate a unique work ID for scout draft tracking
-function generateWorkId(): string {
-    return `work-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`
-}
-
-/**
- * Try to generate and submit draft tokens to the verifier.
- * Falls back gracefully if WebLLM is not available.
- */
-async function trySubmitDraft(prompt: string, workId: string): Promise<boolean> {
-    // Draft submissions now require verifier-issued leases from /v1/scout/work.
-    // This ad-hoc chat-side path has no lease and would always be rejected.
-    void prompt
-    void workId
-    return false
-}
 
 // ─── Streaming Chat ─────────────────────────────────────────────────────────
 
@@ -127,29 +111,6 @@ export async function sendMessage(
     inferenceMode: "standard" | "distributed" = "distributed"
 ): Promise<void> {
     const startedAt = performance.now()
-
-    // Build the prompt in the same format the server expects
-    let prompt = "<|begin_of_text|>"
-    for (const msg of history) {
-        prompt += `<|start_header_id|>${msg.role}<|end_header_id|>\n\n${msg.content}<|eot_id|>`
-    }
-    prompt += "<|start_header_id|>assistant<|end_header_id|>\n\n"
-
-    // Generate and submit draft in parallel with the chat request for distributed mode
-    const workId = generateWorkId()
-
-    if (inferenceMode === "distributed") {
-        // Fire and forget - submit draft but don't wait
-        trySubmitDraft(prompt, workId)
-            .then((success) => {
-                if (success) {
-                    console.log("[Scout] Draft token submission initiated for work", workId)
-                }
-            })
-            .catch(() => {
-                // Ignore errors - fallback to server-side generation
-            })
-    }
 
     const body: ChatCompletionRequest = {
         model: DEFAULT_MODEL_ID,

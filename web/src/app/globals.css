@@ -4,6 +4,28 @@
 
 :root {
   color-scheme: dark;
+  --pitch-black: #191308;
+  --deep-mocha: #322a26;
+  --twilight-indigo: #454b66;
+  --glaucous: #677db7;
+  --wisteria-blue: #9ca3db;
+
+  --bg-primary: var(--pitch-black);
+  --bg-secondary: var(--deep-mocha);
+  --bg-tertiary: var(--twilight-indigo);
+  --bg-elevated: var(--glaucous);
+  --primary: var(--glaucous);
+  --primary-hover: var(--wisteria-blue);
+  --primary-muted: var(--twilight-indigo);
+  --secondary: var(--twilight-indigo);
+  --secondary-hover: var(--glaucous);
+  --text-primary: #f2f4ff;
+  --text-secondary: #dde2ff;
+  --text-muted: var(--wisteria-blue);
+  --text-inverse: var(--pitch-black);
+  --border: rgba(156, 163, 219, 0.25);
+  --border-hover: rgba(156, 163, 219, 0.45);
+  --primary-glow: rgba(103, 125, 183, 0.2);
 }
 
 html,
@@ -13,6 +35,10 @@ body {
 
 body {
   @apply bg-base-950 text-ink-50 antialiased;
+  background-image:
+    radial-gradient(circle at 20% 15%, rgba(156, 163, 219, 0.16) 0%, transparent 34%),
+    radial-gradient(circle at 85% 5%, rgba(103, 125, 183, 0.22) 0%, transparent 40%),
+    linear-gradient(180deg, rgba(69, 75, 102, 0.18) 0%, rgba(25, 19, 8, 0.95) 58%);
 }
 
 main {

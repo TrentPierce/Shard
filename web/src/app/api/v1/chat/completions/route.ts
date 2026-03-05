@@ -19,6 +19,41 @@ const CHAT_TIMEOUT_MS = parseTimeoutMs(
   65000,
 )
 
+function parseCorsOrigins(raw: string | undefined): string[] {
+  return (raw ?? "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean)
+}
+
+const CORS_ALLOWLIST = parseCorsOrigins(process.env.SHARD_CORS_ORIGINS)
+const CORS_ALLOWLIST_SET = new Set(CORS_ALLOWLIST)
+
+function resolveCorsOrigin(request: NextRequest): string | null {
+  const origin = request.headers.get("origin")
+  if (!origin) {
+    return null
+  }
+  if (CORS_ALLOWLIST_SET.has("*")) {
+    return origin
+  }
+  if (CORS_ALLOWLIST_SET.has(origin)) {
+    return origin
+  }
+  return null
+}
+
+function corsHeadersForRequest(request: NextRequest): Record<string, string> {
+  const origin = resolveCorsOrigin(request)
+  if (!origin) {
+    return {}
+  }
+  return {
+    "Access-Control-Allow-Origin": origin,
+    Vary: "Origin",
+  }
+}
+
 export async function GET() {
   return NextResponse.json({
     message: "Use POST to send chat messages",
@@ -27,6 +62,15 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
+  if (request.headers.get("origin") && !resolveCorsOrigin(request)) {
+    return NextResponse.json(
+      {
+        error: "Origin not allowed",
+      },
+      { status: 403 },
+    )
+  }
+
   const candidates = shardBackendUrls("/v1/chat/completions")
   const startedAt = Date.now()
 
@@ -97,6 +141,7 @@ export async function POST(request: NextRequest) {
     })
 
     if (response.body) {
+      const corsHeaders = corsHeadersForRequest(request)
       return new NextResponse(response.body, {
         status: response.status,
         headers: {
@@ -105,15 +150,16 @@ export async function POST(request: NextRequest) {
           Connection: "keep-alive",
           "X-Shard-Backend": backendUsed,
           "X-Shard-Backend-Attempts": String(attempts.length),
-          "Access-Control-Allow-Origin": "*",
+          ...corsHeaders,
         },
       })
     }
 
     const data = await response.json()
+    const corsHeaders = corsHeadersForRequest(request)
     return NextResponse.json(
       { ...data, backend: backendUsed, backend_attempts: attempts },
-      { status: response.status },
+      { status: response.status, headers: corsHeaders },
     )
   } catch (error) {
     recordChatProxyResult({
@@ -132,13 +178,18 @@ export async function POST(request: NextRequest) {
   }
 }
 
-export async function OPTIONS() {
+export async function OPTIONS(request: NextRequest) {
+  const origin = resolveCorsOrigin(request)
+  if (!origin) {
+    return new NextResponse(null, { status: 403 })
+  }
   return new NextResponse(null, {
     status: 204,
     headers: {
-      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Origin": origin,
       "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
       "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Shard-Inference-Mode, X-Shard-Wallet",
+      Vary: "Origin",
     },
   })
 }

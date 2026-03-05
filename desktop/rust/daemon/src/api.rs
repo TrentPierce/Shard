@@ -2639,13 +2639,13 @@ pub(crate) async fn ws_generate_stream(mut socket: WebSocket, state: SharedState
         .await;
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct ChatMessage {
     pub(crate) role: String,
     pub(crate) content: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct ChatRequest {
     pub(crate) model: Option<String>,
     pub(crate) messages: Vec<ChatMessage>,

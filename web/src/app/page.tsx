@@ -1,6 +1,7 @@
 "use client"
 
 import Link from "next/link"
+import Image from "next/image"
 import { useEffect, useState } from "react"
 import { useDashboardTelemetry } from "@/hooks/useDashboardTelemetry"
 import { apiUrl } from "@/lib/config"
@@ -96,10 +97,10 @@ export default function HomePage() {
   const [probeResult, setProbeResult] = useState<WebGPUProbeResult | null>(null)
   const statusClass =
     telemetry.healthState === "ready"
-      ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
+      ? "border-accent-400/60 bg-accent-400/15 text-ink-50"
       : telemetry.healthState === "degraded"
-      ? "border-amber-500/40 bg-amber-500/10 text-amber-300"
-      : "border-rose-500/40 bg-rose-500/10 text-rose-300"
+      ? "border-base-700/70 bg-base-700/30 text-ink-100"
+      : "border-base-800/80 bg-base-900/70 text-ink-300"
 
   const values = {
     verifier: telemetry.verifierNodes.toLocaleString(),
@@ -153,8 +154,8 @@ export default function HomePage() {
               <div
                 className={`mb-4 inline-flex rounded-full border px-3 py-1 text-xs font-medium ${
                   probeResult.eligible
-                    ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
-                    : "border-slate-500/40 bg-slate-500/10 text-slate-200"
+                    ? "border-accent-400/60 bg-accent-400/15 text-ink-50"
+                    : "border-ring/70 bg-base-900/70 text-ink-200"
                 }`}
               >
                 {probeResult.eligible
@@ -163,7 +164,14 @@ export default function HomePage() {
               </div>
             )}
             <div className="mb-6 flex justify-center sm:justify-start">
-              <img src="/icon-192.png" alt="Shard Network" className="h-16 w-16 rounded-2xl sm:h-20 sm:w-20" />
+              <Image
+                src="/icon-192.png"
+                alt="Shard Network"
+                width={80}
+                height={80}
+                className="h-16 w-16 rounded-2xl sm:h-20 sm:w-20"
+                priority
+              />
             </div>
             <div className="mb-5 flex flex-wrap items-center gap-3">
               <p className="text-xs font-semibold uppercase tracking-[0.22em] text-accent-400">

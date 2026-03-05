@@ -10,6 +10,10 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
+fn lock_or_recover<T>(mutex: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 /// Rate limit configuration
 #[derive(Debug, Clone)]
 pub struct RateLimitConfig {
@@ -102,7 +106,7 @@ impl TokenBucket {
     /// Refill tokens based on elapsed time
     fn refill(&self) {
         let now = Instant::now();
-        let mut last = self.last_refill.lock().unwrap();
+        let mut last = lock_or_recover(&self.last_refill);
         let elapsed = now.duration_since(*last).as_secs_f64();
 
         if elapsed > 0.0 {
@@ -128,7 +132,7 @@ impl TokenBucket {
         let time_needed = tokens_needed as f64 / self.rate_per_second;
 
         // Account for time since last refill
-        let last = *self.last_refill.lock().unwrap();
+        let last = *lock_or_recover(&self.last_refill);
         let elapsed = Instant::now().duration_since(last).as_secs_f64();
         let time_until = (time_needed - elapsed).max(0.0);
 
@@ -162,7 +166,7 @@ impl RateLimiter {
 
     /// Get or create a bucket for an API key
     fn get_key_bucket(&self, api_key: &str) -> Arc<TokenBucket> {
-        let mut buckets = self.key_buckets.lock().unwrap();
+        let mut buckets = lock_or_recover(&self.key_buckets);
 
         if let Some(bucket) = buckets.get(api_key) {
             return bucket.clone();
@@ -172,7 +176,7 @@ impl RateLimiter {
         let is_enterprise = self
             .key_tiers
             .lock()
-            .unwrap()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
             .get(api_key)
             .copied()
             .unwrap_or(false);
@@ -196,7 +200,7 @@ impl RateLimiter {
 
     /// Get or create a bucket for an IP address
     fn get_ip_bucket(&self, ip: &str) -> Arc<TokenBucket> {
-        let mut buckets = self.ip_buckets.lock().unwrap();
+        let mut buckets = lock_or_recover(&self.ip_buckets);
 
         if let Some(bucket) = buckets.get(ip) {
             return bucket.clone();
@@ -272,7 +276,7 @@ impl RateLimiter {
         let tier = self
             .key_tiers
             .lock()
-            .unwrap()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
             .get(api_key)
             .copied()
             .unwrap_or(false);
@@ -289,17 +293,17 @@ impl RateLimiter {
     pub fn register_key(&self, api_key: &str, is_enterprise: bool) {
         self.key_tiers
             .lock()
-            .unwrap()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
             .insert(api_key.to_string(), is_enterprise);
 
         // Clear existing bucket to recreate with new limits
-        self.key_buckets.lock().unwrap().remove(api_key);
+        lock_or_recover(&self.key_buckets).remove(api_key);
     }
 
     /// Remove an API key
     pub fn remove_key(&self, api_key: &str) {
-        self.key_tiers.lock().unwrap().remove(api_key);
-        self.key_buckets.lock().unwrap().remove(api_key);
+        lock_or_recover(&self.key_tiers).remove(api_key);
+        lock_or_recover(&self.key_buckets).remove(api_key);
     }
 
     /// Get current timestamp for reset header

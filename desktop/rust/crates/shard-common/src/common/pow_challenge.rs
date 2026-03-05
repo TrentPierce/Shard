@@ -294,7 +294,8 @@ mod tests {
         let challenge = manager.issue_challenge("peer_a", 8, 60_000, false);
 
         // Override difficulty to something solvable quickly in tests
-        let challenge_bytes = hex::decode(&challenge.challenge_bytes_hex).unwrap();
+        let challenge_bytes =
+            hex::decode(&challenge.challenge_bytes_hex).expect("issued challenge hex must decode");
         let solution = solve_challenge(&challenge_bytes, 4).expect("should solve difficulty 4");
 
         // Manually create a challenge with difficulty 4
@@ -315,7 +316,8 @@ mod tests {
         let challenge = manager.issue_challenge("peer_b", 8, 60_000, false);
 
         // Submit a solution with nonce 0 — almost certainly won't meet difficulty 20
-        let challenge_bytes = hex::decode(&challenge.challenge_bytes_hex).unwrap();
+        let challenge_bytes =
+            hex::decode(&challenge.challenge_bytes_hex).expect("issued challenge hex must decode");
         let hash = compute_pow_hash(&challenge_bytes, 0);
         let zeros = count_leading_zero_bits(&hash);
 
@@ -333,8 +335,9 @@ mod tests {
     fn expired_challenge_rejected() {
         let mut manager = PowChallengeManager::with_defaults();
         let challenge = manager.issue_challenge("peer_c", 4, 60_000, false);
-        let challenge_bytes = hex::decode(&challenge.challenge_bytes_hex).unwrap();
-        let solution = solve_challenge(&challenge_bytes, 4).unwrap();
+        let challenge_bytes =
+            hex::decode(&challenge.challenge_bytes_hex).expect("issued challenge hex must decode");
+        let solution = solve_challenge(&challenge_bytes, 4).expect("difficulty 4 should be solvable");
 
         // Manually backdate the challenge so it's guaranteed expired
         if let Some(c) = manager.pending.get_mut("peer_c") {

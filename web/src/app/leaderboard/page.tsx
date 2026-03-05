@@ -1,56 +1,66 @@
 "use client"
+
 import { useEffect, useState } from "react"
 import { apiUrl } from "@/lib/config"
 
 export default function LeaderboardPage() {
-    const [data, setData] = useState<any[]>([])
+  const [data, setData] = useState<any[]>([])
 
-    useEffect(() => {
-        fetch(apiUrl('/v1/leaderboard'))
-            .then(r => r.json())
-            .then(d => { if (d.ok && d.leaderboard) setData(d.leaderboard) })
-            .catch()
-    }, [])
+  useEffect(() => {
+    fetch(apiUrl("/v1/leaderboard"))
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.ok && d.leaderboard) setData(d.leaderboard)
+      })
+      .catch(() => {
+        // ignore fetch failures and show empty state
+      })
+  }, [])
 
-    return (
-        <div className="container mx-auto p-4 max-w-4xl mt-12 mb-20">
-            <h1 className="text-3xl font-bold mb-4 font-mono text-primary">Network Leaderboard</h1>
-            <p className="text-muted mb-8 text-sm">Top contributors providing verifiable inference on the Shard network.</p>
+  return (
+    <main id="main-content" className="mx-auto mb-20 mt-12 w-full max-w-4xl px-4">
+      <h1 className="mb-4 text-3xl font-bold text-ink-50">Network Leaderboard</h1>
+      <p className="mb-8 text-sm text-ink-300">Top contributors providing verifiable inference on the Shard network.</p>
 
-            <div className="card overflow-hidden">
-                <table className="w-full text-left border-collapse">
-                    <thead className="bg-secondary/10 text-secondary text-sm border-b border-secondary/20">
-                        <tr>
-                            <th className="p-4 font-semibold w-24">Rank</th>
-                            <th className="p-4 font-semibold">Wallet</th>
-                            <th className="p-4 font-semibold text-right">Credits Earned</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {data.map((row, i) => (
-                            <tr key={row.wallet} className="border-b border-secondary/10 hover:bg-secondary/5 transition-colors">
-                                <td className="p-4 text-muted">
-                                    {i === 0 ? <span className="text-amber-400 font-bold">#1 🏆</span> :
-                                        i === 1 ? <span className="text-gray-300 font-bold">#2 🥈</span> :
-                                            i === 2 ? <span className="text-amber-700 font-bold">#3 🥉</span> :
-                                                `#${i + 1}`}
-                                </td>
-                                <td className="p-4 font-mono text-sm tracking-tight text-emerald-400/90">{row.wallet}</td>
-                                <td className="p-4 text-right font-mono text-primary/90 font-medium">
-                                    {Number(row.balance).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} SHRD
-                                </td>
-                            </tr>
-                        ))}
-                        {data.length === 0 && (
-                            <tr>
-                                <td colSpan={3} className="p-12 text-center text-muted text-sm italic">
-                                    Leaderboard data unavailable or network is syncing.
-                                </td>
-                            </tr>
-                        )}
-                    </tbody>
-                </table>
-            </div>
-        </div>
-    )
+      <div className="overflow-hidden rounded-2xl border border-ring bg-base-900">
+        <table className="w-full border-collapse text-left">
+          <thead className="border-b border-ring bg-base-800/40 text-sm text-ink-200">
+            <tr>
+              <th className="w-24 p-4 font-semibold">Rank</th>
+              <th className="p-4 font-semibold">Wallet</th>
+              <th className="p-4 text-right font-semibold">Credits Earned</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.map((row, i) => (
+              <tr key={row.wallet} className="border-b border-ring/35 transition-colors hover:bg-base-800/35">
+                <td className="p-4 text-ink-300">
+                  {i === 0 ? (
+                    <span className="font-bold text-ink-50">#1</span>
+                  ) : i === 1 ? (
+                    <span className="font-bold text-ink-100">#2</span>
+                  ) : i === 2 ? (
+                    <span className="font-bold text-ink-200">#3</span>
+                  ) : (
+                    `#${i + 1}`
+                  )}
+                </td>
+                <td className="p-4 font-mono text-sm tracking-tight text-ink-100">{row.wallet}</td>
+                <td className="p-4 text-right font-mono font-medium text-accent-400">
+                  {Number(row.balance).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} SHRD
+                </td>
+              </tr>
+            ))}
+            {data.length === 0 && (
+              <tr>
+                <td colSpan={3} className="p-12 text-center text-sm italic text-ink-300">
+                  Leaderboard data unavailable or network is syncing.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </main>
+  )
 }

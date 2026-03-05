@@ -71,7 +71,7 @@ lint-rust: ## Run Rust clippy
 	cd desktop/rust && cargo clippy -- -D warnings
 
 lint-web: ## Run web linter
-	cd web && npm run lint 2>/dev/null || true
+	cd web && npm run lint
 
 # ── Docker ─────────────────────────────────────────────────────────
 

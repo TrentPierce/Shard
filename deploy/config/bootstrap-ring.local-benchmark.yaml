@@ -1,0 +1,10 @@
+bootstrap_peers:
+  - region: us-east-1
+    label: "US East (N. Virginia)"
+    addr: /ip4/35.175.242.222/tcp/4001/p2p/12D3KooWPQqkkZk7NeWA2b1FeWYuBFRW8X7Q9ugymnzxeKJHFLUV
+    health_url: http://35.175.242.222:9091/health
+
+min_connected_bootstrap: 1
+bootstrap_retry_interval_seconds: 15
+bootstrap_retry_max_backoff_seconds: 120
+refuse_work_below_min_bootstrap: true

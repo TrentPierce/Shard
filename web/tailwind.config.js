@@ -10,25 +10,26 @@ module.exports = {
     extend: {
       colors: {
         base: {
-          950: '#05070a',
-          900: '#0a0f16',
-          800: '#111926',
-          700: '#1b2638',
+          950: '#191308',
+          900: '#322a26',
+          800: '#454b66',
+          700: '#677db7',
         },
         ink: {
-          50: '#e7edf5',
-          100: '#ced9e8',
-          300: '#95a6c0',
-          400: '#6f839e',
+          50: '#f2f4ff',
+          100: '#dde2ff',
+          200: '#bcc3f2',
+          300: '#9ca3db',
+          400: '#677db7',
         },
         accent: {
-          400: '#48d58f',
-          500: '#30b977',
-          600: '#20945f',
+          400: '#9ca3db',
+          500: '#677db7',
+          600: '#454b66',
         },
         ring: {
-          DEFAULT: '#223043',
-          soft: '#1a2636',
+          DEFAULT: '#677db7',
+          soft: '#454b66',
         },
       },
       fontFamily: {
@@ -36,7 +37,7 @@ module.exports = {
         mono: ['var(--font-mono)'],
       },
       boxShadow: {
-        panel: '0 20px 50px rgba(2, 6, 15, 0.45)',
+        panel: '0 20px 50px rgba(25, 19, 8, 0.55)',
       },
       keyframes: {
         pulseSoft: {

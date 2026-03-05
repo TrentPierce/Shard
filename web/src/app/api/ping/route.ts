@@ -1,11 +1,11 @@
 export const runtime = 'edge';
 import { NextResponse } from "next/server"
-import { shardBackendUrl } from "@/lib/server/shard-backend"
+import { shardBackendUrls } from "@/lib/server/shard-backend"
 
 export const dynamic = "force-dynamic"
 
 export async function GET() {
-  const url = shardBackendUrl("/health")
+  const url = shardBackendUrls("/health")[0] ?? "http://127.0.0.1:9091/health"
 
   try {
     const response = await fetch(url, {

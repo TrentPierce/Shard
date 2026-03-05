@@ -1,6 +1,7 @@
 "use client"
 
 import Link from "next/link"
+import Image from "next/image"
 import { usePathname } from "next/navigation"
 import { useEffect, useState } from "react"
 
@@ -22,7 +23,14 @@ export function SiteNav() {
     <header className="sticky top-0 z-40 border-b border-ring bg-base-900/90 backdrop-blur">
       <div className="mx-auto flex h-16 w-full max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
         <Link href="/" className="flex items-center gap-2.5 text-sm font-semibold tracking-wide text-ink-50">
-          <img src="/icon-192.png" alt="" className="h-7 w-7 rounded-lg" aria-hidden="true" />
+          <Image
+            src="/icon-192.png"
+            alt=""
+            width={28}
+            height={28}
+            className="h-7 w-7 rounded-lg"
+            aria-hidden="true"
+          />
           Shard
         </Link>
 

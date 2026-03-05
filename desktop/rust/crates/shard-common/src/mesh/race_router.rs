@@ -324,7 +324,9 @@ mod tests {
             at.record_latency("fast", 30.0);
         }
         // EWMA should converge toward 30ms
-        let ewma = at.ewma_for_peer("fast").unwrap();
+        let ewma = at
+            .ewma_for_peer("fast")
+            .expect("EWMA should exist after recording latency");
         assert!(
             (ewma - 30.0).abs() < 5.0,
             "fast peer EWMA should converge near 30ms, got {ewma}"
@@ -380,7 +382,9 @@ mod tests {
         assert_eq!(result, RaceSubmitOutcome::AcceptedFirst);
 
         // Check the completed race has latency recorded
-        let completed = router.pop_completed(Some(&key)).unwrap();
+        let completed = router
+            .pop_completed(Some(&key))
+            .expect("completed race should be available");
         assert!((completed.latency_ms - 50.0).abs() < 1.0);
     }
 
