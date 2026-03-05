@@ -14,6 +14,7 @@ type MetricsSnapshot = {
 type HealthSummary = {
   connected_peers?: number
   active_browser_sessions?: number
+  verified_peers?: number
 }
 
 type PeersSummary = {
@@ -79,7 +80,10 @@ async function deriveActiveNodeEstimate(
   activeNodes: number
   activeNodesReported: number
   activeNodesEstimated: number
-  activeNodesEstimateSource: "reported" | "peers_minus_browser_sessions"
+  activeNodesEstimateSource:
+    | "reported"
+    | "peers_minus_browser_sessions"
+    | "verified_peers_plus_self"
 }> {
   const base = backendBase(backendUrl)
   if (!base) {
@@ -101,18 +105,27 @@ async function deriveActiveNodeEstimate(
     toNonNegativeInt(health?.connected_peers),
   )
   const activeBrowserSessions = toNonNegativeInt(health?.active_browser_sessions)
+  const verifiedPeers = toNonNegativeInt(health?.verified_peers)
 
   // Estimate verifier-like nodes as:
   // self + max(0, connected peers - browser scout sessions)
   const estimatedFromPeers = Math.max(1, 1 + Math.max(0, peerCount - activeBrowserSessions))
-  const activeNodes = Math.max(reportedActiveNodes, estimatedFromPeers)
-  const source: "reported" | "peers_minus_browser_sessions" =
-    activeNodes > reportedActiveNodes ? "peers_minus_browser_sessions" : "reported"
+  const estimatedFromVerifiedPeers = Math.max(1, 1 + verifiedPeers)
+  const estimatedNodes = Math.max(estimatedFromPeers, estimatedFromVerifiedPeers)
+  const activeNodes = Math.max(reportedActiveNodes, estimatedNodes)
+
+  let source: "reported" | "peers_minus_browser_sessions" | "verified_peers_plus_self" = "reported"
+  if (activeNodes > reportedActiveNodes) {
+    source =
+      estimatedFromVerifiedPeers >= estimatedFromPeers
+        ? "verified_peers_plus_self"
+        : "peers_minus_browser_sessions"
+  }
 
   return {
     activeNodes,
     activeNodesReported: reportedActiveNodes,
-    activeNodesEstimated: estimatedFromPeers,
+    activeNodesEstimated: estimatedNodes,
     activeNodesEstimateSource: source,
   }
 }
