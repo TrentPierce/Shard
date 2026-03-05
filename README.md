@@ -62,25 +62,32 @@ Full guide: [docs/mesh-benchmark.md](docs/mesh-benchmark.md)
 
 ---
 
-## Performance Snapshot (March 4, 2026)
+## Performance Snapshot (March 5, 2026)
 
-Latest adaptive benchmark matrix (distributed orchestrator, 24 scouts, 4 req/s, 60s runs):
+Latest matrix (isolated scenario runs, distributed orchestrator, 24 scouts, 4 req/s, 30s runs, verifier restart before each scenario):
 
-| Scenario | p95 latency (ms) | Throughput (TPS) | Error rate (%) |
-|---------|-------------------|------------------|----------------|
-| 1 node, no scouts | 5047.337 | 3.4500 | 13.3891 |
-| 1 node, with scouts | 2836.973 | 3.9333 | 1.2552 |
-| 2 nodes, no scouts | 5079.376 | 3.5333 | 11.2971 |
-| 2 nodes, with scouts | 6071.445 | 3.6333 | 8.7866 |
+| Scenario | p95 latency (ms) | Throughput (TPS) | Error rate (%) | Speculative samples |
+|---------|-------------------|------------------|----------------|---------------------|
+| 1 node, no scouts | 4523.110 | 4.0333 | 0.0000 | 0 |
+| 1 node, with scouts | 10016.930 | 3.8000 | 5.7851 | 36 |
+| 2 nodes, no scouts | 3031.208 | 4.0333 | 0.0000 | 0 |
+| 2 nodes, with scouts | 7719.465 | 4.0000 | 0.8264 | 12 |
 
-Compared to the earlier EC2 matrix baseline from the same day:
+Raw artifacts:
 
-- 2-node no-scouts: p95 latency `-44.16%`, throughput `+20.45%`, error rate `-15.67` points.
-- 2-node with-scouts: p95 latency `-55.39%`, throughput `+10.10%`, error rate `-9.06` points.
-- 1-node no-scouts: p95 latency `-44.11%`, throughput `+4.55%`, error rate `-4.45` points.
-- 1-node with-scouts: p95 latency `-54.68%`, throughput `+2.16%`, error rate `-2.89` points.
+- `reports/release-rc/final-phase7-one-node-no-scouts.json`
+- `reports/release-rc/final-phase7-one-node-with-scouts.json`
+- `reports/release-rc/final-phase7-two-node-no-scouts.json`
+- `reports/release-rc/final-phase7-two-node-with-scouts.json`
 
-Primary inference from today: adaptive scout backpressure and circuit-breaker controls significantly improved scout tail latency, especially in 1-node runs, while 2-node scout coordination still needs further tuning for consistent latency and error reduction.
+Compared to the previously published matrix (March 4, 2026):
+
+- 2-node no-scouts: p95 latency `-40.32%`, throughput `+14.15%`, error rate `-11.30` points.
+- 2-node with-scouts: p95 latency `+27.14%`, throughput `+10.09%`, error rate `-7.96` points.
+- 1-node no-scouts: p95 latency `-10.39%`, throughput `+16.91%`, error rate `-13.39` points.
+- 1-node with-scouts: p95 latency `+253.09%`, throughput `-3.39%`, error rate `+4.53` points.
+
+Primary inference: verifier-only paths are now stable at this load (0% errors in both 1-node and 2-node runs), and scout paths now produce real speculative samples in both topologies. Tail latency under scout load is still the main release blocker.
 
 ---
 

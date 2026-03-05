@@ -56,34 +56,39 @@ const incentives = [
 const benchmarkRows = [
   {
     scenario: "1 node, no scouts",
-    p95Ms: 5047.905,
-    tps: 3.45,
-    errorPct: 13.3891,
+    p95Ms: 4523.11,
+    tps: 4.0333,
+    errorPct: 0.0,
+    speculativeSamples: 0,
   },
   {
     scenario: "1 node, with scouts",
-    p95Ms: 6463.169,
-    tps: 3.9333,
-    errorPct: 1.2552,
+    p95Ms: 10016.93,
+    tps: 3.8,
+    errorPct: 5.7851,
+    speculativeSamples: 36,
   },
   {
     scenario: "2 nodes, no scouts",
-    p95Ms: 4924.837,
-    tps: 3.7833,
-    errorPct: 5.0209,
+    p95Ms: 3031.208,
+    tps: 4.0333,
+    errorPct: 0.0,
+    speculativeSamples: 0,
   },
   {
     scenario: "2 nodes, with scouts",
-    p95Ms: 8884.42,
-    tps: 3.7167,
-    errorPct: 7.0833,
+    p95Ms: 7719.465,
+    tps: 4.0,
+    errorPct: 0.8264,
+    speculativeSamples: 12,
   },
 ]
 
 const oldVsNew = [
-  "2-node no-scouts vs earlier baseline: p95 latency -45.86%, throughput +28.98%, errors -21.95 points.",
-  "2-node with scouts vs earlier baseline: p95 latency -34.73%, throughput +12.63%, errors -10.76 points.",
-  "1-node no-scouts vs earlier baseline: p95 latency -44.11%, throughput +4.55%, errors -4.45 points.",
+  "2-node no-scouts vs previous published matrix: p95 latency -40.32%, throughput +14.15%, errors -11.30 points.",
+  "2-node with scouts vs previous published matrix: p95 latency +27.14%, throughput +10.09%, errors -7.96 points.",
+  "1-node no-scouts vs previous published matrix: p95 latency -10.39%, throughput +16.91%, errors -13.39 points.",
+  "1-node with scouts vs previous published matrix: p95 latency +253.09%, throughput -3.39%, errors +4.53 points.",
 ]
 
 export default function HomePage() {
@@ -228,10 +233,10 @@ export default function HomePage() {
         </section>
 
         <section className="mt-12">
-          <h2 className="text-balance text-xl font-medium text-ink-50 sm:text-2xl">March 4, 2026 Benchmark Snapshot</h2>
+          <h2 className="text-balance text-xl font-medium text-ink-50 sm:text-2xl">March 5, 2026 Benchmark Snapshot</h2>
           <p className="mt-2 text-sm text-ink-300">
-            Real benchmark matrix from today using the distributed orchestrator (24 scouts, 4 req/s, 60s runs).
-            Verifier pool tested as single-node and two-node (local verifier + EC2 verifier).
+            Isolated scenario runs from today using the distributed orchestrator (24 scouts, 4 req/s, 30s runs).
+            Local + EC2 verifiers were restarted before each scenario to avoid queue carryover between cases.
           </p>
           <div className="mt-4 overflow-x-auto rounded-2xl border border-ring bg-base-900">
             <table className="min-w-full text-left text-sm">
@@ -241,6 +246,7 @@ export default function HomePage() {
                   <th className="px-4 py-3 font-medium">p95 Latency (ms)</th>
                   <th className="px-4 py-3 font-medium">Throughput (TPS)</th>
                   <th className="px-4 py-3 font-medium">Error Rate (%)</th>
+                  <th className="px-4 py-3 font-medium">Speculative Samples</th>
                 </tr>
               </thead>
               <tbody>
@@ -250,6 +256,7 @@ export default function HomePage() {
                     <td className="px-4 py-3">{row.p95Ms.toLocaleString(undefined, { maximumFractionDigits: 3 })}</td>
                     <td className="px-4 py-3">{row.tps.toLocaleString(undefined, { maximumFractionDigits: 4 })}</td>
                     <td className="px-4 py-3">{row.errorPct.toLocaleString(undefined, { maximumFractionDigits: 4 })}</td>
+                    <td className="px-4 py-3">{row.speculativeSamples.toLocaleString()}</td>
                   </tr>
                 ))}
               </tbody>
