@@ -410,14 +410,32 @@ fn compute_effective_scout_timeout_ms(
     }
     // Keep speculative waits tightly bounded to preserve TTFT under WAN jitter.
     let bounded_base = base_timeout_ms.clamp(400, 4_000);
-    if queue_depth > 1024 {
-        return bounded_base.min(900);
+    let soft_queue = std::env::var("SHARD_SCOUT_TIMEOUT_QUEUE_SOFT")
+        .ok()
+        .and_then(|v| v.trim().parse::<usize>().ok())
+        .map(|v| v.clamp(1, 256))
+        .unwrap_or(6);
+    let hard_queue = std::env::var("SHARD_SCOUT_TIMEOUT_QUEUE_HARD")
+        .ok()
+        .and_then(|v| v.trim().parse::<usize>().ok())
+        .map(|v| v.clamp(soft_queue, 512))
+        .unwrap_or(12);
+    let bypass_queue = std::env::var("SHARD_SCOUT_TIMEOUT_QUEUE_BYPASS")
+        .ok()
+        .and_then(|v| v.trim().parse::<usize>().ok())
+        .map(|v| v.clamp(hard_queue, 1024))
+        .unwrap_or(20);
+
+    // Strong backpressure: once verifier queueing grows, cut scout wait budget
+    // aggressively so speculative routing does not amplify saturation.
+    if queue_depth >= bypass_queue {
+        return 0;
     }
-    if queue_depth > 512 {
-        return bounded_base.min(1_200);
+    if queue_depth >= hard_queue {
+        return bounded_base.min(300);
     }
-    if queue_depth > 256 {
-        return bounded_base.min(1_500);
+    if queue_depth >= soft_queue {
+        return bounded_base.min(450);
     }
     if active_scouts <= 1 {
         return bounded_base.min(600);
@@ -426,6 +444,18 @@ fn compute_effective_scout_timeout_ms(
         return bounded_base.min(500);
     }
     bounded_base.min(400)
+}
+
+fn update_request_latency_ewma(state: &SharedState, latency_ms: u64) {
+    let sample = latency_ms.min(u32::MAX as u64) as u32;
+    let previous = state.avg_latency_ms.load(Ordering::Relaxed);
+    let next = if previous == 0 {
+        sample
+    } else {
+        // Lightweight EWMA to track verifier request latency for admission control.
+        ((((previous as u64) * 7) + ((sample as u64) * 3)) / 10) as u32
+    };
+    state.avg_latency_ms.store(next, Ordering::Relaxed);
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -594,8 +624,10 @@ async fn effective_speculative_timeout_ms(
     let supply = estimate_scout_supply(state).await;
     let active_scouts = supply.effective_active_scouts();
     let queue_depth = {
-        let queue = state.scout_work.lock().await;
-        queue.len()
+        let scout_queue_depth = state.scout_work.lock().await.len();
+        let pending_depth = state.speculative_pending.lock().await.len();
+        let verifier_in_flight = state.in_flight_count.load(Ordering::Relaxed);
+        scout_queue_depth.max(pending_depth).max(verifier_in_flight)
     };
     let mut timeout_ms =
         compute_effective_scout_timeout_ms(config.scout_timeout_ms, active_scouts, queue_depth);
@@ -1350,6 +1382,7 @@ pub(crate) async fn chat_completions_handler(
                 .inc_tokens_processed(completion_tokens_generated);
 
             let latency_ms = (now_ms().saturating_sub(request_started_ms)) as u64;
+            update_request_latency_ewma(&state, latency_ms);
             let (acceptance_rate, reject_rate) = request_acceptance
                 .map(|v| (Some(v.0), Some(v.1)))
                 .unwrap_or((None, None));
@@ -1546,6 +1579,7 @@ pub(crate) async fn chat_completions_handler(
         }
 
         let latency_ms = (now_ms().saturating_sub(request_started_ms)) as u64;
+        update_request_latency_ewma(&state, latency_ms);
         let (acceptance_rate, reject_rate) = request_acceptance
             .map(|v| (Some(v.0), Some(v.1)))
             .unwrap_or((None, None));
@@ -1692,7 +1726,10 @@ mod tests {
         assert_eq!(compute_effective_scout_timeout_ms(30_000, 0, 0), 0);
         assert_eq!(compute_effective_scout_timeout_ms(30_000, 1, 0), 600);
         assert_eq!(compute_effective_scout_timeout_ms(30_000, 2, 0), 500);
-        assert_eq!(compute_effective_scout_timeout_ms(30_000, 8, 900), 1_200);
+        assert_eq!(compute_effective_scout_timeout_ms(30_000, 8, 3), 400);
+        assert_eq!(compute_effective_scout_timeout_ms(30_000, 8, 8), 450);
+        assert_eq!(compute_effective_scout_timeout_ms(30_000, 8, 14), 300);
+        assert_eq!(compute_effective_scout_timeout_ms(30_000, 8, 24), 0);
     }
 
     #[test]

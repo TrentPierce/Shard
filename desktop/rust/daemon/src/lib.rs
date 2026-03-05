@@ -3678,7 +3678,7 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
                 NodeHeartbeat {
                     node_pubkey: pubkey.clone(),
                     role: role.clone(),
-                    queue_depth: heartbeat_state.scout_work.lock().await.len() as u64,
+                    queue_depth: heartbeat_state.in_flight_count.load(Ordering::Relaxed) as u64,
                     node_latency_ms: heartbeat_state.avg_latency_ms.load(Ordering::Relaxed) as u64,
                     uptime_seconds: ((now_ms().saturating_sub(heartbeat_state.daemon_start)) / 1000)
                         as u64,

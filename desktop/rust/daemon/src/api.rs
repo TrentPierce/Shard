@@ -571,6 +571,32 @@ fn scout_min_quality_samples() -> usize {
         .unwrap_or(DEFAULT_SCOUT_MIN_QUALITY_SAMPLES)
 }
 
+fn verifier_in_flight_depth(state: &SharedState) -> usize {
+    state.in_flight_count.load(Ordering::Relaxed)
+}
+
+fn verifier_latency_snapshot(state: &SharedState) -> (u64, u64) {
+    let avg_latency_ms = state.avg_latency_ms.load(Ordering::Relaxed) as u64;
+    // gossipsub p95 reflects transport propagation, not full request latency.
+    // Keep it as a lower-bound hint, but never below the local request EWMA.
+    let p95_latency_ms = state
+        .gossipsub_latency_hist
+        .percentiles()
+        .p95_ms
+        .max(avg_latency_ms);
+    (avg_latency_ms, p95_latency_ms)
+}
+
+fn effective_scout_queue_depth(
+    state: &SharedState,
+    scout_queue_depth: usize,
+    pending_depth: usize,
+) -> usize {
+    scout_queue_depth
+        .max(pending_depth)
+        .max(verifier_in_flight_depth(state))
+}
+
 fn scout_admission_retry_after_ms(
     queue_depth: usize,
     avg_latency_ms: u64,
@@ -1595,9 +1621,8 @@ pub(crate) async fn scout_config_handler(
     AxumState(state): AxumState<SharedState>,
 ) -> Json<serde_json::Value> {
     let now = now_ms();
-    let queue_depth = state.scout_work.lock().await.len();
-    let avg_latency_ms = state.avg_latency_ms.load(Ordering::Relaxed) as u64;
-    let p95_latency_ms = state.gossipsub_latency_hist.percentiles().p95_ms;
+    let queue_depth = effective_scout_queue_depth(&state, state.scout_work.lock().await.len(), 0);
+    let (avg_latency_ms, p95_latency_ms) = verifier_latency_snapshot(&state);
     let admission = scout_admission_decision(queue_depth, avg_latency_ms, p95_latency_ms);
     let blackout_mode = update_scout_blackout_state(&state, queue_depth, p95_latency_ms, now).await;
     let active_scouts = recent_active_scouts(&state, now).await;
@@ -1708,9 +1733,8 @@ pub(crate) async fn pop_work_handler(
             }
         }
     }
-    let queue_depth = state.scout_work.lock().await.len();
-    let avg_latency_ms = state.avg_latency_ms.load(Ordering::Relaxed) as u64;
-    let p95_latency_ms = state.gossipsub_latency_hist.percentiles().p95_ms;
+    let queue_depth = effective_scout_queue_depth(&state, state.scout_work.lock().await.len(), 0);
+    let (avg_latency_ms, p95_latency_ms) = verifier_latency_snapshot(&state);
     let blackout_mode = update_scout_blackout_state(&state, queue_depth, p95_latency_ms, now).await;
     if blackout_mode == ScoutBlackoutMode::Blackout {
         state.system_metrics.inc_scout_work_overload_reject();
@@ -1919,9 +1943,9 @@ pub(crate) async fn process_draft_submission(
     }
     let scout_queue_depth = state.scout_work.lock().await.len();
     let pending_queue_depth = state.speculative_pending.lock().await.len();
-    let effective_queue_depth = scout_queue_depth.max(pending_queue_depth);
-    let avg_latency_ms = state.avg_latency_ms.load(Ordering::Relaxed) as u64;
-    let p95_latency_ms = state.gossipsub_latency_hist.percentiles().p95_ms;
+    let effective_queue_depth =
+        effective_scout_queue_depth(state, scout_queue_depth, pending_queue_depth);
+    let (avg_latency_ms, p95_latency_ms) = verifier_latency_snapshot(state);
     let blackout_mode =
         update_scout_blackout_state(state, effective_queue_depth, p95_latency_ms, now).await;
     if blackout_mode == ScoutBlackoutMode::Blackout {
@@ -2646,8 +2670,14 @@ pub(crate) async fn latency_profile_handler(
 }
 
 pub(crate) async fn metrics_handler(AxumState(state): AxumState<SharedState>) -> Response {
-    let queue_depth = state.scout_work.lock().await.len();
-    let active_node_count = state.node_metric_reports.lock().await.len();
+    let queue_depth = effective_scout_queue_depth(&state, state.scout_work.lock().await.len(), 0);
+    let active_node_count = state
+        .node_metric_reports
+        .lock()
+        .await
+        .values()
+        .filter(|snapshot| !snapshot.role.eq_ignore_ascii_case("scout"))
+        .count();
     let node_latency_ms = state.avg_latency_ms.load(Ordering::Relaxed);
     let p = state.gossipsub_latency_hist.percentiles();
     let uptime_seconds = ((now_ms().saturating_sub(state.daemon_start)) / 1000) as u64;
@@ -3099,7 +3129,7 @@ pub(crate) async fn metrics_summary_handler(
 ) -> Json<serde_json::Value> {
     let p = state.gossipsub_latency_hist.percentiles();
     let now = now_ms();
-    let queue_depth = state.scout_work.lock().await.len();
+    let queue_depth = effective_scout_queue_depth(&state, state.scout_work.lock().await.len(), 0);
     prune_expired_scout_leases_for_state(&state, now).await;
     let active_leases = state.scout_work_leases.lock().await.len();
     let blackout_mode = {
@@ -3110,15 +3140,20 @@ pub(crate) async fn metrics_summary_handler(
     let mut active_nodes = 0usize;
     let mut healthy_nodes = 0usize;
     let mut unhealthy_nodes = 0usize;
+    let mut active_scout_nodes = 0usize;
 
     for snapshot in reports.values_mut() {
         snapshot.healthy =
             node_is_healthy(snapshot.last_report_ms, now, state.heartbeat_timeout_ms);
-        active_nodes += 1;
-        if snapshot.healthy {
-            healthy_nodes += 1;
+        if snapshot.role.eq_ignore_ascii_case("scout") {
+            active_scout_nodes += 1;
         } else {
-            unhealthy_nodes += 1;
+            active_nodes += 1;
+            if snapshot.healthy {
+                healthy_nodes += 1;
+            } else {
+                unhealthy_nodes += 1;
+            }
         }
     }
 
@@ -3183,6 +3218,10 @@ pub(crate) async fn metrics_summary_handler(
 
     let mut payload = serde_json::Map::new();
     payload.insert("active_nodes".to_string(), serde_json::json!(active_nodes));
+    payload.insert(
+        "active_scout_nodes".to_string(),
+        serde_json::json!(active_scout_nodes),
+    );
     payload.insert(
         "healthy_nodes".to_string(),
         serde_json::json!(healthy_nodes),

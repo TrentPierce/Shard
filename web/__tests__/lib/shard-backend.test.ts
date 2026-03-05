@@ -6,6 +6,7 @@ jest.mock("next/headers", () => ({
 
 describe("server shard backend selection", () => {
   const originalEnv = process.env
+  const originalFetch = global.fetch
 
   beforeEach(() => {
     jest.resetModules()
@@ -16,10 +17,12 @@ describe("server shard backend selection", () => {
     delete process.env.NEXT_PUBLIC_SHARD_BACKEND_URL
     delete process.env.SHARD_FALLBACK_URLS
     delete process.env.SHARD_FALLBACK_URL
+    global.fetch = originalFetch
   })
 
   afterAll(() => {
     process.env = originalEnv
+    global.fetch = originalFetch
   })
 
   it("parses and deduplicates backend URL candidates", async () => {
@@ -62,5 +65,38 @@ describe("server shard backend selection", () => {
     expect(shardBackendUrls()).toEqual([
       "https://api.shardnetwork.live/",
     ])
+  })
+
+  it("prioritizes explicit preferred candidates during failover", async () => {
+    process.env.SHARD_BACKEND_URLS = "http://a:9091, http://b:9091"
+    global.fetch = jest.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.startsWith("http://b:9091/health")) {
+        return {
+          ok: true,
+          status: 200,
+          url,
+          json: async () => ({ ok: true }),
+        } as unknown as Response
+      }
+      return {
+        ok: false,
+        status: 503,
+        url,
+        json: async () => ({ ok: false }),
+      } as unknown as Response
+    }) as typeof fetch
+
+    const { fetchWithBackendFailover } = await import("@/lib/server/shard-backend")
+    const result = await fetchWithBackendFailover("/health", {
+      method: "GET",
+      maxAttempts: 2,
+      preferredCandidates: ["http://b:9091/health"],
+      loadAware: false,
+      failoverOnStatuses: [503],
+    })
+
+    expect(String((global.fetch as jest.Mock).mock.calls[0][0])).toBe("http://b:9091/health")
+    expect(result.backend).toContain("http://b:9091/health")
   })
 })

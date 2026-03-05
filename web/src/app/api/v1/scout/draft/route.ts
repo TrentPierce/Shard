@@ -5,6 +5,10 @@ import {
   forwardRequestHeaders,
   shardBackendUrls,
 } from "@/lib/server/shard-backend"
+import {
+  clearWorkAffinity,
+  preferredCandidateForWork,
+} from "@/lib/server/scout-affinity"
 
 export const dynamic = "force-dynamic"
 
@@ -34,6 +38,7 @@ function inBackendCooldown(): boolean {
 export async function POST(request: NextRequest) {
   const path = "/v1/scout/draft"
   const candidates = shardBackendUrls(path)
+  let workId = ""
 
   if (inBackendCooldown()) {
     return NextResponse.json(
@@ -49,19 +54,37 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.text()
+    try {
+      const parsed = JSON.parse(body)
+      workId = String(parsed?.work_id ?? "").trim()
+    } catch {
+      workId = ""
+    }
+    const preferredCandidate = workId ? preferredCandidateForWork(workId, path) : null
     const { response, backend, attempts } = await fetchWithBackendFailover(path, {
       method: "POST",
       headers: forwardRequestHeaders(),
       body,
       timeoutMs: 4_000,
       totalTimeoutMs: 6_500,
-      maxAttempts: 2,
+      maxAttempts: preferredCandidate ? 1 : 2,
       retryJitterMs: 180,
       failoverOnStatuses: [500, 502, 503, 504, 521, 530],
+      preferredCandidates: preferredCandidate ? [preferredCandidate] : undefined,
+      loadAware: !preferredCandidate,
     })
     const data = await response.json().catch(() => ({}))
     if (!response.ok) {
       noteBackendFailure()
+      const detail = String((data as any)?.detail ?? "").toLowerCase()
+      if (
+        workId &&
+        (detail.includes("scout_lease_") ||
+          detail.includes("lease_not_found") ||
+          detail.includes("scout_work_not_pending"))
+      ) {
+        clearWorkAffinity(workId)
+      }
       return NextResponse.json(
         {
           ok: false,
@@ -74,6 +97,9 @@ export async function POST(request: NextRequest) {
         },
         { status: 200 },
       )
+    }
+    if (workId && Boolean((data as any)?.ok ?? false)) {
+      clearWorkAffinity(workId)
     }
     noteBackendSuccess()
     return NextResponse.json({ ...data, backend, backend_attempts: attempts }, { status: 200 })
