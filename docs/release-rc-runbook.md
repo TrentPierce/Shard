@@ -99,6 +99,12 @@ python benchmarks/distributed/run_release_matrix.py \
 
 Artifacts are written to `reports/release-rc/release-rc-<timestamp>/`.
 
+The release matrix now fails closed by default:
+
+- If verifier readiness never clears, the scenario aborts.
+- If inter-run queue drain never clears, the matrix aborts.
+- Only use `--allow-dirty-readiness` or `--allow-dirty-flush` for local debugging.
+
 ## 4. Go/No-Go Decision
 
 Read:

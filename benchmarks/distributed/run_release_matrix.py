@@ -313,7 +313,7 @@ async def execute(args: argparse.Namespace) -> dict[str, Any]:
                         timeout_s=args.flush_timeout_s,
                         queue_depth_max=args.flush_queue_depth_max,
                         require_no_blackout=not args.allow_readiness_blackout,
-                        strict=False,
+                        strict=args.strict_flush_readiness,
                     )
 
     aggregates: dict[str, dict[str, Any]] = {}
@@ -370,6 +370,7 @@ async def execute(args: argparse.Namespace) -> dict[str, Any]:
             "ready_queue_depth_max": args.ready_queue_depth_max,
             "allow_readiness_blackout": args.allow_readiness_blackout,
             "strict_readiness": args.strict_readiness,
+            "strict_flush_readiness": args.strict_flush_readiness,
             "flush_timeout_s": args.flush_timeout_s,
             "flush_queue_depth_max": args.flush_queue_depth_max,
             "one_node_pool": one_pool,
@@ -422,7 +423,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--readiness-timeout-s", type=int, default=120)
     parser.add_argument("--ready-queue-depth-max", type=float, default=8.0)
     parser.add_argument("--allow-readiness-blackout", action="store_true")
-    parser.add_argument("--strict-readiness", action="store_true")
+    parser.add_argument(
+        "--allow-dirty-readiness",
+        dest="strict_readiness",
+        action="store_false",
+        help="Allow scenarios to run even if verifier readiness never clears.",
+    )
+    parser.set_defaults(strict_readiness=True)
     parser.add_argument(
         "--flush-timeout-s",
         type=int,
@@ -435,6 +442,13 @@ def parse_args() -> argparse.Namespace:
         default=8.0,
         help="Required queue depth before the next scenario starts.",
     )
+    parser.add_argument(
+        "--allow-dirty-flush",
+        dest="strict_flush_readiness",
+        action="store_false",
+        help="Allow the matrix to continue even when inter-run queue drain fails.",
+    )
+    parser.set_defaults(strict_flush_readiness=True)
     parser.add_argument("--out-dir", type=str, default="reports/release-rc")
     parser.add_argument("--tag", type=str, default="")
     return parser.parse_args()
