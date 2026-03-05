@@ -24,6 +24,14 @@
 - `SHARD_SCOUT_ACTIVE_CAP` (default `8`)
 - `SHARD_SCOUT_ACTIVE_CAP_SOFT` (default `4`)
 - `SHARD_SCOUT_ACTIVE_CAP_HARD` (default `2`)
+- `SHARD_MESH_FORWARD_ENABLED` (`true|false`, default `true`)
+- `SHARD_MESH_FORWARD_MAX_HOPS` (default `1`, clamp `0..4`)
+- `SHARD_MESH_FORWARD_PROBE_LIMIT` (default `4`)
+- `SHARD_MESH_FORWARD_PROBE_TIMEOUT_MS` (default `600`)
+- `SHARD_MESH_FORWARD_TIMEOUT_MS` (default `20000`)
+- `SHARD_MESH_FORWARD_QUEUE_WEIGHT_MS` (default `120`)
+- `SHARD_MESH_FORWARD_MIN_IMPROVEMENT_MS` (default `120`)
+- `SHARD_MESH_FORWARD_LOCAL_QUEUE_TRIGGER` (default `2`)
 - `SHARD_RELEASE_PROFILE` (optional label shown by `/v1/system/scout-config`)
 - `SHARD_HEARTBEAT_TIMEOUT_MS`
 - `SHARD_ALLOW_PRIVATE_BOOTSTRAP` (`true|false`, default `false`; allows dialing private/loopback bootstrap multiaddrs)
@@ -51,6 +59,7 @@
 - Run at least two publicly reachable shard daemon backends.
 - Configure both in `SHARD_BACKEND_URLS` so the web API proxy can fail over automatically.
 - Do not rely on a single bootstrap or a single public telemetry endpoint.
+- Keep mesh-forwarding enabled on verifier nodes so queue pressure can spill into healthier peers.
 
 ## Health Checks
 - Daemon health: `GET /health`
@@ -63,11 +72,11 @@
 - Keep local and EC2 verifier nodes on the same commit and same RC env file while running the RC matrix.
 
 ### Apply frozen config in local Docker mesh
-The mesh compose file already loads `deploy/release/rc1.env` via `env_file`.
+The mesh compose file is the canonical local verifier path and already loads
+`deploy/release/rc1.env` plus `deploy/release/benchmark.env` via `env_file`.
 
 ```bash
-docker compose -f deploy/demo/docker-compose.mesh.yml up -d --build bootstrap
-docker compose -f deploy/demo/docker-compose.mesh.yml up -d --scale shard-node=2 shard-node
+powershell -ExecutionPolicy Bypass -File deploy/demo/mesh-up.ps1 -Nodes 2
 curl http://localhost:19091/v1/system/scout-config
 ```
 
@@ -79,11 +88,16 @@ sudo chmod 0644 /etc/shard/rc1.env
 sudo systemctl edit shard-daemon
 ```
 
-Use this override:
+Use these overrides:
 
 ```ini
 [Service]
 EnvironmentFile=/etc/shard/rc1.env
+```
+
+```ini
+[Service]
+EnvironmentFile=/etc/shard/benchmark.env
 ```
 
 Then reload and verify:
@@ -92,6 +106,7 @@ Then reload and verify:
 sudo systemctl daemon-reload
 sudo systemctl restart shard-daemon
 curl http://127.0.0.1:9091/v1/system/scout-config
+curl http://127.0.0.1:9091/health
 ```
 
 ## Release Rule
