@@ -6346,6 +6346,7 @@ dependencies = [
  "rfd",
  "serde",
  "serde_json",
+ "sha2",
  "shard-common",
  "shard-daemon",
  "tokio",

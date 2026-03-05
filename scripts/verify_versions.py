@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -8,6 +9,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 VERSION_FILE = ROOT / "VERSION"
+MODEL_MANIFEST = ROOT / "deploy" / "models" / "manifest.json"
 
 
 @dataclass(frozen=True)
@@ -61,6 +63,51 @@ def collect_checks(version: str) -> list[VersionCheck]:
     return checks
 
 
+def validate_model_manifest() -> list[str]:
+    if not MODEL_MANIFEST.exists():
+        return [f"{MODEL_MANIFEST}: file not found"]
+
+    try:
+        manifest = json.loads(MODEL_MANIFEST.read_text(encoding="utf-8"))
+    except Exception as exc:  # pragma: no cover - defensive
+        return [f"{MODEL_MANIFEST}: invalid JSON ({exc})"]
+
+    models = manifest.get("models")
+    if not isinstance(models, list) or not models:
+        return [f"{MODEL_MANIFEST}: expected a non-empty 'models' array"]
+
+    failures: list[str] = []
+    for idx, model in enumerate(models):
+        if not isinstance(model, dict):
+            failures.append(f"{MODEL_MANIFEST}: models[{idx}] must be an object")
+            continue
+
+        download_url = str(model.get("download_url", "")).strip()
+        sha256 = str(model.get("sha256", "")).strip()
+        size_bytes = model.get("size_bytes")
+
+        if (
+            not download_url
+            or download_url.startswith("REPLACE_")
+            or re.fullmatch(r"https?://.+", download_url) is None
+        ):
+            failures.append(
+                f"{MODEL_MANIFEST}: models[{idx}].download_url must be a real http(s) URL"
+            )
+
+        if re.fullmatch(r"[0-9a-fA-F]{64}", sha256) is None:
+            failures.append(
+                f"{MODEL_MANIFEST}: models[{idx}].sha256 must be a real 64-char hex digest"
+            )
+
+        if not isinstance(size_bytes, int) or size_bytes <= 0:
+            failures.append(
+                f"{MODEL_MANIFEST}: models[{idx}].size_bytes must be a positive integer"
+            )
+
+    return failures
+
+
 def main() -> None:
     version = read_version()
     failures: list[str] = []
@@ -72,6 +119,8 @@ def main() -> None:
         text = check.path.read_text(encoding="utf-8")
         if re.search(check.pattern, text, flags=re.MULTILINE) is None:
             failures.append(f"{check.path}: expected {check.description} to match {check.pattern!r}")
+
+    failures.extend(validate_model_manifest())
 
     if failures:
         print("Version verification failed:")

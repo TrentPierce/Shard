@@ -22,6 +22,7 @@ shard-daemon = { path = "../daemon" }
 dirs = { workspace = true }
 futures = { workspace = true }
 image = { version = "0.25", default-features = false, features = ["png"] }
+sha2 = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.50"

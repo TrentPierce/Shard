@@ -45,7 +45,7 @@ curl http://localhost:9091/v1/chat/completions \
 
 ## Model Provisioning Note
 
-The repository model manifest currently ships placeholder download metadata (`deploy/models/manifest.json`), so GUI auto-download may require manual configuration until a production model URL/hash is published. If auto-download fails, set the local model path in GUI Settings.
+On first launch, ShardGUI auto-downloads the default verifier model from `deploy/models/manifest.json` and verifies its SHA-256 hash before enabling contribution. If the manifest endpoint is unavailable, ShardGUI falls back to a built-in default model URL.
 
 ## Required Ports
 

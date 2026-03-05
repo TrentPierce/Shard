@@ -1,20 +1,20 @@
 {
   "schema_version": "1.0",
-  "updated_at": "2026-02-19T00:00:00Z",
+  "updated_at": "2026-03-05T00:00:00Z",
   "models": [
     {
-      "id": "bitnet-1.58-3b",
-      "display_name": "BitNet b1.58 3B",
+      "id": "meta-llama/Llama-3.2-1B",
+      "display_name": "Llama 3.2 1B Instruct (Q4_K_M)",
       "version": "1.0.0",
-      "sha256": "REPLACE_WITH_ACTUAL_HASH",
-      "size_bytes": 0,
-      "download_url": "REPLACE_WITH_ACTUAL_URL",
+      "sha256": "6f85a640a97cf2bf5b8e764087b1e83da0fdb51d7c9fab7d0fece9385611df83",
+      "size_bytes": 807694464,
+      "download_url": "https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q4_K_M.gguf",
       "min_vram_gb": 4,
       "min_ram_gb": 8,
       "roles": ["shard"],
-      "quantization": "1.58bit",
-      "architecture": "bitnet",
-      "release_notes": "Initial release"
+      "quantization": "Q4_K_M",
+      "architecture": "llama",
+      "release_notes": "Published default verifier model for first-run auto-provisioning"
     }
   ]
 }

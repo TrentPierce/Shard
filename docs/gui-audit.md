@@ -1,6 +1,6 @@
 # Shard GUI Audit
 
-Date: 2026-03-04
+Date: 2026-03-05
 
 Scope:
 - `desktop/rust/shard-gui`
@@ -19,9 +19,10 @@ Scope:
 - GUI sets `SHARD_REQUIRE_ENGINE_FOR_CONTRIBUTE=false` when model/library are missing, so node can still run in scout-compatible mode.
 - Once model path is available, GUI restarts daemon and contribution telemetry updates.
 
-3. Gap found: model manifest is not production-populated.
-- `deploy/models/manifest.json` still contains `REPLACE_WITH_ACTUAL_URL` and placeholder hash/size values.
-- Result: first-run auto-download path is not yet turnkey without manually setting model path.
+3. Model provisioning path is now production-populated.
+- `deploy/models/manifest.json` now includes a real model URL, hash, and size.
+- GUI model download verifies SHA-256 and re-downloads when a local hash mismatch is detected.
+- If manifest retrieval fails or contains no valid download entries, GUI falls back to a built-in default model source so first-run setup remains turnkey.
 
 4. Gap found: Docker image healthcheck dependency.
 - Compose healthchecks call `wget`, but daemon image previously did not install it.
