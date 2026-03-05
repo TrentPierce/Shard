@@ -2962,6 +2962,14 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
             )
         })
         .unwrap_or(true);
+    let bootstrap_refuse_work_override = std::env::var("SHARD_BOOTSTRAP_REFUSE_WORK_BELOW_MIN")
+        .ok()
+        .map(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        });
     let mut bootstrap_ring = if bootstrap_ring_path.exists() {
         match bootstrap_ring::BootstrapRing::from_config(bootstrap_ring_path.as_path()) {
             Ok(ring) => Some(ring),
@@ -2985,6 +2993,13 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
         None
     };
     if let Some(ring) = bootstrap_ring.as_mut() {
+        if let Some(override_refuse_work) = bootstrap_refuse_work_override {
+            ring.refuse_work_below_min_bootstrap = override_refuse_work;
+            tracing::info!(
+                override_refuse_work,
+                "applied bootstrap ring refuse-work override"
+            );
+        }
         ring.connect_all();
     }
     let bootstrap_ring = bootstrap_ring.map(Arc::new);
