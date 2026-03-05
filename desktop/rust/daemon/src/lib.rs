@@ -2953,10 +2953,26 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
     let bootstrap_ring_path = std::env::var("SHARD_BOOTSTRAP_RING_CONFIG")
         .map(PathBuf::from)
         .unwrap_or_else(|_| PathBuf::from("deploy/config/bootstrap-ring.yaml"));
+    let bootstrap_ring_strict = std::env::var("SHARD_BOOTSTRAP_RING_STRICT")
+        .ok()
+        .map(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
+        .unwrap_or(true);
     let mut bootstrap_ring = if bootstrap_ring_path.exists() {
         match bootstrap_ring::BootstrapRing::from_config(bootstrap_ring_path.as_path()) {
             Ok(ring) => Some(ring),
             Err(error) => {
+                if bootstrap_ring_strict {
+                    return Err(anyhow::anyhow!(
+                        "failed loading bootstrap ring config at {}: {}",
+                        bootstrap_ring_path.display(),
+                        error
+                    ));
+                }
                 tracing::warn!(
                     error = %error,
                     path = %bootstrap_ring_path.display(),

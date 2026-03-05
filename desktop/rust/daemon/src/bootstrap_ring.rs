@@ -40,6 +40,31 @@ impl BootstrapRing {
             .with_context(|| format!("failed reading bootstrap ring config: {}", path.display()))?;
         let parsed: BootstrapRingConfig = serde_yaml::from_str(raw.as_str())
             .with_context(|| format!("failed parsing bootstrap ring config: {}", path.display()))?;
+        let unique_addrs: HashSet<String> = parsed
+            .bootstrap_peers
+            .iter()
+            .map(|peer| peer.addr.clone())
+            .collect();
+        if unique_addrs.is_empty() {
+            anyhow::bail!(
+                "bootstrap ring config has no peers: {}",
+                path.display()
+            );
+        }
+        if parsed.min_connected_bootstrap == 0 {
+            anyhow::bail!(
+                "bootstrap ring config min_connected_bootstrap must be >= 1: {}",
+                path.display()
+            );
+        }
+        if parsed.min_connected_bootstrap > unique_addrs.len() {
+            anyhow::bail!(
+                "bootstrap ring config min_connected_bootstrap={} cannot be satisfied by {} unique peer addr entries in {}",
+                parsed.min_connected_bootstrap,
+                unique_addrs.len(),
+                path.display()
+            );
+        }
         Ok(Self {
             peers: parsed.bootstrap_peers,
             min_connected: parsed.min_connected_bootstrap,
@@ -111,5 +136,69 @@ impl BootstrapRing {
 
     pub(crate) async fn connected_count(&self) -> usize {
         self.connected.lock().await.len()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::BootstrapRing;
+    use std::fs;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_yaml_path(suffix: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        std::env::temp_dir().join(format!("bootstrap-ring-{suffix}-{nanos}.yaml"))
+    }
+
+    #[test]
+    fn rejects_unsatisfiable_min_connected_for_duplicate_addrs() {
+        let path = temp_yaml_path("dup");
+        let body = r#"
+bootstrap_peers:
+  - region: us-east-1
+    label: "A"
+    addr: /ip4/1.2.3.4/tcp/4001/p2p/peer
+    health_url: http://1.2.3.4:9091/health
+  - region: eu-west-1
+    label: "B"
+    addr: /ip4/1.2.3.4/tcp/4001/p2p/peer
+    health_url: http://1.2.3.4:9091/health
+min_connected_bootstrap: 2
+bootstrap_retry_interval_seconds: 15
+bootstrap_retry_max_backoff_seconds: 60
+refuse_work_below_min_bootstrap: true
+"#;
+        fs::write(&path, body).expect("write temp bootstrap ring config");
+        let result = BootstrapRing::from_config(path.as_path());
+        fs::remove_file(&path).ok();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn accepts_valid_unique_addr_threshold() {
+        let path = temp_yaml_path("ok");
+        let body = r#"
+bootstrap_peers:
+  - region: us-east-1
+    label: "A"
+    addr: /ip4/1.2.3.4/tcp/4001/p2p/peer-a
+    health_url: http://1.2.3.4:9091/health
+  - region: eu-west-1
+    label: "B"
+    addr: /ip4/5.6.7.8/tcp/4001/p2p/peer-b
+    health_url: http://5.6.7.8:9091/health
+min_connected_bootstrap: 2
+bootstrap_retry_interval_seconds: 15
+bootstrap_retry_max_backoff_seconds: 60
+refuse_work_below_min_bootstrap: true
+"#;
+        fs::write(&path, body).expect("write temp bootstrap ring config");
+        let result = BootstrapRing::from_config(path.as_path());
+        fs::remove_file(&path).ok();
+        assert!(result.is_ok());
     }
 }
