@@ -70,6 +70,28 @@ def mean_metric(rows: list[dict[str, Any]], key: str) -> float:
     return float(statistics.fmean(values))
 
 
+def nested_count(row: dict[str, Any], section: str, key: str) -> float:
+    payload = row.get(section, {})
+    if not isinstance(payload, dict):
+        return 0.0
+    return float(payload.get(key, 0.0) or 0.0)
+
+
+def median_rate_pct(
+    rows: list[dict[str, Any]],
+    numerator_fn,
+) -> float:
+    values: list[float] = []
+    for row in rows:
+        total = float(row.get("total_requests", 0.0) or 0.0)
+        if total <= 0:
+            continue
+        values.append((float(numerator_fn(row)) / total) * 100.0)
+    if not values:
+        return 0.0
+    return float(statistics.median(values))
+
+
 def git_short_head() -> str:
     try:
         return (
@@ -86,6 +108,8 @@ def evaluate_release_gates(aggregates: dict[str, dict[str, Any]]) -> list[dict[s
     p95_with = float(two_with.get("p95_latency_ms_median", 0.0))
     err_with = float(two_with.get("error_rate_pct_median", 100.0))
     tps_with = float(two_with.get("throughput_tps_median", 0.0))
+    timeout_with = float(two_with.get("timeout_rate_pct_median", 100.0))
+    http429_with = float(two_with.get("http_429_rate_pct_median", 100.0))
     p95_no = float(two_no.get("p95_latency_ms_median", 0.0))
     tps_no = float(two_no.get("throughput_tps_median", 0.0))
 
@@ -113,6 +137,22 @@ def evaluate_release_gates(aggregates: dict[str, dict[str, Any]]) -> list[dict[s
             "expected_op": ">=",
             "expected": 3.75,
             "pass": tps_with >= 3.75,
+        },
+        {
+            "name": "two_node_with_scouts_timeout_rate_pct",
+            "description": "2-node with scouts timeout rate must be <= 2%",
+            "actual": round(timeout_with, 4),
+            "expected_op": "<=",
+            "expected": 2.0,
+            "pass": timeout_with <= 2.0,
+        },
+        {
+            "name": "two_node_with_scouts_http_429_rate_pct",
+            "description": "2-node with scouts HTTP 429 rate must be <= 5%",
+            "actual": round(http429_with, 4),
+            "expected_op": "<=",
+            "expected": 5.0,
+            "pass": http429_with <= 5.0,
         },
     ]
 
@@ -176,13 +216,14 @@ def markdown_report(summary: dict[str, Any]) -> str:
     lines.append("")
     lines.append("## Scenario Medians")
     lines.append("")
-    lines.append("| Scenario | p95 (ms) | TPS | Error (%) | Runs |")
-    lines.append("|---|---:|---:|---:|---:|")
+    lines.append("| Scenario | p95 (ms) | TPS | Error (%) | Timeout (%) | HTTP 429 (%) | Runs |")
+    lines.append("|---|---:|---:|---:|---:|---:|---:|")
     for scenario in SCENARIOS:
         row = summary["aggregates"][scenario.name]
         lines.append(
             f"| {scenario.name} | {row['p95_latency_ms_median']:.3f} | "
             f"{row['throughput_tps_median']:.4f} | {row['error_rate_pct_median']:.4f} | "
+            f"{row['timeout_rate_pct_median']:.4f} | {row['http_429_rate_pct_median']:.4f} | "
             f"{row['runs']} |"
         )
     lines.append("")
@@ -283,6 +324,22 @@ async def execute(args: argparse.Namespace) -> dict[str, Any]:
             "p95_latency_ms_median": round(median_metric(rows, "p95_latency_ms"), 3),
             "throughput_tps_median": round(median_metric(rows, "throughput_tps"), 4),
             "error_rate_pct_median": round(median_metric(rows, "error_rate_pct"), 4),
+            "timeout_rate_pct_median": round(
+                median_rate_pct(
+                    rows,
+                    lambda row: nested_count(row, "error_breakdown", "ReadTimeout")
+                    + nested_count(row, "error_breakdown", "ConnectTimeout"),
+                ),
+                4,
+            ),
+            "http_429_rate_pct_median": round(
+                median_rate_pct(rows, lambda row: nested_count(row, "status_counts", "429")),
+                4,
+            ),
+            "http_503_rate_pct_median": round(
+                median_rate_pct(rows, lambda row: nested_count(row, "status_counts", "503")),
+                4,
+            ),
             "p95_latency_ms_mean": round(mean_metric(rows, "p95_latency_ms"), 3),
             "throughput_tps_mean": round(mean_metric(rows, "throughput_tps"), 4),
             "error_rate_pct_mean": round(mean_metric(rows, "error_rate_pct"), 4),
