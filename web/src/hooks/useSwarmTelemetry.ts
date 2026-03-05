@@ -20,6 +20,7 @@ type SwarmTelemetrySnapshot = {
   globalTflops: number
   scoutCount: number
   shardCount: number
+  healthyShardCount: number
   throughputHistory: ThroughputSample[]
   contributors: Contributor[]
   totalTokensGenerated: number
@@ -93,25 +94,39 @@ async function fetchRealTelemetry(): Promise<SwarmTelemetrySnapshot> {
   
   const activeScoutsFromHealth = Number(health?.active_scouts ?? 0) || 0
   const activeBrowserSessionsFromHealth = Number(health?.active_browser_sessions ?? 0) || 0
+  const activeScoutsFromMetrics = Number(metrics?.active_scout_nodes ?? metrics?.draft_capable_scouts ?? 0) || 0
+  const activeBrowserSessionsFromMetrics = Number(metrics?.active_browser_sessions ?? 0) || 0
   const capacity = health?.capacity ?? topo?.capacity ?? 100
   const load = health?.load ?? topo?.load ?? 0
   const rustConnected = health?.rust_sidecar === "connected"
   const healthOk = health?.status === "ok"
   const bitnetLoaded = health?.bitnet_loaded === true
 
-  // Count shards conservatively from all available sources.
+  // Prefer backend-probed verifier counts from metrics; fall back to the local daemon only
+  // when we have no better network-wide signal.
+  const healthyShardCount = Math.max(
+    0,
+    Number(metrics?.healthy_nodes ?? 0),
+    Number(metrics?.active_nodes_reported ?? 0),
+  )
   const localShardOnline = healthOk || rustConnected || topo?.status === "ok"
   const reportedShardCount = Math.max(
     0,
     Number(health?.shard_count ?? 0),
     Number(topo?.shard_count ?? 0),
+    Number(metrics?.active_nodes ?? 0),
   )
-  // Do not infer verifier nodes from connected peers: browser scouts are peers too.
-  const inferredShardCount = localShardOnline ? 1 : 0
+  const inferredShardCount = healthyShardCount > 0 ? healthyShardCount : localShardOnline ? 1 : 0
   const shardCount = Math.max(reportedShardCount, inferredShardCount)
 
-  // Show browser scout presence from either explicit active scouts or active browser sessions.
-  const scoutCount = Math.max(0, activeScoutsFromHealth, activeBrowserSessionsFromHealth)
+  // Show browser scout presence from explicit metrics first, then health snapshots.
+  const scoutCount = Math.max(
+    0,
+    activeScoutsFromMetrics,
+    activeBrowserSessionsFromMetrics,
+    activeScoutsFromHealth,
+    activeBrowserSessionsFromHealth,
+  )
 
   // TFLOPs estimate: base capacity from the Shard + scout contributions
   // Even with 0 scouts, the Shard itself has compute capacity
@@ -156,6 +171,7 @@ async function fetchRealTelemetry(): Promise<SwarmTelemetrySnapshot> {
     globalTflops,
     scoutCount,
     shardCount,
+    healthyShardCount,
     throughputHistory: [],
     contributors,
     totalTokensGenerated,
@@ -169,6 +185,7 @@ export function useSwarmTelemetry() {
     globalTflops: 0,
     scoutCount: 0,
     shardCount: 0,
+    healthyShardCount: 0,
     throughputHistory: [],
     contributors: [],
     totalTokensGenerated: 0,
@@ -207,6 +224,7 @@ export function useSwarmTelemetry() {
           globalTflops: data.globalTflops,
           scoutCount: data.scoutCount,
           shardCount: data.shardCount,
+          healthyShardCount: data.healthyShardCount,
           throughputHistory: historyRef.current,
           contributors: contributorsRef.current,
           totalTokensGenerated: data.totalTokensGenerated,

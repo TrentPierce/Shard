@@ -12,13 +12,24 @@ type MetricsSnapshot = {
 }
 
 type HealthSummary = {
+  status?: string
+  readiness_reason?: string
+  ready_for_inference?: boolean
   connected_peers?: number
   active_browser_sessions?: number
+  active_scouts?: number
   verified_peers?: number
+  model_id?: string
+  rust_version?: string
 }
 
-type PeersSummary = {
-  count?: number
+type BackendNodeProbe = {
+  backend: string
+  healthy: boolean
+  status: string
+  readiness_reason: string | null
+  model_id: string | null
+  rust_version: string | null
 }
 
 const MAX_STALE_METRICS_MS = 2 * 60 * 1000
@@ -73,59 +84,96 @@ async function fetchJsonWithTimeout<T>(url: string, timeoutMs: number): Promise<
   }
 }
 
-async function deriveActiveNodeEstimate(
+async function probeBackendHealth(backendUrl: string): Promise<BackendNodeProbe | null> {
+  const health = await fetchJsonWithTimeout<HealthSummary>(backendUrl, 3_000)
+  if (!health) return null
+  const status = String(health.status ?? "unknown").toLowerCase()
+  const readinessReason =
+    typeof health.readiness_reason === "string" && health.readiness_reason.trim().length > 0
+      ? health.readiness_reason.trim()
+      : null
+  const healthy =
+    (status === "ok" || status === "ready") &&
+    health.ready_for_inference !== false
+
+  return {
+    backend: backendBase(backendUrl),
+    healthy,
+    status,
+    readiness_reason: readinessReason,
+    model_id: typeof health.model_id === "string" ? health.model_id : null,
+    rust_version: typeof health.rust_version === "string" ? health.rust_version : null,
+  }
+}
+
+export async function deriveActiveNodeEstimate(
   backendUrl: string,
   reportedActiveNodes: number,
 ): Promise<{
   activeNodes: number
   activeNodesReported: number
   activeNodesEstimated: number
+  reachableNodes: number
+  healthyNodes: number
+  unhealthyNodes: number
+  nodeProbes: BackendNodeProbe[]
   activeNodesEstimateSource:
     | "reported"
-    | "peers_minus_browser_sessions"
+    | "backend_health_probe"
     | "verified_peers_plus_self"
 }> {
   const base = backendBase(backendUrl)
-  if (!base) {
+  const backendCandidates = shardBackendUrls("/health")
+  const nodeProbes = (
+    await Promise.all(backendCandidates.map((candidate) => probeBackendHealth(candidate)))
+  ).filter((probe): probe is BackendNodeProbe => probe !== null)
+  const reachableNodes = nodeProbes.length
+  const healthyNodes = nodeProbes.filter((probe) => probe.healthy).length
+  const unhealthyNodes = Math.max(0, reachableNodes - healthyNodes)
+
+  if (!base && healthyNodes === 0) {
     return {
       activeNodes: reportedActiveNodes,
       activeNodesReported: reportedActiveNodes,
       activeNodesEstimated: reportedActiveNodes,
+      reachableNodes,
+      healthyNodes: 0,
+      unhealthyNodes,
+      nodeProbes,
       activeNodesEstimateSource: "reported",
     }
   }
 
-  const [health, peers] = await Promise.all([
-    fetchJsonWithTimeout<HealthSummary>(`${base}/health`, 2500),
-    fetchJsonWithTimeout<PeersSummary>(`${base}/v1/system/peers`, 2500),
-  ])
-
-  const peerCount = Math.max(
-    toNonNegativeInt(peers?.count),
-    toNonNegativeInt(health?.connected_peers),
-  )
-  const activeBrowserSessions = toNonNegativeInt(health?.active_browser_sessions)
+  const health = await fetchJsonWithTimeout<HealthSummary>(`${base}/health`, 2500)
   const verifiedPeers = toNonNegativeInt(health?.verified_peers)
 
-  // Estimate verifier-like nodes as:
-  // self + max(0, connected peers - browser scout sessions)
-  const estimatedFromPeers = Math.max(1, 1 + Math.max(0, peerCount - activeBrowserSessions))
+  // Derive node count from direct backend probes first. Fall back to daemon-reported
+  // verifier peer counts only when we cannot probe enough backends directly.
+  const estimatedFromBackendHealth = reachableNodes
   const estimatedFromVerifiedPeers = Math.max(1, 1 + verifiedPeers)
-  const estimatedNodes = Math.max(estimatedFromPeers, estimatedFromVerifiedPeers)
+  const estimatedNodes = Math.max(
+    estimatedFromBackendHealth,
+    estimatedFromVerifiedPeers,
+    reportedActiveNodes,
+  )
   const activeNodes = Math.max(reportedActiveNodes, estimatedNodes)
 
-  let source: "reported" | "peers_minus_browser_sessions" | "verified_peers_plus_self" = "reported"
+  let source: "reported" | "backend_health_probe" | "verified_peers_plus_self" = "reported"
   if (activeNodes > reportedActiveNodes) {
     source =
-      estimatedFromVerifiedPeers >= estimatedFromPeers
-        ? "verified_peers_plus_self"
-        : "peers_minus_browser_sessions"
+      estimatedFromBackendHealth >= estimatedFromVerifiedPeers
+        ? "backend_health_probe"
+        : "verified_peers_plus_self"
   }
 
   return {
     activeNodes,
     activeNodesReported: reportedActiveNodes,
     activeNodesEstimated: estimatedNodes,
+    reachableNodes,
+    healthyNodes,
+    unhealthyNodes,
+    nodeProbes,
     activeNodesEstimateSource: source,
   }
 }
@@ -150,6 +198,15 @@ export async function GET() {
       active_nodes_reported: activeNodeEstimate.activeNodesReported,
       active_nodes_estimated: activeNodeEstimate.activeNodesEstimated,
       active_nodes_estimate_source: activeNodeEstimate.activeNodesEstimateSource,
+      healthy_nodes: Math.max(
+        toNonNegativeInt((data as any)?.healthy_nodes),
+        activeNodeEstimate.healthyNodes,
+      ),
+      unhealthy_nodes: Math.max(
+        toNonNegativeInt((data as any)?.unhealthy_nodes),
+        activeNodeEstimate.unhealthyNodes,
+      ),
+      node_probes: activeNodeEstimate.nodeProbes,
     }
     updateMetricsSnapshot(mergedData)
     const healthState = deriveHealthState(data, response.ok)
