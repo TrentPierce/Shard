@@ -19,11 +19,9 @@ import { mplex } from '@libp2p/mplex';
 import { identify } from '@libp2p/identify';
 import { gossipsub as createGossipSub } from '@chainsafe/libp2p-gossipsub';
 import { bootstrap } from '@libp2p/bootstrap';
-import { multiaddr } from '@multiformats/multiaddr';
 import type { Libp2p } from 'libp2p';
 import type { GossipSub } from '@chainsafe/libp2p-gossipsub';
 import type { Message } from '@libp2p/interface';
-import type { Multiaddr } from '@multiformats/multiaddr';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -319,7 +317,15 @@ function shuffleArray<T>(input: T[]): T[] {
   return copy;
 }
 
-async function dialWithTimeout(node: Libp2p, peer: string | Multiaddr, timeoutMs: number): Promise<void> {
+function extractPeerIdFromMultiaddrString(peer: string): string | null {
+  const parts = peer.split('/p2p/').filter(Boolean);
+  if (parts.length === 0) return null;
+  const tail = parts[parts.length - 1];
+  const peerId = tail.split('/')[0];
+  return peerId || null;
+}
+
+async function dialWithTimeout(node: Libp2p, peer: string, timeoutMs: number): Promise<void> {
   await Promise.race([
     node.dial(peer as any) as Promise<unknown>,
     (async () => {
@@ -351,12 +357,11 @@ async function reconnectBootstrapPeers(): Promise<void> {
     const connectedPeerIds = new Set(p2pNode.getPeers().map((peer) => peer.toString()));
     for (const peer of shuffleArray(reconnectCandidates).slice(0, MAX_RECONNECT_DIALS_PER_TICK)) {
       try {
-        const target = multiaddr(peer);
-        const targetPeerId = target.getPeerId();
+        const targetPeerId = extractPeerIdFromMultiaddrString(peer);
         if (targetPeerId && connectedPeerIds.has(targetPeerId)) {
           continue;
         }
-        await dialWithTimeout(p2pNode, target, RECONNECT_DIAL_TIMEOUT_MS);
+        await dialWithTimeout(p2pNode, peer, RECONNECT_DIAL_TIMEOUT_MS);
         if (targetPeerId) {
           connectedPeerIds.add(targetPeerId);
         }
