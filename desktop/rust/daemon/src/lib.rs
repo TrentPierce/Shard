@@ -1894,6 +1894,13 @@ fn filter_bootstrap_addrs(addrs: Vec<String>, allow_private: bool) -> Vec<String
             let Ok(multiaddr) = addr.parse::<Multiaddr>() else {
                 return true;
             };
+            let has_peer = multiaddr
+                .iter()
+                .any(|p| matches!(p, libp2p::multiaddr::Protocol::P2p(_)));
+            if !has_peer {
+                tracing::warn!(%addr, "dropping bootstrap address missing /p2p/<peer>");
+                return false;
+            }
             if !allow_private && is_non_public_bootstrap_addr(&multiaddr) {
                 tracing::warn!(%addr, "dropping non-public bootstrap address; set SHARD_ALLOW_PRIVATE_BOOTSTRAP=true to allow");
                 return false;
@@ -1952,19 +1959,36 @@ fn build_autonat_config() -> autonat::v1::Config {
 
 fn reconnect_transport_priority(addr: &Multiaddr) -> u8 {
     let text = addr.to_string();
-    if text.contains("/tcp/") && !text.contains("/ws/") && !text.contains("/wss/") {
+    // Relay + websocket paths are generally the most reliable in mixed NAT environments.
+    if text.contains("/p2p-circuit") {
         return 0;
     }
-    if text.contains("/quic-v1") {
+    if text.contains("/wss/") || text.contains("/ws/") {
         return 1;
     }
-    if text.contains("/webrtc-direct") {
+    if text.contains("/quic-v1") {
         return 2;
     }
-    if text.contains("/wss/") || text.contains("/ws/") {
+    if text.contains("/tcp/") {
         return 3;
     }
-    4
+    if text.contains("/webrtc-direct") {
+        return 4;
+    }
+    5
+}
+
+fn is_reconnect_candidate_addr(addr: &Multiaddr, allow_private: bool) -> bool {
+    let has_peer = addr
+        .iter()
+        .any(|p| matches!(p, libp2p::multiaddr::Protocol::P2p(_)));
+    if !has_peer {
+        return false;
+    }
+    if !allow_private && is_non_public_bootstrap_addr(addr) {
+        return false;
+    }
+    true
 }
 
 fn reconnect_addr_sort_key(addr_str: &str) -> (u8, String) {
@@ -3969,6 +3993,9 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
                 let mut attempted_peer_ids: HashSet<String> = HashSet::new();
                 for addr_str in known {
                     if let Ok(addr) = addr_str.parse::<Multiaddr>() {
+                        if !is_reconnect_candidate_addr(&addr, allow_private_bootstrap) {
+                            continue;
+                        }
                         if should_attempt_reconnect(&addr, &local_peer_id, &connected) {
                             // Per-peer backoff check
                             let peer_ref = peer_id_from_addr_str(&addr_str)
@@ -5003,6 +5030,17 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
                                     if !full_addr.iter().any(|p| matches!(p, libp2p::multiaddr::Protocol::P2p(_))) {
                                         full_addr = full_addr.with(libp2p::multiaddr::Protocol::P2p(peer_id));
                                     }
+                                    if !is_reconnect_candidate_addr(
+                                        &full_addr,
+                                        allow_private_bootstrap,
+                                    ) {
+                                        tracing::debug!(
+                                            %peer_id,
+                                            addr = %full_addr,
+                                            "skipping non-dialable identify listen address"
+                                        );
+                                        continue;
+                                    }
                                     swarm.behaviour_mut().kad.add_address(&peer_id, full_addr.clone());
                                     learned_addrs.push(full_addr.to_string());
                                 }
@@ -5171,11 +5209,16 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
                             );
                         }
 
-                        {
-                            let mut known = state.known_peers.lock().await;
-                            known.push(remote_addr);
-                            *known = unique_addrs(known.clone());
-                            save_persisted_peers(&known_peers_path, &known).await;
+                        if let Ok(remote_multiaddr) = remote_addr.parse::<Multiaddr>() {
+                            if is_reconnect_candidate_addr(
+                                &remote_multiaddr,
+                                allow_private_bootstrap,
+                            ) {
+                                let mut known = state.known_peers.lock().await;
+                                known.push(remote_addr);
+                                *known = unique_addrs(known.clone());
+                                save_persisted_peers(&known_peers_path, &known).await;
+                            }
                         }
 
                         let req = Heartbeat { kind: "PING".into(), sent_at_ms: now_ms() };
@@ -5350,9 +5393,10 @@ mod tests {
 
     #[test]
     fn bootstrap_filter_drops_private_addrs_by_default() {
+        let peer = PeerId::random();
         let input = vec![
-            "/ip4/192.168.1.85/tcp/4001".to_string(),
-            "/ip4/35.175.242.222/tcp/4001".to_string(),
+            format!("/ip4/192.168.1.85/tcp/4001/p2p/{peer}"),
+            format!("/ip4/35.175.242.222/tcp/4001/p2p/{peer}"),
         ];
         let out = filter_bootstrap_addrs(input, false);
         assert_eq!(out.len(), 1);
@@ -5615,7 +5659,7 @@ mod tests {
     }
 
     #[test]
-    fn reconnect_sort_key_prefers_public_tcp_and_deprioritizes_private_tcp() {
+    fn reconnect_sort_key_prefers_public_quic_over_tcp_and_deprioritizes_private_tcp() {
         let peer = PeerId::random();
         let private_tcp = format!("/ip4/192.168.1.25/tcp/4001/p2p/{peer}");
         let public_tcp = format!("/ip4/35.175.242.222/tcp/4001/p2p/{peer}");
@@ -5624,8 +5668,8 @@ mod tests {
         let mut addrs = [public_tcp.clone(), private_tcp.clone(), public_quic.clone()];
         addrs.sort_by_key(|addr| super::reconnect_addr_sort_key(addr));
 
-        assert_eq!(addrs[0], public_tcp);
-        assert_eq!(addrs[1], public_quic);
+        assert_eq!(addrs[0], public_quic);
+        assert_eq!(addrs[1], public_tcp);
         assert_eq!(addrs[2], private_tcp);
     }
 
