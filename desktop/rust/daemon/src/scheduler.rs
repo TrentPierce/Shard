@@ -408,8 +408,9 @@ fn compute_effective_scout_timeout_ms(
     if active_scouts == 0 {
         return 0;
     }
-    // Keep speculative waits tightly bounded to preserve TTFT under WAN jitter.
-    let bounded_base = base_timeout_ms.clamp(400, 4_000);
+    // Keep speculative waits bounded while allowing enough budget for real scout
+    // round-trips (poll + local generation + submit), especially multi-node WAN.
+    let bounded_base = base_timeout_ms.clamp(600, 5_000);
     let soft_queue = std::env::var("SHARD_SCOUT_TIMEOUT_QUEUE_SOFT")
         .ok()
         .and_then(|v| v.trim().parse::<usize>().ok())
@@ -432,18 +433,18 @@ fn compute_effective_scout_timeout_ms(
         return 0;
     }
     if queue_depth >= hard_queue {
-        return bounded_base.min(300);
-    }
-    if queue_depth >= soft_queue {
-        return bounded_base.min(450);
-    }
-    if active_scouts <= 1 {
         return bounded_base.min(600);
     }
-    if active_scouts <= 3 {
-        return bounded_base.min(500);
+    if queue_depth >= soft_queue {
+        return bounded_base.min(800);
     }
-    bounded_base.min(400)
+    if active_scouts <= 1 {
+        return bounded_base.min(1_100);
+    }
+    if active_scouts <= 3 {
+        return bounded_base.min(950);
+    }
+    bounded_base.min(850)
 }
 
 fn update_request_latency_ewma(state: &SharedState, latency_ms: u64) {
@@ -615,8 +616,8 @@ fn scout_probe_timeout_ms() -> u64 {
     std::env::var("SHARD_SCOUT_PROBE_TIMEOUT_MS")
         .ok()
         .and_then(|v| v.trim().parse::<u64>().ok())
-        .map(|v| v.clamp(75, 500))
-        .unwrap_or(200)
+        .map(|v| v.clamp(150, 1_000))
+        .unwrap_or(500)
 }
 
 fn scout_probe_queue_max() -> usize {
@@ -1749,11 +1750,11 @@ mod tests {
     #[test]
     fn adaptive_timeout_short_circuits_without_active_scouts() {
         assert_eq!(compute_effective_scout_timeout_ms(30_000, 0, 0), 0);
-        assert_eq!(compute_effective_scout_timeout_ms(30_000, 1, 0), 600);
-        assert_eq!(compute_effective_scout_timeout_ms(30_000, 2, 0), 500);
-        assert_eq!(compute_effective_scout_timeout_ms(30_000, 8, 3), 400);
-        assert_eq!(compute_effective_scout_timeout_ms(30_000, 8, 8), 450);
-        assert_eq!(compute_effective_scout_timeout_ms(30_000, 8, 14), 300);
+        assert_eq!(compute_effective_scout_timeout_ms(30_000, 1, 0), 1_100);
+        assert_eq!(compute_effective_scout_timeout_ms(30_000, 2, 0), 950);
+        assert_eq!(compute_effective_scout_timeout_ms(30_000, 8, 3), 850);
+        assert_eq!(compute_effective_scout_timeout_ms(30_000, 8, 8), 800);
+        assert_eq!(compute_effective_scout_timeout_ms(30_000, 8, 14), 600);
         assert_eq!(compute_effective_scout_timeout_ms(30_000, 8, 24), 0);
     }
 

@@ -440,7 +440,16 @@ async def run_orchestrator(
                         continue
                     preferred_endpoint = work.get("preferred_endpoint")
                     if isinstance(preferred_endpoint, str) and preferred_endpoint.strip():
-                        sticky_endpoint = preferred_endpoint.rstrip("/")
+                        preferred_target = preferred_endpoint.rstrip("/")
+                        sticky_endpoint = preferred_target
+                        endpoint = preferred_target
+                        if endpoint not in verified_endpoints:
+                            verified = await ensure_pow_for_scout(endpoint, scout_id)
+                            if not verified:
+                                sticky_endpoint = None
+                                await asyncio.sleep(0.25)
+                                continue
+                            verified_endpoints.add(endpoint)
 
                     prompt_context = str(work.get("prompt_context", ""))
                     user_prompt = extract_user_message(prompt_context)
