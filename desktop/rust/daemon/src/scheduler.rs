@@ -476,7 +476,19 @@ impl ScoutSupplyEstimate {
     }
 
     fn candidate_remote_scouts(self) -> usize {
-        self.browser_draft_capable.max(self.healthy_scout_reports)
+        // Candidate signals are used only for occasional cold-start probes.
+        // Accept lightweight scout activity as a hint, but keep "active" gating
+        // strict via remote_active_scouts().
+        let activity_candidates = if self.recent_submitters > 0 {
+            self.recent_submitters
+        } else if self.recent_pollers >= 2 {
+            1
+        } else {
+            0
+        };
+        self.browser_draft_capable
+            .max(self.healthy_scout_reports)
+            .max(activity_candidates)
     }
 
     fn effective_active_scouts(self) -> usize {
@@ -596,7 +608,7 @@ fn scout_probe_every_n_requests() -> u64 {
         .ok()
         .and_then(|v| v.trim().parse::<u64>().ok())
         .map(|v| v.clamp(2, 128))
-        .unwrap_or(16)
+        .unwrap_or(8)
 }
 
 fn scout_probe_timeout_ms() -> u64 {
@@ -636,7 +648,7 @@ async fn effective_speculative_timeout_ms(
         // scout candidates, with a very short timeout budget.
         let candidate_scouts = supply.candidate_remote_scouts();
         let probe_modulus = scout_probe_every_n_requests();
-        if candidate_scouts > 0 && queue_depth <= 2 && probe_allowed_for_request(request_id, probe_modulus) {
+        if candidate_scouts > 0 && queue_depth <= 4 && probe_allowed_for_request(request_id, probe_modulus) {
             let probe_timeout = scout_probe_timeout_ms();
             tracing::debug!(
                 probe_timeout,
