@@ -430,6 +430,7 @@ fn compute_effective_scout_timeout_ms(
 
 #[derive(Debug, Clone, Copy)]
 struct ScoutSupplyEstimate {
+    productive_runtime_scouts: usize,
     browser_draft_capable: usize,
     recent_pollers: usize,
     recent_submitters: usize,
@@ -439,9 +440,13 @@ struct ScoutSupplyEstimate {
 
 impl ScoutSupplyEstimate {
     fn remote_active_scouts(self) -> usize {
-        // Only trust explicit scout-capable runtime/heartbeat signals.
-        // Submission/poll traces can be noisy under overload and cause false positives.
-        self.healthy_scout_reports.max(self.browser_draft_capable)
+        // Route speculative work only when we have proof of recent draft productivity.
+        self.productive_runtime_scouts
+            .max(self.recent_result_submitters)
+    }
+
+    fn candidate_remote_scouts(self) -> usize {
+        self.browser_draft_capable.max(self.healthy_scout_reports)
     }
 
     fn effective_active_scouts(self) -> usize {
@@ -452,6 +457,7 @@ impl ScoutSupplyEstimate {
 async fn estimate_scout_supply(state: &SharedState) -> ScoutSupplyEstimate {
     const SCOUT_RUNTIME_TTL_MS: u128 = 10 * 60 * 1000;
     const SCOUT_ACTIVE_WINDOW_MS: u128 = 3 * 60 * 1000;
+    const SCOUT_PRODUCTIVE_WINDOW_MS: u128 = 90 * 1000;
     const SCOUT_POLL_ACTIVE_WINDOW_MS: u128 = 60 * 1000;
     const SCOUT_SUBMIT_ACTIVE_WINDOW_MS: u128 = 90 * 1000;
     const SCOUT_RESULT_ACTIVE_WINDOW_MS: u128 = 90 * 1000;
@@ -470,6 +476,24 @@ async fn estimate_scout_supply(state: &SharedState) -> ScoutSupplyEstimate {
                     .map(|mode| mode.eq_ignore_ascii_case("webgpu"))
                     .unwrap_or(false)
                     && now.saturating_sub(status.last_event_ms) <= SCOUT_ACTIVE_WINDOW_MS
+            })
+            .count()
+    };
+
+    let productive_runtime_scouts = {
+        let runtime = state.scout_client_runtime.lock().await;
+        runtime
+            .values()
+            .filter(|status| {
+                status
+                    .runtime_mode
+                    .as_deref()
+                    .map(|mode| mode.eq_ignore_ascii_case("webgpu"))
+                    .unwrap_or(false)
+                    && status
+                        .last_submit_success_ms
+                        .map(|ts| now.saturating_sub(ts) <= SCOUT_PRODUCTIVE_WINDOW_MS)
+                        .unwrap_or(false)
             })
             .count()
     };
@@ -524,6 +548,7 @@ async fn estimate_scout_supply(state: &SharedState) -> ScoutSupplyEstimate {
     };
 
     ScoutSupplyEstimate {
+        productive_runtime_scouts,
         browser_draft_capable,
         recent_pollers,
         recent_submitters,
@@ -536,7 +561,36 @@ async fn estimate_remote_active_scouts(state: &SharedState) -> usize {
     estimate_scout_supply(state).await.remote_active_scouts()
 }
 
-async fn effective_speculative_timeout_ms(state: &SharedState, config: &SpeculativeConfig) -> u64 {
+fn scout_probe_every_n_requests() -> u64 {
+    std::env::var("SHARD_SCOUT_PROBE_EVERY_N")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .map(|v| v.clamp(2, 128))
+        .unwrap_or(16)
+}
+
+fn scout_probe_timeout_ms() -> u64 {
+    std::env::var("SHARD_SCOUT_PROBE_TIMEOUT_MS")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .map(|v| v.clamp(75, 500))
+        .unwrap_or(200)
+}
+
+fn probe_allowed_for_request(request_id: &str, modulus: u64) -> bool {
+    if modulus <= 1 {
+        return true;
+    }
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    request_id.hash(&mut hasher);
+    (hasher.finish() % modulus) == 0
+}
+
+async fn effective_speculative_timeout_ms(
+    state: &SharedState,
+    config: &SpeculativeConfig,
+    request_id: &str,
+) -> u64 {
     let supply = estimate_scout_supply(state).await;
     let active_scouts = supply.effective_active_scouts();
     let queue_depth = {
@@ -546,13 +600,28 @@ async fn effective_speculative_timeout_ms(state: &SharedState, config: &Speculat
     let mut timeout_ms =
         compute_effective_scout_timeout_ms(config.scout_timeout_ms, active_scouts, queue_depth);
     if timeout_ms == 0 {
+        // Cold-start discovery: only probe occasionally and only when there are
+        // scout candidates, with a very short timeout budget.
+        let candidate_scouts = supply.candidate_remote_scouts();
+        let probe_modulus = scout_probe_every_n_requests();
+        if candidate_scouts > 0 && queue_depth <= 2 && probe_allowed_for_request(request_id, probe_modulus) {
+            let probe_timeout = scout_probe_timeout_ms();
+            tracing::debug!(
+                probe_timeout,
+                candidate_scouts,
+                probe_modulus,
+                "speculative probe enabled with no productive scouts yet"
+            );
+            return probe_timeout;
+        }
         tracing::debug!(
+            productive_runtime_scouts = supply.productive_runtime_scouts,
             browser_draft_capable = supply.browser_draft_capable,
             recent_pollers = supply.recent_pollers,
             recent_submitters = supply.recent_submitters,
             recent_result_submitters = supply.recent_result_submitters,
             healthy_scout_reports = supply.healthy_scout_reports,
-            "speculative dispatch skipped: no effective scout supply"
+            "speculative dispatch skipped: no productive scout supply"
         );
         return 0;
     }
@@ -607,7 +676,7 @@ async fn fetch_speculative_draft(
         preferred_endpoint: None,
     };
 
-    let scout_timeout_ms = effective_speculative_timeout_ms(state, config).await;
+    let scout_timeout_ms = effective_speculative_timeout_ms(state, config, request_id).await;
     if scout_timeout_ms == 0 {
         tracing::debug!("skipping speculative dispatch with zero effective timeout");
         return None;
@@ -1530,7 +1599,8 @@ mod tests {
     use super::{
         auth_required, compute_effective_scout_timeout_ms, enqueue_scout_work,
         infer_client_ip, model_pair_acceptance_rates, request_host_is_local, resolve_inference_mode,
-        should_abort_on_degenerate_output, strip_control_tokens, InferenceMode,
+        probe_allowed_for_request, should_abort_on_degenerate_output, strip_control_tokens,
+        InferenceMode,
         ScoutSupplyEstimate, WorkRequest,
     };
     use axum::http::{HeaderMap, HeaderValue};
@@ -1628,6 +1698,7 @@ mod tests {
     #[test]
     fn scout_supply_counts_only_remote_activity() {
         let empty = ScoutSupplyEstimate {
+            productive_runtime_scouts: 0,
             browser_draft_capable: 0,
             recent_pollers: 0,
             recent_submitters: 0,
@@ -1638,14 +1709,25 @@ mod tests {
         assert_eq!(empty.effective_active_scouts(), 0);
 
         let remote_present = ScoutSupplyEstimate {
+            productive_runtime_scouts: 1,
             browser_draft_capable: 2,
             recent_pollers: 3,
             recent_submitters: 1,
-            recent_result_submitters: 0,
+            recent_result_submitters: 4,
             healthy_scout_reports: 2,
         };
-        assert_eq!(remote_present.remote_active_scouts(), 2);
-        assert_eq!(remote_present.effective_active_scouts(), 2);
+        assert_eq!(remote_present.remote_active_scouts(), 4);
+        assert_eq!(remote_present.candidate_remote_scouts(), 2);
+        assert_eq!(remote_present.effective_active_scouts(), 4);
+    }
+
+    #[test]
+    fn probe_sampling_is_deterministic_and_bounded() {
+        let request_id = "req-1234";
+        let a = probe_allowed_for_request(request_id, 16);
+        let b = probe_allowed_for_request(request_id, 16);
+        assert_eq!(a, b);
+        assert!(probe_allowed_for_request(request_id, 1));
     }
 
     #[test]
