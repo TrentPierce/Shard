@@ -18,6 +18,43 @@ pub(crate) fn auth_required(require_api_key: bool, route_private: bool) -> bool 
     require_api_key || route_private
 }
 
+fn host_is_local(host: &str) -> bool {
+    let raw = host.trim().trim_start_matches('[').trim_end_matches(']');
+    let host_only = raw.split(':').next().unwrap_or(raw);
+    matches!(host_only, "localhost" | "127.0.0.1" | "::1")
+}
+
+fn request_host_is_local(headers: &HeaderMap) -> bool {
+    headers
+        .get("host")
+        .and_then(|value| value.to_str().ok())
+        .map(host_is_local)
+        .unwrap_or(false)
+}
+
+fn infer_client_ip(headers: &HeaderMap) -> Option<String> {
+    if let Some(forwarded) = headers
+        .get("x-forwarded-for")
+        .and_then(|value| value.to_str().ok())
+    {
+        if let Some(ip) = forwarded.split(',').next().map(str::trim) {
+            if !ip.is_empty() {
+                return Some(ip.to_string());
+            }
+        }
+    }
+    headers
+        .get("x-real-ip")
+        .and_then(|value| value.to_str().ok())
+        .or_else(|| {
+            headers
+                .get("cf-connecting-ip")
+                .and_then(|value| value.to_str().ok())
+        })
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
 fn strip_control_tokens(raw: &str) -> String {
     // Truncate once model control markers begin to avoid leaking serialized
     // chat-template headers back to end users.
@@ -867,18 +904,26 @@ pub(crate) async fn chat_completions_handler(
     }
 
     // 2. Check Contribution Balance and Rate Limit
-    let contribution_subject = api_key.unwrap_or("anonymous");
-    let contribution_balance = if api_key.is_some() {
+    let contribution_balance = if let Some(subject) = api_key {
         let ledger = state.ledger.lock().await;
-        ledger.balance_of(contribution_subject)
+        ledger.balance_of(subject)
     } else {
         0
     };
 
-    let rate_limit =
+    let rate_limit = if let Some(subject) = api_key {
         state
             .rate_limiter
-            .check(Some(contribution_subject), None, contribution_balance);
+            .check(Some(subject), None, contribution_balance)
+    } else if request_host_is_local(&headers) {
+        // Local CLI/benchmark calls should not be throttled by shared anonymous key state.
+        state.rate_limiter.check(None, None, contribution_balance)
+    } else {
+        let client_ip = infer_client_ip(&headers).unwrap_or_else(|| "unknown".to_string());
+        state
+            .rate_limiter
+            .check(None, Some(client_ip.as_str()), contribution_balance)
+    };
     if !rate_limit.is_allowed() {
         return (
             StatusCode::TOO_MANY_REQUESTS,
@@ -1424,9 +1469,10 @@ pub(crate) async fn chat_completions_handler(
 mod tests {
     use super::{
         auth_required, compute_effective_scout_timeout_ms, enqueue_scout_work,
-        model_pair_acceptance_rates, resolve_inference_mode, should_abort_on_degenerate_output,
-        strip_control_tokens, InferenceMode, WorkRequest,
+        infer_client_ip, model_pair_acceptance_rates, request_host_is_local, resolve_inference_mode,
+        should_abort_on_degenerate_output, strip_control_tokens, InferenceMode, WorkRequest,
     };
+    use axum::http::{HeaderMap, HeaderValue};
     use std::collections::VecDeque;
 
     #[test]
@@ -1522,5 +1568,30 @@ mod tests {
     fn degeneration_guard_detects_repetitive_suffix() {
         assert!(should_abort_on_degenerate_output("endendendend", "end").is_some());
         assert!(should_abort_on_degenerate_output("hello world ", "there").is_none());
+    }
+
+    #[test]
+    fn host_local_detection_is_correct() {
+        let mut local = HeaderMap::new();
+        local.insert("host", HeaderValue::from_static("127.0.0.1:9191"));
+        assert!(request_host_is_local(&local));
+
+        let mut remote = HeaderMap::new();
+        remote.insert("host", HeaderValue::from_static("api.shardnetwork.live"));
+        assert!(!request_host_is_local(&remote));
+    }
+
+    #[test]
+    fn infers_client_ip_from_forwarded_headers() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "x-forwarded-for",
+            HeaderValue::from_static("203.0.113.8, 10.0.0.1"),
+        );
+        assert_eq!(infer_client_ip(&headers).as_deref(), Some("203.0.113.8"));
+
+        headers.clear();
+        headers.insert("cf-connecting-ip", HeaderValue::from_static("198.51.100.2"));
+        assert_eq!(infer_client_ip(&headers).as_deref(), Some("198.51.100.2"));
     }
 }

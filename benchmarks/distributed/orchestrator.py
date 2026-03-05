@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from collections import Counter
 import hashlib
 import json
 import re
@@ -27,6 +28,8 @@ import httpx
 class RequestRecord:
     ok: bool
     latency_ms: float
+    status_code: int | None = None
+    error_kind: str | None = None
 
 
 @dataclass
@@ -208,6 +211,16 @@ async def fetch_summary(client: httpx.AsyncClient, base_url: str) -> dict:
     return {}
 
 
+async def fetch_health(client: httpx.AsyncClient, base_url: str) -> dict:
+    try:
+        resp = await client.get(f"{base_url.rstrip('/')}/health")
+        if resp.is_success:
+            return resp.json()
+    except Exception:
+        pass
+    return {}
+
+
 async def fetch_pool_summaries(client: httpx.AsyncClient, verifier_pool: list[str]) -> list[dict]:
     summaries: list[dict] = []
     for endpoint in verifier_pool:
@@ -227,6 +240,56 @@ def aggregate_speculative_totals(summaries: list[dict]) -> tuple[float, float]:
     return accepted, total
 
 
+async def wait_for_pool_readiness(
+    client: httpx.AsyncClient,
+    verifier_pool: list[str],
+    timeout_s: int = 120,
+    queue_depth_max: float = 8.0,
+    require_no_blackout: bool = True,
+    strict: bool = False,
+) -> bool:
+    deadline = time.monotonic() + max(1, timeout_s)
+    last_reason = "initializing"
+    while time.monotonic() < deadline:
+        reasons: list[str] = []
+        all_ready = True
+        for endpoint in verifier_pool:
+            health = await fetch_health(client, endpoint)
+            summary = await fetch_summary(client, endpoint)
+            if not health:
+                all_ready = False
+                reasons.append(f"{endpoint}:health_unreachable")
+                continue
+            if not bool(health.get("ready_for_inference", False)):
+                all_ready = False
+                reason = str(health.get("readiness_reason", "not_ready"))
+                reasons.append(f"{endpoint}:not_ready({reason})")
+            if not summary:
+                all_ready = False
+                reasons.append(f"{endpoint}:summary_unreachable")
+                continue
+            queue_depth = float(summary.get("queue_depth", 0.0) or 0.0)
+            if queue_depth > queue_depth_max:
+                all_ready = False
+                reasons.append(f"{endpoint}:queue={queue_depth:.1f}")
+            if require_no_blackout:
+                mode = str(summary.get("scout_blackout_mode", "open")).lower()
+                if mode == "blackout":
+                    all_ready = False
+                    reasons.append(f"{endpoint}:blackout")
+        if all_ready:
+            return True
+        last_reason = ", ".join(reasons[:4]) if reasons else "waiting"
+        await asyncio.sleep(2)
+    message = (
+        f"pool readiness timeout after {timeout_s}s (queue_max={queue_depth_max}): {last_reason}"
+    )
+    if strict:
+        raise RuntimeError(message)
+    print(f"[readiness] warning: {message}; continuing with run")
+    return False
+
+
 async def run_orchestrator(
     scouts: int,
     rate: int,
@@ -238,6 +301,10 @@ async def run_orchestrator(
     max_attempts: int,
     scout_workers: int,
     max_tokens: int,
+    readiness_timeout_s: int = 120,
+    ready_queue_depth_max: float = 8.0,
+    require_no_blackout: bool = True,
+    strict_readiness: bool = False,
 ) -> int:
     if not verifier_pool:
         raise ValueError("verifier_pool cannot be empty")
@@ -249,9 +316,8 @@ async def run_orchestrator(
     in_flight = 0
     in_flight_lock = asyncio.Lock()
     timeseries: list[dict] = []
-
-    start = time.monotonic()
-    end = start + duration
+    start = 0.0
+    end = 0.0
 
     limits = httpx.Limits(max_keepalive_connections=max(50, scouts), max_connections=max(100, scouts * 2))
     timeout_secs = max(0.5, request_timeout_ms / 1000.0)
@@ -263,6 +329,16 @@ async def run_orchestrator(
     )
 
     async with httpx.AsyncClient(limits=limits, timeout=timeout) as client:
+        await wait_for_pool_readiness(
+            client=client,
+            verifier_pool=verifier_pool,
+            timeout_s=readiness_timeout_s,
+            queue_depth_max=ready_queue_depth_max,
+            require_no_blackout=require_no_blackout,
+            strict=strict_readiness,
+        )
+        start = time.monotonic()
+        end = start + duration
         baseline_summaries = await fetch_pool_summaries(client, verifier_pool)
         baseline_accepted, baseline_total = aggregate_speculative_totals(baseline_summaries)
         scout_target = max(0, scout_workers)
@@ -414,6 +490,8 @@ async def run_orchestrator(
                     in_flight += 1
                 t0 = time.monotonic()
                 ok = False
+                final_status: int | None = None
+                final_error_kind: str | None = None
                 for _attempt in range(max(1, max_attempts)):
                     endpoint = None
                     try:
@@ -427,16 +505,21 @@ async def run_orchestrator(
                                 "max_tokens": max(1, max_tokens),
                             },
                         )
+                        final_status = int(resp.status_code)
                         attempt_ok = resp.status_code < 400
                         await pool.note_result(
                             endpoint=endpoint,
                             ok=attempt_ok,
                             latency_ms=(time.monotonic() - t0) * 1000.0,
                         )
+                        if not attempt_ok:
+                            final_error_kind = f"http_{resp.status_code}"
                         if attempt_ok:
                             ok = True
+                            final_error_kind = None
                             break
-                    except Exception:
+                    except Exception as exc:
+                        final_error_kind = exc.__class__.__name__
                         if endpoint:
                             await pool.note_result(
                                 endpoint=endpoint,
@@ -446,7 +529,14 @@ async def run_orchestrator(
                     await asyncio.sleep(0.01)
                 latency_ms = (time.monotonic() - t0) * 1000.0
                 async with records_lock:
-                    records.append(RequestRecord(ok=ok, latency_ms=latency_ms))
+                    records.append(
+                        RequestRecord(
+                            ok=ok,
+                            latency_ms=latency_ms,
+                            status_code=final_status,
+                            error_kind=final_error_kind,
+                        )
+                    )
                 async with in_flight_lock:
                     in_flight -= 1
 
@@ -476,6 +566,15 @@ async def run_orchestrator(
                     errs = len(records) - oks
                     p95 = percentile(latencies, 0.95)
                     err_rate = (errs / len(records) * 100.0) if records else 0.0
+                    error_counts: Counter[str] = Counter()
+                    for record in records:
+                        if record.ok:
+                            continue
+                        key = (
+                            record.error_kind
+                            or (f"http_{record.status_code}" if record.status_code else "unknown")
+                        )
+                        error_counts[key] += 1
                 summary_now = await fetch_summary(client, verifier_pool[0])
                 acceptance = float(summary_now.get("speculative_acceptance_rate", 0.0)) * 100.0
                 pool_summaries = await fetch_pool_summaries(client, verifier_pool)
@@ -504,11 +603,16 @@ async def run_orchestrator(
                 async with in_flight_lock:
                     active = in_flight
                 active_scout_target = await get_scout_target()
+                top_errors = ", ".join(
+                    f"{kind}:{count}" for kind, count in error_counts.most_common(2)
+                )
+                if not top_errors:
+                    top_errors = "none"
                 print(
-                    f"[{elapsed}s/{duration}s] Scouts: {active} active | p95: {p95/1000.0:.2f}s | "
+                    f"[{elapsed}s/{duration}s] InFlight: {active} | p95: {p95/1000.0:.2f}s | "
                     f"accept: {acceptance:.1f}% | errors: {err_rate:.2f}% | "
                     f"scout_target: {active_scout_target} | max_q: {max_queue_depth:.1f} | max_p95: {max_p95_latency_ms:.0f}ms | "
-                    f"blackout_nodes: {blackout_endpoints}"
+                    f"blackout_nodes: {blackout_endpoints} | top_errors: {top_errors}"
                 )
                 timeseries.append(
                     {
@@ -556,6 +660,14 @@ async def run_orchestrator(
         acceptance_source = "no_speculative_samples"
 
     throughput_tps = oks / float(duration) if duration > 0 else 0.0
+    status_counts: Counter[str] = Counter()
+    error_breakdown: Counter[str] = Counter()
+    for record in records:
+        if record.status_code is not None:
+            status_counts[str(record.status_code)] += 1
+        if not record.ok:
+            key = record.error_kind or (f"http_{record.status_code}" if record.status_code else "unknown")
+            error_breakdown[key] += 1
 
     results = {
         "scouts": scouts,
@@ -571,6 +683,8 @@ async def run_orchestrator(
         "acceptance_source": acceptance_source,
         "acceptance_samples": int(total_delta),
         "throughput_tps": round(throughput_tps, 4),
+        "status_counts": dict(status_counts),
+        "error_breakdown": dict(error_breakdown),
         "timeseries": timeseries,
     }
 
@@ -612,7 +726,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--request-timeout-ms",
         type=int,
-        default=2500,
+        default=10000,
         help="Per-request timeout in milliseconds",
     )
     parser.add_argument(
@@ -633,6 +747,28 @@ def parse_args() -> argparse.Namespace:
         default=32,
         help="max_tokens sent to each chat completion request",
     )
+    parser.add_argument(
+        "--readiness-timeout-s",
+        type=int,
+        default=120,
+        help="Max wait before a run starts while endpoints become healthy/drained",
+    )
+    parser.add_argument(
+        "--ready-queue-depth-max",
+        type=float,
+        default=8.0,
+        help="Required max queue depth before test launch",
+    )
+    parser.add_argument(
+        "--allow-readiness-blackout",
+        action="store_true",
+        help="Allow run launch even if any endpoint reports scout blackout mode",
+    )
+    parser.add_argument(
+        "--strict-readiness",
+        action="store_true",
+        help="Fail the run if endpoints do not drain/ready within readiness timeout.",
+    )
     return parser.parse_args()
 
 
@@ -651,6 +787,10 @@ def main() -> None:
             max_attempts=args.max_attempts,
             scout_workers=args.scout_workers,
             max_tokens=args.max_tokens,
+            readiness_timeout_s=args.readiness_timeout_s,
+            ready_queue_depth_max=args.ready_queue_depth_max,
+            require_no_blackout=not args.allow_readiness_blackout,
+            strict_readiness=args.strict_readiness,
         )
     )
     raise SystemExit(exit_code)

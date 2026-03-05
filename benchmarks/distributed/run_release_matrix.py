@@ -26,10 +26,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import httpx
+
 if __package__ is None or __package__ == "":
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from benchmarks.distributed.orchestrator import run_orchestrator
+from benchmarks.distributed.orchestrator import run_orchestrator, wait_for_pool_readiness
 
 
 @dataclass(frozen=True)
@@ -235,6 +237,10 @@ async def execute(args: argparse.Namespace) -> dict[str, Any]:
                 max_attempts=args.max_attempts,
                 scout_workers=workers,
                 max_tokens=args.max_tokens,
+                readiness_timeout_s=args.readiness_timeout_s,
+                ready_queue_depth_max=args.ready_queue_depth_max,
+                require_no_blackout=not args.allow_readiness_blackout,
+                strict_readiness=args.strict_readiness,
             )
             try:
                 data = json.loads(out_path.read_text(encoding="utf-8"))
@@ -248,6 +254,26 @@ async def execute(args: argparse.Namespace) -> dict[str, Any]:
             data["orchestrator_exit_code"] = exit_code
             data["output_file"] = str(out_path.as_posix())
             by_scenario[scenario.name].append(data)
+            if args.flush_timeout_s > 0:
+                print(
+                    "Flushing verifier queues before next run "
+                    f"(timeout={args.flush_timeout_s}s queue_max={args.flush_queue_depth_max})"
+                )
+                flush_timeout = httpx.Timeout(
+                    connect=2.0,
+                    read=min(10.0, max(2.0, args.flush_timeout_s)),
+                    write=min(10.0, max(2.0, args.flush_timeout_s)),
+                    pool=min(10.0, max(2.0, args.flush_timeout_s)),
+                )
+                async with httpx.AsyncClient(timeout=flush_timeout) as flush_client:
+                    await wait_for_pool_readiness(
+                        client=flush_client,
+                        verifier_pool=pool,
+                        timeout_s=args.flush_timeout_s,
+                        queue_depth_max=args.flush_queue_depth_max,
+                        require_no_blackout=not args.allow_readiness_blackout,
+                        strict=False,
+                    )
 
     aggregates: dict[str, dict[str, Any]] = {}
     for scenario in SCENARIOS:
@@ -283,6 +309,12 @@ async def execute(args: argparse.Namespace) -> dict[str, Any]:
             "request_timeout_ms": args.request_timeout_ms,
             "max_attempts": args.max_attempts,
             "max_tokens": args.max_tokens,
+            "readiness_timeout_s": args.readiness_timeout_s,
+            "ready_queue_depth_max": args.ready_queue_depth_max,
+            "allow_readiness_blackout": args.allow_readiness_blackout,
+            "strict_readiness": args.strict_readiness,
+            "flush_timeout_s": args.flush_timeout_s,
+            "flush_queue_depth_max": args.flush_queue_depth_max,
             "one_node_pool": one_pool,
             "two_node_pool": two_pool,
         },
@@ -327,9 +359,25 @@ def parse_args() -> argparse.Namespace:
         default="distributed",
         choices=["standard", "distributed", "speculative"],
     )
-    parser.add_argument("--request-timeout-ms", type=int, default=2500)
+    parser.add_argument("--request-timeout-ms", type=int, default=10000)
     parser.add_argument("--max-attempts", type=int, default=2)
     parser.add_argument("--max-tokens", type=int, default=32)
+    parser.add_argument("--readiness-timeout-s", type=int, default=120)
+    parser.add_argument("--ready-queue-depth-max", type=float, default=8.0)
+    parser.add_argument("--allow-readiness-blackout", action="store_true")
+    parser.add_argument("--strict-readiness", action="store_true")
+    parser.add_argument(
+        "--flush-timeout-s",
+        type=int,
+        default=45,
+        help="Wait this long for queue/blackout drain between runs (0 disables).",
+    )
+    parser.add_argument(
+        "--flush-queue-depth-max",
+        type=float,
+        default=8.0,
+        help="Required queue depth before the next scenario starts.",
+    )
     parser.add_argument("--out-dir", type=str, default="reports/release-rc")
     parser.add_argument("--tag", type=str, default="")
     return parser.parse_args()
