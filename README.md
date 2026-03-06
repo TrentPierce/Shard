@@ -83,28 +83,28 @@ Latest refreshed RC matrix:
 
 | Scenario | p95 latency (ms) | Throughput (TPS) | Error rate (%) | Speculative samples |
 |---------|-------------------|------------------|----------------|---------------------|
-| 1 node, no scouts | 309.839 | 2.1000 | 0.0000 | 0 |
-| 1 node, with scouts | 968.387 | 2.1000 | 0.0000 | 6 |
-| 2 nodes, no scouts | 481.669 | 2.1000 | 0.0000 | 0 |
-| 2 nodes, with scouts | 1390.275 | 2.1000 | 0.0000 | 1 |
+| 1 node, no scouts | 284.929 | 2.1000 | 0.0000 | 0 |
+| 1 node, with scouts | 1089.169 | 2.1000 | 0.0000 | 3 |
+| 2 nodes, no scouts | 417.335 | 2.1000 | 0.0000 | 0 |
+| 2 nodes, with scouts | 1134.846 | 2.1000 | 0.0000 | 0 |
 
 Current recommendation: **NO_GO**
 
 What this means:
 
 - The verifier mesh is stable in all four scenarios.
-- Queue carryover and stale speculative work were fixed.
-- Scouts no longer break the network, but they still do not beat the 2-node verifier-only baseline in this RC profile.
-- The best current production path is still verifier-first: 2 nodes, no scouts.
+- The benchmark harness now isolates verifier-only runs by forcing `standard` mode and disabling scout ingress during no-scout scenarios.
+- Scouts no longer break the network, but they still do not beat the verifier-only baseline in this RC profile.
+- At this low 2 req/s load, the fastest p95 is still `1 node, no scouts`.
 
 Raw artifacts:
 
-- `reports/release-rc/release-rc-20260306T032328Z-spring-rc-refresh/go-no-go-summary.json`
-- `reports/release-rc/release-rc-20260306T032328Z-spring-rc-refresh/go-no-go-report.md`
-- `reports/release-rc/release-rc-20260306T032328Z-spring-rc-refresh/one-node-no-scouts-run1.json`
-- `reports/release-rc/release-rc-20260306T032328Z-spring-rc-refresh/one-node-with-scouts-run1.json`
-- `reports/release-rc/release-rc-20260306T032328Z-spring-rc-refresh/two-node-no-scouts-run1.json`
-- `reports/release-rc/release-rc-20260306T032328Z-spring-rc-refresh/two-node-with-scouts-run1.json`
+- `reports/release-rc/release-rc-20260306T053407Z-20260306Tclean-zero-scouts-isolated/go-no-go-summary.json`
+- `reports/release-rc/release-rc-20260306T053407Z-20260306Tclean-zero-scouts-isolated/go-no-go-report.md`
+- `reports/release-rc/release-rc-20260306T053407Z-20260306Tclean-zero-scouts-isolated/one-node-no-scouts-run1.json`
+- `reports/release-rc/release-rc-20260306T053407Z-20260306Tclean-zero-scouts-isolated/one-node-with-scouts-run1.json`
+- `reports/release-rc/release-rc-20260306T053407Z-20260306Tclean-zero-scouts-isolated/two-node-no-scouts-run1.json`
+- `reports/release-rc/release-rc-20260306T053407Z-20260306Tclean-zero-scouts-isolated/two-node-with-scouts-run1.json`
 
 ---
 

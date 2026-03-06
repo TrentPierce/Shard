@@ -65,16 +65,16 @@ const joinPaths: JoinPath[] = [
 ]
 
 const benchmarkRows: BenchmarkRow[] = [
-  { scenario: "1 node, no scouts", p95Ms: 309.839, tps: 2.1, errorPct: 0, verdict: "Stable baseline" },
-  { scenario: "1 node, with scouts", p95Ms: 968.387, tps: 2.1, errorPct: 0, verdict: "Working, but slower" },
-  { scenario: "2 nodes, no scouts", p95Ms: 481.669, tps: 2.1, errorPct: 0, verdict: "Best current production path" },
-  { scenario: "2 nodes, with scouts", p95Ms: 1390.275, tps: 2.1, errorPct: 0, verdict: "Much better than before, still not faster" },
+  { scenario: "1 node, no scouts", p95Ms: 284.929, tps: 2.1, errorPct: 0, verdict: "Fastest p95 at this low load" },
+  { scenario: "1 node, with scouts", p95Ms: 1089.169, tps: 2.1, errorPct: 0, verdict: "Stable, but slower than verifier-only" },
+  { scenario: "2 nodes, no scouts", p95Ms: 417.335, tps: 2.1, errorPct: 0, verdict: "Clean mesh baseline across local + EC2" },
+  { scenario: "2 nodes, with scouts", p95Ms: 1134.846, tps: 2.1, errorPct: 0, verdict: "Improved, still behind verifier-only" },
 ]
 
 const takeaways = [
   "The mesh is stable with 1 or 2 verifier nodes and cleanly drains after each run.",
-  "Scouts no longer poison verifier queues when they time out or finish late.",
-  "Release status is still NO_GO because scout-assisted 2-node runs remain slower than the 2-node verifier-only baseline.",
+  "Verifier-only benchmark runs are now isolated by forcing standard mode and disabling scout ingress during those scenarios.",
+  "Release status is still NO_GO because scout-assisted runs remain slower than the verifier-only baseline.",
 ]
 
 function formatCompact(value: number) {
@@ -186,8 +186,8 @@ export default function HomePage() {
               </div>
               <div className="rounded-2xl border border-white/10 bg-black/15 p-4">
                 <p className="text-xs uppercase tracking-[0.18em] text-ink-400">Best current path</p>
-                <p className="mt-2 text-lg font-semibold text-ink-50">2 verifiers, no scouts</p>
-                <p className="mt-1 text-sm text-ink-300">Fastest current median p95 in the refreshed RC matrix.</p>
+                <p className="mt-2 text-lg font-semibold text-ink-50">1 verifier, no scouts</p>
+                <p className="mt-1 text-sm text-ink-300">Fastest current median p95 in the isolated March 6 RC matrix.</p>
               </div>
               <div className="rounded-2xl border border-white/10 bg-black/15 p-4">
                 <p className="text-xs uppercase tracking-[0.18em] text-ink-400">Browser status</p>
