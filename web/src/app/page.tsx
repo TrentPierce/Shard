@@ -81,6 +81,19 @@ function formatCompact(value: number) {
   return value.toLocaleString(undefined, { maximumFractionDigits: value >= 100 ? 0 : 1 })
 }
 
+function formatSeconds(seconds: number | null) {
+  if (!seconds || seconds <= 0) return "fresh"
+  if (seconds >= 3600) return `${Math.round(seconds / 3600)}h uptime`
+  if (seconds >= 60) return `${Math.round(seconds / 60)}m uptime`
+  return `${seconds}s uptime`
+}
+
+function healthBadgeClass(health: string) {
+  if (health === "healthy") return "border-emerald-400/30 bg-emerald-400/10 text-emerald-100"
+  if (health === "degraded") return "border-amber-300/30 bg-amber-300/10 text-amber-100"
+  return "border-white/10 bg-white/5 text-ink-300"
+}
+
 export default function HomePage() {
   const dashboard = useDashboardTelemetry()
   const { telemetry, errorMessage } = useSwarmTelemetry()
@@ -129,7 +142,6 @@ export default function HomePage() {
       const share = totalTokens > 0 ? (row.tokensProcessed / totalTokens) * 100 : row.efficiency
       return {
         ...row,
-        label: row.role === "Shard" ? "Verifier node" : "Browser scout",
         width: Math.max(12, Math.min(100, Math.round(share))),
       }
     })
@@ -290,7 +302,7 @@ export default function HomePage() {
             </span>
           </div>
           <p className="mt-3 text-sm leading-6 text-ink-300">
-            This view uses live daemon and proxy telemetry to show the active nodes the dashboard can currently observe, plus each node&apos;s recent token contribution when that data is available.
+            This view combines proxy health probes, queue data, latency, uptime, model identity, and token totals so you can see which verifier nodes are healthy and which contributors are actually carrying work.
           </p>
           <div className="mt-6 space-y-3">
             {contributionRows.length > 0 ? (
@@ -299,13 +311,47 @@ export default function HomePage() {
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
                       <p className="text-sm font-semibold text-ink-50">{row.id}</p>
-                      <p className="text-xs uppercase tracking-[0.16em] text-ink-400">{row.label}</p>
+                      <div className="mt-1 flex flex-wrap items-center gap-2">
+                        <p className="text-xs uppercase tracking-[0.16em] text-ink-400">{row.label}</p>
+                        <span className={`rounded-full border px-2 py-1 text-[11px] uppercase tracking-[0.14em] ${healthBadgeClass(row.health)}`}>
+                          {row.health}
+                        </span>
+                        {row.backend ? (
+                          <span className="rounded-full border border-white/10 bg-white/5 px-2 py-1 text-[11px] text-ink-300">
+                            {row.backend.replace(/^https?:\/\//, "")}
+                          </span>
+                        ) : null}
+                      </div>
                     </div>
                     <div className="text-right">
                       <p className="text-sm font-semibold text-accent-100">{formatCompact(row.tokensProcessed)} tokens</p>
                       <p className="text-xs text-ink-400">efficiency {row.efficiency}%</p>
                     </div>
                   </div>
+                  <div className="mt-3 flex flex-wrap gap-2 text-xs text-ink-300">
+                    <span className="rounded-full border border-white/10 bg-white/5 px-2 py-1">
+                      queue {row.queueDepth}
+                    </span>
+                    <span className="rounded-full border border-white/10 bg-white/5 px-2 py-1">
+                      {row.latencyMs > 0 ? `${row.latencyMs} ms` : "latency n/a"}
+                    </span>
+                    <span className="rounded-full border border-white/10 bg-white/5 px-2 py-1">
+                      {formatSeconds(row.uptimeSeconds)}
+                    </span>
+                    {row.modelId ? (
+                      <span className="rounded-full border border-white/10 bg-white/5 px-2 py-1">
+                        {row.modelId}
+                      </span>
+                    ) : null}
+                    {row.rustVersion ? (
+                      <span className="rounded-full border border-white/10 bg-white/5 px-2 py-1">
+                        rust {row.rustVersion}
+                      </span>
+                    ) : null}
+                  </div>
+                  {row.readinessReason ? (
+                    <p className="mt-3 text-xs text-amber-100">readiness: {row.readinessReason}</p>
+                  ) : null}
                   <div className="mt-3 h-3 overflow-hidden rounded-full bg-white/6">
                     <div className="h-full rounded-full bg-[linear-gradient(90deg,#677db7,#9ca3db)]" style={{ width: `${row.width}%` }} />
                   </div>

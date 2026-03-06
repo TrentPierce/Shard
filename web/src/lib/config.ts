@@ -16,6 +16,13 @@ export const SHARD_BACKEND_BASE = process.env.NEXT_PUBLIC_SHARD_BACKEND_URL || "
  */
 export const PREFER_LOCAL_SHARD = process.env.NEXT_PUBLIC_PREFER_LOCAL_SHARD === "true"
 
+/**
+ * Browser layer hosting is an experimental path and should only be enabled when
+ * the backend has been explicitly prepared to accept browser-layer sessions.
+ */
+export const ENABLE_BROWSER_LAYER_HOST =
+  process.env.NEXT_PUBLIC_ENABLE_BROWSER_LAYER_HOST === "true"
+
 export function apiUrl(path: string = "/v1"): string {
   const cleanPath = path.startsWith("/") ? path : `/${path}`
   // If API_BASE is empty, it results in a relative path like "/api/v1/..."

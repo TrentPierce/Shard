@@ -3,11 +3,23 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { canUseLocalDaemonFallback, getPreferredLocalDaemonBase, localDaemonUrl } from "@/lib/runtime"
 
+type ContributorHealth = "healthy" | "degraded" | "unknown"
+
 type Contributor = {
   id: string
   role: "Scout" | "Shard"
   tokensProcessed: number
   efficiency: number
+  health: ContributorHealth
+  queueDepth: number
+  latencyMs: number
+  backend: string | null
+  modelId: string | null
+  rustVersion: string | null
+  uptimeSeconds: number | null
+  readinessReason: string | null
+  label: string
+  source: "metrics_node" | "peer_store" | "local_daemon" | "browser_scout"
 }
 
 type ThroughputSample = {
@@ -24,6 +36,18 @@ type SwarmTelemetrySnapshot = {
   throughputHistory: ThroughputSample[]
   contributors: Contributor[]
   totalTokensGenerated: number
+}
+
+function toPositiveNumber(value: unknown): number | null {
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed)) return null
+  return parsed >= 0 ? parsed : null
+}
+
+function compactId(value: unknown, fallback: string): string {
+  const raw = String(value ?? "").trim()
+  if (!raw) return fallback
+  return raw.length > 18 ? raw.slice(0, 18) : raw
 }
 
 async function fetchRealTelemetry(): Promise<SwarmTelemetrySnapshot> {
@@ -145,29 +169,99 @@ async function fetchRealTelemetry(): Promise<SwarmTelemetrySnapshot> {
   )
   const totalTokensGenerated = tokensProcessedTotal + tokensOffloadedToScoutsTotal
 
-  // Build contributor list: start with the Shard node itself
   const contributors: Contributor[] = []
+  const seenContributorIds = new Set<string>()
+  const registerContributor = (contributor: Contributor) => {
+    if (seenContributorIds.has(contributor.id)) return
+    seenContributorIds.add(contributor.id)
+    contributors.push(contributor)
+  }
+
+  const nodeSummaries = Array.isArray(metrics?.nodes) ? metrics.nodes : []
+  const nodeProbes = Array.isArray(metrics?.node_probes) ? metrics.node_probes : []
+
+  nodeSummaries.forEach((node: any, index: number) => {
+    const probe = nodeProbes[index] ?? null
+    const queueDepth = toPositiveNumber(node?.queue_depth) ?? 0
+    const latencyMs = toPositiveNumber(node?.node_latency_ms) ?? 0
+    const uptimeSeconds = toPositiveNumber(node?.uptime_seconds)
+    const healthy = Boolean(node?.healthy ?? probe?.healthy ?? false)
+    registerContributor({
+      id: compactId(node?.node_pubkey ?? probe?.backend, `node-${index + 1}`),
+      role: "Shard",
+      tokensProcessed: toPositiveNumber(node?.tokens_processed) ?? (index === 0 ? tokensProcessedTotal : 0),
+      efficiency: healthy ? 95 : 68,
+      health: healthy ? "healthy" : probe ? "degraded" : "unknown",
+      queueDepth,
+      latencyMs,
+      backend: typeof probe?.backend === "string" ? probe.backend : null,
+      modelId: typeof probe?.model_id === "string" ? probe.model_id : typeof health?.model_id === "string" ? health.model_id : null,
+      rustVersion: typeof probe?.rust_version === "string" ? probe.rust_version : typeof health?.rust_version === "string" ? health.rust_version : null,
+      uptimeSeconds,
+      readinessReason: typeof probe?.readiness_reason === "string" ? probe.readiness_reason : null,
+      label: node?.role === "gateway" ? "Gateway verifier" : "Verifier node",
+      source: "metrics_node",
+    })
+  })
 
   const localPeerId = topo?.shard_peer_id ?? health?.peer_id
   if (shardCount > 0 && localPeerId) {
-    contributors.push({
-      id: localPeerId.slice(0, 16),
+    registerContributor({
+      id: compactId(localPeerId, "local-shard"),
       role: "Shard",
       tokensProcessed: tokensProcessedTotal,
       efficiency: bitnetLoaded ? 95 : 50,
+      health: healthOk ? "healthy" : "degraded",
+      queueDepth: toPositiveNumber(metrics?.queue_depth) ?? 0,
+      latencyMs: toPositiveNumber(health?.latency_ms) ?? 0,
+      backend: typeof health?.backend === "string" ? health.backend : null,
+      modelId: typeof health?.model_id === "string" ? health.model_id : null,
+      rustVersion: typeof health?.rust_version === "string" ? health.rust_version : null,
+      uptimeSeconds: toPositiveNumber(health?.uptime_ms) != null ? Math.round((toPositiveNumber(health?.uptime_ms) ?? 0) / 1000) : null,
+      readinessReason: typeof health?.readiness_reason === "string" ? health.readiness_reason : null,
+      label: "Local verifier",
+      source: "local_daemon",
     })
   }
 
-  // Add connected peers as Shard contributors
   if (peersData?.peers && Array.isArray(peersData.peers)) {
     for (const peer of peersData.peers) {
-      contributors.push({
-        id: (peer.peer_id || peer.id || "unknown").slice(0, 16),
+      registerContributor({
+        id: compactId(peer.peer_id || peer.id || "unknown", "peer"),
         role: "Shard",
-        tokensProcessed: peer.tokens_processed ?? 0,
+        tokensProcessed: toPositiveNumber(peer.tokens_processed) ?? 0,
         efficiency: peer.verified ? 90 : 70,
+        health: peer.verified ? "healthy" : "unknown",
+        queueDepth: 0,
+        latencyMs: 0,
+        backend: null,
+        modelId: null,
+        rustVersion: null,
+        uptimeSeconds: null,
+        readinessReason: null,
+        label: peer.verified ? "Connected verifier" : "Connected peer",
+        source: "peer_store",
       })
     }
+  }
+
+  if (scoutCount > 0 || tokensOffloadedToScoutsTotal > 0) {
+    registerContributor({
+      id: `scout-pool-${scoutCount || 1}`,
+      role: "Scout",
+      tokensProcessed: tokensOffloadedToScoutsTotal,
+      efficiency: scoutCount > 0 ? Math.max(55, Math.min(98, 72 + scoutCount)) : 60,
+      health: scoutCount > 0 ? "healthy" : "unknown",
+      queueDepth: 0,
+      latencyMs: 0,
+      backend: null,
+      modelId: typeof health?.model_id === "string" ? health.model_id : null,
+      rustVersion: null,
+      uptimeSeconds: null,
+      readinessReason: null,
+      label: scoutCount > 0 ? `Browser scout pool (${scoutCount})` : "Browser scout pool",
+      source: "browser_scout",
+    })
   }
 
   return {

@@ -8,7 +8,7 @@ import {
     startScoutWorker,
     type Topology,
 } from "@/lib/swarm"
-import { PREFER_LOCAL_SHARD, apiUrl } from "@/lib/config"
+import { ENABLE_BROWSER_LAYER_HOST, PREFER_LOCAL_SHARD, apiUrl } from "@/lib/config"
 import {
     initWebLLM,
     type ModelProgress,
@@ -225,10 +225,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                     )
                 }
 
-                try {
-                    stopLayerHostRef.current = await startBrowserLayerHost({ modelId: DEFAULT_MODEL_ID, layerStart: 0, layerEnd: 1 })
-                } catch (e) {
-                    console.warn(e)
+                if (ENABLE_BROWSER_LAYER_HOST) {
+                    try {
+                        stopLayerHostRef.current = await startBrowserLayerHost({ modelId: DEFAULT_MODEL_ID, layerStart: 0, layerEnd: 1 })
+                    } catch (e) {
+                        console.warn(e)
+                    }
                 }
 
                 try {
