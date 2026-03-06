@@ -337,7 +337,8 @@ mod tests {
         let challenge = manager.issue_challenge("peer_c", 4, 60_000, false);
         let challenge_bytes =
             hex::decode(&challenge.challenge_bytes_hex).expect("issued challenge hex must decode");
-        let solution = solve_challenge(&challenge_bytes, 4).expect("difficulty 4 should be solvable");
+        let solution =
+            solve_challenge(&challenge_bytes, 4).expect("difficulty 4 should be solvable");
 
         // Manually backdate the challenge so it's guaranteed expired
         if let Some(c) = manager.pending.get_mut("peer_c") {

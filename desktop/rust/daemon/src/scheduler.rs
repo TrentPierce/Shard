@@ -891,8 +891,13 @@ fn compute_effective_scout_timeout_ms(
     if queue_depth >= soft_queue {
         return bounded_base.min(800);
     }
+    let low_supply_cap = std::env::var("SHARD_SCOUT_TIMEOUT_LOW_SUPPLY_MS")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .map(|v| v.clamp(600, 5_000))
+        .unwrap_or(950);
     if active_scouts <= min_active_scouts.saturating_add(1) {
-        return bounded_base.min(950);
+        return bounded_base.min(low_supply_cap);
     }
     bounded_base.min(850)
 }
@@ -1066,7 +1071,7 @@ fn scout_probe_timeout_ms() -> u64 {
     std::env::var("SHARD_SCOUT_PROBE_TIMEOUT_MS")
         .ok()
         .and_then(|v| v.trim().parse::<u64>().ok())
-        .map(|v| v.clamp(150, 1_000))
+        .map(|v| v.clamp(150, 2_500))
         .unwrap_or(500)
 }
 

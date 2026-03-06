@@ -2535,7 +2535,10 @@ fn create_router(
             post(model_rollout_reset_handler),
         )
         .route("/v1/system/scout-ingress", get(scout_ingress_handler))
-        .route("/v1/system/scout-ingress", post(scout_ingress_update_handler))
+        .route(
+            "/v1/system/scout-ingress",
+            post(scout_ingress_update_handler),
+        )
         .route("/v1/system/scout-config", get(scout_config_handler))
         .route(
             "/browser-layer/register",

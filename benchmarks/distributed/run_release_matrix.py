@@ -381,6 +381,8 @@ async def execute(args: argparse.Namespace) -> dict[str, Any]:
                     browser_headless=args.browser_headless,
                     browser_startup_timeout_ms=args.browser_startup_timeout_ms,
                     browser_user_data_dir=args.browser_user_data_dir or None,
+                    browser_warmup_timeout_s=args.browser_warmup_timeout_s,
+                    browser_warmup_max_requests=args.browser_warmup_max_requests,
                     readiness_timeout_s=args.readiness_timeout_s,
                     ready_queue_depth_max=args.ready_queue_depth_max,
                     require_no_blackout=not args.allow_readiness_blackout,
@@ -486,6 +488,8 @@ async def execute(args: argparse.Namespace) -> dict[str, Any]:
             "browser_headless": args.browser_headless,
             "browser_startup_timeout_ms": args.browser_startup_timeout_ms,
             "browser_user_data_dir": args.browser_user_data_dir,
+            "browser_warmup_timeout_s": args.browser_warmup_timeout_s,
+            "browser_warmup_max_requests": args.browser_warmup_max_requests,
             "readiness_timeout_s": args.readiness_timeout_s,
             "ready_queue_depth_max": args.ready_queue_depth_max,
             "allow_readiness_blackout": args.allow_readiness_blackout,
@@ -550,6 +554,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--browser-headless", action="store_true")
     parser.add_argument("--browser-startup-timeout-ms", type=int, default=900000)
     parser.add_argument("--browser-user-data-dir", type=str, default="")
+    parser.add_argument("--browser-warmup-timeout-s", type=int, default=45)
+    parser.add_argument("--browser-warmup-max-requests", type=int, default=12)
     parser.add_argument(
         "--inference-mode",
         type=str,

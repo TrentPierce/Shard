@@ -265,6 +265,13 @@ async def fetch_pool_health(client: httpx.AsyncClient, verifier_pool: list[str])
     return health_rows
 
 
+def aggregate_counter(summaries: list[dict], key: str) -> float:
+    total = 0.0
+    for summary in summaries:
+        total += float(summary.get(key, 0.0) or 0.0)
+    return total
+
+
 def aggregate_speculative_totals(summaries: list[dict]) -> tuple[float, float]:
     accepted = 0.0
     total = 0.0
@@ -282,6 +289,30 @@ def summary_latency_signal_ms(summary: dict) -> float:
 
 def summary_has_queue_breakdown(summary: dict) -> bool:
     return all(key in summary for key in SUMMARY_QUEUE_BREAKDOWN_KEYS)
+
+
+async def wait_for_browser_scout_supply(
+    client: httpx.AsyncClient,
+    verifier_pool: list[str],
+    timeout_s: int,
+    expected_scouts: int,
+) -> bool:
+    deadline = time.monotonic() + max(1, timeout_s)
+    required = max(1, expected_scouts)
+    while time.monotonic() < deadline:
+        pool_health = await fetch_pool_health(client, verifier_pool)
+        observed_sessions = max(
+            (int(health.get("active_browser_sessions", 0) or 0) for health in pool_health),
+            default=0,
+        )
+        observed_draft_capable = max(
+            (int(health.get("draft_capable_scouts", 0) or 0) for health in pool_health),
+            default=0,
+        )
+        if observed_sessions >= required and observed_draft_capable >= required:
+            return True
+        await asyncio.sleep(1.0)
+    return False
 
 
 async def wait_for_pool_readiness(
@@ -394,6 +425,8 @@ async def run_orchestrator(
     browser_headless: bool = False,
     browser_startup_timeout_ms: int = 900_000,
     browser_user_data_dir: str | None = None,
+    browser_warmup_timeout_s: int = 45,
+    browser_warmup_max_requests: int = 12,
     readiness_timeout_s: int = 120,
     ready_queue_depth_max: float = 8.0,
     require_no_blackout: bool = True,
@@ -421,6 +454,12 @@ async def run_orchestrator(
         pool=timeout_secs,
     )
     browser_scout_proc: asyncio.subprocess.Process | None = None
+    browser_warmup: dict[str, object] = {
+        "attempted": scout_mode == "browser" and scout_workers > 0,
+        "ready": False,
+        "productive": False,
+        "requests_sent": 0,
+    }
 
     try:
         async with httpx.AsyncClient(limits=limits, timeout=timeout) as client:
@@ -432,10 +471,6 @@ async def run_orchestrator(
                 require_no_blackout=require_no_blackout,
                 strict=strict_readiness,
             )
-            start = time.monotonic()
-            end = start + duration
-            baseline_summaries = await fetch_pool_summaries(client, verifier_pool)
-            baseline_accepted, baseline_total = aggregate_speculative_totals(baseline_summaries)
             scout_target = max(0, scout_workers)
             scout_target_lock = asyncio.Lock()
     
@@ -648,6 +683,108 @@ async def run_orchestrator(
                         )
                     async with in_flight_lock:
                         in_flight -= 1
+
+            async def warmup_one(seq: int) -> bool:
+                endpoint = None
+                t0 = time.monotonic()
+                ok = False
+                try:
+                    endpoint = await pool.next(client)
+                    resp = await client.post(
+                        f"{endpoint}/v1/chat/completions",
+                        headers={
+                            "x-shard-inference-mode": inference_mode,
+                        },
+                        json={
+                            "model": "shard-hybrid",
+                            "messages": [{"role": "user", "content": f"browser scout warmup {seq}"}],
+                            "max_tokens": max(4, max_tokens),
+                        },
+                    )
+                    ok = resp.status_code < 400
+                    return ok
+                except Exception:
+                    return False
+                finally:
+                    if endpoint:
+                        await pool.note_result(
+                            endpoint=endpoint,
+                            ok=ok,
+                            latency_ms=(time.monotonic() - t0) * 1000.0,
+                        )
+
+            async def warmup_browser_scouts() -> dict[str, object]:
+                info: dict[str, object] = {
+                    "attempted": True,
+                    "ready": False,
+                    "productive": False,
+                    "requests_sent": 0,
+                }
+                ready = await wait_for_browser_scout_supply(
+                    client=client,
+                    verifier_pool=verifier_pool,
+                    timeout_s=browser_warmup_timeout_s,
+                    expected_scouts=max(1, scout_workers),
+                )
+                info["ready"] = ready
+                if not ready:
+                    print(
+                        f"[browser-warmup] warning: scouts never became draft-capable within "
+                        f"{browser_warmup_timeout_s}s"
+                    )
+                    return info
+
+                baseline_summaries = await fetch_pool_summaries(client, verifier_pool)
+                baseline_submit_success = aggregate_counter(
+                    baseline_summaries, "scout_client_submit_success_total"
+                )
+                baseline_draft_submissions = aggregate_counter(
+                    baseline_summaries, "scout_draft_submissions_total"
+                )
+                baseline_speculative_tokens = aggregate_counter(
+                    baseline_summaries, "speculative_draft_tokens_total"
+                )
+                deadline = time.monotonic() + max(5, browser_warmup_timeout_s)
+                attempts = max(1, browser_warmup_max_requests)
+                for seq in range(attempts):
+                    if time.monotonic() >= deadline:
+                        break
+                    await warmup_one(seq)
+                    info["requests_sent"] = int(info["requests_sent"]) + 1
+                    await asyncio.sleep(0.35)
+                    pool_summaries = await fetch_pool_summaries(client, verifier_pool)
+                    pool_health = await fetch_pool_health(client, verifier_pool)
+                    submit_success_total = aggregate_counter(
+                        pool_summaries, "scout_client_submit_success_total"
+                    )
+                    draft_submissions_total = aggregate_counter(
+                        pool_summaries, "scout_draft_submissions_total"
+                    )
+                    speculative_draft_tokens_total = aggregate_counter(
+                        pool_summaries, "speculative_draft_tokens_total"
+                    )
+                    recent_submitters = max(
+                        (int(health.get("recent_scout_submitters", 0) or 0) for health in pool_health),
+                        default=0,
+                    )
+                    if (
+                        submit_success_total > baseline_submit_success
+                        or draft_submissions_total > baseline_draft_submissions
+                        or speculative_draft_tokens_total > baseline_speculative_tokens
+                        or recent_submitters > 0
+                    ):
+                        info["productive"] = True
+                        print(
+                            "[browser-warmup] productive scout supply detected "
+                            f"after {info['requests_sent']} warmup requests"
+                        )
+                        return info
+
+                print(
+                    "[browser-warmup] warning: scouts became draft-capable but no submit-success "
+                    f"signal appeared after {info['requests_sent']} warmup requests"
+                )
+                return info
     
             launch_tasks: list[asyncio.Task] = []
     
@@ -758,26 +895,33 @@ async def run_orchestrator(
                     )
     
             scout_tasks: list[asyncio.Task] = []
-            if scout_workers > 0 and scout_mode == "synthetic":
-                scout_tasks = [
-                    asyncio.create_task(scout_loop(idx))
-                    for idx in range(max(0, scout_workers))
-                ]
-            elif scout_workers > 0 and scout_mode == "browser":
+            if scout_workers > 0 and scout_mode == "browser":
                 browser_scout_proc = await launch_browser_scout_runner(
                     count=scout_workers,
                     verifier_pool=verifier_pool,
                     page_base_url=browser_scout_page_base_url,
-                browser_channel=browser_channel,
-                browser_headless=browser_headless,
-                startup_timeout_ms=browser_startup_timeout_ms,
-                browser_user_data_dir=browser_user_data_dir,
-            )
+                    browser_channel=browser_channel,
+                    browser_headless=browser_headless,
+                    startup_timeout_ms=browser_startup_timeout_ms,
+                    browser_user_data_dir=browser_user_data_dir,
+                )
                 await asyncio.sleep(2.0)
                 if browser_scout_proc.returncode is not None:
                     raise RuntimeError(
                         f"browser scout runner exited early with code {browser_scout_proc.returncode}"
                     )
+                browser_warmup = await warmup_browser_scouts()
+
+            baseline_summaries = await fetch_pool_summaries(client, verifier_pool)
+            baseline_accepted, baseline_total = aggregate_speculative_totals(baseline_summaries)
+            start = time.monotonic()
+            end = start + duration
+
+            if scout_workers > 0 and scout_mode == "synthetic":
+                scout_tasks = [
+                    asyncio.create_task(scout_loop(idx))
+                    for idx in range(max(0, scout_workers))
+                ]
             await asyncio.gather(launcher(), progress_loop())
             await asyncio.gather(*launch_tasks, return_exceptions=True)
             if scout_tasks:
@@ -854,6 +998,7 @@ async def run_orchestrator(
         "acceptance_source": acceptance_source,
         "acceptance_samples": int(total_delta),
         "throughput_tps": round(throughput_tps, 4),
+        "browser_warmup": browser_warmup,
         "status_counts": dict(status_counts),
         "error_breakdown": dict(error_breakdown),
         "timeseries": timeseries,
@@ -947,6 +1092,18 @@ def parse_args() -> argparse.Namespace:
         type=str,
         default="",
         help="Persistent browser profile directory for real browser scouts",
+    )
+    parser.add_argument(
+        "--browser-warmup-timeout-s",
+        type=int,
+        default=45,
+        help="Untimed wait for browser scouts to become productive before measured load starts",
+    )
+    parser.add_argument(
+        "--browser-warmup-max-requests",
+        type=int,
+        default=12,
+        help="Maximum untimed warmup requests used to prime real browser scouts",
     )
     parser.add_argument(
         "--max-tokens",

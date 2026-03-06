@@ -285,7 +285,8 @@ impl ShardApp {
                     // Restart daemon with the freshly downloaded model.
                     self.start_daemon();
                     self.post_download_restart_attempts = 0;
-                    self.post_download_next_retry = Some(Instant::now() + POST_DOWNLOAD_RETRY_DELAY);
+                    self.post_download_next_retry =
+                        Some(Instant::now() + POST_DOWNLOAD_RETRY_DELAY);
                     self.download_state = DownloadState::Done;
                     drop(self.download_rx.take()); // channel no longer needed
                 }
