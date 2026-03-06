@@ -8,7 +8,7 @@ import {
     startScoutWorker,
     type Topology,
 } from "@/lib/swarm"
-import { ENABLE_BROWSER_LAYER_HOST, PREFER_LOCAL_SHARD, apiUrl } from "@/lib/config"
+import { ENABLE_BROWSER_LAYER_HOST, ENABLE_BROWSER_P2P, PREFER_LOCAL_SHARD, apiUrl } from "@/lib/config"
 import {
     initWebLLM,
     type ModelProgress,
@@ -233,21 +233,23 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                     }
                 }
 
-                try {
-                    const liveTopology = await fetchTopology()
-                    const bootstrapPeers = getBootstrapPeersFromTopology(liveTopology)
-                    if (bootstrapPeers.length === 0) {
-                        console.warn("[p2p] Skipping browser P2P init: no dialable websocket bootstrap peers")
-                        return
+                if (ENABLE_BROWSER_P2P) {
+                    try {
+                        const liveTopology = await fetchTopology()
+                        const bootstrapPeers = getBootstrapPeersFromTopology(liveTopology)
+                        if (bootstrapPeers.length === 0) {
+                            console.warn("[p2p] Skipping browser P2P init: no dialable websocket bootstrap peers")
+                            return
+                        }
+                        const p2p = await import("@/lib/p2p")
+                        await p2p.initP2P({ emitSelf: false, bootstrapPeers: bootstrapPeers.length > 0 ? bootstrapPeers : undefined })
+                        p2p.subscribeToWork((work) => console.log("Work:", work.request_id))
+                        p2p.subscribeToResults((result) => {
+                            console.log("[p2p] Result observed:", result.request_id)
+                        })
+                    } catch (e) {
+                        console.error(e)
                     }
-                    const p2p = await import("@/lib/p2p")
-                    await p2p.initP2P({ emitSelf: false, bootstrapPeers: bootstrapPeers.length > 0 ? bootstrapPeers : undefined })
-                    p2p.subscribeToWork((work) => console.log("Work:", work.request_id))
-                    p2p.subscribeToResults((result) => {
-                        console.log("[p2p] Result observed:", result.request_id)
-                    })
-                } catch (e) {
-                    console.error(e)
                 }
             } catch (error: any) {
                 const reason = normalizeScoutInitError(error)

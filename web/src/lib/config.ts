@@ -23,6 +23,13 @@ export const PREFER_LOCAL_SHARD = process.env.NEXT_PUBLIC_PREFER_LOCAL_SHARD ===
 export const ENABLE_BROWSER_LAYER_HOST =
   process.env.NEXT_PUBLIC_ENABLE_BROWSER_LAYER_HOST === "true"
 
+/**
+ * Browser libp2p is optional. The browser scout HTTP work loop is sufficient
+ * for normal contribution, so keep browser P2P off unless explicitly testing it.
+ */
+export const ENABLE_BROWSER_P2P =
+  process.env.NEXT_PUBLIC_ENABLE_BROWSER_P2P === "true"
+
 export function apiUrl(path: string = "/v1"): string {
   const cleanPath = path.startsWith("/") ? path : `/${path}`
   // If API_BASE is empty, it results in a relative path like "/api/v1/..."
