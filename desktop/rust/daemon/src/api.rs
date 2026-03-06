@@ -28,6 +28,8 @@ pub(crate) async fn health_handler(
     let verified_count = peers.values().filter(|p| p.verified).count();
     let capacity = state.capacity.load(Ordering::Relaxed);
     let load = state.current_load.load(Ordering::Relaxed);
+    let verifier_queue_cap = verifier_queue_cap();
+    let verifier_request_depth = verifier_request_depth(&state);
     let latency_ms = state.avg_latency_ms.load(Ordering::Relaxed);
     let browser_scout_count = {
         let mut sessions = state.browser_sessions.lock().await;
@@ -115,6 +117,8 @@ pub(crate) async fn health_handler(
         "race_timeout_ms": state.race_timeout_ms,
         "capacity": capacity,
         "load": load,
+        "verifier_request_depth": verifier_request_depth,
+        "verifier_queue_cap": verifier_queue_cap,
         "latency_ms": latency_ms,
         "engine_loaded": engine_loaded,
         "bitnet_model": std::env::var("BITNET_MODEL").unwrap_or_default(),
@@ -627,7 +631,7 @@ fn scout_min_quality_samples() -> usize {
 }
 
 fn verifier_in_flight_depth(state: &SharedState) -> usize {
-    state.in_flight_count.load(Ordering::Relaxed)
+    verifier_request_depth(state)
 }
 
 fn verifier_latency_snapshot(state: &SharedState) -> (u64, u64) {
@@ -3299,6 +3303,7 @@ pub(crate) async fn metrics_summary_handler(
     let scout_queue_depth = state.scout_work.lock().await.len();
     let pending_queue_depth = state.speculative_pending.lock().await.len();
     let verifier_in_flight_depth = verifier_in_flight_depth(&state);
+    let verifier_queue_cap = verifier_queue_cap();
     let queue_depth = effective_verifier_queue_depth(&state, pending_queue_depth);
     let (avg_latency_ms, verifier_p95_latency_ms) = verifier_latency_snapshot(&state);
     prune_expired_scout_leases_for_state(&state, now).await;
@@ -3410,6 +3415,10 @@ pub(crate) async fn metrics_summary_handler(
     payload.insert(
         "verifier_in_flight_depth".to_string(),
         serde_json::json!(verifier_in_flight_depth),
+    );
+    payload.insert(
+        "verifier_queue_cap".to_string(),
+        serde_json::json!(verifier_queue_cap),
     );
     payload.insert(
         "speculative_pending_depth".to_string(),

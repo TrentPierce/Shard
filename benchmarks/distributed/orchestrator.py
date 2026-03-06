@@ -116,6 +116,7 @@ class LoadAwarePool:
         for state in stale:
             queue_depth = state.queue_depth
             load = state.load
+            latency_ms = state.ewma_latency_ms
             try:
                 resp = await client.get(f"{state.endpoint}/metrics/summary")
                 if resp.is_success:
@@ -123,6 +124,13 @@ class LoadAwarePool:
                     if summary_has_queue_breakdown(data):
                         queue_depth = float(data.get("queue_depth", queue_depth) or 0.0)
                         load = float(data.get("load", load) or 0.0)
+                        latency_ms = float(
+                            data.get(
+                                "average_latency_ms",
+                                data.get("latency_ms", latency_ms),
+                            )
+                            or latency_ms
+                        )
             except Exception:
                 pass
             async with self._lock:
@@ -131,6 +139,12 @@ class LoadAwarePool:
                     continue
                 current.queue_depth = max(0.0, queue_depth)
                 current.load = max(0.0, load)
+                if latency_ms > 0:
+                    alpha = 0.35
+                    current.ewma_latency_ms = (
+                        ((1.0 - alpha) * current.ewma_latency_ms)
+                        + (alpha * max(0.0, latency_ms))
+                    )
                 current.last_refresh_monotonic = now
 
     @staticmethod
@@ -365,7 +379,7 @@ async def launch_browser_scout_runner(
 
 async def run_orchestrator(
     scouts: int,
-    rate: int,
+    rate: float,
     duration: int,
     verifier_pool: list[str],
     out_path: Path,
@@ -593,7 +607,6 @@ async def run_orchestrator(
                                 f"{endpoint}/v1/chat/completions",
                                 headers={
                                     "x-shard-inference-mode": inference_mode,
-                                    "x-shard-mesh-forward": "false",
                                 },
                                 json={
                                     "model": "shard-hybrid",
@@ -865,7 +878,7 @@ async def run_orchestrator(
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Shard distributed load orchestrator")
     parser.add_argument("--scouts", type=int, required=True, help="Target concurrent simulated scouts")
-    parser.add_argument("--rate", type=int, required=True, help="Global requests per second")
+    parser.add_argument("--rate", type=float, required=True, help="Global requests per second")
     parser.add_argument("--duration", type=int, required=True, help="Test duration in seconds")
     parser.add_argument(
         "--verifier-pool",

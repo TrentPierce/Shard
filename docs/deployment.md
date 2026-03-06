@@ -55,6 +55,21 @@
 - Web app: `web`
 - Monitoring: `deploy/monitoring/prometheus`, `deploy/monitoring/grafana`
 
+## Cloudflare Pages
+- Production web project name: `shard`
+- Production deploys are expected to come from the `main` branch via Cloudflare Pages Git integration.
+- Verify that Pages has picked up the latest `main` commit with:
+
+```bash
+npm run cf:pages:verify --prefix web
+```
+
+- List recent Pages deployments with:
+
+```bash
+npm run cf:pages:list --prefix web
+```
+
 ## HA Baseline
 - Run at least two publicly reachable shard daemon backends.
 - Configure both in `SHARD_BACKEND_URLS` so the web API proxy can fail over automatically.

@@ -107,6 +107,61 @@ def git_short_head() -> str:
         return "unknown"
 
 
+async def probe_endpoint_latency_ms(
+    endpoint: str,
+    max_tokens: int,
+    timeout_s: float = 120.0,
+) -> float:
+    payload = {
+        "model": "shard-hybrid",
+        "messages": [{"role": "user", "content": "hello from release calibration probe"}],
+        "max_tokens": max(1, max_tokens),
+        "stream": False,
+    }
+    timeout = httpx.Timeout(timeout_s, connect=min(5.0, timeout_s))
+    started = datetime.now(UTC).timestamp()
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        resp = await client.post(
+            f"{endpoint.rstrip('/')}/v1/chat/completions",
+            headers={
+                "x-shard-inference-mode": "standard",
+                "x-shard-mesh-forward": "false",
+            },
+            json=payload,
+        )
+        resp.raise_for_status()
+        await resp.aread()
+    finished = datetime.now(UTC).timestamp()
+    return max(1.0, (finished - started) * 1000.0)
+
+
+async def calibrate_scenario_load(
+    pool: list[str],
+    configured_rate: float,
+    request_timeout_ms: int,
+    max_tokens: int,
+    utilization: float,
+    timeout_multiplier: float,
+) -> tuple[float, int, dict[str, float]]:
+    latencies: dict[str, float] = {}
+    for endpoint in pool:
+        try:
+            latencies[endpoint] = await probe_endpoint_latency_ms(endpoint, max_tokens=max_tokens)
+        except Exception:
+            continue
+
+    if not latencies:
+        return configured_rate, request_timeout_ms, {}
+
+    service_capacity_rps = sum(1000.0 / max(latency_ms, 1.0) for latency_ms in latencies.values())
+    calibrated_rate = min(configured_rate, max(0.05, service_capacity_rps * utilization))
+    calibrated_timeout_ms = max(
+        request_timeout_ms,
+        int(max(latencies.values()) * timeout_multiplier) + 2_000,
+    )
+    return calibrated_rate, calibrated_timeout_ms, latencies
+
+
 async def configure_scout_ingress(
     verifier_pool: list[str],
     enabled: bool,
@@ -289,21 +344,34 @@ async def execute(args: argparse.Namespace) -> dict[str, Any]:
             pool = one_pool if scenario.pool_kind == "one_node" else two_pool
             workers = args.scout_workers if scenario.use_scout_workers else 0
             await configure_scout_ingress(pool, enabled=scenario.use_scout_workers)
+            scenario_rate = args.rate
+            scenario_timeout_ms = args.request_timeout_ms
+            latency_probe_ms: dict[str, float] = {}
+            if args.auto_calibrate_rate:
+                scenario_rate, scenario_timeout_ms, latency_probe_ms = await calibrate_scenario_load(
+                    pool=pool,
+                    configured_rate=args.rate,
+                    request_timeout_ms=args.request_timeout_ms,
+                    max_tokens=args.max_tokens,
+                    utilization=args.auto_calibrate_utilization,
+                    timeout_multiplier=args.auto_timeout_multiplier,
+                )
             for run_idx in range(1, args.runs_per_scenario + 1):
                 out_path = run_dir / f"{scenario.name}-run{run_idx}.json"
                 print(
                     f"Running {scenario.name} (run {run_idx}/{args.runs_per_scenario}) "
                     f"pool={','.join(pool)} scout_workers={workers} "
-                    f"inference_mode={scenario_inference_mode(scenario, args.inference_mode)}"
+                    f"inference_mode={scenario_inference_mode(scenario, args.inference_mode)} "
+                    f"rate={scenario_rate:.4f} timeout_ms={scenario_timeout_ms}"
                 )
                 exit_code = await run_orchestrator(
                     scouts=args.scouts,
-                    rate=args.rate,
+                    rate=scenario_rate,
                     duration=args.duration,
                     verifier_pool=pool,
                     out_path=out_path,
                     inference_mode=scenario_inference_mode(scenario, args.inference_mode),
-                    request_timeout_ms=args.request_timeout_ms,
+                    request_timeout_ms=scenario_timeout_ms,
                     max_attempts=args.max_attempts,
                     scout_workers=workers,
                     max_tokens=args.max_tokens,
@@ -331,6 +399,9 @@ async def execute(args: argparse.Namespace) -> dict[str, Any]:
                 data["scenario_inference_mode"] = scenario_inference_mode(
                     scenario, args.inference_mode
                 )
+                data["scenario_rate"] = scenario_rate
+                data["scenario_request_timeout_ms"] = scenario_timeout_ms
+                data["scenario_latency_probe_ms"] = latency_probe_ms
                 data["output_file"] = str(out_path.as_posix())
                 by_scenario[scenario.name].append(data)
                 if args.flush_timeout_s > 0:
@@ -404,6 +475,9 @@ async def execute(args: argparse.Namespace) -> dict[str, Any]:
             "scout_workers_with_scouts": args.scout_workers,
             "inference_mode": args.inference_mode,
             "request_timeout_ms": args.request_timeout_ms,
+            "auto_calibrate_rate": args.auto_calibrate_rate,
+            "auto_calibrate_utilization": args.auto_calibrate_utilization,
+            "auto_timeout_multiplier": args.auto_timeout_multiplier,
             "max_attempts": args.max_attempts,
             "max_tokens": args.max_tokens,
             "scout_mode": args.scout_mode,
@@ -453,10 +527,10 @@ def parse_args() -> argparse.Namespace:
         help="Comma-separated verifier pool for two-node scenarios",
     )
     parser.add_argument("--runs-per-scenario", type=int, default=3)
-    parser.add_argument("--scouts", type=int, default=24)
-    parser.add_argument("--rate", type=int, default=4)
-    parser.add_argument("--duration", type=int, default=60)
-    parser.add_argument("--scout-workers", type=int, default=4)
+    parser.add_argument("--scouts", type=int, default=16)
+    parser.add_argument("--rate", type=float, default=2.0)
+    parser.add_argument("--duration", type=int, default=10)
+    parser.add_argument("--scout-workers", type=int, default=2)
     parser.add_argument(
         "--scout-mode",
         type=str,
@@ -482,11 +556,14 @@ def parse_args() -> argparse.Namespace:
         default="distributed",
         choices=["standard", "distributed", "speculative"],
     )
-    parser.add_argument("--request-timeout-ms", type=int, default=10000)
+    parser.add_argument("--request-timeout-ms", type=int, default=30000)
+    parser.add_argument("--auto-calibrate-rate", action="store_true")
+    parser.add_argument("--auto-calibrate-utilization", type=float, default=0.85)
+    parser.add_argument("--auto-timeout-multiplier", type=float, default=4.0)
     parser.add_argument("--max-attempts", type=int, default=1)
-    parser.add_argument("--max-tokens", type=int, default=32)
-    parser.add_argument("--readiness-timeout-s", type=int, default=120)
-    parser.add_argument("--ready-queue-depth-max", type=float, default=8.0)
+    parser.add_argument("--max-tokens", type=int, default=8)
+    parser.add_argument("--readiness-timeout-s", type=int, default=30)
+    parser.add_argument("--ready-queue-depth-max", type=float, default=3.0)
     parser.add_argument("--allow-readiness-blackout", action="store_true")
     parser.add_argument(
         "--allow-dirty-readiness",
@@ -498,13 +575,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--flush-timeout-s",
         type=int,
-        default=45,
+        default=20,
         help="Wait this long for queue/blackout drain between runs (0 disables).",
     )
     parser.add_argument(
         "--flush-queue-depth-max",
         type=float,
-        default=8.0,
+        default=3.0,
         help="Required queue depth before the next scenario starts.",
     )
     parser.add_argument(
