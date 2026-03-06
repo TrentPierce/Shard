@@ -1247,6 +1247,15 @@ async fn clear_draft_notifier(state: &SharedState, work_id: &str) {
     notifiers.remove(work_id);
 }
 
+fn remove_work_id_from_scout_queue(
+    queue: &mut std::collections::VecDeque<WorkRequest>,
+    work_id: &str,
+) -> usize {
+    let before = queue.len();
+    queue.retain(|work| work.request_id != work_id);
+    before.saturating_sub(queue.len())
+}
+
 async fn clear_speculative_work_state(state: &SharedState, work_id: &str) {
     {
         let mut pending = state.speculative_pending.lock().await;
@@ -1263,6 +1272,18 @@ async fn clear_speculative_work_state(state: &SharedState, work_id: &str) {
     {
         let mut by_id = state.idempotent_results.lock().await;
         by_id.remove(work_id);
+    }
+    {
+        let mut scout_work = state.scout_work.lock().await;
+        let removed = remove_work_id_from_scout_queue(&mut scout_work, work_id);
+        if removed > 0 {
+            tracing::debug!(
+                work_id,
+                removed,
+                remaining = scout_work.len(),
+                "cleared queued scout work for completed request"
+            );
+        }
     }
     clear_draft_notifier(state, work_id).await;
 }
@@ -2189,9 +2210,10 @@ mod tests {
         auth_required, compute_effective_scout_timeout_ms, endpoint_from_multiaddr,
         enqueue_scout_work, infer_client_ip, local_scout_fallback_allowed, mesh_forward_score,
         model_pair_acceptance_rates, normalize_endpoint, probe_allowed_for_request,
-        request_host_is_local, resolve_inference_mode, should_abort_on_degenerate_output,
-        should_attempt_mesh_forward, should_forward_to_mesh, should_refuse_mesh_degraded,
-        strip_control_tokens, InferenceMode, ScoutSupplyEstimate, WorkRequest,
+        remove_work_id_from_scout_queue, request_host_is_local, resolve_inference_mode,
+        should_abort_on_degenerate_output, should_attempt_mesh_forward, should_forward_to_mesh,
+        should_refuse_mesh_degraded, strip_control_tokens, InferenceMode, ScoutSupplyEstimate,
+        WorkRequest,
     };
     use axum::http::{HeaderMap, HeaderValue};
     use std::collections::VecDeque;
@@ -2275,6 +2297,47 @@ mod tests {
             queue.back().map(|w| w.request_id.as_str()),
             Some("req-1099")
         );
+    }
+
+    #[test]
+    fn clearing_speculative_state_removes_matching_scout_work() {
+        let mut queue = VecDeque::from([
+            WorkRequest {
+                request_id: "req-a".to_string(),
+                prompt_context: "p".to_string(),
+                min_tokens: 8,
+                created_at_ms: None,
+                lease_id: None,
+                lease_expires_at_ms: None,
+                assigned_scout_id: None,
+                preferred_endpoint: None,
+            },
+            WorkRequest {
+                request_id: "req-b".to_string(),
+                prompt_context: "p".to_string(),
+                min_tokens: 8,
+                created_at_ms: None,
+                lease_id: None,
+                lease_expires_at_ms: None,
+                assigned_scout_id: None,
+                preferred_endpoint: None,
+            },
+            WorkRequest {
+                request_id: "req-a".to_string(),
+                prompt_context: "p".to_string(),
+                min_tokens: 8,
+                created_at_ms: None,
+                lease_id: None,
+                lease_expires_at_ms: None,
+                assigned_scout_id: None,
+                preferred_endpoint: None,
+            },
+        ]);
+
+        let removed = remove_work_id_from_scout_queue(&mut queue, "req-a");
+        assert_eq!(removed, 2);
+        assert_eq!(queue.len(), 1);
+        assert_eq!(queue.front().map(|w| w.request_id.as_str()), Some("req-b"));
     }
 
     #[test]

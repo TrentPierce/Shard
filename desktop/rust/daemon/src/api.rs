@@ -648,14 +648,8 @@ pub(crate) async fn prune_stale_speculative_pending(state: &SharedState, now: u1
     stale_ids.len()
 }
 
-fn effective_scout_queue_depth(
-    state: &SharedState,
-    scout_queue_depth: usize,
-    pending_depth: usize,
-) -> usize {
-    scout_queue_depth
-        .max(pending_depth)
-        .max(verifier_in_flight_depth(state))
+fn effective_verifier_queue_depth(state: &SharedState, pending_depth: usize) -> usize {
+    pending_depth.max(verifier_in_flight_depth(state))
 }
 
 fn scout_admission_retry_after_ms(
@@ -812,6 +806,31 @@ fn prune_expired_scout_leases(leases: &mut HashMap<String, ScoutWorkLease>, now:
     let before = leases.len();
     leases.retain(|_, lease| now < lease.expires_at_ms);
     before.saturating_sub(leases.len())
+}
+
+fn prune_stale_scout_work_queue(
+    queue: &mut std::collections::VecDeque<WorkRequest>,
+    now: u128,
+) -> usize {
+    let max_age_ms = scout_work_max_age_ms();
+    let before = queue.len();
+    queue.retain(|work| {
+        let created_at_ms = work.created_at_ms.unwrap_or(now);
+        now.saturating_sub(created_at_ms) <= max_age_ms
+    });
+    before.saturating_sub(queue.len())
+}
+
+async fn prune_stale_scout_work_queue_for_state(state: &SharedState, now: u128) {
+    let mut queue = state.scout_work.lock().await;
+    let removed = prune_stale_scout_work_queue(&mut queue, now);
+    if removed > 0 {
+        tracing::debug!(
+            removed,
+            remaining = queue.len(),
+            "pruned stale scout work items"
+        );
+    }
 }
 
 async fn prune_expired_scout_leases_for_state(state: &SharedState, now: u128) {
@@ -1682,7 +1701,9 @@ pub(crate) async fn scout_config_handler(
     AxumState(state): AxumState<SharedState>,
 ) -> Json<serde_json::Value> {
     let now = now_ms();
-    let queue_depth = effective_scout_queue_depth(&state, state.scout_work.lock().await.len(), 0);
+    prune_stale_scout_work_queue_for_state(&state, now).await;
+    let pending_queue_depth = state.speculative_pending.lock().await.len();
+    let queue_depth = effective_verifier_queue_depth(&state, pending_queue_depth);
     let (avg_latency_ms, p95_latency_ms) = verifier_latency_snapshot(&state);
     let admission = scout_admission_decision(queue_depth, avg_latency_ms, p95_latency_ms);
     let blackout_mode = update_scout_blackout_state(&state, queue_depth, p95_latency_ms, now).await;
@@ -1749,6 +1770,7 @@ pub(crate) async fn pop_work_handler(
     let now = now_ms();
     prune_stale_speculative_pending(&state, now).await;
     prune_expired_scout_leases_for_state(&state, now).await;
+    prune_stale_scout_work_queue_for_state(&state, now).await;
     {
         let mut polls = state.scout_work_last_poll.lock().await;
         if let Some(retry_after_ms) =
@@ -1795,7 +1817,8 @@ pub(crate) async fn pop_work_handler(
             }
         }
     }
-    let queue_depth = effective_scout_queue_depth(&state, state.scout_work.lock().await.len(), 0);
+    let pending_queue_depth = state.speculative_pending.lock().await.len();
+    let queue_depth = effective_verifier_queue_depth(&state, pending_queue_depth);
     let (avg_latency_ms, p95_latency_ms) = verifier_latency_snapshot(&state);
     let blackout_mode = update_scout_blackout_state(&state, queue_depth, p95_latency_ms, now).await;
     if blackout_mode == ScoutBlackoutMode::Blackout {
@@ -1984,6 +2007,7 @@ pub(crate) async fn process_draft_submission(
     let now = now_ms();
     prune_stale_speculative_pending(state, now).await;
     prune_expired_scout_leases_for_state(state, now).await;
+    prune_stale_scout_work_queue_for_state(state, now).await;
     {
         let mut drafts = state.scout_draft_last_submit.lock().await;
         if let Some(retry_after_ms) = apply_scout_rate_limit(
@@ -2006,8 +2030,7 @@ pub(crate) async fn process_draft_submission(
     }
     let scout_queue_depth = state.scout_work.lock().await.len();
     let pending_queue_depth = state.speculative_pending.lock().await.len();
-    let effective_queue_depth =
-        effective_scout_queue_depth(state, scout_queue_depth, pending_queue_depth);
+    let effective_queue_depth = effective_verifier_queue_depth(state, pending_queue_depth);
     let (avg_latency_ms, p95_latency_ms) = verifier_latency_snapshot(state);
     let blackout_mode =
         update_scout_blackout_state(state, effective_queue_depth, p95_latency_ms, now).await;
@@ -2733,7 +2756,10 @@ pub(crate) async fn latency_profile_handler(
 }
 
 pub(crate) async fn metrics_handler(AxumState(state): AxumState<SharedState>) -> Response {
-    let queue_depth = effective_scout_queue_depth(&state, state.scout_work.lock().await.len(), 0);
+    let now = now_ms();
+    prune_stale_scout_work_queue_for_state(&state, now).await;
+    let pending_queue_depth = state.speculative_pending.lock().await.len();
+    let queue_depth = effective_verifier_queue_depth(&state, pending_queue_depth);
     let active_node_count = state
         .node_metric_reports
         .lock()
@@ -3193,12 +3219,11 @@ pub(crate) async fn metrics_summary_handler(
     let gossipsub = state.gossipsub_latency_hist.percentiles();
     let now = now_ms();
     prune_stale_speculative_pending(&state, now).await;
+    prune_stale_scout_work_queue_for_state(&state, now).await;
     let scout_queue_depth = state.scout_work.lock().await.len();
     let pending_queue_depth = state.speculative_pending.lock().await.len();
     let verifier_in_flight_depth = verifier_in_flight_depth(&state);
-    let queue_depth = scout_queue_depth
-        .max(pending_queue_depth)
-        .max(verifier_in_flight_depth);
+    let queue_depth = effective_verifier_queue_depth(&state, pending_queue_depth);
     let (avg_latency_ms, verifier_p95_latency_ms) = verifier_latency_snapshot(&state);
     prune_expired_scout_leases_for_state(&state, now).await;
     let active_leases = state.scout_work_leases.lock().await.len();
@@ -3893,14 +3918,14 @@ pub(crate) async fn register_bootstrap_handler(
 #[cfg(test)]
 mod tests {
     use super::{
-        prune_expired_scout_leases, push_scheduler_decision_log, require_scout_id,
-        runtime_health_state, sanitize_scout_draft_text, scout_admission_decision,
-        scout_assignment_backpressured, scout_blackout_mode, scout_reopen_stage_ms,
-        should_route_long_context, verify_spot_check_submission, DraftSpotCheckProof,
-        ScoutAdmissionMode, ScoutBlackoutMode, ScoutBlackoutState, ScoutWorkLease, ScoutWorkQuery,
-        WebGPUProbeResult, WebGPUStats,
+        prune_expired_scout_leases, prune_stale_scout_work_queue, push_scheduler_decision_log,
+        require_scout_id, runtime_health_state, sanitize_scout_draft_text,
+        scout_admission_decision, scout_assignment_backpressured, scout_blackout_mode,
+        scout_reopen_stage_ms, scout_work_max_age_ms, should_route_long_context,
+        verify_spot_check_submission, DraftSpotCheckProof, ScoutAdmissionMode, ScoutBlackoutMode,
+        ScoutBlackoutState, ScoutWorkLease, ScoutWorkQuery, WebGPUProbeResult, WebGPUStats,
     };
-    use crate::SchedulerDecisionLog;
+    use crate::{SchedulerDecisionLog, WorkRequest};
     use std::collections::{HashMap, VecDeque};
 
     #[test]
@@ -4073,6 +4098,42 @@ mod tests {
         assert_eq!(removed, 1);
         assert!(leases.contains_key("work-active"));
         assert!(!leases.contains_key("work-expired"));
+    }
+
+    #[test]
+    fn scout_work_pruning_removes_only_stale_entries() {
+        let max_age_ms = scout_work_max_age_ms();
+        let now = max_age_ms.saturating_add(10_000);
+        let mut queue = std::collections::VecDeque::from([
+            WorkRequest {
+                request_id: "work-expired".to_string(),
+                prompt_context: "hello".to_string(),
+                min_tokens: 4,
+                created_at_ms: Some(now.saturating_sub(max_age_ms + 1)),
+                lease_id: None,
+                lease_expires_at_ms: None,
+                assigned_scout_id: None,
+                preferred_endpoint: None,
+            },
+            WorkRequest {
+                request_id: "work-active".to_string(),
+                prompt_context: "hello".to_string(),
+                min_tokens: 4,
+                created_at_ms: Some(now.saturating_sub(max_age_ms.saturating_sub(1))),
+                lease_id: None,
+                lease_expires_at_ms: None,
+                assigned_scout_id: None,
+                preferred_endpoint: None,
+            },
+        ]);
+
+        let removed = prune_stale_scout_work_queue(&mut queue, now);
+        assert_eq!(removed, 1);
+        assert_eq!(queue.len(), 1);
+        assert_eq!(
+            queue.front().map(|work| work.request_id.as_str()),
+            Some("work-active")
+        );
     }
 
     #[test]
