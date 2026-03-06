@@ -16,7 +16,10 @@ import asyncio
 from collections import Counter
 import hashlib
 import json
+import os
 import re
+import shutil
+import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -321,6 +324,45 @@ async def wait_for_pool_readiness(
     return False
 
 
+def browser_scout_runner_path() -> Path:
+    return Path(__file__).resolve().with_name("browser_scout_runner.mjs")
+
+
+async def launch_browser_scout_runner(
+    count: int,
+    verifier_pool: list[str],
+    page_base_url: str,
+    browser_channel: str,
+    browser_headless: bool,
+    startup_timeout_ms: int,
+    browser_user_data_dir: str | None,
+) -> asyncio.subprocess.Process:
+    node_name = "node.exe" if os.name == "nt" else "node"
+    node_path = shutil.which(node_name) or shutil.which("node")
+    if not node_path:
+        raise RuntimeError("node is required for browser scout benchmarks")
+
+    cmd = [
+        node_path,
+        str(browser_scout_runner_path()),
+        "--count",
+        str(max(1, count)),
+        "--page-base",
+        page_base_url,
+        "--backends",
+        ",".join(verifier_pool),
+        "--channel",
+        browser_channel,
+        "--startup-timeout-ms",
+        str(max(30_000, startup_timeout_ms)),
+        "--headless",
+        "true" if browser_headless else "false",
+    ]
+    if browser_user_data_dir:
+        cmd.extend(["--user-data-dir", browser_user_data_dir])
+    return await asyncio.create_subprocess_exec(*cmd)
+
+
 async def run_orchestrator(
     scouts: int,
     rate: int,
@@ -332,6 +374,12 @@ async def run_orchestrator(
     max_attempts: int,
     scout_workers: int,
     max_tokens: int,
+    scout_mode: str = "synthetic",
+    browser_scout_page_base_url: str = "http://127.0.0.1:3000/benchmark/scout",
+    browser_channel: str = "msedge" if sys.platform.startswith("win") else "chrome",
+    browser_headless: bool = False,
+    browser_startup_timeout_ms: int = 900_000,
+    browser_user_data_dir: str | None = None,
     readiness_timeout_s: int = 120,
     ready_queue_depth_max: float = 8.0,
     require_no_blackout: bool = True,
@@ -358,364 +406,394 @@ async def run_orchestrator(
         write=timeout_secs,
         pool=timeout_secs,
     )
+    browser_scout_proc: asyncio.subprocess.Process | None = None
 
-    async with httpx.AsyncClient(limits=limits, timeout=timeout) as client:
-        await wait_for_pool_readiness(
-            client=client,
-            verifier_pool=verifier_pool,
-            timeout_s=readiness_timeout_s,
-            queue_depth_max=ready_queue_depth_max,
-            require_no_blackout=require_no_blackout,
-            strict=strict_readiness,
-        )
-        start = time.monotonic()
-        end = start + duration
-        baseline_summaries = await fetch_pool_summaries(client, verifier_pool)
-        baseline_accepted, baseline_total = aggregate_speculative_totals(baseline_summaries)
-        scout_target = max(0, scout_workers)
-        scout_target_lock = asyncio.Lock()
-
-        async def get_scout_target() -> int:
-            async with scout_target_lock:
-                return scout_target
-
-        async def set_scout_target(value: int) -> None:
-            nonlocal scout_target
-            bounded = max(0, min(max(0, scout_workers), int(value)))
-            async with scout_target_lock:
-                scout_target = bounded
-
-        async def ensure_pow_for_scout(endpoint: str, scout_id: str) -> bool:
-            challenge_resp = await client.get(
-                f"{endpoint}/v1/pow/challenge",
-                params={
-                    "peer_id": scout_id,
-                    "hardware_concurrency": 8,
-                    "is_mobile": "false",
-                },
+    try:
+        async with httpx.AsyncClient(limits=limits, timeout=timeout) as client:
+            await wait_for_pool_readiness(
+                client=client,
+                verifier_pool=verifier_pool,
+                timeout_s=readiness_timeout_s,
+                queue_depth_max=ready_queue_depth_max,
+                require_no_blackout=require_no_blackout,
+                strict=strict_readiness,
             )
-            if not challenge_resp.is_success:
-                return False
-            payload = challenge_resp.json()
-            challenge = payload.get("challenge", {})
-            challenge_hex = challenge.get("challenge_bytes_hex")
-            difficulty = int(challenge.get("difficulty", 0))
-            if not challenge_hex or difficulty <= 0:
-                return False
-            nonce, hash_hex = await asyncio.to_thread(solve_pow, challenge_hex, difficulty)
-            verify_resp = await client.post(
-                f"{endpoint}/v1/pow/verify",
-                json={"peer_id": scout_id, "nonce": nonce, "hash_hex": hash_hex},
-            )
-            if not verify_resp.is_success:
-                return False
-            return bool(verify_resp.json().get("ok"))
-
-        async def scout_loop(worker_idx: int) -> None:
-            scout_id = f"orchestrator-scout-{worker_idx}"
-            verified_endpoints: set[str] = set()
-            sticky_endpoint: str | None = None
-            while time.monotonic() < end:
-                try:
-                    target = await get_scout_target()
-                    if worker_idx >= target:
-                        await asyncio.sleep(0.2)
-                        continue
-                    if sticky_endpoint:
-                        sticky_score = await pool.score_for(sticky_endpoint, client)
-                        if sticky_score == float("inf"):
-                            sticky_endpoint = None
-                        else:
-                            best_score = await pool.score_for(
-                                await pool.best_endpoint_for_scout(client), client
-                            )
-                            # Keep affinity unless it is materially worse than current best.
-                            if sticky_score > (best_score * 1.35):
-                                sticky_endpoint = None
-
-                    preferred_candidates = [sticky_endpoint] if sticky_endpoint else None
-                    endpoint = await pool.best_endpoint_for_scout(client, preferred_candidates)
-                    sticky_endpoint = endpoint
-                    if endpoint not in verified_endpoints:
-                        verified = await ensure_pow_for_scout(endpoint, scout_id)
-                        if not verified:
-                            sticky_endpoint = None
-                            await asyncio.sleep(0.5)
+            start = time.monotonic()
+            end = start + duration
+            baseline_summaries = await fetch_pool_summaries(client, verifier_pool)
+            baseline_accepted, baseline_total = aggregate_speculative_totals(baseline_summaries)
+            scout_target = max(0, scout_workers)
+            scout_target_lock = asyncio.Lock()
+    
+            async def get_scout_target() -> int:
+                async with scout_target_lock:
+                    return scout_target
+    
+            async def set_scout_target(value: int) -> None:
+                nonlocal scout_target
+                bounded = max(0, min(max(0, scout_workers), int(value)))
+                async with scout_target_lock:
+                    scout_target = bounded
+    
+            async def ensure_pow_for_scout(endpoint: str, scout_id: str) -> bool:
+                challenge_resp = await client.get(
+                    f"{endpoint}/v1/pow/challenge",
+                    params={
+                        "peer_id": scout_id,
+                        "hardware_concurrency": 8,
+                        "is_mobile": "false",
+                    },
+                )
+                if not challenge_resp.is_success:
+                    return False
+                payload = challenge_resp.json()
+                challenge = payload.get("challenge", {})
+                challenge_hex = challenge.get("challenge_bytes_hex")
+                difficulty = int(challenge.get("difficulty", 0))
+                if not challenge_hex or difficulty <= 0:
+                    return False
+                nonce, hash_hex = await asyncio.to_thread(solve_pow, challenge_hex, difficulty)
+                verify_resp = await client.post(
+                    f"{endpoint}/v1/pow/verify",
+                    json={"peer_id": scout_id, "nonce": nonce, "hash_hex": hash_hex},
+                )
+                if not verify_resp.is_success:
+                    return False
+                return bool(verify_resp.json().get("ok"))
+    
+            async def scout_loop(worker_idx: int) -> None:
+                scout_id = f"orchestrator-scout-{worker_idx}"
+                verified_endpoints: set[str] = set()
+                sticky_endpoint: str | None = None
+                while time.monotonic() < end:
+                    try:
+                        target = await get_scout_target()
+                        if worker_idx >= target:
+                            await asyncio.sleep(0.2)
                             continue
-                        verified_endpoints.add(endpoint)
-
-                    work_resp = await client.get(
-                        f"{endpoint}/v1/scout/work",
-                        params={"scout_id": scout_id},
-                    )
-                    if not work_resp.is_success:
-                        retry_after_ms = 0
-                        preferred_endpoint = None
-                        try:
-                            payload = work_resp.json() or {}
-                            retry_after_ms = int(payload.get("retry_after_ms", 0) or 0)
-                            preferred_endpoint = payload.get("preferred_endpoint")
-                        except Exception:
-                            retry_after_ms = 0
-                        if isinstance(preferred_endpoint, str) and preferred_endpoint.strip():
-                            sticky_endpoint = preferred_endpoint.rstrip("/")
-                        elif work_resp.status_code in (429, 503):
-                            sticky_endpoint = None
-                        await asyncio.sleep(max(0.05, retry_after_ms / 1000.0))
-                        continue
-                    payload = work_resp.json() or {}
-                    work = payload.get("work")
-                    if not work:
-                        retry_after_ms = int(payload.get("retry_after_ms", 0) or 0)
-                        await asyncio.sleep(max(0.01, retry_after_ms / 1000.0))
-                        continue
-                    preferred_endpoint = work.get("preferred_endpoint")
-                    if isinstance(preferred_endpoint, str) and preferred_endpoint.strip():
-                        preferred_target = preferred_endpoint.rstrip("/")
-                        sticky_endpoint = preferred_target
-                        endpoint = preferred_target
+                        if sticky_endpoint:
+                            sticky_score = await pool.score_for(sticky_endpoint, client)
+                            if sticky_score == float("inf"):
+                                sticky_endpoint = None
+                            else:
+                                best_score = await pool.score_for(
+                                    await pool.best_endpoint_for_scout(client), client
+                                )
+                                # Keep affinity unless it is materially worse than current best.
+                                if sticky_score > (best_score * 1.35):
+                                    sticky_endpoint = None
+    
+                        preferred_candidates = [sticky_endpoint] if sticky_endpoint else None
+                        endpoint = await pool.best_endpoint_for_scout(client, preferred_candidates)
+                        sticky_endpoint = endpoint
                         if endpoint not in verified_endpoints:
                             verified = await ensure_pow_for_scout(endpoint, scout_id)
                             if not verified:
                                 sticky_endpoint = None
-                                await asyncio.sleep(0.25)
+                                await asyncio.sleep(0.5)
                                 continue
                             verified_endpoints.add(endpoint)
-
-                    prompt_context = str(work.get("prompt_context", ""))
-                    user_prompt = extract_user_message(prompt_context)
-                    min_tokens = max(1, int(work.get("min_tokens", 1)))
-                    lease_id = work.get("lease_id")
-
-                    # Draft with standard mode so this helper path does not recurse into speculative work.
-                    gen_resp = await client.post(
-                        f"{endpoint}/v1/chat/completions",
-                        headers={
-                            "x-shard-inference-mode": "standard",
-                            "x-shard-mesh-forward": "false",
-                        },
-                        json={
-                            "model": "shard-hybrid",
-                            "messages": [{"role": "user", "content": user_prompt}],
-                            "max_tokens": max(min_tokens, 4),
-                            "stream": False,
-                        },
-                    )
-                    if not gen_resp.is_success:
-                        await asyncio.sleep(0.01)
-                        continue
-                    generated = (
-                        gen_resp.json()
-                        .get("choices", [{}])[0]
-                        .get("message", {})
-                        .get("content", "")
-                    )
-                    draft_text = (str(generated).strip() or "ok")[:256]
-
-                    await client.post(
-                        f"{endpoint}/v1/scout/draft",
-                        json={
-                            "work_id": work.get("request_id"),
-                            "scout_id": scout_id,
-                            "lease_id": lease_id,
-                            "draft_text": draft_text,
-                            "prompt_context": prompt_context,
-                            "timestamp": time.time(),
-                        },
-                    )
-                except Exception:
-                    await asyncio.sleep(0.05)
-
-        async def fire_one(seq: int) -> None:
-            nonlocal in_flight
-            async with semaphore:
-                async with in_flight_lock:
-                    in_flight += 1
-                t0 = time.monotonic()
-                ok = False
-                final_status: int | None = None
-                final_error_kind: str | None = None
-                for _attempt in range(max(1, max_attempts)):
-                    endpoint = None
-                    try:
-                        endpoint = await pool.next(client)
-                        resp = await client.post(
+    
+                        work_resp = await client.get(
+                            f"{endpoint}/v1/scout/work",
+                            params={"scout_id": scout_id},
+                        )
+                        if not work_resp.is_success:
+                            retry_after_ms = 0
+                            preferred_endpoint = None
+                            try:
+                                payload = work_resp.json() or {}
+                                retry_after_ms = int(payload.get("retry_after_ms", 0) or 0)
+                                preferred_endpoint = payload.get("preferred_endpoint")
+                            except Exception:
+                                retry_after_ms = 0
+                            if isinstance(preferred_endpoint, str) and preferred_endpoint.strip():
+                                sticky_endpoint = preferred_endpoint.rstrip("/")
+                            elif work_resp.status_code in (429, 503):
+                                sticky_endpoint = None
+                            await asyncio.sleep(max(0.05, retry_after_ms / 1000.0))
+                            continue
+                        payload = work_resp.json() or {}
+                        work = payload.get("work")
+                        if not work:
+                            retry_after_ms = int(payload.get("retry_after_ms", 0) or 0)
+                            await asyncio.sleep(max(0.01, retry_after_ms / 1000.0))
+                            continue
+                        preferred_endpoint = work.get("preferred_endpoint")
+                        if isinstance(preferred_endpoint, str) and preferred_endpoint.strip():
+                            preferred_target = preferred_endpoint.rstrip("/")
+                            sticky_endpoint = preferred_target
+                            endpoint = preferred_target
+                            if endpoint not in verified_endpoints:
+                                verified = await ensure_pow_for_scout(endpoint, scout_id)
+                                if not verified:
+                                    sticky_endpoint = None
+                                    await asyncio.sleep(0.25)
+                                    continue
+                                verified_endpoints.add(endpoint)
+    
+                        prompt_context = str(work.get("prompt_context", ""))
+                        user_prompt = extract_user_message(prompt_context)
+                        min_tokens = max(1, int(work.get("min_tokens", 1)))
+                        lease_id = work.get("lease_id")
+    
+                        # Draft with standard mode so this helper path does not recurse into speculative work.
+                        gen_resp = await client.post(
                             f"{endpoint}/v1/chat/completions",
                             headers={
-                                "x-shard-inference-mode": inference_mode,
+                                "x-shard-inference-mode": "standard",
                                 "x-shard-mesh-forward": "false",
                             },
                             json={
                                 "model": "shard-hybrid",
-                                "messages": [{"role": "user", "content": f"hello from scout {seq}"}],
-                                "max_tokens": max(1, max_tokens),
+                                "messages": [{"role": "user", "content": user_prompt}],
+                                "max_tokens": max(min_tokens, 4),
+                                "stream": False,
                             },
                         )
-                        final_status = int(resp.status_code)
-                        attempt_ok = resp.status_code < 400
-                        await pool.note_result(
-                            endpoint=endpoint,
-                            ok=attempt_ok,
-                            latency_ms=(time.monotonic() - t0) * 1000.0,
+                        if not gen_resp.is_success:
+                            await asyncio.sleep(0.01)
+                            continue
+                        generated = (
+                            gen_resp.json()
+                            .get("choices", [{}])[0]
+                            .get("message", {})
+                            .get("content", "")
                         )
-                        if not attempt_ok:
-                            final_error_kind = f"http_{resp.status_code}"
-                        if attempt_ok:
-                            ok = True
-                            final_error_kind = None
-                            break
-                    except Exception as exc:
-                        final_error_kind = exc.__class__.__name__
-                        if endpoint:
+                        draft_text = (str(generated).strip() or "ok")[:256]
+    
+                        await client.post(
+                            f"{endpoint}/v1/scout/draft",
+                            json={
+                                "work_id": work.get("request_id"),
+                                "scout_id": scout_id,
+                                "lease_id": lease_id,
+                                "draft_text": draft_text,
+                                "prompt_context": prompt_context,
+                                "timestamp": time.time(),
+                            },
+                        )
+                    except Exception:
+                        await asyncio.sleep(0.05)
+    
+            async def fire_one(seq: int) -> None:
+                nonlocal in_flight
+                async with semaphore:
+                    async with in_flight_lock:
+                        in_flight += 1
+                    t0 = time.monotonic()
+                    ok = False
+                    final_status: int | None = None
+                    final_error_kind: str | None = None
+                    for _attempt in range(max(1, max_attempts)):
+                        endpoint = None
+                        try:
+                            endpoint = await pool.next(client)
+                            resp = await client.post(
+                                f"{endpoint}/v1/chat/completions",
+                                headers={
+                                    "x-shard-inference-mode": inference_mode,
+                                    "x-shard-mesh-forward": "false",
+                                },
+                                json={
+                                    "model": "shard-hybrid",
+                                    "messages": [{"role": "user", "content": f"hello from scout {seq}"}],
+                                    "max_tokens": max(1, max_tokens),
+                                },
+                            )
+                            final_status = int(resp.status_code)
+                            attempt_ok = resp.status_code < 400
                             await pool.note_result(
                                 endpoint=endpoint,
-                                ok=False,
+                                ok=attempt_ok,
                                 latency_ms=(time.monotonic() - t0) * 1000.0,
                             )
-                    await asyncio.sleep(0.01)
-                latency_ms = (time.monotonic() - t0) * 1000.0
-                async with records_lock:
-                    records.append(
-                        RequestRecord(
-                            ok=ok,
-                            latency_ms=latency_ms,
-                            status_code=final_status,
-                            error_kind=final_error_kind,
+                            if not attempt_ok:
+                                final_error_kind = f"http_{resp.status_code}"
+                            if attempt_ok:
+                                ok = True
+                                final_error_kind = None
+                                break
+                        except Exception as exc:
+                            final_error_kind = exc.__class__.__name__
+                            if endpoint:
+                                await pool.note_result(
+                                    endpoint=endpoint,
+                                    ok=False,
+                                    latency_ms=(time.monotonic() - t0) * 1000.0,
+                                )
+                        await asyncio.sleep(0.01)
+                    latency_ms = (time.monotonic() - t0) * 1000.0
+                    async with records_lock:
+                        records.append(
+                            RequestRecord(
+                                ok=ok,
+                                latency_ms=latency_ms,
+                                status_code=final_status,
+                                error_kind=final_error_kind,
+                            )
                         )
+                    async with in_flight_lock:
+                        in_flight -= 1
+    
+            launch_tasks: list[asyncio.Task] = []
+    
+            async def launcher() -> None:
+                if rate <= 0:
+                    return
+                interval = 1.0 / float(rate)
+                seq = 0
+                next_fire = time.monotonic()
+                while time.monotonic() < end:
+                    now = time.monotonic()
+                    if now < next_fire:
+                        await asyncio.sleep(next_fire - now)
+                    next_fire += interval
+                    launch_tasks.append(asyncio.create_task(fire_one(seq)))
+                    seq += 1
+    
+            async def progress_loop() -> None:
+                while time.monotonic() < end:
+                    await asyncio.sleep(10)
+                    elapsed = int(time.monotonic() - start)
+                    async with records_lock:
+                        latencies = [r.latency_ms for r in records]
+                        oks = sum(1 for r in records if r.ok)
+                        errs = len(records) - oks
+                        p95 = percentile(latencies, 0.95)
+                        err_rate = (errs / len(records) * 100.0) if records else 0.0
+                        error_counts: Counter[str] = Counter()
+                        for record in records:
+                            if record.ok:
+                                continue
+                            key = (
+                                record.error_kind
+                                or (f"http_{record.status_code}" if record.status_code else "unknown")
+                            )
+                            error_counts[key] += 1
+                    summary_now = await fetch_summary(client, verifier_pool[0])
+                    acceptance = float(summary_now.get("speculative_acceptance_rate", 0.0)) * 100.0
+                    pool_summaries = await fetch_pool_summaries(client, verifier_pool)
+                    pool_health = await fetch_pool_health(client, verifier_pool)
+                    max_queue_depth = max(
+                        (float(s.get("queue_depth", 0.0) or 0.0) for s in pool_summaries),
+                        default=0.0,
                     )
-                async with in_flight_lock:
-                    in_flight -= 1
-
-        launch_tasks: list[asyncio.Task] = []
-
-        async def launcher() -> None:
-            if rate <= 0:
-                return
-            interval = 1.0 / float(rate)
-            seq = 0
-            next_fire = time.monotonic()
-            while time.monotonic() < end:
-                now = time.monotonic()
-                if now < next_fire:
-                    await asyncio.sleep(next_fire - now)
-                next_fire += interval
-                launch_tasks.append(asyncio.create_task(fire_one(seq)))
-                seq += 1
-
-        async def progress_loop() -> None:
-            while time.monotonic() < end:
-                await asyncio.sleep(10)
-                elapsed = int(time.monotonic() - start)
-                async with records_lock:
-                    latencies = [r.latency_ms for r in records]
-                    oks = sum(1 for r in records if r.ok)
-                    errs = len(records) - oks
-                    p95 = percentile(latencies, 0.95)
-                    err_rate = (errs / len(records) * 100.0) if records else 0.0
-                    error_counts: Counter[str] = Counter()
-                    for record in records:
-                        if record.ok:
-                            continue
-                        key = (
-                            record.error_kind
-                            or (f"http_{record.status_code}" if record.status_code else "unknown")
+                    max_p95_latency_ms = max(
+                        (summary_latency_signal_ms(s) for s in pool_summaries),
+                        default=0.0,
+                    )
+                    blackout_endpoints = sum(
+                        1
+                        for s in pool_summaries
+                        if str(s.get("scout_blackout_mode", "open")).lower() == "blackout"
+                    )
+                    if scout_mode == "synthetic":
+                        current_target = await get_scout_target()
+                        next_target = adaptive_scout_target(
+                            current=current_target,
+                            configured_max=max(0, scout_workers),
+                            max_queue_depth=max_queue_depth,
+                            max_p95_latency_ms=max_p95_latency_ms,
+                            blackout_endpoints=blackout_endpoints,
                         )
-                        error_counts[key] += 1
-                summary_now = await fetch_summary(client, verifier_pool[0])
-                acceptance = float(summary_now.get("speculative_acceptance_rate", 0.0)) * 100.0
-                pool_summaries = await fetch_pool_summaries(client, verifier_pool)
-                pool_health = await fetch_pool_health(client, verifier_pool)
-                max_queue_depth = max(
-                    (float(s.get("queue_depth", 0.0) or 0.0) for s in pool_summaries),
-                    default=0.0,
-                )
-                max_p95_latency_ms = max(
-                    (summary_latency_signal_ms(s) for s in pool_summaries),
-                    default=0.0,
-                )
-                blackout_endpoints = sum(
-                    1
-                    for s in pool_summaries
-                    if str(s.get("scout_blackout_mode", "open")).lower() == "blackout"
-                )
-                current_target = await get_scout_target()
-                next_target = adaptive_scout_target(
-                    current=current_target,
-                    configured_max=max(0, scout_workers),
-                    max_queue_depth=max_queue_depth,
-                    max_p95_latency_ms=max_p95_latency_ms,
-                    blackout_endpoints=blackout_endpoints,
-                )
-                await set_scout_target(next_target)
-                async with in_flight_lock:
-                    active = in_flight
-                active_scout_target = await get_scout_target()
-                observed_active_scouts = max(
-                    (int(h.get("active_scouts", 0) or 0) for h in pool_health),
-                    default=0,
-                )
-                observed_browser_sessions = max(
-                    (int(h.get("active_browser_sessions", 0) or 0) for h in pool_health),
-                    default=0,
-                )
-                observed_draft_capable_scouts = max(
-                    (int(h.get("draft_capable_scouts", 0) or 0) for h in pool_health),
-                    default=0,
-                )
-                top_errors = ", ".join(
-                    f"{kind}:{count}" for kind, count in error_counts.most_common(2)
-                )
-                if not top_errors:
-                    top_errors = "none"
-                print(
-                    f"[{elapsed}s/{duration}s] InFlight: {active} | obs_scouts: {observed_active_scouts} | "
-                    f"browser_sessions: {observed_browser_sessions} | p95: {p95/1000.0:.2f}s | "
-                    f"accept: {acceptance:.1f}% | errors: {err_rate:.2f}% | "
-                    f"scout_target: {active_scout_target} | max_q: {max_queue_depth:.1f} | max_p95: {max_p95_latency_ms:.0f}ms | "
-                    f"blackout_nodes: {blackout_endpoints} | top_errors: {top_errors}"
-                )
-                timeseries.append(
-                    {
-                        "t": elapsed,
-                        "in_flight_requests": active,
-                        "observed_active_scouts": observed_active_scouts,
-                        "observed_active_browser_sessions": observed_browser_sessions,
-                        "observed_draft_capable_scouts": observed_draft_capable_scouts,
-                        "scout_target": active_scout_target,
-                        "max_queue_depth": round(max_queue_depth, 3),
-                        "max_pool_p95_latency_ms": round(max_p95_latency_ms, 3),
-                        "blackout_endpoints": blackout_endpoints,
-                        "p95_latency_ms": round(p95, 3),
-                        "acceptance_rate_pct": round(acceptance, 3),
-                        "error_rate_pct": round(err_rate, 4),
-                    }
-                )
-
-        scout_tasks = [
-            asyncio.create_task(scout_loop(idx))
-            for idx in range(max(0, scout_workers))
-        ]
-        await asyncio.gather(launcher(), progress_loop())
-        await asyncio.gather(*launch_tasks, return_exceptions=True)
-        if scout_tasks:
-            scout_shutdown_grace_s = max(5.0, timeout_secs + 2.0)
-            done, pending = await asyncio.wait(
-                scout_tasks,
-                timeout=scout_shutdown_grace_s,
+                        await set_scout_target(next_target)
+                    async with in_flight_lock:
+                        active = in_flight
+                    active_scout_target = (
+                        await get_scout_target() if scout_mode == "synthetic" else max(0, scout_workers)
+                    )
+                    observed_active_scouts = max(
+                        (int(h.get("active_scouts", 0) or 0) for h in pool_health),
+                        default=0,
+                    )
+                    observed_browser_sessions = max(
+                        (int(h.get("active_browser_sessions", 0) or 0) for h in pool_health),
+                        default=0,
+                    )
+                    observed_draft_capable_scouts = max(
+                        (int(h.get("draft_capable_scouts", 0) or 0) for h in pool_health),
+                        default=0,
+                    )
+                    top_errors = ", ".join(
+                        f"{kind}:{count}" for kind, count in error_counts.most_common(2)
+                    )
+                    if not top_errors:
+                        top_errors = "none"
+                    print(
+                        f"[{elapsed}s/{duration}s] InFlight: {active} | obs_scouts: {observed_active_scouts} | "
+                        f"browser_sessions: {observed_browser_sessions} | p95: {p95/1000.0:.2f}s | "
+                        f"accept: {acceptance:.1f}% | errors: {err_rate:.2f}% | "
+                        f"scout_target: {active_scout_target} | max_q: {max_queue_depth:.1f} | max_p95: {max_p95_latency_ms:.0f}ms | "
+                        f"blackout_nodes: {blackout_endpoints} | top_errors: {top_errors}"
+                    )
+                    timeseries.append(
+                        {
+                            "t": elapsed,
+                            "in_flight_requests": active,
+                            "observed_active_scouts": observed_active_scouts,
+                            "observed_active_browser_sessions": observed_browser_sessions,
+                            "observed_draft_capable_scouts": observed_draft_capable_scouts,
+                            "scout_target": active_scout_target,
+                            "max_queue_depth": round(max_queue_depth, 3),
+                            "max_pool_p95_latency_ms": round(max_p95_latency_ms, 3),
+                            "blackout_endpoints": blackout_endpoints,
+                            "p95_latency_ms": round(p95, 3),
+                            "acceptance_rate_pct": round(acceptance, 3),
+                            "error_rate_pct": round(err_rate, 4),
+                        }
+                    )
+    
+            scout_tasks: list[asyncio.Task] = []
+            if scout_workers > 0 and scout_mode == "synthetic":
+                scout_tasks = [
+                    asyncio.create_task(scout_loop(idx))
+                    for idx in range(max(0, scout_workers))
+                ]
+            elif scout_workers > 0 and scout_mode == "browser":
+                browser_scout_proc = await launch_browser_scout_runner(
+                    count=scout_workers,
+                    verifier_pool=verifier_pool,
+                    page_base_url=browser_scout_page_base_url,
+                browser_channel=browser_channel,
+                browser_headless=browser_headless,
+                startup_timeout_ms=browser_startup_timeout_ms,
+                browser_user_data_dir=browser_user_data_dir,
             )
-            if pending:
-                print(
-                    f"[scout-drain] canceling {len(pending)} scout workers after "
-                    f"{scout_shutdown_grace_s:.1f}s grace period"
+                await asyncio.sleep(2.0)
+                if browser_scout_proc.returncode is not None:
+                    raise RuntimeError(
+                        f"browser scout runner exited early with code {browser_scout_proc.returncode}"
+                    )
+            await asyncio.gather(launcher(), progress_loop())
+            await asyncio.gather(*launch_tasks, return_exceptions=True)
+            if scout_tasks:
+                scout_shutdown_grace_s = max(5.0, timeout_secs + 2.0)
+                done, pending = await asyncio.wait(
+                    scout_tasks,
+                    timeout=scout_shutdown_grace_s,
                 )
-                for task in pending:
-                    task.cancel()
-                await asyncio.gather(*pending, return_exceptions=True)
-            if done:
-                await asyncio.gather(*done, return_exceptions=True)
-
-        after_summaries = await fetch_pool_summaries(client, verifier_pool)
-        after_accepted, after_total = aggregate_speculative_totals(after_summaries)
+                if pending:
+                    print(
+                        f"[scout-drain] canceling {len(pending)} scout workers after "
+                        f"{scout_shutdown_grace_s:.1f}s grace period"
+                    )
+                    for task in pending:
+                        task.cancel()
+                    await asyncio.gather(*pending, return_exceptions=True)
+                if done:
+                    await asyncio.gather(*done, return_exceptions=True)
+    
+            after_summaries = await fetch_pool_summaries(client, verifier_pool)
+            after_accepted, after_total = aggregate_speculative_totals(after_summaries)
+    finally:
+        if browser_scout_proc is not None and browser_scout_proc.returncode is None:
+            browser_scout_proc.terminate()
+            try:
+                await asyncio.wait_for(browser_scout_proc.wait(), timeout=20.0)
+            except asyncio.TimeoutError:
+                browser_scout_proc.kill()
+                await browser_scout_proc.wait()
 
     latencies = [r.latency_ms for r in records]
     total = len(records)
@@ -750,6 +828,10 @@ async def run_orchestrator(
         "rate": rate,
         "duration_seconds": duration,
         "verifier_pool": verifier_pool,
+        "scout_mode": scout_mode,
+        "browser_scout_page_base_url": (
+            browser_scout_page_base_url if scout_mode == "browser" else None
+        ),
         "total_requests": total,
         "successful_requests": oks,
         "error_requests": errs,
@@ -818,6 +900,42 @@ def parse_args() -> argparse.Namespace:
         help="Synthetic scout workers that poll /v1/scout/work and submit drafts",
     )
     parser.add_argument(
+        "--scout-mode",
+        type=str,
+        default="synthetic",
+        choices=["synthetic", "browser"],
+        help="Use synthetic verifier-generated scouts or real browser WebGPU scout tabs",
+    )
+    parser.add_argument(
+        "--browser-scout-page-base-url",
+        type=str,
+        default="http://127.0.0.1:3000/benchmark/scout",
+        help="Benchmark scout page used when --scout-mode=browser",
+    )
+    parser.add_argument(
+        "--browser-channel",
+        type=str,
+        default="msedge" if sys.platform.startswith("win") else "chrome",
+        help="Browser channel for real browser scouts (chrome, msedge, chromium)",
+    )
+    parser.add_argument(
+        "--browser-headless",
+        action="store_true",
+        help="Run browser scouts headless when supported by the chosen browser",
+    )
+    parser.add_argument(
+        "--browser-startup-timeout-ms",
+        type=int,
+        default=900000,
+        help="Max wait for each browser scout tab to reach contributing state",
+    )
+    parser.add_argument(
+        "--browser-user-data-dir",
+        type=str,
+        default="",
+        help="Persistent browser profile directory for real browser scouts",
+    )
+    parser.add_argument(
         "--max-tokens",
         type=int,
         default=32,
@@ -863,6 +981,12 @@ def main() -> None:
             max_attempts=args.max_attempts,
             scout_workers=args.scout_workers,
             max_tokens=args.max_tokens,
+            scout_mode=args.scout_mode,
+            browser_scout_page_base_url=args.browser_scout_page_base_url,
+            browser_channel=args.browser_channel,
+            browser_headless=args.browser_headless,
+            browser_startup_timeout_ms=args.browser_startup_timeout_ms,
+            browser_user_data_dir=args.browser_user_data_dir or None,
             readiness_timeout_s=args.readiness_timeout_s,
             ready_queue_depth_max=args.ready_queue_depth_max,
             require_no_blackout=not args.allow_readiness_blackout,

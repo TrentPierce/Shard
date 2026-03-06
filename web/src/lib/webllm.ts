@@ -11,6 +11,8 @@
 import {
     CreateMLCEngine,
     CreateWebWorkerMLCEngine,
+    prebuiltAppConfig,
+    type AppConfig,
     type MLCEngineInterface,
     type WebWorkerMLCEngine,
     type InitProgressReport,
@@ -72,6 +74,19 @@ const DEFAULT_DRAFT_OPTIONS: DraftGenerationOptions = {
 let engine: MLCEngineInterface | null = null
 let isLoading = false
 let currentModel: string = DRAFT_MODEL
+let scoutAppConfig: AppConfig | null = null
+
+function getScoutAppConfig(): AppConfig {
+    if (scoutAppConfig) {
+        return scoutAppConfig
+    }
+    scoutAppConfig = {
+        ...prebuiltAppConfig,
+        useIndexedDBCache: true,
+        model_list: [...prebuiltAppConfig.model_list],
+    }
+    return scoutAppConfig
+}
 
 function preferDirectEngineOnThisPlatform(): boolean {
     if (typeof navigator === "undefined") {
@@ -282,6 +297,7 @@ export async function initWebLLM(
                         {
                             initProgressCallback: wrappedCallback,
                             logLevel: "INFO",
+                            appConfig: getScoutAppConfig(),
                         },
                         {
                             context_window_size: 2048,
@@ -295,6 +311,7 @@ export async function initWebLLM(
                     {
                         initProgressCallback: wrappedCallback,
                         logLevel: "INFO",
+                        appConfig: getScoutAppConfig(),
                     },
                     {
                         context_window_size: 2048,
@@ -310,6 +327,7 @@ export async function initWebLLM(
                     {
                         initProgressCallback: wrappedCallback,
                         logLevel: "INFO",
+                        appConfig: getScoutAppConfig(),
                     },
                     {
                         context_window_size: 2048,
@@ -435,7 +453,7 @@ export async function resetWebLLMChat(): Promise<void> {
 export async function isModelCached(modelId?: string): Promise<boolean> {
     try {
         const { hasModelInCache } = await import("@mlc-ai/web-llm")
-        return await hasModelInCache(modelId || getModelForDevice())
+        return await hasModelInCache(modelId || getModelForDevice(), getScoutAppConfig())
     } catch {
         return false
     }

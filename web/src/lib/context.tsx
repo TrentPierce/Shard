@@ -163,6 +163,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
         const boot = async () => {
             scoutBootedRef.current = true
+            if (typeof window !== "undefined" && window.location.pathname.startsWith("/benchmark/scout")) {
+                return
+            }
 
             try {
                 if (PREFER_LOCAL_SHARD) {

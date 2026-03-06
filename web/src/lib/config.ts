@@ -9,6 +9,7 @@ const isTauri = typeof window !== "undefined" && (window as any).__TAURI_INTERNA
 export const API_BASE = process.env.NEXT_PUBLIC_API_URL || (isTauri ? "http://localhost:9091" : "")
 export const RUST_BASE = process.env.NEXT_PUBLIC_RUST_URL || "http://localhost:9091"
 export const SHARD_BACKEND_BASE = process.env.NEXT_PUBLIC_SHARD_BACKEND_URL || "http://localhost:9091"
+const RUNTIME_API_BASE_OVERRIDE_KEY = "shard_runtime_api_base_override"
 
 /**
  * Whether the browser should prefer local shard mode when a localhost daemon is detected.
@@ -30,10 +31,39 @@ export const ENABLE_BROWSER_LAYER_HOST =
 export const ENABLE_BROWSER_P2P =
   process.env.NEXT_PUBLIC_ENABLE_BROWSER_P2P === "true"
 
+function getRuntimeApiBaseOverride(): string {
+  if (typeof window === "undefined") return ""
+  const win = window as typeof window & { __SHARD_API_BASE_OVERRIDE__?: string }
+  const direct = typeof win.__SHARD_API_BASE_OVERRIDE__ === "string" ? win.__SHARD_API_BASE_OVERRIDE__ : ""
+  if (direct.trim()) return direct.trim()
+  try {
+    return window.sessionStorage.getItem(RUNTIME_API_BASE_OVERRIDE_KEY)?.trim() || ""
+  } catch {
+    return ""
+  }
+}
+
+export function setRuntimeApiBaseOverride(base: string | null): void {
+  if (typeof window === "undefined") return
+  const clean = (base || "").trim()
+  const win = window as typeof window & { __SHARD_API_BASE_OVERRIDE__?: string }
+  win.__SHARD_API_BASE_OVERRIDE__ = clean || undefined
+  try {
+    if (clean) {
+      window.sessionStorage.setItem(RUNTIME_API_BASE_OVERRIDE_KEY, clean)
+    } else {
+      window.sessionStorage.removeItem(RUNTIME_API_BASE_OVERRIDE_KEY)
+    }
+  } catch {
+    // Best effort only.
+  }
+}
+
 export function apiUrl(path: string = "/v1"): string {
   const cleanPath = path.startsWith("/") ? path : `/${path}`
   // If API_BASE is empty, it results in a relative path like "/api/v1/..."
-  const base = API_BASE.replace(/\/$/, "")
+  const runtimeOverride = getRuntimeApiBaseOverride()
+  const base = (runtimeOverride || API_BASE).replace(/\/$/, "")
   
   // Ensure we use the /api prefix for relative routes if no absolute URL is provided
   if (!base && !cleanPath.startsWith("/api")) {

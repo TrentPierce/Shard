@@ -48,8 +48,8 @@ def scenario_inference_mode(scenario: Scenario, default_mode: str) -> str:
 
 SCENARIOS: list[Scenario] = [
     Scenario(name="one-node-no-scouts", use_scout_workers=False, pool_kind="one_node"),
-    Scenario(name="one-node-with-scouts", use_scout_workers=True, pool_kind="one_node"),
     Scenario(name="two-node-no-scouts", use_scout_workers=False, pool_kind="two_node"),
+    Scenario(name="one-node-with-scouts", use_scout_workers=True, pool_kind="one_node"),
     Scenario(name="two-node-with-scouts", use_scout_workers=True, pool_kind="two_node"),
 ]
 
@@ -307,6 +307,12 @@ async def execute(args: argparse.Namespace) -> dict[str, Any]:
                     max_attempts=args.max_attempts,
                     scout_workers=workers,
                     max_tokens=args.max_tokens,
+                    scout_mode=args.scout_mode if scenario.use_scout_workers else "synthetic",
+                    browser_scout_page_base_url=args.browser_scout_page_base_url,
+                    browser_channel=args.browser_channel,
+                    browser_headless=args.browser_headless,
+                    browser_startup_timeout_ms=args.browser_startup_timeout_ms,
+                    browser_user_data_dir=args.browser_user_data_dir or None,
                     readiness_timeout_s=args.readiness_timeout_s,
                     ready_queue_depth_max=args.ready_queue_depth_max,
                     require_no_blackout=not args.allow_readiness_blackout,
@@ -400,6 +406,12 @@ async def execute(args: argparse.Namespace) -> dict[str, Any]:
             "request_timeout_ms": args.request_timeout_ms,
             "max_attempts": args.max_attempts,
             "max_tokens": args.max_tokens,
+            "scout_mode": args.scout_mode,
+            "browser_scout_page_base_url": args.browser_scout_page_base_url,
+            "browser_channel": args.browser_channel,
+            "browser_headless": args.browser_headless,
+            "browser_startup_timeout_ms": args.browser_startup_timeout_ms,
+            "browser_user_data_dir": args.browser_user_data_dir,
             "readiness_timeout_s": args.readiness_timeout_s,
             "ready_queue_depth_max": args.ready_queue_depth_max,
             "allow_readiness_blackout": args.allow_readiness_blackout,
@@ -445,6 +457,25 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--rate", type=int, default=4)
     parser.add_argument("--duration", type=int, default=60)
     parser.add_argument("--scout-workers", type=int, default=4)
+    parser.add_argument(
+        "--scout-mode",
+        type=str,
+        default="synthetic",
+        choices=["synthetic", "browser"],
+    )
+    parser.add_argument(
+        "--browser-scout-page-base-url",
+        type=str,
+        default="http://127.0.0.1:3000/benchmark/scout",
+    )
+    parser.add_argument(
+        "--browser-channel",
+        type=str,
+        default="msedge" if sys.platform.startswith("win") else "chrome",
+    )
+    parser.add_argument("--browser-headless", action="store_true")
+    parser.add_argument("--browser-startup-timeout-ms", type=int, default=900000)
+    parser.add_argument("--browser-user-data-dir", type=str, default="")
     parser.add_argument(
         "--inference-mode",
         type=str,

@@ -36,6 +36,7 @@ pub(crate) async fn health_handler(
     };
     let (
         draft_capable_scout_count,
+        active_browser_runtime_count,
         scout_runtime_webgpu_total,
         scout_runtime_wasm_total,
         scout_last_submit_success_ms,
@@ -90,7 +91,7 @@ pub(crate) async fn health_handler(
         "verified_peers": verified_count,
         "active_scouts": scout_count,
         "draft_capable_scouts": draft_capable_scout_count,
-        "active_browser_sessions": browser_scout_count,
+        "active_browser_sessions": browser_scout_count.max(active_browser_runtime_count),
         "recent_scout_submitters": recent_scout_submitters,
         "scout_runtime_webgpu_total": scout_runtime_webgpu_total,
         "scout_runtime_wasm_total": scout_runtime_wasm_total,
@@ -444,17 +445,22 @@ pub(crate) fn prune_scout_client_runtime(
 fn summarize_scout_client_runtime(
     statuses: &HashMap<String, ScoutClientRuntimeStatus>,
     now: u128,
-) -> (usize, usize, usize, Option<u128>) {
+) -> (usize, usize, usize, usize, Option<u128>) {
     let mut draft_capable = 0usize;
+    let mut active_runtime_total = 0usize;
     let mut webgpu_total = 0usize;
     let mut wasm_total = 0usize;
     let mut last_submit_success_ms: Option<u128> = None;
 
     for status in statuses.values() {
+        let active = now.saturating_sub(status.last_event_ms) <= SCOUT_CLIENT_ACTIVE_WINDOW_MS;
+        if active {
+            active_runtime_total += 1;
+        }
         let mode = status.runtime_mode.as_deref().unwrap_or_default();
         if mode.eq_ignore_ascii_case("webgpu") {
             webgpu_total += 1;
-            if now.saturating_sub(status.last_event_ms) <= SCOUT_CLIENT_ACTIVE_WINDOW_MS {
+            if active {
                 draft_capable += 1;
             }
         } else if mode.eq_ignore_ascii_case("wasm") {
@@ -469,6 +475,7 @@ fn summarize_scout_client_runtime(
 
     (
         draft_capable,
+        active_runtime_total,
         webgpu_total,
         wasm_total,
         last_submit_success_ms,
@@ -3323,6 +3330,7 @@ pub(crate) async fn metrics_summary_handler(
 
     let (
         draft_capable_scout_count,
+        active_browser_runtime_count,
         scout_runtime_webgpu_total,
         scout_runtime_wasm_total,
         scout_last_submit_success_ms,
@@ -3452,6 +3460,10 @@ pub(crate) async fn metrics_summary_handler(
     payload.insert(
         "draft_capable_scouts".to_string(),
         serde_json::json!(draft_capable_scout_count),
+    );
+    payload.insert(
+        "active_browser_sessions".to_string(),
+        serde_json::json!(active_browser_runtime_count),
     );
     payload.insert(
         "scout_runtime_webgpu_total".to_string(),
@@ -3995,8 +4007,9 @@ mod tests {
         require_scout_id, runtime_health_state, sanitize_scout_draft_text,
         scout_admission_decision, scout_assignment_backpressured, scout_blackout_mode,
         scout_reopen_stage_ms, scout_work_max_age_ms, should_route_long_context,
-        verify_spot_check_submission, DraftSpotCheckProof, ScoutAdmissionMode, ScoutBlackoutMode,
-        ScoutBlackoutState, ScoutWorkLease, ScoutWorkQuery, WebGPUProbeResult, WebGPUStats,
+        summarize_scout_client_runtime, verify_spot_check_submission, DraftSpotCheckProof,
+        ScoutAdmissionMode, ScoutBlackoutMode, ScoutBlackoutState, ScoutClientRuntimeStatus,
+        ScoutWorkLease, ScoutWorkQuery, WebGPUProbeResult, WebGPUStats,
     };
     use crate::{SchedulerDecisionLog, WorkRequest};
     use std::collections::{HashMap, VecDeque};
@@ -4247,6 +4260,48 @@ mod tests {
             runtime_health_state(true, true, true),
             ("ok", "ready", true)
         );
+    }
+
+    #[test]
+    fn scout_runtime_summary_counts_active_browser_sessions() {
+        let now = 10_000u128;
+        let mut statuses = HashMap::new();
+        statuses.insert(
+            "scout-webgpu".to_string(),
+            ScoutClientRuntimeStatus {
+                scout_id: "scout-webgpu".to_string(),
+                runtime_mode: Some("webgpu".to_string()),
+                last_event: "runtime_webgpu_ready".to_string(),
+                last_event_detail: None,
+                last_event_ms: now - 1_000,
+                last_submit_success_ms: Some(now - 500),
+            },
+        );
+        statuses.insert(
+            "scout-wasm".to_string(),
+            ScoutClientRuntimeStatus {
+                scout_id: "scout-wasm".to_string(),
+                runtime_mode: Some("wasm".to_string()),
+                last_event: "runtime_wasm_fallback".to_string(),
+                last_event_detail: None,
+                last_event_ms: now - 1_500,
+                last_submit_success_ms: None,
+            },
+        );
+
+        let (
+            draft_capable,
+            active_browser_sessions,
+            webgpu_total,
+            wasm_total,
+            last_submit_success_ms,
+        ) = summarize_scout_client_runtime(&statuses, now);
+
+        assert_eq!(draft_capable, 1);
+        assert_eq!(active_browser_sessions, 2);
+        assert_eq!(webgpu_total, 1);
+        assert_eq!(wasm_total, 1);
+        assert_eq!(last_submit_success_ms, Some(now - 500));
     }
 
     #[test]
