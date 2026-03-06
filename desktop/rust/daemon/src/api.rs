@@ -55,7 +55,12 @@ pub(crate) async fn health_handler(
         }
         unique.len()
     };
-    let scout_count = draft_capable_scout_count.max(recent_scout_submitters);
+    let scout_ingress_enabled = state.scout_ingress_enabled.load(Ordering::Relaxed);
+    let scout_count = if scout_ingress_enabled {
+        draft_capable_scout_count.max(recent_scout_submitters)
+    } else {
+        0
+    };
     let model_compat =
         shard_verifier::inference::check_model_compatibility(state.model_id.as_str());
     let rollout_snapshot = {
@@ -76,7 +81,7 @@ pub(crate) async fn health_handler(
         "status": status,
         "readiness_reason": readiness_reason,
         "ready_for_inference": ready_for_inference,
-        "scout_ingress_enabled": state.scout_ingress_enabled.load(Ordering::Relaxed),
+        "scout_ingress_enabled": scout_ingress_enabled,
         "rust_sidecar": "connected",
         "rust_version": env!("CARGO_PKG_VERSION"),
         "rust_uptime_ms": now_ms() - state.daemon_start,
