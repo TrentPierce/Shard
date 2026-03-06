@@ -1,19 +1,36 @@
 <svg width="1200" height="630" viewBox="0 0 1200 630" fill="none" xmlns="http://www.w3.org/2000/svg">
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1200" y2="630" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#070A12"/>
-      <stop offset="1" stop-color="#0D1830"/>
+      <stop stop-color="#091540"/>
+      <stop offset="0.55" stop-color="#1B2CC1"/>
+      <stop offset="1" stop-color="#3D518C"/>
     </linearGradient>
-    <linearGradient id="accent" x1="220" y1="130" x2="950" y2="490" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#3E8BFF"/>
-      <stop offset="1" stop-color="#00EAFF"/>
+    <radialGradient id="glowA" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(180 120) rotate(30) scale(320 240)">
+      <stop stop-color="#ABD2FA" stop-opacity="0.42"/>
+      <stop offset="1" stop-color="#ABD2FA" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glowB" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(1035 520) rotate(-12) scale(360 260)">
+      <stop stop-color="#7692FF" stop-opacity="0.34"/>
+      <stop offset="1" stop-color="#7692FF" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="panel" x1="144" y1="96" x2="1032" y2="534" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF" stop-opacity="0.16"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0.04"/>
     </linearGradient>
   </defs>
   <rect width="1200" height="630" fill="url(#bg)"/>
-  <circle cx="190" cy="120" r="180" fill="#3E8BFF" fill-opacity="0.16"/>
-  <circle cx="1030" cy="500" r="220" fill="#00EAFF" fill-opacity="0.14"/>
-  <rect x="120" y="90" width="960" height="450" rx="28" fill="#0F172A" fill-opacity="0.75" stroke="url(#accent)" stroke-width="2"/>
-  <text x="180" y="250" fill="#E2E8F0" font-family="Inter, Arial, sans-serif" font-weight="700" font-size="68">Shard Network</text>
-  <text x="180" y="332" fill="#7DD3FC" font-family="Inter, Arial, sans-serif" font-weight="600" font-size="40">Browser-powered distributed inference</text>
-  <text x="180" y="400" fill="#CBD5E1" font-family="Inter, Arial, sans-serif" font-size="30">Contribute WebGPU compute. Get resilient AI responses.</text>
+  <circle cx="180" cy="120" r="220" fill="url(#glowA)"/>
+  <circle cx="1035" cy="520" r="250" fill="url(#glowB)"/>
+  <rect x="120" y="84" width="960" height="462" rx="30" fill="#0D1B53" fill-opacity="0.68" stroke="#7692FF" stroke-opacity="0.28" stroke-width="2"/>
+  <rect x="144" y="108" width="912" height="414" rx="26" fill="url(#panel)"/>
+  <image href="/brand-mark.png" x="168" y="146" width="230" height="230"/>
+  <text x="430" y="244" fill="#F5F9FF" font-family="Space Grotesk, Arial, sans-serif" font-weight="700" font-size="78">Shard Network</text>
+  <text x="430" y="318" fill="#ABD2FA" font-family="Space Grotesk, Arial, sans-serif" font-weight="600" font-size="34" letter-spacing="1">Browser scouts draft. Verifier nodes prove.</text>
+  <text x="430" y="380" fill="#DEEBFF" font-family="IBM Plex Mono, Arial, sans-serif" font-size="26">OpenAI-compatible mesh inference with live node telemetry.</text>
+  <g opacity="0.88">
+    <rect x="430" y="432" width="178" height="56" rx="18" fill="#7692FF"/>
+    <text x="472" y="468" fill="#091540" font-family="IBM Plex Mono, Arial, sans-serif" font-weight="700" font-size="22">JOIN FAST</text>
+    <rect x="626" y="432" width="240" height="56" rx="18" fill="#091540" stroke="#ABD2FA" stroke-opacity="0.45" stroke-width="2"/>
+    <text x="662" y="468" fill="#ABD2FA" font-family="IBM Plex Mono, Arial, sans-serif" font-weight="700" font-size="22">RUN VERIFIER</text>
+  </g>
 </svg>

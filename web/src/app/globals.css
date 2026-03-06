@@ -4,28 +4,28 @@
 
 :root {
   color-scheme: dark;
-  --pitch-black: #191308;
-  --deep-mocha: #322a26;
-  --twilight-indigo: #454b66;
-  --glaucous: #677db7;
-  --wisteria-blue: #9ca3db;
+  --deep-navy: #091540;
+  --cornflower-blue: #7692ff;
+  --icy-blue: #abd2fa;
+  --dusk-blue: #3d518c;
+  --persian-blue: #1b2cc1;
 
-  --bg-primary: var(--pitch-black);
-  --bg-secondary: var(--deep-mocha);
-  --bg-tertiary: var(--twilight-indigo);
-  --bg-elevated: var(--glaucous);
-  --primary: var(--glaucous);
-  --primary-hover: var(--wisteria-blue);
-  --primary-muted: var(--twilight-indigo);
-  --secondary: var(--twilight-indigo);
-  --secondary-hover: var(--glaucous);
-  --text-primary: #f2f4ff;
-  --text-secondary: #dde2ff;
-  --text-muted: var(--wisteria-blue);
-  --text-inverse: var(--pitch-black);
-  --border: rgba(156, 163, 219, 0.25);
-  --border-hover: rgba(156, 163, 219, 0.45);
-  --primary-glow: rgba(103, 125, 183, 0.2);
+  --bg-primary: var(--deep-navy);
+  --bg-secondary: #11205d;
+  --bg-tertiary: var(--persian-blue);
+  --bg-elevated: var(--dusk-blue);
+  --primary: var(--cornflower-blue);
+  --primary-hover: var(--icy-blue);
+  --primary-muted: var(--persian-blue);
+  --secondary: var(--dusk-blue);
+  --secondary-hover: var(--cornflower-blue);
+  --text-primary: #f5f9ff;
+  --text-secondary: #deebff;
+  --text-muted: var(--icy-blue);
+  --text-inverse: var(--deep-navy);
+  --border: rgba(118, 146, 255, 0.22);
+  --border-hover: rgba(171, 210, 250, 0.48);
+  --primary-glow: rgba(118, 146, 255, 0.22);
 }
 
 html,
@@ -36,9 +36,10 @@ body {
 body {
   @apply bg-base-950 text-ink-50 antialiased;
   background-image:
-    radial-gradient(circle at 20% 15%, rgba(156, 163, 219, 0.16) 0%, transparent 34%),
-    radial-gradient(circle at 85% 5%, rgba(103, 125, 183, 0.22) 0%, transparent 40%),
-    linear-gradient(180deg, rgba(69, 75, 102, 0.18) 0%, rgba(25, 19, 8, 0.95) 58%);
+    radial-gradient(circle at 16% 12%, rgba(171, 210, 250, 0.18) 0%, transparent 30%),
+    radial-gradient(circle at 84% 8%, rgba(118, 146, 255, 0.22) 0%, transparent 34%),
+    radial-gradient(circle at 50% 100%, rgba(27, 44, 193, 0.18) 0%, transparent 42%),
+    linear-gradient(180deg, rgba(61, 81, 140, 0.18) 0%, rgba(9, 21, 64, 0.96) 58%);
 }
 
 main {

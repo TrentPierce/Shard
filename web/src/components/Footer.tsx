@@ -1,6 +1,7 @@
 "use client"
 
 import Link from "next/link"
+import Image from "next/image"
 import { Github, Twitter, FileText } from "lucide-react"
 import { SHARD_VERSION } from "@/lib/version"
 
@@ -43,11 +44,7 @@ export default function Footer() {
                 <div className="footer-grid">
                     <div className="footer-brand">
                         <Link href="/" className="header-logo">
-                            <svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style={{ width: 32, height: 32 }}>
-                                <path d="M16 2L28 9V23L16 30L4 23V9L16 2Z" stroke="currentColor" strokeWidth="2" fill="none"/>
-                                <path d="M16 2V16M16 16L28 9M16 16L4 9M16 16V30" stroke="currentColor" strokeWidth="2"/>
-                                <circle cx="16" cy="16" r="4" fill="currentColor"/>
-                            </svg>
+                            <Image src="/brand-mark.png" alt="" width={32} height={32} aria-hidden="true" />
                             <span>Shard</span>
                         </Link>
                         <p>

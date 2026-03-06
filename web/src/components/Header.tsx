@@ -2,6 +2,7 @@
 
 import { useState } from "react"
 import Link from "next/link"
+import Image from "next/image"
 import { Menu, X, ChevronRight } from "lucide-react"
 
 export const modeLabels: Record<string, string> = {
@@ -30,11 +31,7 @@ export default function Header() {
         <header className="header">
             <div className="header-inner">
                 <Link href="/" className="header-logo" aria-label="Shard Home">
-                    <svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                        <path d="M16 2L28 9V23L16 30L4 23V9L16 2Z" stroke="currentColor" strokeWidth="2" fill="none"/>
-                        <path d="M16 2V16M16 16L28 9M16 16L4 9M16 16V30" stroke="currentColor" strokeWidth="2"/>
-                        <circle cx="16" cy="16" r="4" fill="currentColor"/>
-                    </svg>
+                    <Image src="/brand-mark.png" alt="" width={32} height={32} aria-hidden="true" />
                     <span>Shard</span>
                 </Link>
 

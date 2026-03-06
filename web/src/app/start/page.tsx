@@ -76,7 +76,7 @@ export default function StartPage() {
 
   return (
     <main id="main-content" className="py-8 sm:py-10">
-      <section className="rounded-[2rem] border border-ring bg-[linear-gradient(180deg,rgba(69,75,102,0.18),rgba(25,19,8,0.92))] p-6 shadow-panel sm:p-8">
+      <section className="rounded-[2rem] border border-ring bg-[linear-gradient(180deg,rgba(61,81,140,0.2),rgba(9,21,64,0.92))] p-6 shadow-panel sm:p-8">
         <p className="text-xs uppercase tracking-[0.22em] text-ink-400">Quick Start</p>
         <h1 className="mt-2 text-balance text-4xl font-semibold text-ink-50">Choose the easiest way for you to join the network.</h1>
         <p className="mt-4 max-w-3xl text-sm leading-6 text-ink-300 sm:text-base">

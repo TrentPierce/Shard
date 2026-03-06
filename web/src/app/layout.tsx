@@ -14,7 +14,7 @@ export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   colorScheme: "dark",
-  themeColor: "#191308",
+  themeColor: "#091540",
 }
 
 export const metadata: Metadata = {
@@ -25,8 +25,8 @@ export const metadata: Metadata = {
   },
   description: "Browser-powered distributed inference with live telemetry and OpenAI-compatible APIs.",
   icons: {
-    icon: "/icon-192.png",
-    apple: "/icon-192.png",
+    icon: "/brand-mark.png",
+    apple: "/brand-mark.png",
   },
 }
 
