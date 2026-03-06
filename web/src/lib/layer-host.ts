@@ -156,7 +156,7 @@ export async function startBrowserLayerHost(options?: {
   }
 
   const profile = await profileWebGPU()
-  const registerSession = async (): Promise<BrowserLayerRegisterResponse> => {
+  const registerSession = async (): Promise<BrowserLayerRegisterResponse | null> => {
     const register = await fetch(apiUrl("/browser-layer/register"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -168,16 +168,22 @@ export async function startBrowserLayerHost(options?: {
       }),
     })
     if (!register.ok) {
-      throw new Error(`browser layer registration failed (${register.status})`)
+      return null
     }
     const session = (await register.json()) as BrowserLayerRegisterResponse
     if (!session.ok) {
-      throw new Error("browser layer registration rejected")
+      return null
     }
     return session
   }
 
   let session = await registerSession()
+  if (!session) {
+    hostStopper = () => {
+      hostStopper = null
+    }
+    return hostStopper
+  }
 
   let stopped = false
   const loop = async () => {
@@ -191,7 +197,10 @@ export async function startBrowserLayerHost(options?: {
           consecutiveFailures += 1
           await new Promise((resolve) => setTimeout(resolve, 500))
           if (consecutiveFailures >= 5) {
-            session = await registerSession()
+            const refreshed = await registerSession()
+            if (refreshed) {
+              session = refreshed
+            }
             consecutiveFailures = 0
           }
           continue
@@ -200,7 +209,10 @@ export async function startBrowserLayerHost(options?: {
         if (!payload.ok) {
           const detail = (payload as any).detail as string | undefined
           if (detail?.toLowerCase().includes("invalid session_id")) {
-            session = await registerSession()
+            const refreshed = await registerSession()
+            if (refreshed) {
+              session = refreshed
+            }
             consecutiveFailures = 0
             continue
           }
@@ -217,8 +229,11 @@ export async function startBrowserLayerHost(options?: {
         consecutiveFailures += 1
         if (consecutiveFailures >= 5) {
           try {
-            session = await registerSession()
-            consecutiveFailures = 0
+            const refreshed = await registerSession()
+            if (refreshed) {
+              session = refreshed
+              consecutiveFailures = 0
+            }
           } catch {
           }
         }

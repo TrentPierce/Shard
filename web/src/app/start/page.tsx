@@ -1,109 +1,157 @@
 "use client"
 
-import { useState } from "react"
+import Link from "next/link"
+import { useMemo } from "react"
 import { useAppContext } from "@/lib/context"
 
-type Section = {
-  id: "verifier" | "scout" | "api"
+type PathCard = {
+  id: "browser" | "desktop" | "api"
   title: string
   summary: string
-  body: string
-  code: string
-  codeLabel: string
+  action: string
+  href: string
+  steps: string[]
+  notes: string[]
 }
 
-const sections: Section[] = [
+const paths: PathCard[] = [
   {
-    id: "verifier",
-    title: "Run a Verifier",
-    summary: "Desktop App from Releases",
-    body:
-      "Download the Shard Desktop App for Windows or macOS. The README notes one-click setup with model download and background contribution mode.",
-    codeLabel: "Open releases",
-    code: "https://github.com/TrentPierce/Shard/releases/latest",
+    id: "browser",
+    title: "Browser Scout",
+    summary: "The easiest way to help. No install required.",
+    action: "Open shardnetwork.live",
+    href: "https://www.shardnetwork.live/",
+    steps: [
+      "Open the site in Chrome or Edge.",
+      "Click Join and wait for the model download to finish.",
+      "Leave the tab open while the page shows contributing.",
+    ],
+    notes: [
+      "If WebGPU is unavailable, the page can still show telemetry but will not contribute compute.",
+      "The browser path is best for trying the network quickly.",
+    ],
   },
   {
-    id: "scout",
-    title: "Become a Scout",
-    summary: "Browser-based participation",
-    body:
-      "Open the live dashboard in latest Chrome or Edge with hardware acceleration enabled, then keep the tab open to contribute scout compute.",
-    codeLabel: "Open dashboard",
-    code: "https://www.shardnetwork.live/",
+    id: "desktop",
+    title: "Desktop Verifier",
+    summary: "The best path for a spare PC that should stay online and help the mesh.",
+    action: "Download Shard GUI",
+    href: "https://github.com/TrentPierce/Shard/releases/latest",
+    steps: [
+      "Download and open Shard GUI.",
+      "Let the model finish downloading on first run.",
+      "Save settings, restart the node once, then click Start.",
+    ],
+    notes: [
+      "After the model finishes downloading, restart once so the verifier comes up cleanly.",
+      "If health is green and the node shows a peer connection, it has joined the mesh.",
+    ],
   },
   {
     id: "api",
-    title: "Consume the API",
-    summary: "Install SDK and call chat",
-    body: "Install the Shard SDK from PyPI and use it as a drop-in OpenAI replacement.",
-    codeLabel: "Python SDK",
-    code: "pip install shard-inference\n\nfrom shard import Shard\nclient = Shard()\n\nresponse = client.chat.completions.create(\n    model=\"meta-llama/Llama-3.2-1B\",\n    messages=[{\"role\": \"user\", \"content\": \"Explain the Shard network architecture.\"}]\n)\nprint(response.choices[0].message.content)",
+    title: "API Consumer",
+    summary: "Use the network like an OpenAI-compatible backend in your own app.",
+    action: "Read API docs",
+    href: "https://github.com/TrentPierce/Shard#python-sdk",
+    steps: [
+      "Point your client to the Shard endpoint.",
+      "Send standard chat-completions requests.",
+      "Check network health before production traffic.",
+    ],
+    notes: [
+      "This path is for developers. Most users should start with browser or desktop.",
+      "The API shape is already familiar if you have used OpenAI-compatible SDKs.",
+    ],
   },
 ]
 
 export default function StartPage() {
-  const [active, setActive] = useState<Section["id"]>("verifier")
   const { contributionStatus } = useAppContext()
+  const statusText = useMemo(() => {
+    if (!contributionStatus) return null
+    if (contributionStatus.state === "contributing") return "Contributing"
+    if (contributionStatus.state === "starting") return "Starting"
+    return "Not contributing"
+  }, [contributionStatus])
 
   return (
     <main id="main-content" className="py-8 sm:py-10">
-      <section className="rounded-2xl border border-ring bg-base-900 p-5 sm:p-8">
-        <h1 className="text-balance text-3xl font-semibold text-ink-50 sm:text-4xl">Quick Start Guide</h1>
-        <p className="mt-3 max-w-2xl text-sm text-ink-300 sm:text-base">
-          Steps below come directly from the project README installation path: join as verifier, join as scout, then integrate the API.
+      <section className="rounded-[2rem] border border-ring bg-[linear-gradient(180deg,rgba(69,75,102,0.18),rgba(25,19,8,0.92))] p-6 shadow-panel sm:p-8">
+        <p className="text-xs uppercase tracking-[0.22em] text-ink-400">Quick Start</p>
+        <h1 className="mt-2 text-balance text-4xl font-semibold text-ink-50">Choose the easiest way for you to join the network.</h1>
+        <p className="mt-4 max-w-3xl text-sm leading-6 text-ink-300 sm:text-base">
+          You do not need to understand distributed systems to help. Pick the browser path if you want the fastest setup, or the desktop path if you want your computer to act as a stronger verifier node.
         </p>
         {contributionStatus ? (
-          <div className="mt-4 rounded-xl border border-ring bg-base-800 p-4">
-            <p className="text-xs uppercase tracking-[0.18em] text-accent-400">Browser Contribution Status</p>
-            <p className="mt-2 text-sm font-medium text-ink-50">
-              {contributionStatus.state === "contributing" ? "Contributing" : "Not Contributing"}
-            </p>
+          <div className="mt-5 rounded-2xl border border-ring bg-base-950/40 p-4">
+            <p className="text-xs uppercase tracking-[0.18em] text-accent-300">Browser status</p>
+            <p className="mt-2 text-lg font-semibold text-ink-50">{statusText}</p>
             <p className="mt-1 text-sm text-ink-300">{contributionStatus.reason}</p>
           </div>
         ) : null}
+      </section>
 
-        <div className="mt-6 hidden gap-2 md:flex">
-          {sections.map((section) => (
-            <button
-              key={section.id}
-              type="button"
-              onClick={() => setActive(section.id)}
-              className={`min-h-11 rounded-lg px-4 py-2 text-sm ${
-                active === section.id
-                  ? "bg-accent-500 text-base-950"
-                  : "border border-ring text-ink-100 hover:bg-base-800"
-              }`}
-            >
-              {section.title}
-            </button>
-          ))}
+      <section className="mt-8 grid gap-4 lg:grid-cols-3">
+        {paths.map((path, index) => (
+          <article id={path.id} key={path.id} className="rounded-[1.6rem] border border-ring bg-base-900/90 p-5 shadow-panel">
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-xs uppercase tracking-[0.18em] text-accent-300">Option {index + 1}</span>
+              <a
+                href={path.href}
+                target={path.href.startsWith("http") ? "_blank" : undefined}
+                rel={path.href.startsWith("http") ? "noreferrer" : undefined}
+                className="rounded-full border border-ring px-3 py-1 text-[11px] uppercase tracking-[0.14em] text-ink-300 hover:border-accent-300 hover:text-accent-100"
+              >
+                {path.action}
+              </a>
+            </div>
+            <h2 className="mt-4 text-2xl font-semibold text-ink-50">{path.title}</h2>
+            <p className="mt-2 text-sm leading-6 text-ink-300">{path.summary}</p>
+            <ol className="mt-5 space-y-3 text-sm text-ink-100">
+              {path.steps.map((step, stepIndex) => (
+                <li key={step} className="flex gap-3">
+                  <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-accent-400/15 text-xs font-semibold text-accent-100">
+                    {stepIndex + 1}
+                  </span>
+                  <span>{step}</span>
+                </li>
+              ))}
+            </ol>
+            <div className="mt-5 rounded-2xl border border-ring bg-base-950/40 p-4">
+              <p className="text-xs uppercase tracking-[0.16em] text-ink-400">Good to know</p>
+              <div className="mt-3 space-y-2 text-sm text-ink-300">
+                {path.notes.map((note) => (
+                  <p key={note}>{note}</p>
+                ))}
+              </div>
+            </div>
+          </article>
+        ))}
+      </section>
+
+      <section className="mt-8 rounded-[1.6rem] border border-ring bg-base-900/90 p-6 shadow-panel">
+        <p className="text-xs uppercase tracking-[0.22em] text-ink-400">Simple rule of thumb</p>
+        <div className="mt-3 grid gap-4 md:grid-cols-3">
+          <div>
+            <h3 className="text-lg font-semibold text-ink-50">Just want to help?</h3>
+            <p className="mt-2 text-sm text-ink-300">Use the browser scout. It is the least technical path.</p>
+          </div>
+          <div>
+            <h3 className="text-lg font-semibold text-ink-50">Want more impact?</h3>
+            <p className="mt-2 text-sm text-ink-300">Run Shard GUI on a PC that can stay online as a verifier node.</p>
+          </div>
+          <div>
+            <h3 className="text-lg font-semibold text-ink-50">Building software?</h3>
+            <p className="mt-2 text-sm text-ink-300">Use the API path and treat Shard like an OpenAI-compatible backend.</p>
+          </div>
         </div>
-
-        <div className="mt-4 hidden md:block">
-          {sections
-            .filter((section) => section.id === active)
-            .map((section) => (
-              <article key={section.id} className="rounded-xl border border-ring bg-base-800 p-5">
-                <p className="text-xs uppercase tracking-[0.18em] text-accent-400">{section.summary}</p>
-                <p className="mt-2 text-sm text-ink-200">{section.body}</p>
-                <p className="mt-4 text-xs font-medium uppercase tracking-[0.14em] text-ink-400">{section.codeLabel}</p>
-                <pre className="mt-2 overflow-x-auto rounded-lg border border-ring-soft bg-base-950 p-3 text-xs text-ink-100 sm:text-sm">
-                  <code className="overflow-x-auto">{section.code}</code>
-                </pre>
-              </article>
-            ))}
-        </div>
-
-        <div className="mt-6 space-y-3 md:hidden">
-          {sections.map((section) => (
-            <details key={section.id} className="rounded-xl border border-ring bg-base-800 p-4" open={section.id === "verifier"}>
-              <summary className="cursor-pointer list-none text-base font-medium text-ink-50">{section.title}</summary>
-              <p className="mt-2 text-sm text-ink-200">{section.body}</p>
-              <pre className="mt-3 overflow-x-auto rounded-lg border border-ring-soft bg-base-950 p-3 text-xs text-ink-100">
-                <code className="overflow-x-auto">{section.code}</code>
-              </pre>
-            </details>
-          ))}
+        <div className="mt-6 flex flex-wrap gap-3">
+          <Link href="/" className="inline-flex min-h-11 items-center justify-center rounded-xl border border-ring px-4 py-2.5 text-sm font-semibold text-ink-100 hover:bg-base-800">
+            Back to dashboard
+          </Link>
+          <Link href="/chat" className="inline-flex min-h-11 items-center justify-center rounded-xl bg-accent-500 px-4 py-2.5 text-sm font-semibold text-base-950 hover:bg-accent-400">
+            Test the API
+          </Link>
         </div>
       </section>
     </main>

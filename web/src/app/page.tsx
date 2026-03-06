@@ -1,116 +1,94 @@
 "use client"
 
-import Link from "next/link"
 import Image from "next/image"
-import { useEffect, useState } from "react"
+import Link from "next/link"
+import { useEffect, useMemo, useState } from "react"
 import { useDashboardTelemetry } from "@/hooks/useDashboardTelemetry"
+import { useSwarmTelemetry } from "@/hooks/useSwarmTelemetry"
 import { apiUrl } from "@/lib/config"
 import { probeWebGPU, type WebGPUProbeResult } from "@/lib/webgpu-probe"
 
-const telemetryCards = [
-  { key: "verifier", label: "Active Verifier Nodes" },
-  { key: "scouts", label: "Active Browser Scouts" },
-  { key: "tps", label: "Tokens / Second" },
-  { key: "total", label: "Total Tokens Generated" },
-] as const
+type JoinPath = {
+  title: string
+  eyebrow: string
+  description: string
+  href: string
+  cta: string
+  checklist: string[]
+}
 
-const flow = [
-  {
-    title: "Prompt enters the mesh",
-    body: "Clients submit requests over OpenAI-compatible endpoints to active verifiers.",
-  },
-  {
-    title: "Scouts draft candidate tokens",
-    body: "Browser workers generate fast drafts locally and forward them into the network.",
-  },
-  {
-    title: "Verifiers confirm and stream",
-    body: "Verifier nodes validate drafts and stream trusted tokens back with low latency.",
-  },
-]
+type BenchmarkRow = {
+  scenario: string
+  p95Ms: number
+  tps: number
+  errorPct: number
+  verdict: string
+}
 
-const quickStart = [
+const joinPaths: JoinPath[] = [
   {
-    title: "Scout (No Install)",
-    bullets: [
-      "Open shardnetwork.live",
-      "Click Join / Start Contributing",
-      "Keep tab open to contribute WebGPU compute",
+    title: "Join from your browser",
+    eyebrow: "Fastest path",
+    description: "Best for non-technical users. Open the site in Chrome or Edge, click Join, and let the page do the rest.",
+    href: "/start#browser",
+    cta: "Use browser scout",
+    checklist: [
+      "Open the site in Chrome or Edge",
+      "Click Join and keep the tab open",
+      "Watch the status badge change from download to contributing",
     ],
   },
   {
-    title: "Verifier (Docker)",
-    bullets: [
-      "git clone github.com/TrentPierce/Shard",
-      "docker compose up --build shard-daemon -d",
-      "curl localhost:9091/health",
+    title: "Run a desktop verifier",
+    eyebrow: "More impact",
+    description: "Best for a spare PC. Download Shard GUI, let it fetch the model, then start the node and join the network.",
+    href: "/start#desktop",
+    cta: "Run desktop node",
+    checklist: [
+      "Download the latest Shard GUI release",
+      "Wait for the model download to finish",
+      "Save, restart the node, then click Start",
+    ],
+  },
+  {
+    title: "Build on the API",
+    eyebrow: "For developers",
+    description: "Point your app at the OpenAI-compatible endpoint and keep your existing chat-completions workflow.",
+    href: "/start#api",
+    cta: "Use the API",
+    checklist: [
+      "Install the SDK or call the REST endpoint",
+      "Send standard chat-completions payloads",
+      "Monitor live health and release status before production rollout",
     ],
   },
 ]
 
-const incentives = [
-  "Compute-for-compute model: contribute capacity, draw capacity when needed.",
-  "No token required to start participating in current contribution flow.",
-  "Practical benefits: lower API spend, burst scaling, infrastructure ownership.",
+const benchmarkRows: BenchmarkRow[] = [
+  { scenario: "1 node, no scouts", p95Ms: 309.839, tps: 2.1, errorPct: 0, verdict: "Stable baseline" },
+  { scenario: "1 node, with scouts", p95Ms: 968.387, tps: 2.1, errorPct: 0, verdict: "Working, but slower" },
+  { scenario: "2 nodes, no scouts", p95Ms: 481.669, tps: 2.1, errorPct: 0, verdict: "Best current production path" },
+  { scenario: "2 nodes, with scouts", p95Ms: 1390.275, tps: 2.1, errorPct: 0, verdict: "Much better than before, still not faster" },
 ]
 
-const benchmarkRows = [
-  {
-    scenario: "1 node, no scouts",
-    p95Ms: 4523.11,
-    tps: 4.0333,
-    errorPct: 0.0,
-    speculativeSamples: 0,
-  },
-  {
-    scenario: "1 node, with scouts",
-    p95Ms: 10016.93,
-    tps: 3.8,
-    errorPct: 5.7851,
-    speculativeSamples: 36,
-  },
-  {
-    scenario: "2 nodes, no scouts",
-    p95Ms: 3031.208,
-    tps: 4.0333,
-    errorPct: 0.0,
-    speculativeSamples: 0,
-  },
-  {
-    scenario: "2 nodes, with scouts",
-    p95Ms: 7719.465,
-    tps: 4.0,
-    errorPct: 0.8264,
-    speculativeSamples: 12,
-  },
+const takeaways = [
+  "The mesh is stable with 1 or 2 verifier nodes and cleanly drains after each run.",
+  "Scouts no longer poison verifier queues when they time out or finish late.",
+  "Release status is still NO_GO because scout-assisted 2-node runs remain slower than the 2-node verifier-only baseline.",
 ]
 
-const oldVsNew = [
-  "2-node no-scouts vs previous published matrix: p95 latency -40.32%, throughput +14.15%, errors -11.30 points.",
-  "2-node with scouts vs previous published matrix: p95 latency +27.14%, throughput +10.09%, errors -7.96 points.",
-  "1-node no-scouts vs previous published matrix: p95 latency -10.39%, throughput +16.91%, errors -13.39 points.",
-  "1-node with scouts vs previous published matrix: p95 latency +253.09%, throughput -3.39%, errors +4.53 points.",
-]
+function formatCompact(value: number) {
+  return value.toLocaleString(undefined, { maximumFractionDigits: value >= 100 ? 0 : 1 })
+}
 
 export default function HomePage() {
-  const telemetry = useDashboardTelemetry()
+  const dashboard = useDashboardTelemetry()
+  const { telemetry, errorMessage } = useSwarmTelemetry()
   const [probeResult, setProbeResult] = useState<WebGPUProbeResult | null>(null)
-  const statusClass =
-    telemetry.healthState === "ready"
-      ? "border-accent-400/60 bg-accent-400/15 text-ink-50"
-      : telemetry.healthState === "degraded"
-      ? "border-base-700/70 bg-base-700/30 text-ink-100"
-      : "border-base-800/80 bg-base-900/70 text-ink-300"
-
-  const values = {
-    verifier: telemetry.verifierNodes.toLocaleString(),
-    scouts: telemetry.scouts.toLocaleString(),
-    tps: telemetry.tokensPerSecond.toLocaleString(),
-    total: telemetry.totalTokensGenerated.toLocaleString(),
-  }
 
   useEffect(() => {
     let cancelled = false
+
     async function runProbe() {
       try {
         const result = await probeWebGPU()
@@ -123,19 +101,18 @@ export default function HomePage() {
           keepalive: true,
         })
       } catch {
-        if (!cancelled) {
-          setProbeResult({
-            eligible: false,
-            reason: "probe_error",
-            tier: "none",
-            estimated_vram_mb: 0,
-            supports_f16: false,
-            browser: "Unknown",
-            os: "Unknown",
-            adapter_vendor: "unknown",
-            adapter_device: "unknown",
-          })
-        }
+        if (cancelled) return
+        setProbeResult({
+          eligible: false,
+          reason: "probe_error",
+          tier: "none",
+          estimated_vram_mb: 0,
+          supports_f16: false,
+          browser: "Unknown",
+          os: "Unknown",
+          adapter_vendor: "unknown",
+          adapter_device: "unknown",
+        })
       }
     }
 
@@ -145,160 +122,213 @@ export default function HomePage() {
     }
   }, [])
 
+  const contributionRows = useMemo(() => {
+    const rows = telemetry.contributors.slice(0, 6)
+    const totalTokens = rows.reduce((sum, row) => sum + Math.max(0, row.tokensProcessed), 0)
+    return rows.map((row) => {
+      const share = totalTokens > 0 ? (row.tokensProcessed / totalTokens) * 100 : row.efficiency
+      return {
+        ...row,
+        label: row.role === "Shard" ? "Verifier node" : "Browser scout",
+        width: Math.max(12, Math.min(100, Math.round(share))),
+      }
+    })
+  }, [telemetry.contributors])
+
   return (
-    <>
-      <main id="main-content" className="pb-16 pt-10 sm:pt-14">
-        <section className="relative overflow-hidden rounded-3xl border border-ring bg-gradient-to-br from-base-900 to-base-800 px-6 py-12 shadow-panel sm:px-10 sm:py-16">
-          <div className="relative mx-auto max-w-4xl">
-            {probeResult && (
-              <div
-                className={`mb-4 inline-flex rounded-full border px-3 py-1 text-xs font-medium ${
-                  probeResult.eligible
-                    ? "border-accent-400/60 bg-accent-400/15 text-ink-50"
-                    : "border-ring/70 bg-base-900/70 text-ink-200"
-                }`}
-              >
-                {probeResult.eligible
-                  ? "Your browser is contributing compute"
-                  : "Your browser is in viewer mode (WebGPU not available)"}
+    <main id="main-content" className="pb-16 pt-8 sm:pt-12">
+      <section className="relative overflow-hidden rounded-[2rem] border border-white/10 bg-[linear-gradient(135deg,rgba(69,75,102,0.88),rgba(25,19,8,0.98))] px-6 py-8 shadow-panel sm:px-10 sm:py-12">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(156,163,219,0.24),transparent_32%),radial-gradient(circle_at_bottom_left,rgba(103,125,183,0.16),transparent_28%)]" />
+        <div className="relative grid gap-10 lg:grid-cols-[1.25fr_0.75fr] lg:items-end">
+          <div>
+            <div className="inline-flex items-center gap-2 rounded-full border border-white/12 bg-white/5 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.24em] text-ink-200">
+              <span>Shard Network</span>
+              <span className="text-ink-400">Spring RC</span>
+            </div>
+            <div className="mt-5 flex items-center gap-4">
+              <Image src="/icon-192.png" alt="Shard Network" width={76} height={76} className="h-16 w-16 rounded-2xl border border-white/10 bg-black/20 p-2" priority />
+              <div>
+                <p className="text-sm uppercase tracking-[0.18em] text-ink-300">Simple distributed AI</p>
+                <p className="text-sm text-ink-400">Browser scouts draft. Verifier nodes check. Apps use one standard API.</p>
               </div>
-            )}
-            <div className="mb-6 flex justify-center sm:justify-start">
-              <Image
-                src="/icon-192.png"
-                alt="Shard Network"
-                width={80}
-                height={80}
-                className="h-16 w-16 rounded-2xl sm:h-20 sm:w-20"
-                priority
-              />
             </div>
-            <div className="mb-5 flex flex-wrap items-center gap-3">
-              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-accent-400">
-                Shard 0.6.2 | Distributed Inference Mesh
-              </p>
-              <span
-                className={`inline-flex min-h-7 items-center rounded-full border px-2.5 text-[11px] font-semibold uppercase tracking-[0.14em] ${statusClass}`}
-              >
-                {telemetry.statusLabel}
-              </span>
-            </div>
-            <h1 className="text-balance text-3xl font-semibold tracking-tight text-ink-50 sm:text-5xl">
-              Reduce AI cost and scale with browser scouts + verifier nodes.
+            <h1 className="mt-6 max-w-3xl text-balance text-4xl font-semibold tracking-tight text-ink-50 sm:text-6xl">
+              Join the network in minutes, even if you are not technical.
             </h1>
-            <p className="mt-5 max-w-2xl text-pretty text-base text-ink-300 sm:text-lg">
-              In under 10 seconds: Shard is an OpenAI-compatible distributed inference network where scouts draft,
-              verifiers validate, and operators keep ownership of runtime + policy.
+            <p className="mt-5 max-w-2xl text-base leading-7 text-ink-200 sm:text-lg">
+              Shard lets everyday users lend browser or desktop compute to a shared inference mesh. The network is stable today on verifier nodes, and scouts now stay out of the way until there is enough real scout supply to help.
             </p>
-            <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:items-center">
-              <Link
-                href="/start"
-                className="inline-flex min-h-11 items-center justify-center rounded-lg bg-accent-500 px-5 py-2.5 text-sm font-medium text-base-950 transition hover:bg-accent-400"
-              >
-                Join as Scout
+            <div className="mt-8 flex flex-col gap-3 sm:flex-row">
+              <Link href="/start#browser" className="inline-flex min-h-11 items-center justify-center rounded-xl bg-accent-500 px-5 py-3 text-sm font-semibold text-base-950 transition hover:bg-accent-400">
+                Start in Browser
               </Link>
-              <Link
-                href="/chat"
-                className="inline-flex min-h-11 items-center justify-center rounded-lg border border-ring px-5 py-2.5 text-sm font-medium text-ink-100 transition hover:bg-base-800"
-              >
-                Test Verifier API
+              <Link href="/start#desktop" className="inline-flex min-h-11 items-center justify-center rounded-xl border border-white/15 bg-white/5 px-5 py-3 text-sm font-semibold text-ink-50 transition hover:bg-white/10">
+                Download Shard GUI
               </Link>
             </div>
+            <div className="mt-6 grid gap-3 sm:grid-cols-3">
+              <div className="rounded-2xl border border-white/10 bg-black/15 p-4">
+                <p className="text-xs uppercase tracking-[0.18em] text-ink-400">Release status</p>
+                <p className="mt-2 text-lg font-semibold text-amber-200">NO_GO</p>
+                <p className="mt-1 text-sm text-ink-300">Verifier mesh is solid. Scout-assisted 2-node runs still need work.</p>
+              </div>
+              <div className="rounded-2xl border border-white/10 bg-black/15 p-4">
+                <p className="text-xs uppercase tracking-[0.18em] text-ink-400">Best current path</p>
+                <p className="mt-2 text-lg font-semibold text-ink-50">2 verifiers, no scouts</p>
+                <p className="mt-1 text-sm text-ink-300">Fastest current median p95 in the refreshed RC matrix.</p>
+              </div>
+              <div className="rounded-2xl border border-white/10 bg-black/15 p-4">
+                <p className="text-xs uppercase tracking-[0.18em] text-ink-400">Browser status</p>
+                <p className="mt-2 text-lg font-semibold text-ink-50">
+                  {probeResult?.eligible ? "Ready to contribute" : "Viewer mode"}
+                </p>
+                <p className="mt-1 text-sm text-ink-300">
+                  {probeResult?.eligible
+                    ? `${probeResult.browser} with ${probeResult.estimated_vram_mb}MB estimated VRAM`
+                    : "Chrome or Edge with WebGPU gives the best contribution path."}
+                </p>
+              </div>
+            </div>
           </div>
-        </section>
 
-        <section className="mt-10">
-          <h2 className="text-balance text-xl font-medium text-ink-50 sm:text-2xl">Start Contributing Fast</h2>
-          <div className="mt-4 grid gap-3 md:grid-cols-2">
-            {quickStart.map((card) => (
-              <article key={card.title} className="rounded-2xl border border-ring bg-base-900 p-5">
-                <h3 className="text-lg font-medium text-ink-50">{card.title}</h3>
-                <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-ink-300">
-                  {card.bullets.map((item) => (
-                    <li key={item}>{item}</li>
-                  ))}
-                </ul>
-              </article>
-            ))}
-          </div>
-        </section>
+          <aside className="rounded-[1.75rem] border border-white/12 bg-black/20 p-5 backdrop-blur">
+            <p className="text-xs uppercase tracking-[0.2em] text-ink-400">Live network snapshot</p>
+            <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
+              <StatCard label="Active verifiers" value={dashboard.verifierNodes.toLocaleString()} detail="Healthy nodes currently visible" />
+              <StatCard label="Active browser scouts" value={dashboard.scouts.toLocaleString()} detail="Tabs currently contributing or recently active" />
+              <StatCard label="Tokens generated" value={dashboard.totalTokensGenerated.toLocaleString()} detail="Observed processed + offloaded tokens" />
+              <StatCard label="Network speed" value={`${dashboard.tokensPerSecond.toLocaleString()} tok/s`} detail={dashboard.isLive ? "Live telemetry" : "Last known snapshot"} />
+            </div>
+            {errorMessage ? <p className="mt-4 text-sm text-amber-200">Telemetry note: {errorMessage}</p> : null}
+          </aside>
+        </div>
+      </section>
 
-        <section className="mt-10">
-          <div className="mb-4 flex items-center justify-between">
-            <h2 className="text-balance text-xl font-medium text-ink-50 sm:text-2xl">Live Telemetry</h2>
-            <p className="text-xs uppercase tracking-[0.18em] text-ink-400">
-              {telemetry.isLive ? "Live from network" : "Fallback simulation"}
-            </p>
+      <section className="mt-12">
+        <div className="flex items-end justify-between gap-4">
+          <div>
+            <p className="text-xs uppercase tracking-[0.22em] text-ink-400">Onboarding</p>
+            <h2 className="mt-2 text-3xl font-semibold text-ink-50">Pick the path that matches your comfort level.</h2>
           </div>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            {telemetryCards.map((card) => (
-              <article key={card.key} className="rounded-2xl border border-ring bg-base-900 p-5">
-                <p className="text-sm text-ink-300">{card.label}</p>
-                <p className="mt-3 text-2xl font-semibold text-ink-50 sm:text-3xl">{values[card.key]}</p>
-              </article>
-            ))}
-          </div>
-        </section>
+          <Link href="/start" className="text-sm font-medium text-accent-300 hover:text-accent-200">
+            Full quick start
+          </Link>
+        </div>
+        <div className="mt-5 grid gap-4 lg:grid-cols-3">
+          {joinPaths.map((path, index) => (
+            <article key={path.title} className="rounded-[1.6rem] border border-ring bg-base-900/90 p-5 shadow-panel">
+              <div className="flex items-center justify-between">
+                <span className="text-xs uppercase tracking-[0.18em] text-accent-300">Step {index + 1}</span>
+                <span className="rounded-full border border-ring px-2 py-1 text-[11px] uppercase tracking-[0.16em] text-ink-400">{path.eyebrow}</span>
+              </div>
+              <h3 className="mt-4 text-2xl font-semibold text-ink-50">{path.title}</h3>
+              <p className="mt-3 text-sm leading-6 text-ink-300">{path.description}</p>
+              <ul className="mt-5 space-y-2 text-sm text-ink-200">
+                {path.checklist.map((item) => (
+                  <li key={item} className="flex gap-3">
+                    <span className="mt-1 h-2.5 w-2.5 rounded-full bg-accent-400" />
+                    <span>{item}</span>
+                  </li>
+                ))}
+              </ul>
+              <Link href={path.href} className="mt-6 inline-flex min-h-11 items-center justify-center rounded-xl border border-accent-400/30 bg-accent-400/10 px-4 py-2.5 text-sm font-semibold text-accent-100 transition hover:border-accent-300 hover:bg-accent-400/15">
+                {path.cta}
+              </Link>
+            </article>
+          ))}
+        </div>
+      </section>
 
-        <section className="mt-12">
-          <h2 className="text-balance text-xl font-medium text-ink-50 sm:text-2xl">March 5, 2026 Benchmark Snapshot</h2>
-          <p className="mt-2 text-sm text-ink-300">
-            Isolated scenario runs from today using the distributed orchestrator (24 scouts, 4 req/s, 30s runs).
-            Local + EC2 verifiers were restarted before each scenario to avoid queue carryover between cases.
+      <section className="mt-12 grid gap-6 lg:grid-cols-[0.95fr_1.05fr]">
+        <article className="rounded-[1.6rem] border border-ring bg-base-900/90 p-6 shadow-panel">
+          <p className="text-xs uppercase tracking-[0.22em] text-ink-400">Today&apos;s benchmark result</p>
+          <h2 className="mt-2 text-3xl font-semibold text-ink-50">What works right now</h2>
+          <p className="mt-3 text-sm leading-6 text-ink-300">
+            These medians come from the refreshed RC matrix on March 6, 2026. The network is stable in all four scenarios. The question is no longer whether the mesh works. The question is when scouts become a speed boost instead of a coordination cost.
           </p>
-          <div className="mt-4 overflow-x-auto rounded-2xl border border-ring bg-base-900">
-            <table className="min-w-full text-left text-sm">
-              <thead className="border-b border-ring text-ink-300">
+          <div className="mt-5 overflow-hidden rounded-2xl border border-ring">
+            <table className="min-w-full divide-y divide-ring text-left text-sm">
+              <thead className="bg-base-950/60 text-ink-300">
                 <tr>
                   <th className="px-4 py-3 font-medium">Scenario</th>
-                  <th className="px-4 py-3 font-medium">p95 Latency (ms)</th>
-                  <th className="px-4 py-3 font-medium">Throughput (TPS)</th>
-                  <th className="px-4 py-3 font-medium">Error Rate (%)</th>
-                  <th className="px-4 py-3 font-medium">Speculative Samples</th>
+                  <th className="px-4 py-3 font-medium">p95 ms</th>
+                  <th className="px-4 py-3 font-medium">TPS</th>
+                  <th className="px-4 py-3 font-medium">Errors</th>
+                  <th className="px-4 py-3 font-medium">Takeaway</th>
                 </tr>
               </thead>
-              <tbody>
+              <tbody className="divide-y divide-ring/70 bg-base-900/60 text-ink-100">
                 {benchmarkRows.map((row) => (
-                  <tr key={row.scenario} className="border-b border-ring/60 text-ink-100">
-                    <td className="px-4 py-3">{row.scenario}</td>
+                  <tr key={row.scenario}>
+                    <td className="px-4 py-3 font-medium text-ink-50">{row.scenario}</td>
                     <td className="px-4 py-3">{row.p95Ms.toLocaleString(undefined, { maximumFractionDigits: 3 })}</td>
-                    <td className="px-4 py-3">{row.tps.toLocaleString(undefined, { maximumFractionDigits: 4 })}</td>
-                    <td className="px-4 py-3">{row.errorPct.toLocaleString(undefined, { maximumFractionDigits: 4 })}</td>
-                    <td className="px-4 py-3">{row.speculativeSamples.toLocaleString()}</td>
+                    <td className="px-4 py-3">{row.tps.toLocaleString(undefined, { maximumFractionDigits: 2 })}</td>
+                    <td className="px-4 py-3">{row.errorPct.toFixed(2)}%</td>
+                    <td className="px-4 py-3 text-ink-300">{row.verdict}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-          <ul className="mt-4 list-disc space-y-1 pl-5 text-sm text-ink-300">
-            {oldVsNew.map((line) => (
-              <li key={line}>{line}</li>
-            ))}
-          </ul>
-        </section>
-
-        <section className="mt-12">
-          <h2 className="text-balance text-xl font-medium text-ink-50 sm:text-2xl">Participation Incentives</h2>
-          <ul className="mt-4 list-disc space-y-2 pl-5 text-sm text-ink-300">
-            {incentives.map((line) => (
-              <li key={line}>{line}</li>
-            ))}
-          </ul>
-        </section>
-
-        <section className="mt-12">
-          <h2 className="text-balance text-xl font-medium text-ink-50 sm:text-2xl">How it Works</h2>
-          <div className="mt-4 grid gap-3 md:grid-cols-3">
-            {flow.map((item, index) => (
-              <article key={item.title} className="rounded-2xl border border-ring bg-base-900 p-5">
-                <p className="text-xs uppercase tracking-[0.18em] text-accent-400">Step {index + 1}</p>
-                <h3 className="mt-2 text-lg font-medium text-ink-50">{item.title}</h3>
-                <p className="mt-2 text-sm text-ink-300">{item.body}</p>
-              </article>
+          <div className="mt-5 grid gap-3">
+            {takeaways.map((line) => (
+              <div key={line} className="rounded-2xl border border-ring bg-base-950/40 p-4 text-sm text-ink-200">
+                {line}
+              </div>
             ))}
           </div>
-        </section>
-      </main>
-    </>
+        </article>
+
+        <article className="rounded-[1.6rem] border border-ring bg-base-900/90 p-6 shadow-panel">
+          <div className="flex items-end justify-between gap-4">
+            <div>
+              <p className="text-xs uppercase tracking-[0.22em] text-ink-400">Live contribution map</p>
+              <h2 className="mt-2 text-3xl font-semibold text-ink-50">Who is helping right now</h2>
+            </div>
+            <span className="rounded-full border border-ring px-3 py-1 text-xs uppercase tracking-[0.16em] text-ink-300">
+              {telemetry.contributors.length} observed contributors
+            </span>
+          </div>
+          <p className="mt-3 text-sm leading-6 text-ink-300">
+            This view uses live daemon and proxy telemetry to show the active nodes the dashboard can currently observe, plus each node&apos;s recent token contribution when that data is available.
+          </p>
+          <div className="mt-6 space-y-3">
+            {contributionRows.length > 0 ? (
+              contributionRows.map((row) => (
+                <div key={`${row.role}-${row.id}`} className="rounded-2xl border border-ring bg-base-950/40 p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-ink-50">{row.id}</p>
+                      <p className="text-xs uppercase tracking-[0.16em] text-ink-400">{row.label}</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-sm font-semibold text-accent-100">{formatCompact(row.tokensProcessed)} tokens</p>
+                      <p className="text-xs text-ink-400">efficiency {row.efficiency}%</p>
+                    </div>
+                  </div>
+                  <div className="mt-3 h-3 overflow-hidden rounded-full bg-white/6">
+                    <div className="h-full rounded-full bg-[linear-gradient(90deg,#677db7,#9ca3db)]" style={{ width: `${row.width}%` }} />
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="rounded-2xl border border-dashed border-ring p-6 text-sm text-ink-300">
+                Waiting for contributor telemetry. Once nodes or browser scouts report in, they will appear here automatically.
+              </div>
+            )}
+          </div>
+        </article>
+      </section>
+    </main>
+  )
+}
+
+function StatCard({ label, value, detail }: { label: string; value: string; detail: string }) {
+  return (
+    <div className="rounded-2xl border border-white/10 bg-black/15 p-4">
+      <p className="text-xs uppercase tracking-[0.18em] text-ink-400">{label}</p>
+      <p className="mt-2 text-2xl font-semibold text-ink-50">{value}</p>
+      <p className="mt-1 text-sm text-ink-300">{detail}</p>
+    </div>
   )
 }

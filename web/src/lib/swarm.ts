@@ -10,7 +10,7 @@
 import { apiUrl, rustUrl } from "./config"
 import { getActiveEngine, generateDrafts } from "./scout-engine"
 import { getScoutId, pollForWork, reportScoutClientEvent, submitDraft } from "./scout-draft"
-import { canUseLocalDaemonFallback } from "./runtime"
+import { canUseLocalDaemonFallback, getPreferredLocalDaemonBase, localDaemonUrl } from "./runtime"
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -158,7 +158,11 @@ function collectSwarmWorkerBootstrapAddrs(
 }
 
 export async function probeLocalShard(): Promise<LocalShardProbe> {
-    const endpoint = rustUrl("/health")
+    if (!canUseLocalDaemonFallback()) {
+        return { available: false, endpoint: "" }
+    }
+    const preferredBase = canUseLocalDaemonFallback() ? await getPreferredLocalDaemonBase() : null
+    const endpoint = preferredBase ? localDaemonUrl("/health", preferredBase) : rustUrl("/health")
     const LATENCY_THRESHOLD_MS = 2  // Same-machine detection threshold
 
     try {
@@ -191,7 +195,10 @@ export async function probeLocalShard(): Promise<LocalShardProbe> {
  */
 export async function fetchTopology(): Promise<Topology> {
     const degraded: Topology = { status: "degraded", shard_webrtc_multiaddr: null, shard_quic_multiaddr: null }
-    const endpoints = canUseLocalDaemonFallback()
+    const preferredBase = canUseLocalDaemonFallback() ? await getPreferredLocalDaemonBase() : null
+    const endpoints = preferredBase
+        ? [localDaemonUrl("/v1/system/topology", preferredBase), apiUrl("/v1/system/topology")]
+        : canUseLocalDaemonFallback()
         ? [rustUrl("/v1/system/topology"), apiUrl("/v1/system/topology")]
         : [apiUrl("/v1/system/topology")]
 
@@ -217,7 +224,10 @@ export async function fetchTopology(): Promise<Topology> {
 export async function heartbeatShard(
     shardAddr: string
 ): Promise<HandshakeResult> {
-    const healthEndpoints = canUseLocalDaemonFallback()
+    const preferredBase = canUseLocalDaemonFallback() ? await getPreferredLocalDaemonBase() : null
+    const healthEndpoints = preferredBase
+        ? [localDaemonUrl("/health", preferredBase), apiUrl("/health")]
+        : canUseLocalDaemonFallback()
         ? [rustUrl("/health"), apiUrl("/health")]
         : [apiUrl("/health")]
 

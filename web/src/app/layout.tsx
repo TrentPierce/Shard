@@ -24,6 +24,10 @@ export const metadata: Metadata = {
     template: "%s | Shard",
   },
   description: "Browser-powered distributed inference with live telemetry and OpenAI-compatible APIs.",
+  icons: {
+    icon: "/icon-192.png",
+    apple: "/icon-192.png",
+  },
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

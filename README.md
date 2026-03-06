@@ -29,13 +29,21 @@ Browser Scouts  →  speculative drafts  →  Verifier Nodes  →  validated str
 
 ## Quick Start
 
-### Scout — no install required
+### Browser Scout � easiest path
 
 1. Open [shardnetwork.live](https://shardnetwork.live)
-2. Click **Join** or **Start Contributing**
-3. Keep the tab open — your browser GPU contributes compute to the network
+2. Click **Join**
+3. Wait for the browser model download to finish
+4. Keep the tab open while the page shows **contributing**
 
-### Verifier Node — Docker
+### Desktop Verifier � easiest full node path
+
+1. Download the latest **Shard GUI** from [GitHub Releases](https://github.com/TrentPierce/Shard/releases/latest)
+2. Let the app download the verifier model on first run
+3. Save settings, restart the node once, then click **Start**
+4. Confirm `http://127.0.0.1:9091/health` returns `status: ok`
+
+### Verifier Node � Docker
 
 ```bash
 git clone https://github.com/TrentPierce/Shard.git
@@ -62,32 +70,41 @@ Full guide: [docs/mesh-benchmark.md](docs/mesh-benchmark.md)
 
 ---
 
-## Performance Snapshot (March 5, 2026)
+## Release-Candidate Snapshot (March 6, 2026)
 
-Latest matrix (isolated scenario runs, distributed orchestrator, 24 scouts, 4 req/s, 30s runs, verifier restart before each scenario):
+Latest refreshed RC matrix:
+
+- 3 runs per scenario
+- 16 browser scouts configured
+- 2 req/s
+- 10s runs
+- local + EC2 verifier pools
+- strict readiness and queue flush between runs
 
 | Scenario | p95 latency (ms) | Throughput (TPS) | Error rate (%) | Speculative samples |
 |---------|-------------------|------------------|----------------|---------------------|
-| 1 node, no scouts | 4523.110 | 4.0333 | 0.0000 | 0 |
-| 1 node, with scouts | 10016.930 | 3.8000 | 5.7851 | 36 |
-| 2 nodes, no scouts | 3031.208 | 4.0333 | 0.0000 | 0 |
-| 2 nodes, with scouts | 7719.465 | 4.0000 | 0.8264 | 12 |
+| 1 node, no scouts | 309.839 | 2.1000 | 0.0000 | 0 |
+| 1 node, with scouts | 968.387 | 2.1000 | 0.0000 | 6 |
+| 2 nodes, no scouts | 481.669 | 2.1000 | 0.0000 | 0 |
+| 2 nodes, with scouts | 1390.275 | 2.1000 | 0.0000 | 1 |
+
+Current recommendation: **NO_GO**
+
+What this means:
+
+- The verifier mesh is stable in all four scenarios.
+- Queue carryover and stale speculative work were fixed.
+- Scouts no longer break the network, but they still do not beat the 2-node verifier-only baseline in this RC profile.
+- The best current production path is still verifier-first: 2 nodes, no scouts.
 
 Raw artifacts:
 
-- `reports/release-rc/final-phase7-one-node-no-scouts.json`
-- `reports/release-rc/final-phase7-one-node-with-scouts.json`
-- `reports/release-rc/final-phase7-two-node-no-scouts.json`
-- `reports/release-rc/final-phase7-two-node-with-scouts.json`
-
-Compared to the previously published matrix (March 4, 2026):
-
-- 2-node no-scouts: p95 latency `-40.32%`, throughput `+14.15%`, error rate `-11.30` points.
-- 2-node with-scouts: p95 latency `+27.14%`, throughput `+10.09%`, error rate `-7.96` points.
-- 1-node no-scouts: p95 latency `-10.39%`, throughput `+16.91%`, error rate `-13.39` points.
-- 1-node with-scouts: p95 latency `+253.09%`, throughput `-3.39%`, error rate `+4.53` points.
-
-Primary inference: verifier-only paths are now stable at this load (0% errors in both 1-node and 2-node runs), and scout paths now produce real speculative samples in both topologies. Tail latency under scout load is still the main release blocker.
+- `reports/release-rc/release-rc-20260306T032328Z-spring-rc-refresh/go-no-go-summary.json`
+- `reports/release-rc/release-rc-20260306T032328Z-spring-rc-refresh/go-no-go-report.md`
+- `reports/release-rc/release-rc-20260306T032328Z-spring-rc-refresh/one-node-no-scouts-run1.json`
+- `reports/release-rc/release-rc-20260306T032328Z-spring-rc-refresh/one-node-with-scouts-run1.json`
+- `reports/release-rc/release-rc-20260306T032328Z-spring-rc-refresh/two-node-no-scouts-run1.json`
+- `reports/release-rc/release-rc-20260306T032328Z-spring-rc-refresh/two-node-with-scouts-run1.json`
 
 ---
 
@@ -214,3 +231,5 @@ docs/               Architecture, deployment, API, and operations documentation
 ## License
 
 Business Source License 1.1 (BSL 1.1). See [LICENSE](LICENSE).
+
+

@@ -7,7 +7,7 @@
 
 import { apiUrl } from "./config"
 import { DEFAULT_MODEL_ID } from "./model"
-import { canUseLocalDaemonFallback, localDaemonUrl } from "./runtime"
+import { canUseLocalDaemonFallback, getPreferredLocalDaemonBase, localDaemonUrls } from "./runtime"
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -50,8 +50,10 @@ function authHeaders(): Record<string, string> {
 async function fetchWithLocalFallback(path: string, init: RequestInit): Promise<Response> {
     const primary = apiUrl(path)
     let primaryError: unknown = null
+    let primaryResponse: Response | null = null
     try {
         const res = await fetch(primary, init)
+        primaryResponse = res
         if (res.ok || !canUseLocalDaemonFallback()) return res
     } catch {
         primaryError = new Error(`Primary API fetch failed for ${path}`)
@@ -62,7 +64,23 @@ async function fetchWithLocalFallback(path: string, init: RequestInit): Promise<
         throw new Error(`Primary API failed and local fallback disabled for ${path}`)
     }
 
-    return fetch(localDaemonUrl(path), init)
+    const preferredBase = await getPreferredLocalDaemonBase()
+    let lastResponse: Response | null = primaryResponse
+    let lastError: unknown = primaryError
+
+    for (const endpoint of localDaemonUrls(path, preferredBase)) {
+        try {
+            const res = await fetch(endpoint, init)
+            if (res.ok) return res
+            lastResponse = res
+        } catch (error) {
+            lastError = error
+        }
+    }
+
+    if (lastResponse) return lastResponse
+    if (lastError) throw lastError
+    throw new Error(`Local daemon fallback failed for ${path}`)
 }
 
 async function sendMessageNonStreaming(

@@ -4,6 +4,15 @@ import { headers } from "next/headers"
 const DEFAULT_BACKEND = "https://api.shardnetwork.live"
 // Fallback: read from env so no IP is hardcoded in source
 const DEFAULT_FALLBACK = process.env.SHARD_FALLBACK_URL || ""
+const DEFAULT_LOCAL_BACKENDS =
+  process.env.NODE_ENV === "production"
+    ? []
+    : [
+        "http://127.0.0.1:9091",
+        "http://127.0.0.1:9191",
+        "http://localhost:9091",
+        "http://localhost:9191",
+      ]
 
 function normalizeUrl(url: string): string {
   return url.trim().replace(/\/$/, "")
@@ -210,7 +219,7 @@ export function shardBackendUrls(path: string = ""): string[] {
   const single = parseUrlList(
     process.env.SHARD_BACKEND_URL || process.env.NEXT_PUBLIC_SHARD_BACKEND_URL,
   )
-  const defaults = [DEFAULT_BACKEND, DEFAULT_FALLBACK]
+  const defaults = [...DEFAULT_LOCAL_BACKENDS, DEFAULT_BACKEND, DEFAULT_FALLBACK]
     .map(normalizeUrl)
     .filter((u) => u.length > 0)
   return dedupe([...multi, ...single, ...defaults]).map((base) => `${base}${cleanPath}`)

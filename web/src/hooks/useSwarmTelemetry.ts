@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState } from "react"
-import { canUseLocalDaemonFallback, localDaemonUrl } from "@/lib/runtime"
+import { canUseLocalDaemonFallback, getPreferredLocalDaemonBase, localDaemonUrl } from "@/lib/runtime"
 
 type Contributor = {
   id: string
@@ -50,12 +50,15 @@ async function fetchRealTelemetry(): Promise<SwarmTelemetrySnapshot> {
   let localMetrics: any | null = null
 
   if (canUseLocalDaemonFallback()) {
+    const preferredBase = await getPreferredLocalDaemonBase()
+    if (preferredBase) {
     ;[localHealth, localPeersData, localTopo, localMetrics] = await Promise.all([
-      fetchJson(localDaemonUrl("/health")),
-      fetchJson(localDaemonUrl("/v1/system/peers")),
-      fetchJson(localDaemonUrl("/v1/system/topology")),
-      fetchJson(localDaemonUrl("/metrics/summary")),
+      fetchJson(localDaemonUrl("/health", preferredBase)),
+      fetchJson(localDaemonUrl("/v1/system/peers", preferredBase)),
+      fetchJson(localDaemonUrl("/v1/system/topology", preferredBase)),
+      fetchJson(localDaemonUrl("/metrics/summary", preferredBase)),
     ])
+    }
   }
 
   if (

@@ -19,6 +19,8 @@ import { mplex } from '@libp2p/mplex';
 import { identify } from '@libp2p/identify';
 import { gossipsub as createGossipSub } from '@chainsafe/libp2p-gossipsub';
 import { bootstrap } from '@libp2p/bootstrap';
+import { peerIdFromString } from '@libp2p/peer-id';
+import { multiaddr } from '../../node_modules/@libp2p/interface/node_modules/@multiformats/multiaddr/dist/src/index.js';
 import type { Libp2p } from 'libp2p';
 import type { GossipSub } from '@chainsafe/libp2p-gossipsub';
 import type { Message } from '@libp2p/interface';
@@ -74,6 +76,7 @@ let isInitialized = false;
 let reconnectTimer: ReturnType<typeof setInterval> | null = null;
 let peerCountTimer: ReturnType<typeof setInterval> | null = null;
 let reconnectInFlight = false;
+let reconnectDisabled = false;
 let workHandler: WorkHandler | null = null;
 let resultHandler: ResultHandler | null = null;
 let bootstrapPeersSnapshot: string[] = [];
@@ -241,17 +244,26 @@ function isSecureWsPeer(peer: string): boolean {
 
 function sanitizeBootstrapPeers(peers: string[]): string[] {
   const isHttpsPage = typeof window !== 'undefined' && window.location.protocol === 'https:';
-  const unique = new Set<string>();
+  const dedupedByKey = new Map<string, string>();
 
   for (const raw of peers) {
     const peer = String(raw || '').trim();
     if (!peer) continue;
     if (!isWsDialablePeer(peer)) continue;
     if (isHttpsPage && !isSecureWsPeer(peer)) continue;
-    unique.add(peer);
+    const peerId = extractPeerIdFromMultiaddrString(peer);
+    const dedupeKey = peerId ? `peer:${peerId}` : `addr:${peer}`;
+    const current = dedupedByKey.get(dedupeKey);
+    if (!current || (isSecureWsPeer(peer) && !isSecureWsPeer(current))) {
+      dedupedByKey.set(dedupeKey, peer);
+    }
   }
 
-  return Array.from(unique);
+  return Array.from(dedupedByKey.values()).sort((left, right) => {
+    const secureDelta = Number(isSecureWsPeer(right)) - Number(isSecureWsPeer(left));
+    if (secureDelta !== 0) return secureDelta;
+    return left.localeCompare(right);
+  });
 }
 
 function mergeBootstrapPeers(primary: string[], secondary: string[]): string[] {
@@ -326,8 +338,19 @@ function extractPeerIdFromMultiaddrString(peer: string): string | null {
 }
 
 async function dialWithTimeout(node: Libp2p, peer: string, timeoutMs: number): Promise<void> {
+  const peerIdStr = extractPeerIdFromMultiaddrString(peer);
+  const target = multiaddr(peer);
+  const peerId = peerIdStr ? peerIdFromString(peerIdStr) : null;
+  const dialTarget = peerId ?? target;
+
+  if (peerId) {
+    await node.peerStore.merge(peerId, {
+      multiaddrs: [target],
+    });
+  }
+
   await Promise.race([
-    node.dial(peer as any) as Promise<unknown>,
+    node.dial(dialTarget) as Promise<unknown>,
     (async () => {
       await sleep(timeoutMs);
       throw new Error(`dial_timeout_${timeoutMs}ms`);
@@ -338,6 +361,7 @@ async function dialWithTimeout(node: Libp2p, peer: string, timeoutMs: number): P
 async function reconnectBootstrapPeers(): Promise<void> {
   if (!p2pNode) return;
   if (reconnectInFlight) return;
+  if (reconnectDisabled) return;
   reconnectInFlight = true;
   // Maintain at least MIN_MESH_PEERS connections for redundancy.
   // Previously stopped reconnecting at 1 peer, which left the node
@@ -349,12 +373,17 @@ async function reconnectBootstrapPeers(): Promise<void> {
     if (reconnectCandidates.length === 0) {
       return;
     }
+    const uniqueCandidatePeerIds = new Set(
+      reconnectCandidates
+        .map((peer) => extractPeerIdFromMultiaddrString(peer))
+        .filter((peerId): peerId is string => Boolean(peerId))
+    );
     // If we only have one reachable bootstrap endpoint, keeping >=1 peer is sufficient.
-    const targetMeshPeers = Math.max(1, Math.min(2, reconnectCandidates.length));
-    if (p2pNode.getPeers().length >= targetMeshPeers) return;
+    const targetMeshPeers = Math.max(1, Math.min(2, uniqueCandidatePeerIds.size || reconnectCandidates.length));
+    const connectedPeerIds = new Set(p2pNode.getPeers().map((peer) => peer.toString()));
+    if (connectedPeerIds.size >= targetMeshPeers) return;
 
     const MAX_RECONNECT_DIALS_PER_TICK = 3;
-    const connectedPeerIds = new Set(p2pNode.getPeers().map((peer) => peer.toString()));
     for (const peer of shuffleArray(reconnectCandidates).slice(0, MAX_RECONNECT_DIALS_PER_TICK)) {
       try {
         const targetPeerId = extractPeerIdFromMultiaddrString(peer);
@@ -368,6 +397,17 @@ async function reconnectBootstrapPeers(): Promise<void> {
         console.log('[p2p] Reconnected bootstrap peer:', peer);
         persistBootstrapPeers([peer]);
       } catch (error) {
+        if (String(error).includes('getPeerId is not a function')) {
+          reconnectDisabled = true;
+          if (reconnectTimer) {
+            clearInterval(reconnectTimer);
+            reconnectTimer = null;
+          }
+          console.warn(
+            '[p2p] Manual reconnect disabled after incompatible browser dial target; relying on bootstrap discovery.'
+          );
+          return;
+        }
         console.warn('[p2p] Reconnect attempt failed:', peer, error);
       }
     }
@@ -477,6 +517,7 @@ export async function stopP2P(): Promise<void> {
   gossipsub = null;
   isInitialized = false;
   reconnectInFlight = false;
+  reconnectDisabled = false;
 }
 
 // ─── Internal Helpers ──────────────────────────────────────────────────────
