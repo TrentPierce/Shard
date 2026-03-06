@@ -184,7 +184,7 @@ export default function BenchmarkScoutPage() {
             <div className="mt-4">
               <div className="h-3 overflow-hidden rounded-full bg-white/6">
                 <div
-                  className="h-full rounded-full bg-[linear-gradient(90deg,#1b2cc1,#7692ff,#abd2fa)]"
+                  className="h-full rounded-full bg-accent-500"
                   style={{ width: `${Math.max(4, Math.min(100, Math.round(progress.progress * 100)))}%` }}
                 />
               </div>

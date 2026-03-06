@@ -20,7 +20,7 @@ export function SiteNav() {
   }, [pathname])
 
   return (
-    <header className="sticky top-0 z-40 border-b border-ring/70 bg-[linear-gradient(180deg,rgba(9,21,64,0.94),rgba(17,32,93,0.88))] backdrop-blur">
+    <header className="sticky top-0 z-40 border-b border-ring/70 bg-base-950/95 backdrop-blur">
       <div className="mx-auto flex h-16 w-full max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
         <Link href="/" className="group flex items-center gap-3 text-sm font-semibold tracking-[0.18em] text-ink-50">
           <Image

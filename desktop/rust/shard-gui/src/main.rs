@@ -9,6 +9,7 @@ use tray_icon::menu::MenuEvent;
 
 mod app;
 mod autostart;
+mod cleanup;
 mod log_capture;
 mod model_download;
 mod process;
@@ -47,6 +48,9 @@ async fn main() -> Result<()> {
 
     // ── Auto-download model if not configured ────────────────────────────────
     let config = app::AppConfig::load();
+    if let Err(error) = cleanup::run_startup_cleanup(config.bitnet_model_path.as_str()) {
+        tracing::warn!(error = %error, "startup cleanup skipped");
+    }
     let needs_download = config.bitnet_model_path.is_empty()
         || !std::path::Path::new(&config.bitnet_model_path).exists();
 

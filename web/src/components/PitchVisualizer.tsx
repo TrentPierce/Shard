@@ -350,7 +350,7 @@ export default function NetworkVisualizer({ pitchMode = false, onToast }: Networ
         width: "100%",
         height: "100%",
         minHeight: "250px",
-        background: "linear-gradient(135deg, rgba(15, 23, 42, 0.9) 0%, rgba(30, 41, 59, 0.9) 100%)",
+        background: "rgba(9, 21, 64, 0.92)",
         borderRadius: "12px",
         border: "1px solid rgba(100, 200, 255, 0.2)",
         position: "relative",
@@ -408,7 +408,7 @@ export default function NetworkVisualizer({ pitchMode = false, onToast }: Networ
           <button
             onClick={spawnBot}
             style={{
-              background: "linear-gradient(135deg, #10b981, #059669)",
+              background: "#1b2cc1",
               border: "none",
               borderRadius: "6px",
               padding: "8px 16px",
@@ -424,7 +424,7 @@ export default function NetworkVisualizer({ pitchMode = false, onToast }: Networ
           <button
             onClick={killBot}
             style={{
-              background: "linear-gradient(135deg, #ef4444, #dc2626)",
+              background: "#3d518c",
               border: "none",
               borderRadius: "6px",
               padding: "8px 16px",

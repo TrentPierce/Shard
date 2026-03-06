@@ -293,7 +293,7 @@ export default function NetworkVisualizer({ pitchMode = false, onToast }: Networ
         width: "100%",
         height: "100%",
         minHeight: "250px",
-        background: "linear-gradient(135deg, rgba(15, 23, 42, 0.9) 0%, rgba(30, 41, 59, 0.9) 100%)",
+        background: "rgba(9, 21, 64, 0.92)",
         borderRadius: "12px",
         border: "1px solid rgba(100, 200, 255, 0.2)",
         position: "relative",

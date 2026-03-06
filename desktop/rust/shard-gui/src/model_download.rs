@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use directories::ProjectDirs;
 use futures::StreamExt;
 use sha2::{Digest, Sha256};
 use std::io::Read;
@@ -125,6 +126,9 @@ pub fn daemon_data_dir() -> PathBuf {
             return PathBuf::from(t);
         }
     }
+    if let Some(project_dirs) = ProjectDirs::from("com", "shard", "Shard") {
+        return project_dirs.data_local_dir().to_path_buf();
+    }
     dirs::data_local_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join("shard")
@@ -161,7 +165,9 @@ async fn download_inner(tx: &mpsc::Sender<DownloadMsg>) -> Result<PathBuf> {
     let entry = match fetch_manifest_entry().await {
         Ok(Some(entry)) => entry,
         Ok(None) => {
-            warn!("model manifest had no valid download entries; using built-in default model source");
+            warn!(
+                "model manifest had no valid download entries; using built-in default model source"
+            );
             default_model_entry()
         }
         Err(err) => {
@@ -353,7 +359,10 @@ mod tests {
         std::fs::create_dir_all(data_dir.as_path())?;
 
         let _g1 = EnvVarGuard::set("SHARD_DATA_DIR", data_dir.to_string_lossy().as_ref());
-        let _g2 = EnvVarGuard::set("SHARD_MODEL_MANIFEST_URL", "http://127.0.0.1:9/manifest.json");
+        let _g2 = EnvVarGuard::set(
+            "SHARD_MODEL_MANIFEST_URL",
+            "http://127.0.0.1:9/manifest.json",
+        );
         let _g3 = EnvVarGuard::set("SHARD_DEFAULT_MODEL_ID", "smoke-model");
         let _g4 = EnvVarGuard::set("SHARD_DEFAULT_MODEL_VERSION", "test");
         let _g5 = EnvVarGuard::set("SHARD_DEFAULT_MODEL_URL", download_url.as_str());

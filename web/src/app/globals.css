@@ -35,11 +35,7 @@ body {
 
 body {
   @apply bg-base-950 text-ink-50 antialiased;
-  background-image:
-    radial-gradient(circle at 16% 12%, rgba(171, 210, 250, 0.18) 0%, transparent 30%),
-    radial-gradient(circle at 84% 8%, rgba(118, 146, 255, 0.22) 0%, transparent 34%),
-    radial-gradient(circle at 50% 100%, rgba(27, 44, 193, 0.18) 0%, transparent 42%),
-    linear-gradient(180deg, rgba(61, 81, 140, 0.18) 0%, rgba(9, 21, 64, 0.96) 58%);
+  background-color: var(--bg-primary);
 }
 
 main {

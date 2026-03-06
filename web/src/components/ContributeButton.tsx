@@ -96,7 +96,7 @@ export function ContributeButton({ className = "" }: ContributeButtonProps) {
     <>
       <button
         onClick={() => setShowModal(true)}
-        className={`px-4 py-2 bg-gradient-to-r from-emerald-500 to-cyan-500 text-white font-semibold rounded-lg hover:opacity-90 transition-opacity ${className}`}
+        className={`rounded-lg bg-accent-500 px-4 py-2 font-semibold text-white transition-colors hover:bg-accent-400 ${className}`}
       >
         Contribute
       </button>
@@ -128,7 +128,7 @@ export function ContributeButton({ className = "" }: ContributeButtonProps) {
                     key={tier.id}
                     onClick={() => setSelectedTier(tier.id)}
                     className={`w-full p-4 rounded-lg border-2 text-left transition-all ${selectedTier === tier.id
-                        ? "border-emerald-500 bg-emerald-500/10"
+                        ? "border-accent-500 bg-accent-500/10"
                         : "border-slate-700 hover:border-slate-600"
                       }`}
                   >
@@ -142,7 +142,7 @@ export function ContributeButton({ className = "" }: ContributeButtonProps) {
                         </p>
                       </div>
                       {selectedTier === tier.id && (
-                        <span className="text-emerald-500">✓</span>
+                        <span className="text-accent-400">✓</span>
                       )}
                     </div>
                   </button>
@@ -166,7 +166,7 @@ export function ContributeButton({ className = "" }: ContributeButtonProps) {
                 <button
                   onClick={() => handleDownload(selectedTier!)}
                   disabled={!selectedTier}
-                  className="flex-1 py-3 bg-emerald-600 text-white font-semibold rounded-lg hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  className="flex-1 rounded-lg bg-accent-500 py-3 font-semibold text-white transition-colors hover:bg-accent-400 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {downloadStatus === "downloading"
                     ? "Downloading..."
@@ -195,3 +195,4 @@ export function ContributeButton({ className = "" }: ContributeButtonProps) {
     </>
   )
 }
+

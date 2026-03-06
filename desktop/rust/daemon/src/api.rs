@@ -3772,11 +3772,11 @@ pub(crate) async fn dashboard_handler() -> Html<&'static str> {
   <title>Shard Operations Dashboard</title>
   <style>
     :root { --bg:#09121a; --card:#132534; --fg:#d9e9f7; --muted:#8fb2cf; --accent:#44d2ff; --ok:#4ae596; --warn:#ffbe55; }
-    body { margin:0; font-family: "IBM Plex Sans", "Segoe UI", sans-serif; background: radial-gradient(circle at top, #163149, var(--bg)); color: var(--fg); }
+    body { margin:0; font-family: "IBM Plex Sans", "Segoe UI", sans-serif; background: var(--bg); color: var(--fg); }
     main { max-width: 1080px; margin: 0 auto; padding: 24px; }
     h1 { margin: 0 0 18px 0; font-size: 28px; letter-spacing: .02em; }
     .grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(220px,1fr)); gap: 14px; }
-    .card { background: linear-gradient(180deg, #173147, var(--card)); border:1px solid #295170; border-radius: 12px; padding: 14px; }
+    .card { background: var(--card); border:1px solid #295170; border-radius: 12px; padding: 14px; }
     .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .08em; }
     .value { font-size: 26px; margin-top: 4px; }
     table { width:100%; border-collapse: collapse; margin-top: 16px; }

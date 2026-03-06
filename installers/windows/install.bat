@@ -140,6 +140,9 @@ schtasks /Delete /F /TN "ShardAutoUpdate" >nul 2>&1
 if exist "%INSTALL_DIR%" (
     rmdir /S /Q "%INSTALL_DIR%"
 )
+for %%D in ("%APPDATA%\Shard" "%LOCALAPPDATA%\shard" "%LOCALAPPDATA%\Shard" "%ProgramData%\Shard") do (
+    if exist "%%~D" rmdir /S /Q "%%~D"
+)
 
 echo Uninstall complete.
 if "%SILENT%"=="0" pause

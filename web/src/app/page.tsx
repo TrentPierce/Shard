@@ -149,9 +149,8 @@ export default function HomePage() {
 
   return (
     <main id="main-content" className="pb-16 pt-8 sm:pt-12">
-      <section className="relative overflow-hidden rounded-[2rem] border border-white/10 bg-[linear-gradient(135deg,rgba(9,21,64,0.96),rgba(27,44,193,0.84)_52%,rgba(61,81,140,0.88))] px-6 py-8 shadow-panel sm:px-10 sm:py-12">
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(171,210,250,0.26),transparent_30%),radial-gradient(circle_at_bottom_left,rgba(118,146,255,0.18),transparent_34%),linear-gradient(180deg,transparent,rgba(9,21,64,0.24))]" />
-        <div className="relative grid gap-10 lg:grid-cols-[1.25fr_0.75fr] lg:items-end">
+      <section className="overflow-hidden rounded-[2rem] border border-white/10 bg-base-800 px-6 py-8 shadow-panel sm:px-10 sm:py-12">
+        <div className="grid gap-10 lg:grid-cols-[1.25fr_0.75fr] lg:items-end">
           <div>
             <div className="inline-flex items-center gap-2 rounded-full border border-white/12 bg-white/8 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.24em] text-ink-200">
               <span>Shard Network</span>
@@ -179,17 +178,17 @@ export default function HomePage() {
               </Link>
             </div>
             <div className="mt-6 grid gap-3 sm:grid-cols-3">
-              <div className="rounded-2xl border border-white/10 bg-white/6 p-4 backdrop-blur">
+              <div className="rounded-2xl border border-white/10 bg-base-900 p-4">
                 <p className="text-xs uppercase tracking-[0.18em] text-ink-400">Release status</p>
                 <p className="mt-2 text-lg font-semibold text-amber-200">NO_GO</p>
                 <p className="mt-1 text-sm text-ink-300">Verifier mesh is solid. Scout-assisted 2-node runs still need work.</p>
               </div>
-              <div className="rounded-2xl border border-white/10 bg-white/6 p-4 backdrop-blur">
+              <div className="rounded-2xl border border-white/10 bg-base-900 p-4">
                 <p className="text-xs uppercase tracking-[0.18em] text-ink-400">Best current path</p>
                 <p className="mt-2 text-lg font-semibold text-ink-50">1 verifier, no scouts</p>
                 <p className="mt-1 text-sm text-ink-300">Fastest current median p95 in the isolated March 6 RC matrix.</p>
               </div>
-              <div className="rounded-2xl border border-white/10 bg-white/6 p-4 backdrop-blur">
+              <div className="rounded-2xl border border-white/10 bg-base-900 p-4">
                 <p className="text-xs uppercase tracking-[0.18em] text-ink-400">Browser status</p>
                 <p className="mt-2 text-lg font-semibold text-ink-50">
                   {probeResult?.eligible ? "Ready to contribute" : "Viewer mode"}
@@ -203,7 +202,7 @@ export default function HomePage() {
             </div>
           </div>
 
-          <aside className="rounded-[1.75rem] border border-white/12 bg-[linear-gradient(180deg,rgba(9,21,64,0.38),rgba(255,255,255,0.04))] p-5 backdrop-blur">
+          <aside className="rounded-[1.75rem] border border-white/12 bg-base-900 p-5">
             <p className="text-xs uppercase tracking-[0.2em] text-ink-400">Live network snapshot</p>
             <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
               <StatCard label="Active verifiers" value={dashboard.verifierNodes.toLocaleString()} detail="Healthy nodes currently visible" />
@@ -353,7 +352,7 @@ export default function HomePage() {
                     <p className="mt-3 text-xs text-amber-100">readiness: {row.readinessReason}</p>
                   ) : null}
                   <div className="mt-3 h-3 overflow-hidden rounded-full bg-white/6">
-                    <div className="h-full rounded-full bg-[linear-gradient(90deg,#1b2cc1,#7692ff,#abd2fa)]" style={{ width: `${row.width}%` }} />
+                    <div className="h-full rounded-full bg-accent-500" style={{ width: `${row.width}%` }} />
                   </div>
                 </div>
               ))

@@ -52,6 +52,12 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: de
 ; Auto-start via Run key
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "ShardNode"; ValueData: """{app}\{#MyAppExeName}"" --background"; Flags: uninsdeletevalue; Tasks: startup
 
+[UninstallDelete]
+Type: filesandordirs; Name: "{userappdata}\Shard"
+Type: filesandordirs; Name: "{localappdata}\shard"
+Type: filesandordirs; Name: "{localappdata}\Shard"
+Type: filesandordirs; Name: "{commonappdata}\Shard"
+
 [Run]
 Filename: "{app}\install.bat"; Parameters: "/S /NOGUI"; Flags: runhidden skipifnotsilent
 Filename: "{app}\install.bat"; Flags: waituntilterminated skipifsilent

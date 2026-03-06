@@ -54,11 +54,7 @@ export default function SwarmThroughputCanvas({ samples }: SwarmThroughputCanvas
       return { x, y }
     })
 
-    const gradient = context.createLinearGradient(0, 0, width, height)
-    gradient.addColorStop(0, "rgba(122, 162, 184, 0.95)")
-    gradient.addColorStop(1, "rgba(100, 116, 139, 0.95)")
-
-    context.strokeStyle = gradient
+    context.strokeStyle = "rgba(118, 146, 255, 0.95)"
     context.lineWidth = 2.2
     context.beginPath()
     points.forEach((point, idx) => {
@@ -70,11 +66,7 @@ export default function SwarmThroughputCanvas({ samples }: SwarmThroughputCanvas
     })
     context.stroke()
 
-    const areaGradient = context.createLinearGradient(0, 0, 0, height)
-    areaGradient.addColorStop(0, "rgba(122, 162, 184, 0.28)")
-    areaGradient.addColorStop(1, "rgba(122, 162, 184, 0)")
-
-    context.fillStyle = areaGradient
+    context.fillStyle = "rgba(118, 146, 255, 0.18)"
     context.beginPath()
     points.forEach((point, idx) => {
       if (idx === 0) {
@@ -90,7 +82,7 @@ export default function SwarmThroughputCanvas({ samples }: SwarmThroughputCanvas
 
     const lastPoint = points[points.length - 1]
     context.beginPath()
-    context.fillStyle = "#7aa2b8"
+    context.fillStyle = "#7692ff"
     context.arc(lastPoint.x, lastPoint.y, 4, 0, Math.PI * 2)
     context.fill()
 

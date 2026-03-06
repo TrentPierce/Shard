@@ -277,6 +277,11 @@ impl ShardApp {
                 DownloadMsg::Done(path) => {
                     self.config.bitnet_model_path = path.display().to_string();
                     let _ = self.config.save();
+                    if let Err(error) =
+                        crate::cleanup::run_startup_cleanup(self.config.bitnet_model_path.as_str())
+                    {
+                        tracing::warn!(error = %error, "post-download cleanup skipped");
+                    }
                     // Restart daemon with the freshly downloaded model.
                     self.start_daemon();
                     self.post_download_restart_attempts = 0;
