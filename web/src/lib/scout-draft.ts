@@ -143,9 +143,10 @@ export async function reportScoutClientEvent(
   detail?: string,
   status?: number,
   scoutIdValue?: string,
-): Promise<void> {
-  if (Date.now() < clientEventMutedUntilMs) {
-    return
+  options: { bypassMute?: boolean } = {},
+): Promise<boolean> {
+  if (!options.bypassMute && Date.now() < clientEventMutedUntilMs) {
+    return false
   }
   try {
     const response = await fetchWithTimeout(
@@ -163,12 +164,16 @@ export async function reportScoutClientEvent(
       },
       DEFAULT_CONFIG.clientEventTimeoutMs,
     )
-    if (response.status >= 500 || response.status === 202) {
+    if (!options.bypassMute && (response.status >= 500 || response.status === 202)) {
       clientEventMutedUntilMs = Date.now() + getJitteredBackoff(10000, 0, 30000)
     }
+    return response.ok
   } catch {
     // Best-effort telemetry only. On repeated failures, avoid generating a storm.
-    clientEventMutedUntilMs = Date.now() + getJitteredBackoff(10000, 0, 30000)
+    if (!options.bypassMute) {
+      clientEventMutedUntilMs = Date.now() + getJitteredBackoff(10000, 0, 30000)
+    }
+    return false
   }
 }
 

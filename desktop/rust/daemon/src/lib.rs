@@ -660,7 +660,11 @@ impl Default for SpeculativeConfig {
                 .unwrap_or(1_500),
             scout_cooldown_ms: 60000,
             max_consecutive_timeouts: 3,
-            draft_token_count: 4,
+            draft_token_count: std::env::var("SHARD_SCOUT_DRAFT_TOKEN_COUNT")
+                .ok()
+                .and_then(|v| v.parse::<usize>().ok())
+                .map(|v| v.clamp(1, 16))
+                .unwrap_or(4),
         }
     }
 }

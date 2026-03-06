@@ -1865,6 +1865,11 @@ fn scout_config_snapshot_json() -> serde_json::Value {
         "lease": {
             "ttl_ms": scout_lease_ttl_ms(),
         },
+        "speculative": {
+            "min_request_tokens": speculative_min_request_tokens(),
+            "long_request_min_tokens": scout_long_request_min_tokens(),
+            "long_request_draft_token_count": scout_long_request_draft_token_count(),
+        },
         "blackout": {
             "trigger_ms": scout_blackout_trigger_ms(),
             "duration_ms": scout_blackout_duration_ms(),

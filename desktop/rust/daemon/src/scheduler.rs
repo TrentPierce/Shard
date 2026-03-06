@@ -226,8 +226,13 @@ fn should_attempt_mesh_forward(
     headers: &HeaderMap,
     route_private: bool,
     stream_mode: bool,
+    inference_mode: InferenceMode,
 ) -> bool {
-    if route_private || stream_mode || !mesh_forward_enabled() {
+    if route_private
+        || stream_mode
+        || inference_mode == InferenceMode::Speculative
+        || !mesh_forward_enabled()
+    {
         return false;
     }
     if matches!(
@@ -938,6 +943,130 @@ fn compute_effective_scout_timeout_ms(
     bounded_base.min(850)
 }
 
+fn scout_short_request_max_tokens() -> usize {
+    std::env::var("SHARD_SCOUT_TIMEOUT_SHORT_REQUEST_MAX_TOKENS")
+        .ok()
+        .and_then(|v| v.trim().parse::<usize>().ok())
+        .map(|v| v.clamp(1, 512))
+        .unwrap_or(12)
+}
+
+fn scout_short_request_timeout_cap_ms() -> u64 {
+    std::env::var("SHARD_SCOUT_TIMEOUT_SHORT_REQUEST_CAP_MS")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .map(|v| v.clamp(100, 2_500))
+        .unwrap_or(450)
+}
+
+fn scout_timeout_verifier_ratio() -> f64 {
+    std::env::var("SHARD_SCOUT_TIMEOUT_VERIFIER_RATIO")
+        .ok()
+        .and_then(|v| v.trim().parse::<f64>().ok())
+        .filter(|v| v.is_finite() && *v > 0.0)
+        .unwrap_or(0.55)
+}
+
+fn scout_timeout_verifier_floor_ms() -> u64 {
+    std::env::var("SHARD_SCOUT_TIMEOUT_VERIFIER_FLOOR_MS")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .map(|v| v.clamp(100, 2_500))
+        .unwrap_or(200)
+}
+
+fn scout_timeout_verifier_ceil_ms() -> u64 {
+    std::env::var("SHARD_SCOUT_TIMEOUT_VERIFIER_CEIL_MS")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .map(|v| v.clamp(scout_timeout_verifier_floor_ms(), 5_000))
+        .unwrap_or(900)
+}
+
+fn parse_speculative_min_request_tokens(raw: Option<&str>) -> usize {
+    raw.and_then(|v| v.trim().parse::<usize>().ok())
+        .map(|v| v.clamp(0, 4096))
+        .unwrap_or(0)
+}
+
+pub(crate) fn speculative_min_request_tokens() -> usize {
+    parse_speculative_min_request_tokens(
+        std::env::var("SHARD_SPECULATIVE_MIN_REQUEST_TOKENS")
+            .ok()
+            .as_deref(),
+    )
+}
+
+pub(crate) fn scout_long_request_min_tokens() -> usize {
+    std::env::var("SHARD_SCOUT_LONG_REQUEST_MIN_TOKENS")
+        .ok()
+        .and_then(|v| v.trim().parse::<usize>().ok())
+        .map(|v| v.clamp(0, 4096))
+        .unwrap_or(0)
+}
+
+pub(crate) fn scout_long_request_draft_token_count() -> usize {
+    std::env::var("SHARD_SCOUT_LONG_REQUEST_DRAFT_TOKEN_COUNT")
+        .ok()
+        .and_then(|v| v.trim().parse::<usize>().ok())
+        .map(|v| v.clamp(1, 16))
+        .unwrap_or(0)
+}
+
+fn effective_draft_token_count_with(
+    default_count: usize,
+    request_max_tokens: usize,
+    long_request_min: usize,
+    long_request_count: usize,
+) -> usize {
+    let boosted = if long_request_min > 0
+        && long_request_count > 0
+        && request_max_tokens >= long_request_min
+    {
+        default_count.max(long_request_count)
+    } else {
+        default_count
+    };
+    boosted.clamp(1, request_max_tokens.max(1))
+}
+
+fn effective_draft_token_count(default_count: usize, request_max_tokens: usize) -> usize {
+    effective_draft_token_count_with(
+        default_count,
+        request_max_tokens,
+        scout_long_request_min_tokens(),
+        scout_long_request_draft_token_count(),
+    )
+}
+
+fn adapt_speculative_timeout_ms(
+    state: &SharedState,
+    timeout_ms: u64,
+    request_max_tokens: usize,
+    draft_token_count: usize,
+) -> u64 {
+    let mut adapted = timeout_ms;
+    if request_max_tokens <= scout_short_request_max_tokens() {
+        adapted = adapted.min(scout_short_request_timeout_cap_ms());
+    }
+    if request_max_tokens <= draft_token_count.saturating_add(1) {
+        adapted = adapted.min(300);
+    }
+    let avg_latency_ms = state.avg_latency_ms.load(Ordering::Relaxed) as u64;
+    if avg_latency_ms > 0 {
+        let ratio = scout_timeout_verifier_ratio();
+        let verifier_cap =
+            ((avg_latency_ms as f64) * ratio).round() as u64;
+        adapted = adapted.min(
+            verifier_cap.clamp(
+                scout_timeout_verifier_floor_ms(),
+                scout_timeout_verifier_ceil_ms(),
+            ),
+        );
+    }
+    adapted
+}
+
 fn update_request_latency_ewma(state: &SharedState, latency_ms: u64) {
     let sample = latency_ms.min(u32::MAX as u64) as u32;
     let previous = state.avg_latency_ms.load(Ordering::Relaxed);
@@ -1180,6 +1309,7 @@ async fn fetch_speculative_draft(
     request_id: &str,
     prompt: &str,
     config: &SpeculativeConfig,
+    request_max_tokens: usize,
 ) -> Option<ScoutDraft> {
     let in_cooldown = {
         let tracker = state.scout_timeout_tracker.lock().await;
@@ -1190,10 +1320,11 @@ async fn fetch_speculative_draft(
         return None;
     }
 
+    let draft_token_count = effective_draft_token_count(config.draft_token_count, request_max_tokens);
     let work = WorkRequest {
         request_id: request_id.to_string(),
         prompt_context: prompt.to_string(),
-        min_tokens: config.draft_token_count as i32,
+        min_tokens: draft_token_count as i32,
         created_at_ms: Some(now_ms()),
         lease_id: None,
         lease_expires_at_ms: None,
@@ -1201,7 +1332,12 @@ async fn fetch_speculative_draft(
         preferred_endpoint: None,
     };
 
-    let scout_timeout_ms = effective_speculative_timeout_ms(state, config, request_id).await;
+    let scout_timeout_ms = adapt_speculative_timeout_ms(
+        state,
+        effective_speculative_timeout_ms(state, config, request_id).await,
+        request_max_tokens,
+        draft_token_count,
+    );
     if scout_timeout_ms == 0 {
         tracing::debug!("skipping speculative dispatch with zero effective timeout");
         return None;
@@ -1621,8 +1757,13 @@ pub(crate) async fn chat_completions_handler(
     }
 
     let stream_mode = req.stream.unwrap_or(false);
+    let inference_mode = resolve_inference_mode(
+        headers
+            .get("x-shard-inference-mode")
+            .and_then(|v| v.to_str().ok()),
+    );
     let max_tokens = req.max_tokens.or(req.max_new_tokens).unwrap_or(256);
-    if should_attempt_mesh_forward(&headers, route_private, stream_mode) {
+    if should_attempt_mesh_forward(&headers, route_private, stream_mode, inference_mode) {
         let queue_weight_ms = mesh_forward_queue_weight_ms();
         let local_queue_depth = verifier_request_depth(&state) as f64;
         let local_latency_ms = state.avg_latency_ms.load(Ordering::Relaxed) as f64;
@@ -1702,11 +1843,6 @@ pub(crate) async fn chat_completions_handler(
         }
     }
 
-    let inference_mode = resolve_inference_mode(
-        headers
-            .get("x-shard-inference-mode")
-            .and_then(|v| v.to_str().ok()),
-    );
     let use_speculative = inference_mode == InferenceMode::Speculative;
 
     let speculative_config = if use_speculative {
@@ -1746,6 +1882,19 @@ pub(crate) async fn chat_completions_handler(
     );
     let mut use_speculative = inference_mode == InferenceMode::Speculative && model_pair_compatible;
 
+    if use_speculative {
+        let min_request_tokens = speculative_min_request_tokens();
+        if min_request_tokens > 0 && (max_tokens as usize) < min_request_tokens {
+            tracing::debug!(
+                request_max_tokens = max_tokens,
+                min_request_tokens,
+                "adaptive bypass: request is too short for speculative routing"
+            );
+            state.system_metrics.inc_speculative_bypass();
+            use_speculative = false;
+        }
+    }
+
     // ── Adaptive Speculative Bypass ──
     // If historical acceptance rate is too low, skip speculative decoding entirely
     // to avoid the costly TTFT penalty (waiting for scouts that produce rejected drafts).
@@ -1778,7 +1927,14 @@ pub(crate) async fn chat_completions_handler(
 
     let speculative_draft = if use_speculative {
         if let Some(ref config) = speculative_config {
-            fetch_speculative_draft(&state, &request_id, &prompt, config).await
+            fetch_speculative_draft(
+                &state,
+                &request_id,
+                &prompt,
+                config,
+                max_tokens as usize,
+            )
+            .await
         } else {
             None
         }
@@ -2249,8 +2405,9 @@ pub(crate) async fn chat_completions_handler(
 mod tests {
     use super::{
         auth_required, compute_effective_scout_timeout_ms, endpoint_from_multiaddr,
-        enqueue_scout_work, infer_client_ip, local_scout_fallback_allowed, mesh_forward_score,
-        model_pair_acceptance_rates, normalize_endpoint, probe_allowed_for_request,
+        effective_draft_token_count_with, enqueue_scout_work, infer_client_ip,
+        local_scout_fallback_allowed, mesh_forward_score, model_pair_acceptance_rates,
+        normalize_endpoint, parse_speculative_min_request_tokens, probe_allowed_for_request,
         remove_work_id_from_scout_queue, request_host_is_local, resolve_inference_mode,
         should_abort_on_degenerate_output, should_attempt_mesh_forward, should_forward_to_mesh,
         should_refuse_mesh_degraded, strip_control_tokens, InferenceMode, ScoutSupplyEstimate,
@@ -2394,6 +2551,23 @@ mod tests {
     }
 
     #[test]
+    fn speculative_min_request_tokens_defaults_to_disabled() {
+        assert_eq!(parse_speculative_min_request_tokens(None), 0);
+    }
+
+    #[test]
+    fn speculative_min_request_tokens_reads_env_override() {
+        assert_eq!(parse_speculative_min_request_tokens(Some("12")), 12);
+    }
+
+    #[test]
+    fn effective_draft_token_count_stays_default_for_short_requests() {
+        assert_eq!(effective_draft_token_count_with(3, 8, 24, 6), 3);
+        assert_eq!(effective_draft_token_count_with(3, 32, 24, 6), 6);
+        assert_eq!(effective_draft_token_count_with(3, 4, 24, 6), 3);
+    }
+
+    #[test]
     fn remote_local_fallback_is_blocked_under_load() {
         assert!(local_scout_fallback_allowed(false, 100, 100, 10_000));
         assert!(local_scout_fallback_allowed(true, 2, 3, 800));
@@ -2477,12 +2651,33 @@ mod tests {
     #[test]
     fn mesh_forward_respects_headers_and_mode() {
         let headers = HeaderMap::new();
-        assert!(!should_attempt_mesh_forward(&headers, false, true));
-        assert!(!should_attempt_mesh_forward(&headers, true, false));
+        assert!(!should_attempt_mesh_forward(
+            &headers,
+            false,
+            true,
+            InferenceMode::Standard
+        ));
+        assert!(!should_attempt_mesh_forward(
+            &headers,
+            true,
+            false,
+            InferenceMode::Standard
+        ));
+        assert!(!should_attempt_mesh_forward(
+            &headers,
+            false,
+            false,
+            InferenceMode::Speculative
+        ));
 
         let mut disabled = HeaderMap::new();
         disabled.insert("x-shard-mesh-forward", HeaderValue::from_static("false"));
-        assert!(!should_attempt_mesh_forward(&disabled, false, false));
+        assert!(!should_attempt_mesh_forward(
+            &disabled,
+            false,
+            false,
+            InferenceMode::Standard
+        ));
     }
 
     #[test]

@@ -47,12 +47,19 @@ export type DraftGenerationOptions = {
     topP?: number
 }
 
+export type InitWebLLMOptions = {
+    allowFallback?: boolean
+    modelId?: string
+}
+
 // ─── Constants ──────────────────────────────────────────────────────────────
 
 // Keep scout draft model aligned with verifier family to maximize acceptance.
-const DRAFT_MODEL = "Llama-3.2-1B-Instruct-q4f32_1-MLC"
+// Prefer the lighter q4f16 WebLLM variant so browser scouts start faster and
+// return drafts sooner on consumer GPUs.
+const DRAFT_MODEL = "Llama-3.2-1B-Instruct-q4f16_1-MLC"
 
-// Lower-memory Llama variant for mobile devices.
+// Mobile devices use the same fast variant by default.
 const NANO_MODEL = "Llama-3.2-1B-Instruct-q4f16_1-MLC"
 
 // Compatibility fallback if Llama artifacts fail to load on a specific browser build.
@@ -76,6 +83,31 @@ let isLoading = false
 let currentModel: string = DRAFT_MODEL
 let scoutAppConfig: AppConfig | null = null
 
+function isTauriRuntime(): boolean {
+    return typeof window !== "undefined" && (window as any).__TAURI_INTERNALS__ !== undefined
+}
+
+function shouldProxyWebLLMModelAssets(): boolean {
+    const mode = (process.env.NEXT_PUBLIC_WEBLLM_MODEL_PROXY_MODE || "proxy").trim().toLowerCase()
+    return mode !== "direct" && !isTauriRuntime()
+}
+
+function toProxyModelUrl(modelUrl: string): string {
+    if (!shouldProxyWebLLMModelAssets() || typeof window === "undefined") {
+        return modelUrl
+    }
+    try {
+        const parsed = new URL(modelUrl)
+        if (parsed.hostname !== "huggingface.co") {
+            return modelUrl
+        }
+        const cleanPath = parsed.pathname.replace(/^\/+/, "").replace(/\/+$/, "")
+        return new URL(`/api/webllm/model/${cleanPath}`, window.location.origin).href
+    } catch {
+        return modelUrl
+    }
+}
+
 function getScoutAppConfig(): AppConfig {
     if (scoutAppConfig) {
         return scoutAppConfig
@@ -83,7 +115,10 @@ function getScoutAppConfig(): AppConfig {
     scoutAppConfig = {
         ...prebuiltAppConfig,
         useIndexedDBCache: true,
-        model_list: [...prebuiltAppConfig.model_list],
+        model_list: prebuiltAppConfig.model_list.map((record) => ({
+            ...record,
+            model: toProxyModelUrl(record.model),
+        })),
     }
     return scoutAppConfig
 }
@@ -113,6 +148,18 @@ function isWorkerInitBug(error: unknown): boolean {
         msg.includes("failed to read the 'lost' property from 'gpudevice'") ||
         msg.includes("illegal invocation") ||
         msg.includes("ftvmffierrorsetraisedfromcstr")
+    )
+}
+
+function isRecoverableModelLoadError(error: unknown): boolean {
+    const msg = String((error as any)?.message ?? error ?? "").toLowerCase()
+    return (
+        msg.includes("artifactindexeddbcache failed to fetch") ||
+        msg.includes("artifactcache failed to fetch") ||
+        msg.includes("failed to fetch") ||
+        msg.includes("networkerror") ||
+        msg.includes("load wasm binary") ||
+        msg.includes("fetch:")
     )
 }
 
@@ -252,7 +299,8 @@ export async function checkWebGPUSupport(): Promise<WebGPUStatus> {
  * @returns Promise that resolves when the engine is ready
  */
 export async function initWebLLM(
-    progressCallback?: ProgressCallback
+    progressCallback?: ProgressCallback,
+    options: InitWebLLMOptions = {}
 ): Promise<void> {
     if (engine) {
         return // Already initialized
@@ -286,7 +334,7 @@ export async function initWebLLM(
 
     try {
         // Use device-appropriate model (Nano for mobile, standard for desktop)
-        const model = getModelForDevice()
+        const model = options.modelId?.trim() || getModelForDevice()
         currentModel = model
 
         const loadModel = async (modelId: string): Promise<MLCEngineInterface> => {
@@ -336,15 +384,34 @@ export async function initWebLLM(
             }
         }
 
+        const loadModelWithRecovery = async (modelId: string): Promise<MLCEngineInterface> => {
+            try {
+                return await loadModel(modelId)
+            } catch (initialError) {
+                if (!isRecoverableModelLoadError(initialError)) {
+                    throw initialError
+                }
+                console.warn(`[WebLLM] Recovering from failed model load for ${modelId}; clearing cached artifacts`, initialError)
+                try {
+                    const { deleteModelAllInfoInCache } = await import("@mlc-ai/web-llm")
+                    await deleteModelAllInfoInCache(modelId, getScoutAppConfig())
+                } catch (purgeError) {
+                    console.warn(`[WebLLM] Failed to clear cached artifacts for ${modelId}`, purgeError)
+                }
+                return await loadModel(modelId)
+            }
+        }
+
+        const allowFallback = options.allowFallback ?? true
         try {
-            engine = await loadModel(model)
+            engine = await loadModelWithRecovery(model)
         } catch (modelError) {
             const fallbackModel = isMobileDevice() ? FALLBACK_NANO_MODEL : FALLBACK_DRAFT_MODEL
-            if (model === fallbackModel) {
+            if (!allowFallback || model === fallbackModel) {
                 throw modelError
             }
             console.warn(`[WebLLM] Failed to load ${model}; falling back to ${fallbackModel}`, modelError)
-            engine = await loadModel(fallbackModel)
+            engine = await loadModelWithRecovery(fallbackModel)
             currentModel = fallbackModel
         }
 

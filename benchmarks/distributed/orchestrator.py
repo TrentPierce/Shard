@@ -245,6 +245,16 @@ async def fetch_health(client: httpx.AsyncClient, base_url: str) -> dict:
     return {}
 
 
+async def fetch_scout_config(client: httpx.AsyncClient, base_url: str) -> dict:
+    try:
+        resp = await client.get(f"{base_url.rstrip('/')}/v1/system/scout-config")
+        if resp.is_success:
+            return resp.json()
+    except Exception:
+        pass
+    return {}
+
+
 async def fetch_pool_summaries(client: httpx.AsyncClient, verifier_pool: list[str]) -> list[dict]:
     summaries: list[dict] = []
     for endpoint in verifier_pool:
@@ -373,7 +383,7 @@ def browser_scout_runner_path() -> Path:
 
 async def launch_browser_scout_runner(
     count: int,
-    verifier_pool: list[str],
+    browser_backends: list[str],
     page_base_url: str,
     browser_channel: str,
     browser_headless: bool,
@@ -393,7 +403,7 @@ async def launch_browser_scout_runner(
         "--page-base",
         page_base_url,
         "--backends",
-        ",".join(verifier_pool),
+        ",".join(browser_backends),
         "--channel",
         browser_channel,
         "--startup-timeout-ms",
@@ -717,6 +727,7 @@ async def run_orchestrator(
                     "ready": False,
                     "productive": False,
                     "requests_sent": 0,
+                    "speculative_bypassed_for_request": False,
                 }
                 ready = await wait_for_browser_scout_supply(
                     client=client,
@@ -729,6 +740,18 @@ async def run_orchestrator(
                     print(
                         f"[browser-warmup] warning: scouts never became draft-capable within "
                         f"{browser_warmup_timeout_s}s"
+                    )
+                    return info
+
+                scout_config = await fetch_scout_config(client, verifier_pool[0])
+                speculative_cfg = scout_config.get("config", {}).get("speculative", {})
+                min_request_tokens = int(speculative_cfg.get("min_request_tokens", 0) or 0)
+                if min_request_tokens > 0 and max_tokens < min_request_tokens:
+                    info["speculative_bypassed_for_request"] = True
+                    print(
+                        "[browser-warmup] request max_tokens is below the verifier speculative "
+                        f"threshold ({max_tokens} < {min_request_tokens}); treating ready scouts "
+                        "as expected without submit-success warmup"
                     )
                     return info
 
@@ -891,9 +914,17 @@ async def run_orchestrator(
     
             scout_tasks: list[asyncio.Task] = []
             if scout_workers > 0 and scout_mode == "browser":
+                browser_backends = [
+                    await pool.best_endpoint_for_scout(client)
+                    for _ in range(max(1, scout_workers))
+                ]
+                print(
+                    "[browser-scout-runner] selected backends: "
+                    + ", ".join(browser_backends)
+                )
                 browser_scout_proc = await launch_browser_scout_runner(
                     count=scout_workers,
-                    verifier_pool=verifier_pool,
+                    browser_backends=browser_backends,
                     page_base_url=browser_scout_page_base_url,
                     browser_channel=browser_channel,
                     browser_headless=browser_headless,

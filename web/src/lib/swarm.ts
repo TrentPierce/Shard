@@ -449,16 +449,20 @@ export async function startScoutWorker(
     let consecutiveFailures = 0
     let lastRuntimeEvent: "runtime_webgpu_ready" | "runtime_wasm_fallback" | null = null
 
-    const reportRuntimeMode = () => {
+    const reportRuntimeMode = async () => {
         const engine = getActiveEngine()
         const runtimeEvent: "runtime_webgpu_ready" | "runtime_wasm_fallback" =
             engine?.mode === "webgpu" ? "runtime_webgpu_ready" : "runtime_wasm_fallback"
         if (runtimeEvent === lastRuntimeEvent) {
             return
         }
-        lastRuntimeEvent = runtimeEvent
         const detail = engine?.mode === "webgpu" ? "engine_mode_webgpu" : "engine_mode_wasm_or_unavailable"
-        void reportScoutClientEvent(runtimeEvent, detail)
+        const reported = await reportScoutClientEvent(runtimeEvent, detail, undefined, undefined, {
+            bypassMute: true,
+        })
+        if (reported) {
+            lastRuntimeEvent = runtimeEvent
+        }
     }
 
     const schedule = (delayMs: number) => {
@@ -473,7 +477,7 @@ export async function startScoutWorker(
         }
         inFlight = true
         try {
-            reportRuntimeMode()
+            await reportRuntimeMode()
             const polled = await requestWork()
             const work = polled.work
             if (work) {
@@ -498,7 +502,7 @@ export async function startScoutWorker(
         }
     }
 
-    reportRuntimeMode()
+    void reportRuntimeMode()
     schedule(0)
     return () => {
         stopped = true

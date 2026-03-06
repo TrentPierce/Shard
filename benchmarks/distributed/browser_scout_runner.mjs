@@ -13,7 +13,7 @@ function parseArgs(argv) {
     startupTimeoutMs: 900000,
     headless: false,
     userDataDir: process.env.SHARD_BROWSER_SCOUT_PROFILE_DIR || "",
-    reuseProfile: false,
+    reuseProfile: true,
   }
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -36,6 +36,7 @@ function benchmarkUrl(pageBase, backend, slot) {
   if (backend) url.searchParams.set("backend", backend)
   url.searchParams.set("slot", String(slot))
   url.searchParams.set("label", `Benchmark Scout ${slot + 1}`)
+  url.searchParams.set("benchmark", "1")
   return url.toString()
 }
 
@@ -46,13 +47,15 @@ async function waitForContribution(page, timeoutMs) {
     () => {
       const root = document.querySelector("[data-benchmark-scout-root]")
       const state = root?.getAttribute("data-scout-state") || ""
-      return state === "contributing" || state === "failed"
+      const runtimeRegistered = root?.getAttribute("data-runtime-registered") || "false"
+      return ((state === "ready" || state === "contributing") && runtimeRegistered === "true") || state === "failed"
     },
     undefined,
     { timeout: timeoutMs },
   )
   const state = await locator.getAttribute("data-scout-state")
-  if (state !== "contributing") {
+  const runtimeRegistered = await locator.getAttribute("data-runtime-registered")
+  if (!((state === "ready" || state === "contributing") && runtimeRegistered === "true")) {
     const text = await locator.textContent()
     throw new Error(`benchmark scout failed to start: ${text || "unknown page state"}`)
   }
@@ -77,8 +80,10 @@ async function main() {
   const defaultProfileRoot = path.join(os.tmpdir(), `shard-browser-scout-profiles-${args.channel}`)
   const profileRoot = path.resolve(args.userDataDir || defaultProfileRoot)
   await fs.mkdir(profileRoot, { recursive: true })
+  const persistentProfileDir = path.join(profileRoot, "persistent")
+  await fs.mkdir(persistentProfileDir, { recursive: true })
   const userDataDir = args.reuseProfile
-    ? profileRoot
+    ? persistentProfileDir
     : await fs.mkdtemp(path.join(profileRoot, "run-"))
   const ephemeralProfile = !args.reuseProfile
   console.log(
@@ -94,6 +99,16 @@ async function main() {
       "--disable-features=CalculateNativeWinOcclusion",
       "--disable-dawn-features=disallow_unsafe_apis",
     ],
+  })
+  await context.addInitScript(() => {
+    try {
+      window.localStorage.removeItem("shard_scout_id")
+      window.sessionStorage.removeItem("shard_scout_id_session")
+      window.sessionStorage.removeItem("shard_contribution_status")
+    } catch {
+      // Best-effort benchmark-state reset.
+    }
+    ;(window).__SHARD_BENCHMARK_SCOUT__ = undefined
   })
 
   const cleanup = async () => {

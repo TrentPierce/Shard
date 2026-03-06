@@ -3,16 +3,20 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { setRuntimeApiBaseOverride } from "@/lib/config"
 import { detectScoutCapability, type ScoutCapabilityResult } from "@/lib/scout-capability"
-import { initScoutEngine } from "@/lib/scout-engine"
+import { generateDrafts, initScoutEngine } from "@/lib/scout-engine"
 import { setContributionStatus } from "@/lib/contribution-status"
 import { startScoutWorker } from "@/lib/swarm"
+import { getScoutId, reportScoutClientEvent } from "@/lib/scout-draft"
 import type { ModelProgress } from "@/lib/webllm"
 
 type BenchmarkState =
   | "booting"
   | "checking_capability"
   | "loading_model"
+  | "priming_engine"
+  | "registering_runtime"
   | "starting_worker"
+  | "ready"
   | "contributing"
   | "failed"
 
@@ -35,6 +39,7 @@ export default function BenchmarkScoutPage() {
   const [capability, setCapability] = useState<ScoutCapabilityResult | null>(null)
   const [progress, setProgress] = useState<ModelProgress | null>(null)
   const [lastSuccessAtMs, setLastSuccessAtMs] = useState<number | null>(null)
+  const [runtimeRegistered, setRuntimeRegistered] = useState(false)
   const stopWorkerRef = useRef<null | (() => void)>(null)
   const capabilityRef = useRef<ScoutCapabilityResult | null>(null)
 
@@ -62,9 +67,30 @@ export default function BenchmarkScoutPage() {
   useEffect(() => {
     let cancelled = false
 
+    const registerRuntimeMode = async (attempts: number, delayMs: number): Promise<boolean> => {
+      const scoutId = getScoutId()
+      for (let attempt = 0; attempt < attempts; attempt += 1) {
+        const ok = await reportScoutClientEvent(
+          "runtime_webgpu_ready",
+          "benchmark_runtime_registration",
+          undefined,
+          scoutId,
+          { bypassMute: true },
+        )
+        if (ok) {
+          return true
+        }
+        if (attempt < attempts - 1) {
+          await new Promise((resolve) => setTimeout(resolve, delayMs))
+        }
+      }
+      return false
+    }
+
     const boot = async () => {
       try {
         setRuntimeApiBaseOverride(backend || null)
+        setRuntimeRegistered(false)
         setState("checking_capability")
         setDetail("Checking WebGPU support")
         const nextCapability = await detectScoutCapability()
@@ -88,10 +114,29 @@ export default function BenchmarkScoutPage() {
             text,
             timeElapsed: 0,
           })
+        }, {
+          allowModelFallback: false,
         })
         if (cancelled) return
 
         setProgress(null)
+        setState("priming_engine")
+        setDetail("Priming WebLLM draft engine")
+        const selfTest = await generateDrafts("hello from benchmark scout", { maxTokens: 1 })
+        if (!selfTest.success) {
+          throw new Error(selfTest.error || "WebLLM self-test draft generation failed")
+        }
+        if (cancelled) return
+
+        setState("registering_runtime")
+        setDetail("Registering scout runtime with verifier")
+        const registered = await registerRuntimeMode(8, 750)
+        if (!registered) {
+          throw new Error("Failed to register browser scout runtime with verifier")
+        }
+        if (cancelled) return
+        setRuntimeRegistered(true)
+
         setState("starting_worker")
         setDetail("Starting real browser scout worker")
         setContributionStatus("initializing", "Starting benchmark scout worker", "webgpu")
@@ -116,8 +161,8 @@ export default function BenchmarkScoutPage() {
         )
 
         if (cancelled) return
-        setState("contributing")
-        setDetail("Scout worker loop started")
+        setState("ready")
+        setDetail("Scout registered and waiting for work")
       } catch (error) {
         if (cancelled) return
         const reason = normalizeError(error)
@@ -147,8 +192,9 @@ export default function BenchmarkScoutPage() {
       capability: capability?.capability || null,
       progress: progress?.progress ?? null,
       lastSuccessAtMs,
+      runtimeRegistered,
     }
-  }, [backend, capability?.capability, detail, label, lastSuccessAtMs, progress?.progress, slot, state])
+  }, [backend, capability?.capability, detail, label, lastSuccessAtMs, progress?.progress, runtimeRegistered, slot, state])
 
   useEffect(() => {
     const suffix = progress ? ` progress=${Math.round(progress.progress * 100)}%` : ""
@@ -161,6 +207,8 @@ export default function BenchmarkScoutPage() {
       data-benchmark-scout-root
       data-scout-state={state}
       data-scout-backend={backend}
+      data-runtime-registered={runtimeRegistered ? "true" : "false"}
+      data-last-submit-success-ms={lastSuccessAtMs ? String(lastSuccessAtMs) : ""}
       className="mx-auto max-w-3xl px-6 py-10"
     >
       <div className="rounded-[1.75rem] border border-ring bg-base-900/90 p-6 shadow-panel">
@@ -174,6 +222,7 @@ export default function BenchmarkScoutPage() {
           <StatusCard label="State" value={state} />
           <StatusCard label="Backend" value={backend || "relative /api proxy"} />
           <StatusCard label="Capability" value={capability?.capability || "pending"} />
+          <StatusCard label="Runtime" value={runtimeRegistered ? "registered" : "pending"} />
           <StatusCard label="Last success" value={lastSuccessAtMs ? new Date(lastSuccessAtMs).toLocaleTimeString() : "waiting"} />
         </div>
 

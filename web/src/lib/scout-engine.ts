@@ -1,9 +1,17 @@
 import { detectScoutCapability, type ScoutCapabilityResult } from "./scout-capability"
 import * as WebLLM from "./webllm"
 
+export interface ScoutEngineInitOptions {
+    allowModelFallback?: boolean
+    modelId?: string
+}
+
 // Interface for any scout engine
 export interface ScoutEngine {
-    init(progressCallback?: (progress: number, text: string) => void): Promise<void>
+    init(
+        progressCallback?: (progress: number, text: string) => void,
+        options?: ScoutEngineInitOptions,
+    ): Promise<void>
     generate(prompt: string, options?: any): Promise<{ tokens: number[], text: string, success: boolean, error?: string }>
     reset(): Promise<void>
     mode: "webgpu" | "wasm"
@@ -13,10 +21,19 @@ export interface ScoutEngine {
 class WebGPUScoutEngine implements ScoutEngine {
     mode: "webgpu" = "webgpu" as const
 
-    async init(progressCallback?: (progress: number, text: string) => void) {
-        await WebLLM.initWebLLM((p) => {
-            progressCallback?.(p.progress, p.text)
-        })
+    async init(
+        progressCallback?: (progress: number, text: string) => void,
+        options?: ScoutEngineInitOptions,
+    ) {
+        await WebLLM.initWebLLM(
+            (p) => {
+                progressCallback?.(p.progress, p.text)
+            },
+            {
+                allowFallback: options?.allowModelFallback,
+                modelId: options?.modelId,
+            }
+        )
     }
 
     async generate(prompt: string, options?: any) {
@@ -66,7 +83,8 @@ class WasmScoutEngine implements ScoutEngine {
 let activeEngine: ScoutEngine | null = null
 
 export async function initScoutEngine(
-    progressCallback?: (progress: number, text: string) => void
+    progressCallback?: (progress: number, text: string) => void,
+    options?: ScoutEngineInitOptions,
 ): Promise<ScoutCapabilityResult> {
     const report = await detectScoutCapability()
 
@@ -78,7 +96,7 @@ export async function initScoutEngine(
         throw new Error("Browser not supported for Scout mode")
     }
 
-    await activeEngine.init(progressCallback)
+    await activeEngine.init(progressCallback, options)
     return report
 }
 
