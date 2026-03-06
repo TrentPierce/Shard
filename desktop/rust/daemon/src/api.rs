@@ -3195,7 +3195,10 @@ pub(crate) async fn metrics_summary_handler(
     prune_stale_speculative_pending(&state, now).await;
     let scout_queue_depth = state.scout_work.lock().await.len();
     let pending_queue_depth = state.speculative_pending.lock().await.len();
-    let queue_depth = effective_scout_queue_depth(&state, scout_queue_depth, pending_queue_depth);
+    let verifier_in_flight_depth = verifier_in_flight_depth(&state);
+    let queue_depth = scout_queue_depth
+        .max(pending_queue_depth)
+        .max(verifier_in_flight_depth);
     let (avg_latency_ms, verifier_p95_latency_ms) = verifier_latency_snapshot(&state);
     prune_expired_scout_leases_for_state(&state, now).await;
     let active_leases = state.scout_work_leases.lock().await.len();
@@ -3298,6 +3301,18 @@ pub(crate) async fn metrics_summary_handler(
         serde_json::json!(unhealthy_nodes),
     );
     payload.insert("queue_depth".to_string(), serde_json::json!(queue_depth));
+    payload.insert(
+        "verifier_in_flight_depth".to_string(),
+        serde_json::json!(verifier_in_flight_depth),
+    );
+    payload.insert(
+        "speculative_pending_depth".to_string(),
+        serde_json::json!(pending_queue_depth),
+    );
+    payload.insert(
+        "scout_work_queue_depth".to_string(),
+        serde_json::json!(scout_queue_depth),
+    );
     payload.insert(
         "active_leases".to_string(),
         serde_json::json!(active_leases),
