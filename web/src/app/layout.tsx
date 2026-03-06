@@ -25,8 +25,9 @@ export const metadata: Metadata = {
   },
   description: "Browser-powered distributed inference with live telemetry and OpenAI-compatible APIs.",
   icons: {
-    icon: "/brand-mark.png",
-    apple: "/brand-mark.png",
+    icon: [{ url: "/brand-mark.png", type: "image/png" }],
+    shortcut: [{ url: "/brand-mark.png", type: "image/png" }],
+    apple: [{ url: "/brand-mark.png", type: "image/png" }],
   },
 }
 
