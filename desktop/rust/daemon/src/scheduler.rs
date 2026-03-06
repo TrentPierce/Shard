@@ -178,6 +178,42 @@ fn overload_retry_after_seconds(depth: usize, cap: usize) -> u64 {
     (1 + headroom.min(4)) as u64
 }
 
+fn verifier_target_queue_wait_ms() -> u64 {
+    static TARGET_WAIT_MS: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+    *TARGET_WAIT_MS.get_or_init(|| {
+        std::env::var("SHARD_VERIFIER_TARGET_QUEUE_WAIT_MS")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .map(|v| v.clamp(0, 5_000))
+            .unwrap_or(0)
+    })
+}
+
+async fn acquire_verifier_load_guard(state: &SharedState) -> Option<VerifierLoadGuard> {
+    if let Some(guard) = VerifierLoadGuard::try_acquire(state) {
+        return Some(guard);
+    }
+
+    let wait_budget_ms = verifier_target_queue_wait_ms();
+    if wait_budget_ms == 0 {
+        return None;
+    }
+
+    let started = std::time::Instant::now();
+    while started.elapsed() < Duration::from_millis(wait_budget_ms) {
+        tokio::time::sleep(Duration::from_millis(25)).await;
+        if let Some(guard) = VerifierLoadGuard::try_acquire(state) {
+            tracing::debug!(
+                waited_ms = started.elapsed().as_millis() as u64,
+                "acquired verifier compute slot after bounded queue wait"
+            );
+            return Some(guard);
+        }
+    }
+
+    None
+}
+
 fn mesh_forward_current_hop(headers: &HeaderMap) -> u8 {
     headers
         .get("x-shard-forward-hop")
@@ -1666,29 +1702,6 @@ pub(crate) async fn chat_completions_handler(
         }
     }
 
-    let _verifier_load_guard = match VerifierLoadGuard::try_acquire(&state) {
-        Some(guard) => guard,
-        None => {
-            let depth = verifier_request_depth(&state);
-            let cap = verifier_queue_cap(&state);
-            return (
-                StatusCode::SERVICE_UNAVAILABLE,
-                HeaderMap::from_iter([(
-                    HeaderName::from_static("retry-after"),
-                    HeaderValue::from_str(&overload_retry_after_seconds(depth, cap).to_string())
-                        .unwrap(),
-                )]),
-                Json(serde_json::json!({
-                    "error": "verifier_overloaded",
-                    "detail": "local verifier queue is saturated",
-                    "queue_depth": depth,
-                    "queue_cap": cap,
-                })),
-            )
-                .into_response();
-        }
-    };
-
     let inference_mode = resolve_inference_mode(
         headers
             .get("x-shard-inference-mode")
@@ -1763,20 +1776,46 @@ pub(crate) async fn chat_completions_handler(
         }
     }
 
+    let speculative_draft = if use_speculative {
+        if let Some(ref config) = speculative_config {
+            fetch_speculative_draft(&state, &request_id, &prompt, config).await
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    let verifier_load_guard = match acquire_verifier_load_guard(&state).await {
+        Some(guard) => guard,
+        None => {
+            let depth = verifier_request_depth(&state);
+            let cap = verifier_queue_cap(&state);
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                HeaderMap::from_iter([(
+                    HeaderName::from_static("retry-after"),
+                    HeaderValue::from_str(&overload_retry_after_seconds(depth, cap).to_string())
+                        .unwrap(),
+                )]),
+                Json(serde_json::json!({
+                    "error": "verifier_overloaded",
+                    "detail": "local verifier queue is saturated",
+                    "queue_depth": depth,
+                    "queue_cap": cap,
+                })),
+            )
+                .into_response();
+        }
+    };
+
     if stream_mode {
         let stream = async_stream::stream! {
+            let _verifier_load_guard = verifier_load_guard;
             let mut request_acceptance: Option<(f64, f64)> = None;
             let mut completion_tokens_generated: u64 = 0;
             let mut degeneration_detected = false;
-            let mut speculative_draft = if use_speculative {
-                if let Some(ref config) = speculative_config {
-                    fetch_speculative_draft(&state, &request_id, &prompt, config).await
-                } else {
-                    None
-                }
-            } else {
-                None
-            };
+            let mut speculative_draft = speculative_draft;
             let mut engine_guard = state.engine.lock().await;
             if let Some(engine) = engine_guard.as_mut() {
                 if let Ok(mut tokens) = engine.tokenize(&prompt, 4096) {
@@ -1985,20 +2024,13 @@ pub(crate) async fn chat_completions_handler(
             .into_response()
     } else {
         // Run synchronously but hold the lock
+        let _verifier_load_guard = verifier_load_guard;
         let mut full_text = String::new();
         let mut request_acceptance: Option<(f64, f64)> = None;
         let mut prompt_token_count: u64 = 0;
         let mut completion_tokens_generated: u64 = 0;
         let mut degeneration_detected = false;
-        let mut speculative_draft = if use_speculative {
-            if let Some(ref config) = speculative_config {
-                fetch_speculative_draft(&state, &request_id, &prompt, config).await
-            } else {
-                None
-            }
-        } else {
-            None
-        };
+        let mut speculative_draft = speculative_draft;
         {
             let mut engine_guard = state.engine.lock().await;
             if let Some(engine) = engine_guard.as_mut() {
