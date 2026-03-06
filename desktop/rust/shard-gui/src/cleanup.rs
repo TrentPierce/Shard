@@ -266,7 +266,7 @@ mod tests {
         std::fs::write(stale_model.as_path(), b"stale")?;
         std::fs::write(partial.as_path(), b"partial")?;
 
-        let stats = prune_managed_storage(&[root.clone()], Some(active_model.as_path()))?;
+        let stats = prune_managed_storage(std::slice::from_ref(&root), Some(active_model.as_path()))?;
 
         assert_eq!(
             stats,
@@ -296,7 +296,7 @@ mod tests {
         std::fs::write(model.as_path(), b"model")?;
         std::fs::write(partial.as_path(), b"partial")?;
 
-        let stats = prune_managed_storage(&[root.clone()], None)?;
+        let stats = prune_managed_storage(std::slice::from_ref(&root), None)?;
 
         assert_eq!(
             stats,

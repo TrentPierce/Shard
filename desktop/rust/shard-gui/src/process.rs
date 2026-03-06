@@ -79,13 +79,6 @@ impl DaemonTask {
         drop(self.thread.take());
     }
 
-    pub fn is_running(&self) -> bool {
-        self.thread
-            .as_ref()
-            .map(|t| !t.is_finished())
-            .unwrap_or(false)
-    }
-
     /// Returns the path to `shard_engine.dll` bundled next to this executable,
     /// if it exists. Returns `None` if not found (e.g. dev build without DLLs).
     fn bundled_engine_path() -> Option<std::path::PathBuf> {

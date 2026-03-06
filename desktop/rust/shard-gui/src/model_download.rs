@@ -348,6 +348,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
     async fn download_inner_falls_back_and_verifies_hash() -> Result<()> {
         let _lock = env_lock().lock().expect("env lock");
 
@@ -376,9 +377,8 @@ mod tests {
         let path = super::download_inner(&tx).await?;
         let got = std::fs::read(path.as_path())?;
         assert_eq!(got, payload);
-        assert!(path
-            .to_string_lossy()
-            .contains("smoke-model\\test\\model.gguf"));
+        let normalized = path.to_string_lossy().replace('\\', "/");
+        assert!(normalized.contains("smoke-model/test/model.gguf"));
 
         server.join().expect("download server thread");
         let _ = std::fs::remove_dir_all(data_dir);

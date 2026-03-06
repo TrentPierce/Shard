@@ -173,6 +173,11 @@ fn mesh_forward_local_queue_trigger() -> f64 {
     })
 }
 
+fn overload_retry_after_seconds(depth: usize, cap: usize) -> u64 {
+    let headroom = depth.saturating_sub(cap);
+    (1 + headroom.min(4)) as u64
+}
+
 fn mesh_forward_current_hop(headers: &HeaderMap) -> u8 {
     headers
         .get("x-shard-forward-hop")
@@ -213,9 +218,7 @@ fn normalize_endpoint(raw: &str, default_port: u16) -> Option<String> {
         format!("http://{trimmed}")
     };
     let mut url = Url::parse(&with_scheme).ok()?;
-    if url.host_str().is_none() {
-        return None;
-    }
+    url.host_str()?;
     if url.port().is_none() {
         url.set_port(Some(default_port)).ok()?;
     }
@@ -1081,7 +1084,7 @@ fn probe_allowed_for_request(request_id: &str, modulus: u64) -> bool {
     }
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     request_id.hash(&mut hasher);
-    (hasher.finish() % modulus) == 0
+    hasher.finish().is_multiple_of(modulus)
 }
 
 async fn effective_speculative_timeout_ms(
@@ -1603,7 +1606,7 @@ pub(crate) async fn chat_completions_handler(
     let max_tokens = req.max_tokens.or(req.max_new_tokens).unwrap_or(256);
     if should_attempt_mesh_forward(&headers, route_private, stream_mode) {
         let queue_weight_ms = mesh_forward_queue_weight_ms();
-        let local_queue_depth = state.in_flight_count.load(Ordering::Relaxed) as f64;
+        let local_queue_depth = verifier_request_depth(&state) as f64;
         let local_latency_ms = state.avg_latency_ms.load(Ordering::Relaxed) as f64;
         let local_score = mesh_forward_score(local_latency_ms, local_queue_depth, queue_weight_ms);
         if let Some(target) = choose_mesh_forward_target(&state).await {
@@ -1680,6 +1683,29 @@ pub(crate) async fn chat_completions_handler(
             }
         }
     }
+
+    let _verifier_load_guard = match VerifierLoadGuard::try_acquire(&state) {
+        Some(guard) => guard,
+        None => {
+            let depth = verifier_request_depth(&state);
+            let cap = verifier_queue_cap(&state);
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                HeaderMap::from_iter([(
+                    HeaderName::from_static("retry-after"),
+                    HeaderValue::from_str(&overload_retry_after_seconds(depth, cap).to_string())
+                        .unwrap(),
+                )]),
+                Json(serde_json::json!({
+                    "error": "verifier_overloaded",
+                    "detail": "local verifier queue is saturated",
+                    "queue_depth": depth,
+                    "queue_cap": cap,
+                })),
+            )
+                .into_response();
+        }
+    };
 
     let inference_mode = resolve_inference_mode(
         headers

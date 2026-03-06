@@ -1,10 +1,13 @@
-import { sendMessage, sendMessageSync, type ChatMessage } from "@/lib/api"
+import type { ChatMessage } from "@/lib/api"
 
 const canUseLocalDaemonFallbackMock = jest.fn(() => false)
 
 jest.mock("@/lib/runtime", () => ({
   canUseLocalDaemonFallback: () => canUseLocalDaemonFallbackMock(),
-  localDaemonUrl: (path: string) => `http://127.0.0.1:9091${path.startsWith("/") ? path : `/${path}`}`,
+  getPreferredLocalDaemonBase: async () => "http://127.0.0.1:9091",
+  localDaemonUrls: (path: string) => [
+    `http://127.0.0.1:9091${path.startsWith("/") ? path : `/${path}`}`,
+  ],
 }))
 
 describe("api transport fallbacks", () => {
@@ -12,10 +15,13 @@ describe("api transport fallbacks", () => {
 
   beforeEach(() => {
     jest.restoreAllMocks()
+    jest.resetModules()
+    canUseLocalDaemonFallbackMock.mockReset()
     global.fetch = jest.fn()
   })
 
   it("falls back to non-streaming chat when ReadableStream reader is unavailable", async () => {
+    const { sendMessage } = await import("@/lib/api")
     canUseLocalDaemonFallbackMock.mockReturnValue(false)
     ;(global.fetch as jest.Mock)
       .mockResolvedValueOnce({
@@ -46,6 +52,7 @@ describe("api transport fallbacks", () => {
   })
 
   it("does not attempt localhost fallback on hosted contexts when primary request fails", async () => {
+    const { sendMessageSync } = await import("@/lib/api")
     canUseLocalDaemonFallbackMock.mockReturnValue(false)
     ;(global.fetch as jest.Mock).mockRejectedValue(new Error("network fail"))
 
@@ -54,6 +61,7 @@ describe("api transport fallbacks", () => {
   })
 
   it("uses localhost fallback when explicitly enabled", async () => {
+    const { sendMessageSync } = await import("@/lib/api")
     canUseLocalDaemonFallbackMock.mockReturnValue(true)
     ;(global.fetch as jest.Mock)
       .mockRejectedValueOnce(new Error("primary down"))

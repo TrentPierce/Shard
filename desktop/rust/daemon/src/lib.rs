@@ -2276,8 +2276,18 @@ fn should_accept_work(state: &SharedState) -> Result<(), String> {
     if !state.participation_enabled.load(Ordering::Relaxed) {
         return Err("node participation disabled".to_string());
     }
+    let verifier_depth = verifier_request_depth(state);
+    let verifier_cap = verifier_queue_cap(state);
+    if verifier_depth >= verifier_cap {
+        return Err(format!(
+            "verifier queue saturated ({verifier_depth}/{verifier_cap})"
+        ));
+    }
     let capacity = state.capacity.load(Ordering::Relaxed).max(1);
-    let load = state.current_load.load(Ordering::Relaxed);
+    let load = state
+        .current_load
+        .load(Ordering::Relaxed)
+        .max(verifier_depth as u32);
     let load_ratio = load as f32 / capacity as f32;
 
     if state.resource_policy.idle_only_mode && load > 0 {
@@ -2287,6 +2297,59 @@ fn should_accept_work(state: &SharedState) -> Result<(), String> {
         return Err("load threshold cutoff reached".to_string());
     }
     Ok(())
+}
+
+fn verifier_queue_cap_base() -> usize {
+    std::env::var("SHARD_VERIFIER_QUEUE_CAP")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .map(|v| v.clamp(1, 64))
+        .unwrap_or(2)
+}
+
+pub(crate) fn verifier_request_depth(state: &SharedState) -> usize {
+    let current_load = state.current_load.load(Ordering::Relaxed) as usize;
+    let in_flight = state.in_flight_count.load(Ordering::Relaxed);
+    current_load.max(in_flight)
+}
+
+pub(crate) fn verifier_queue_cap(state: &SharedState) -> usize {
+    let _ = state;
+    verifier_queue_cap_base()
+}
+
+pub(crate) struct VerifierLoadGuard {
+    counter: Arc<AtomicU32>,
+}
+
+impl VerifierLoadGuard {
+    pub(crate) fn try_acquire(state: &SharedState) -> Option<Self> {
+        let counter = Arc::clone(&state.current_load);
+        let cap = verifier_queue_cap(state) as u32;
+        loop {
+            let current = counter.load(Ordering::Relaxed);
+            if current >= cap {
+                return None;
+            }
+            if counter
+                .compare_exchange(
+                    current,
+                    current.saturating_add(1),
+                    Ordering::Relaxed,
+                    Ordering::Relaxed,
+                )
+                .is_ok()
+            {
+                return Some(Self { counter });
+            }
+        }
+    }
+}
+
+impl Drop for VerifierLoadGuard {
+    fn drop(&mut self) {
+        self.counter.fetch_sub(1, Ordering::Relaxed);
+    }
 }
 
 #[derive(Clone)]
@@ -5184,6 +5247,7 @@ pub async fn run_until_stopped(
 }
 
 #[cfg(test)]
+#[allow(clippy::items_after_test_module)]
 mod tests {
     use super::{
         accept_replay_nonce, bootstrap_registry_seed_addrs, filter_bootstrap_addrs,

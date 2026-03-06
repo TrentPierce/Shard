@@ -28,7 +28,7 @@ pub(crate) async fn health_handler(
     let verified_count = peers.values().filter(|p| p.verified).count();
     let capacity = state.capacity.load(Ordering::Relaxed);
     let load = state.current_load.load(Ordering::Relaxed);
-    let verifier_queue_cap = verifier_queue_cap();
+    let verifier_queue_cap = verifier_queue_cap(&state);
     let verifier_request_depth = verifier_request_depth(&state);
     let latency_ms = state.avg_latency_ms.load(Ordering::Relaxed);
     let browser_scout_count = {
@@ -663,9 +663,8 @@ pub(crate) async fn prune_stale_speculative_pending(state: &SharedState, now: u1
         let pending = state.speculative_pending.lock().await;
         pending
             .iter()
-            .filter_map(|(work_id, issued_at_ms)| {
-                (now.saturating_sub(*issued_at_ms) > max_age_ms).then(|| work_id.clone())
-            })
+            .filter(|(_, issued_at_ms)| now.saturating_sub(**issued_at_ms) > max_age_ms)
+            .map(|(work_id, _)| work_id.clone())
             .collect::<Vec<_>>()
     };
 
@@ -801,7 +800,7 @@ fn scout_active_cap_for_blackout(mode: ScoutBlackoutMode, cap: usize) -> usize {
         ScoutBlackoutMode::Blackout => 0,
         ScoutBlackoutMode::ReopenStage1 => cap.min(1),
         ScoutBlackoutMode::ReopenStage2 => cap.min(2),
-        ScoutBlackoutMode::ReopenStage3 => cap.min((cap.max(2) + 1) / 2),
+        ScoutBlackoutMode::ReopenStage3 => cap.min(cap.max(2).div_ceil(2)),
     }
 }
 
@@ -850,7 +849,7 @@ async fn update_scout_blackout_state(
             state.system_metrics.inc_scout_blackout_exit();
             return ScoutBlackoutMode::ReopenStage1;
         }
-        let mode = scout_blackout_mode(&*snapshot, now);
+        let mode = scout_blackout_mode(&snapshot, now);
         if mode == ScoutBlackoutMode::Open {
             snapshot.blackout_until_ms = 0;
             snapshot.reopen_started_ms = None;
@@ -3303,14 +3302,14 @@ pub(crate) async fn metrics_summary_handler(
     let scout_queue_depth = state.scout_work.lock().await.len();
     let pending_queue_depth = state.speculative_pending.lock().await.len();
     let verifier_in_flight_depth = verifier_in_flight_depth(&state);
-    let verifier_queue_cap = verifier_queue_cap();
+    let verifier_queue_cap = verifier_queue_cap(&state);
     let queue_depth = effective_verifier_queue_depth(&state, pending_queue_depth);
     let (avg_latency_ms, verifier_p95_latency_ms) = verifier_latency_snapshot(&state);
     prune_expired_scout_leases_for_state(&state, now).await;
     let active_leases = state.scout_work_leases.lock().await.len();
     let blackout_mode = {
         let blackout = state.scout_blackout.lock().await;
-        scout_blackout_mode(&*blackout, now)
+        scout_blackout_mode(&blackout, now)
     };
     let mut reports = state.node_metric_reports.lock().await;
     let mut active_nodes = 0usize;
@@ -4010,6 +4009,7 @@ pub(crate) async fn register_bootstrap_handler(
 }
 
 #[cfg(test)]
+#[allow(clippy::items_after_test_module)]
 mod tests {
     use super::{
         prune_expired_scout_leases, prune_stale_scout_work_queue, push_scheduler_decision_log,
@@ -4233,9 +4233,11 @@ mod tests {
 
     #[test]
     fn scout_blackout_mode_transitions_through_reopen_stages() {
-        let mut blackout = ScoutBlackoutState::default();
-        blackout.blackout_until_ms = 2_000;
-        blackout.reopen_started_ms = Some(2_000);
+        let blackout = ScoutBlackoutState {
+            blackout_until_ms: 2_000,
+            reopen_started_ms: Some(2_000),
+            ..ScoutBlackoutState::default()
+        };
 
         assert_eq!(
             scout_blackout_mode(&blackout, 1_500),
