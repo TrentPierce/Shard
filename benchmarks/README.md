@@ -56,25 +56,38 @@ This script:
 - Runs the same benchmark protocol across all scenarios
 - Tears down the stack at the end
 
-## Option C: Release Candidate Go/No-Go Matrix
+## Option C: Release Candidate Matrices
 
-Use this when preparing public release signoff. It runs repeated 1-node/2-node
-scenarios with and without scouts, then emits a single recommendation.
+Use these when preparing release signoff. The short matrix answers stability.
+The long matrix answers whether scouts are actually engaging and helping.
 
 ```bash
+# Short RC stability gate
 python benchmarks/distributed/run_release_matrix.py \
+  --matrix-class short_rc_stability \
   --one-node-pool http://127.0.0.1:9191 \
   --two-node-pool http://127.0.0.1:9191,http://35.175.242.222:9091 \
   --runs-per-scenario 3 \
-  --scouts 24 \
-  --rate 4 \
-  --duration 60 \
-  --scout-workers 4
+  --scouts 16 \
+  --scout-mode browser
+
+# Long scout-engagement matrix
+python benchmarks/distributed/run_release_matrix.py \
+  --matrix-class long_scout_generation \
+  --one-node-pool http://127.0.0.1:9191 \
+  --two-node-pool http://127.0.0.1:9191,http://35.175.242.222:9091 \
+  --runs-per-scenario 3 \
+  --scouts 16 \
+  --scout-mode browser
 ```
 
 Outputs:
 - `go-no-go-summary.json` (machine-readable gate decisions)
 - `go-no-go-report.md` (human-readable release signoff report)
+
+Matrix classes:
+- `short_rc_stability`: defaults to short requests (`max_tokens=8`) and judges release stability, not scout uplift.
+- `long_scout_generation`: defaults to longer requests (`max_tokens=64`) and requires non-zero speculative samples.
 
 ## Output Artifacts
 

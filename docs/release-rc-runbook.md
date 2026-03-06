@@ -84,20 +84,37 @@ pwsh -File scripts/dev/check_verifier_parity.ps1 \
 
 The parity check must report `ok: true` before matrix runs.
 
-## 3. Run Release Matrix
+## 3. Run Release Matrices
+
+### Short RC stability gate
 
 ```bash
 python benchmarks/distributed/run_release_matrix.py \
+  --matrix-class short_rc_stability \
   --one-node-pool http://127.0.0.1:9191 \
   --two-node-pool http://127.0.0.1:9191,http://35.175.242.222:9091 \
   --runs-per-scenario 3 \
-  --scouts 24 \
-  --rate 4 \
-  --duration 60 \
-  --scout-workers 4
+  --scouts 16 \
+  --scout-mode browser
 ```
 
 Artifacts are written to `reports/release-rc/release-rc-<timestamp>/`.
+
+Use this class to answer whether the RC is stable enough to release on short requests.
+
+### Long scout-engagement matrix
+
+```bash
+python benchmarks/distributed/run_release_matrix.py \
+  --matrix-class long_scout_generation \
+  --one-node-pool http://127.0.0.1:9191 \
+  --two-node-pool http://127.0.0.1:9191,http://35.175.242.222:9091 \
+  --runs-per-scenario 3 \
+  --scouts 16 \
+  --scout-mode browser
+```
+
+Use this class to answer whether scouts are actually engaging speculatively and improving long generations.
 
 The release matrix now fails closed by default:
 
@@ -112,7 +129,9 @@ Read:
 - `go-no-go-summary.json`
 - `go-no-go-report.md`
 
-Release only if recommendation is `GO` and all gates in `docs/release-rc-checklist.md` pass.
+Release only if the `short_rc_stability` recommendation is `GO` and all stability gates in [release-rc-checklist.md](D:\Dev\Projects\Shard\Shard\docs\release-rc-checklist.md) pass.
+
+Use the `long_scout_generation` report to judge scout uplift separately from ship/no-ship stability.
 
 ## 5. Rollback Conditions
 

@@ -65,16 +65,16 @@ const joinPaths: JoinPath[] = [
 ]
 
 const benchmarkRows: BenchmarkRow[] = [
-  { scenario: "1 node, no scouts", p95Ms: 284.929, tps: 2.1, errorPct: 0, verdict: "Fastest p95 at this low load" },
-  { scenario: "1 node, with scouts", p95Ms: 1089.169, tps: 2.1, errorPct: 0, verdict: "Stable, but slower than verifier-only" },
-  { scenario: "2 nodes, no scouts", p95Ms: 417.335, tps: 2.1, errorPct: 0, verdict: "Clean mesh baseline across local + EC2" },
-  { scenario: "2 nodes, with scouts", p95Ms: 1134.846, tps: 2.1, errorPct: 0, verdict: "Improved, still behind verifier-only" },
+  { scenario: "1 node, no scouts", p95Ms: 928.962, tps: 1.3, errorPct: 0, verdict: "Stable verifier-only baseline for short requests" },
+  { scenario: "1 node, with browser scouts", p95Ms: 544.563, tps: 1.1, errorPct: 0, verdict: "Short-request run stays stable while scouts remain bypassed" },
+  { scenario: "2 nodes, no scouts", p95Ms: 526.015, tps: 1.9, errorPct: 0, verdict: "Current best short-run mesh baseline across local + EC2" },
+  { scenario: "2 nodes, with browser scouts", p95Ms: 662.13, tps: 1.7, errorPct: 0, verdict: "Stable, but not yet a proof of scout uplift" },
 ]
 
 const takeaways = [
-  "The mesh is stable with 1 or 2 verifier nodes and cleanly drains after each run.",
-  "Verifier-only benchmark runs are now isolated by forcing standard mode and disabling scout ingress during those scenarios.",
-  "Release status is still NO_GO because scout-assisted runs remain slower than the verifier-only baseline.",
+  "The short RC matrix is now a release stability gate, not a scout-speedup benchmark.",
+  "With SHARD_SPECULATIVE_MIN_REQUEST_TOKENS=12 and max_tokens=8, the short benchmark intentionally bypasses speculative routing.",
+  "Scout uplift now needs to be judged in a separate long-generation matrix where accepted speculative samples are expected.",
 ]
 
 function formatCompact(value: number) {
@@ -181,12 +181,12 @@ export default function HomePage() {
               <div className="rounded-2xl border border-white/10 bg-base-900 p-4">
                 <p className="text-xs uppercase tracking-[0.18em] text-ink-400">Release status</p>
                 <p className="mt-2 text-lg font-semibold text-amber-200">NO_GO</p>
-                <p className="mt-1 text-sm text-ink-300">Verifier mesh is solid. Scout-assisted 2-node runs still need work.</p>
+                <p className="mt-1 text-sm text-ink-300">Short-request release stability is the current gate. Scout uplift is tracked separately.</p>
               </div>
               <div className="rounded-2xl border border-white/10 bg-base-900 p-4">
                 <p className="text-xs uppercase tracking-[0.18em] text-ink-400">Best current path</p>
                 <p className="mt-2 text-lg font-semibold text-ink-50">1 verifier, no scouts</p>
-                <p className="mt-1 text-sm text-ink-300">Fastest current median p95 in the isolated March 6 RC matrix.</p>
+                <p className="mt-1 text-sm text-ink-300">Best current short-run baseline is 2 verifiers without scout dependence.</p>
               </div>
               <div className="rounded-2xl border border-white/10 bg-base-900 p-4">
                 <p className="text-xs uppercase tracking-[0.18em] text-ink-400">Browser status</p>
@@ -255,7 +255,7 @@ export default function HomePage() {
           <p className="text-xs uppercase tracking-[0.22em] text-ink-400">Today&apos;s benchmark result</p>
           <h2 className="mt-2 text-3xl font-semibold text-ink-50">What works right now</h2>
           <p className="mt-3 text-sm leading-6 text-ink-300">
-            These medians come from the refreshed RC matrix on March 6, 2026. The network is stable in all four scenarios. The question is no longer whether the mesh works. The question is when scouts become a speed boost instead of a coordination cost.
+            These medians come from the short RC stability matrix on March 6, 2026. This view answers whether the release candidate is stable on brief requests. It does not answer whether scouts create a speedup on longer generations.
           </p>
           <div className="mt-5 overflow-hidden rounded-2xl border border-ring">
             <table className="min-w-full divide-y divide-ring text-left text-sm">

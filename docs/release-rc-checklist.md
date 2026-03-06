@@ -15,19 +15,18 @@ This checklist is the go/no-go control document for public release.
 - [ ] Both verifier nodes report the same effective scout runtime config at `/v1/system/scout-config`.
 - [ ] Model + engine pair are identical across nodes (or documented if intentionally different).
 
-## Mandatory RC Matrix
+## Mandatory RC Stability Matrix
 
 Run repeated matrix and auto-generate go/no-go artifacts:
 
 ```bash
 python benchmarks/distributed/run_release_matrix.py \
+  --matrix-class short_rc_stability \
   --one-node-pool http://127.0.0.1:9191 \
   --two-node-pool http://127.0.0.1:9191,http://35.175.242.222:9091 \
   --runs-per-scenario 3 \
-  --scouts 24 \
-  --rate 4 \
-  --duration 60 \
-  --scout-workers 4
+  --scouts 16 \
+  --scout-mode browser
 ```
 
 Expected outputs in `reports/release-rc/release-rc-<timestamp>/`:
@@ -36,10 +35,32 @@ Expected outputs in `reports/release-rc/release-rc-<timestamp>/`:
 - `go-no-go-report.md`
 - per-scenario raw run JSON files
 
-## Release Gates (must all pass)
+## Stability Gates (must all pass)
 
 - [ ] `2-node with scouts` p95 latency median `<= 4500ms`.
 - [ ] `2-node with scouts` error rate median `<= 3.0%`.
+- [ ] `2-node with scouts` timeout rate median `<= 2.0%`.
+- [ ] `2-node with scouts` HTTP `429` rate median `<= 5.0%`.
+- [ ] `2-node with scouts` HTTP `503` rate median `== 0.0%`.
+- [ ] `2-node no-scouts` and `2-node with scouts` runs all exit cleanly.
+
+## Scout Uplift Matrix
+
+Run this separately when validating speculative performance instead of release stability:
+
+```bash
+python benchmarks/distributed/run_release_matrix.py \
+  --matrix-class long_scout_generation \
+  --one-node-pool http://127.0.0.1:9191 \
+  --two-node-pool http://127.0.0.1:9191,http://35.175.242.222:9091 \
+  --runs-per-scenario 3 \
+  --scouts 16 \
+  --scout-mode browser
+```
+
+Expected scout-uplift gates:
+
+- [ ] `2-node with scouts` records non-zero speculative samples.
 - [ ] `2-node with scouts` throughput median `>= 3.75 TPS`.
 - [ ] `2-node with scouts` throughput median `>= 105%` of `2-node no-scouts`.
 - [ ] `2-node with scouts` p95 median `<= 110%` of `2-node no-scouts`.
