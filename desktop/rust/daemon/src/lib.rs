@@ -2539,6 +2539,10 @@ fn create_router(
             "/v1/system/scout-ingress",
             post(scout_ingress_update_handler),
         )
+        .route(
+            "/v1/system/scout-runtime/reset",
+            post(scout_runtime_reset_handler),
+        )
         .route("/v1/system/scout-config", get(scout_config_handler))
         .route(
             "/browser-layer/register",

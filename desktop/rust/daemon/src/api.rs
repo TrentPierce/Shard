@@ -47,17 +47,7 @@ pub(crate) async fn health_handler(
         prune_scout_client_runtime(&mut runtime, now);
         summarize_scout_client_runtime(&runtime, now)
     };
-    let recent_scout_submitters = {
-        let results = state.results.lock().await;
-        let cutoff = now_ms().saturating_sub(5 * 60 * 1000);
-        let mut unique = std::collections::HashSet::new();
-        for entry in results.iter() {
-            if entry.created_at_ms.unwrap_or(0) >= cutoff {
-                unique.insert(entry.peer_id.clone());
-            }
-        }
-        unique.len()
-    };
+    let recent_scout_submitters = recent_scout_submitters_count(&state, now).await;
     let scout_ingress_enabled = state.scout_ingress_enabled.load(Ordering::Relaxed);
     let scout_count = if scout_ingress_enabled {
         draft_capable_scout_count.max(recent_scout_submitters)
@@ -125,6 +115,15 @@ pub(crate) async fn health_handler(
     }))
 }
 
+async fn recent_scout_submitters_count(state: &SharedState, now: u128) -> usize {
+    let mut submits = state.scout_draft_last_submit.lock().await;
+    prune_recent_activity_map(&mut submits, now, SCOUT_CLIENT_RUNTIME_TTL_MS);
+    submits
+        .values()
+        .filter(|ts| now.saturating_sub(**ts) <= SCOUT_CLIENT_ACTIVE_WINDOW_MS)
+        .count()
+}
+
 pub(crate) async fn scout_ingress_handler(
     AxumState(state): AxumState<SharedState>,
 ) -> Json<serde_json::Value> {
@@ -165,6 +164,121 @@ pub(crate) async fn scout_ingress_update_handler(
         "ok": true,
         "scout_ingress_enabled": req.enabled,
     }))
+}
+
+async fn reset_scout_runtime_state(state: &SharedState) -> serde_json::Value {
+    let cleared_browser_sessions = {
+        let mut sessions = state.browser_sessions.lock().await;
+        let count = sessions.len();
+        sessions.clear();
+        count
+    };
+    let cleared_runtime_entries = {
+        let mut runtime = state.scout_client_runtime.lock().await;
+        let count = runtime.len();
+        runtime.clear();
+        count
+    };
+    let cleared_pollers = {
+        let mut polls = state.scout_work_last_poll.lock().await;
+        let count = polls.len();
+        polls.clear();
+        count
+    };
+    let cleared_submitters = {
+        let mut submits = state.scout_draft_last_submit.lock().await;
+        let count = submits.len();
+        submits.clear();
+        count
+    };
+    let cleared_leases = {
+        let mut leases = state.scout_work_leases.lock().await;
+        let count = leases.len();
+        leases.clear();
+        count
+    };
+    let cleared_scout_work = {
+        let mut work = state.scout_work.lock().await;
+        let count = work.len();
+        work.clear();
+        count
+    };
+    let cleared_browser_work = {
+        let mut work = state.browser_work.lock().await;
+        let count = work.len();
+        work.clear();
+        count
+    };
+    let cleared_mailboxes = {
+        let mut mailboxes = state.scout_draft_mailbox.lock().await;
+        let count = mailboxes.len();
+        mailboxes.clear();
+        count
+    };
+    let cleared_notifiers = {
+        let mut notifiers = state.scout_draft_notifiers.lock().await;
+        let count = notifiers.len();
+        notifiers.clear();
+        count
+    };
+    let cleared_pending = {
+        let mut pending = state.speculative_pending.lock().await;
+        let count = pending.len();
+        pending.clear();
+        count
+    };
+    let cleared_draft_buffers = {
+        let mut buffers = state.draft_buffers.lock().await;
+        let count = buffers.len();
+        buffers.clear();
+        count
+    };
+    {
+        let mut blackout = state.scout_blackout.lock().await;
+        *blackout = ScoutBlackoutState::default();
+    }
+    {
+        let mut tracker = state.scout_timeout_tracker.lock().await;
+        *tracker = ScoutTimeoutTracker::new();
+    }
+
+    serde_json::json!({
+        "ok": true,
+        "cleared": {
+            "browser_sessions": cleared_browser_sessions,
+            "runtime_entries": cleared_runtime_entries,
+            "pollers": cleared_pollers,
+            "submitters": cleared_submitters,
+            "leases": cleared_leases,
+            "scout_work": cleared_scout_work,
+            "browser_work": cleared_browser_work,
+            "mailboxes": cleared_mailboxes,
+            "notifiers": cleared_notifiers,
+            "speculative_pending": cleared_pending,
+            "draft_buffers": cleared_draft_buffers,
+        }
+    })
+}
+
+pub(crate) async fn scout_runtime_reset_handler(
+    AxumState(state): AxumState<SharedState>,
+    headers: HeaderMap,
+) -> Json<serde_json::Value> {
+    if let Some(admin_key) = state.admin_key.as_deref() {
+        let provided = headers
+            .get("x-shard-admin")
+            .and_then(|v| v.to_str().ok())
+            .map(str::trim)
+            .unwrap_or_default();
+        if provided != admin_key {
+            return Json(serde_json::json!({
+                "ok": false,
+                "detail": "admin key required for scout runtime reset",
+            }));
+        }
+    }
+
+    Json(reset_scout_runtime_state(&state).await)
 }
 
 pub(crate) async fn connectivity_handler(
@@ -444,6 +558,14 @@ pub(crate) fn prune_scout_client_runtime(
     statuses.retain(|_, status| {
         now.saturating_sub(status.last_event_ms) <= SCOUT_CLIENT_RUNTIME_TTL_MS
     });
+}
+
+pub(crate) fn prune_recent_activity_map(
+    statuses: &mut HashMap<String, u128>,
+    now: u128,
+    ttl_ms: u128,
+) {
+    statuses.retain(|_, ts| now.saturating_sub(*ts) <= ttl_ms);
 }
 
 fn summarize_scout_client_runtime(

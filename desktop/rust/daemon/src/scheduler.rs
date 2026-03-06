@@ -920,7 +920,6 @@ struct ScoutSupplyEstimate {
     browser_draft_capable: usize,
     recent_pollers: usize,
     recent_submitters: usize,
-    recent_result_submitters: usize,
     healthy_scout_reports: usize,
 }
 
@@ -928,7 +927,6 @@ impl ScoutSupplyEstimate {
     fn remote_active_scouts(self) -> usize {
         // Route speculative work only when we have proof of recent draft productivity.
         self.productive_runtime_scouts
-            .max(self.recent_result_submitters)
     }
 
     fn candidate_remote_scouts(self) -> usize {
@@ -956,9 +954,9 @@ async fn estimate_scout_supply(state: &SharedState) -> ScoutSupplyEstimate {
     const SCOUT_RUNTIME_TTL_MS: u128 = 10 * 60 * 1000;
     const SCOUT_ACTIVE_WINDOW_MS: u128 = 3 * 60 * 1000;
     const SCOUT_PRODUCTIVE_WINDOW_MS: u128 = 90 * 1000;
+    const SCOUT_PRODUCTIVE_EVENT_WINDOW_MS: u128 = 30 * 1000;
     const SCOUT_POLL_ACTIVE_WINDOW_MS: u128 = 60 * 1000;
     const SCOUT_SUBMIT_ACTIVE_WINDOW_MS: u128 = 90 * 1000;
-    const SCOUT_RESULT_ACTIVE_WINDOW_MS: u128 = 90 * 1000;
     let now = now_ms();
 
     let browser_draft_capable = {
@@ -988,6 +986,7 @@ async fn estimate_scout_supply(state: &SharedState) -> ScoutSupplyEstimate {
                     .as_deref()
                     .map(|mode| mode.eq_ignore_ascii_case("webgpu"))
                     .unwrap_or(false)
+                    && now.saturating_sub(status.last_event_ms) <= SCOUT_PRODUCTIVE_EVENT_WINDOW_MS
                     && status
                         .last_submit_success_ms
                         .map(|ts| now.saturating_sub(ts) <= SCOUT_PRODUCTIVE_WINDOW_MS)
@@ -1025,32 +1024,11 @@ async fn estimate_scout_supply(state: &SharedState) -> ScoutSupplyEstimate {
             .count()
     };
 
-    let local_peer_id = {
-        let topo = state.topology.lock().await;
-        topo.local_peer_id.clone()
-    };
-
-    let recent_result_submitters = {
-        let results = state.results.lock().await;
-        let cutoff = now.saturating_sub(SCOUT_RESULT_ACTIVE_WINDOW_MS);
-        let mut unique = std::collections::HashSet::new();
-        for entry in results.iter() {
-            if entry.created_at_ms.unwrap_or(0) >= cutoff
-                && !entry.peer_id.trim().is_empty()
-                && entry.peer_id != local_peer_id
-            {
-                unique.insert(entry.peer_id.clone());
-            }
-        }
-        unique.len()
-    };
-
     ScoutSupplyEstimate {
         productive_runtime_scouts,
         browser_draft_capable,
         recent_pollers,
         recent_submitters,
-        recent_result_submitters,
         healthy_scout_reports,
     }
 }
@@ -1131,7 +1109,6 @@ async fn effective_speculative_timeout_ms(
             browser_draft_capable = supply.browser_draft_capable,
             recent_pollers = supply.recent_pollers,
             recent_submitters = supply.recent_submitters,
-            recent_result_submitters = supply.recent_result_submitters,
             healthy_scout_reports = supply.healthy_scout_reports,
             "speculative dispatch skipped: no productive scout supply"
         );
@@ -2400,7 +2377,6 @@ mod tests {
             browser_draft_capable: 0,
             recent_pollers: 0,
             recent_submitters: 0,
-            recent_result_submitters: 0,
             healthy_scout_reports: 0,
         };
         assert_eq!(empty.remote_active_scouts(), 0);
@@ -2411,12 +2387,11 @@ mod tests {
             browser_draft_capable: 2,
             recent_pollers: 3,
             recent_submitters: 1,
-            recent_result_submitters: 4,
             healthy_scout_reports: 2,
         };
-        assert_eq!(remote_present.remote_active_scouts(), 4);
+        assert_eq!(remote_present.remote_active_scouts(), 1);
         assert_eq!(remote_present.candidate_remote_scouts(), 2);
-        assert_eq!(remote_present.effective_active_scouts(), 4);
+        assert_eq!(remote_present.effective_active_scouts(), 1);
     }
 
     #[test]

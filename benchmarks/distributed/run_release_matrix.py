@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import statistics
 import subprocess
 import sys
@@ -107,6 +108,13 @@ def git_short_head() -> str:
         return "unknown"
 
 
+def admin_headers() -> dict[str, str]:
+    admin_key = os.environ.get("SHARD_ADMIN_KEY", "").strip()
+    if not admin_key:
+        return {}
+    return {"x-shard-admin": admin_key}
+
+
 async def probe_endpoint_latency_ms(
     endpoint: str,
     max_tokens: int,
@@ -168,10 +176,12 @@ async def configure_scout_ingress(
     timeout_s: float = 10.0,
 ) -> None:
     timeout = httpx.Timeout(timeout_s, connect=min(3.0, timeout_s))
+    headers = admin_headers()
     async with httpx.AsyncClient(timeout=timeout) as client:
         for endpoint in verifier_pool:
             resp = await client.post(
                 f"{endpoint.rstrip('/')}/v1/system/scout-ingress",
+                headers=headers,
                 json={"enabled": enabled},
             )
             resp.raise_for_status()
@@ -180,6 +190,24 @@ async def configure_scout_ingress(
                 raise RuntimeError(
                     f"{endpoint}: failed to set scout ingress to {enabled}"
                 )
+
+
+async def reset_scout_runtime_state(
+    verifier_pool: list[str],
+    timeout_s: float = 10.0,
+) -> None:
+    timeout = httpx.Timeout(timeout_s, connect=min(3.0, timeout_s))
+    headers = admin_headers()
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        for endpoint in verifier_pool:
+            resp = await client.post(
+                f"{endpoint.rstrip('/')}/v1/system/scout-runtime/reset",
+                headers=headers,
+            )
+            resp.raise_for_status()
+            payload = resp.json() or {}
+            if not bool(payload.get("ok")):
+                raise RuntimeError(f"{endpoint}: scout runtime reset did not report ok")
 
 
 def evaluate_release_gates(aggregates: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
@@ -357,6 +385,7 @@ async def execute(args: argparse.Namespace) -> dict[str, Any]:
                     timeout_multiplier=args.auto_timeout_multiplier,
                 )
             for run_idx in range(1, args.runs_per_scenario + 1):
+                await reset_scout_runtime_state(pool)
                 out_path = run_dir / f"{scenario.name}-run{run_idx}.json"
                 print(
                     f"Running {scenario.name} (run {run_idx}/{args.runs_per_scenario}) "

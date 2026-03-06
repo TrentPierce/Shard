@@ -13,6 +13,7 @@ function parseArgs(argv) {
     startupTimeoutMs: 900000,
     headless: false,
     userDataDir: process.env.SHARD_BROWSER_SCOUT_PROFILE_DIR || "",
+    reuseProfile: false,
   }
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -25,6 +26,7 @@ function parseArgs(argv) {
     if (key === "--startup-timeout-ms") args.startupTimeoutMs = Number(value || args.startupTimeoutMs)
     if (key === "--headless") args.headless = String(value || "false").toLowerCase() === "true"
     if (key === "--user-data-dir") args.userDataDir = value || args.userDataDir
+    if (key === "--reuse-profile") args.reuseProfile = String(value || "false").toLowerCase() === "true"
   }
   return args
 }
@@ -72,10 +74,16 @@ async function main() {
     throw new Error("--count must be >= 1")
   }
 
-  const defaultProfileDir = path.join(os.tmpdir(), `shard-browser-scout-profile-${args.channel}`)
-  const userDataDir = path.resolve(args.userDataDir || defaultProfileDir)
-  await fs.mkdir(userDataDir, { recursive: true })
-  console.log(`[browser-scout-runner] launching channel=${args.channel} headless=${args.headless} profile=${userDataDir}`)
+  const defaultProfileRoot = path.join(os.tmpdir(), `shard-browser-scout-profiles-${args.channel}`)
+  const profileRoot = path.resolve(args.userDataDir || defaultProfileRoot)
+  await fs.mkdir(profileRoot, { recursive: true })
+  const userDataDir = args.reuseProfile
+    ? profileRoot
+    : await fs.mkdtemp(path.join(profileRoot, "run-"))
+  const ephemeralProfile = !args.reuseProfile
+  console.log(
+    `[browser-scout-runner] launching channel=${args.channel} headless=${args.headless} profile=${userDataDir} reuse=${args.reuseProfile}`,
+  )
   const context = await chromium.launchPersistentContext(userDataDir, {
     channel: args.channel,
     headless: args.headless,
@@ -90,6 +98,9 @@ async function main() {
 
   const cleanup = async () => {
     await context.close().catch(() => undefined)
+    if (ephemeralProfile) {
+      await fs.rm(userDataDir, { recursive: true, force: true }).catch(() => undefined)
+    }
   }
 
   let shuttingDown = false
