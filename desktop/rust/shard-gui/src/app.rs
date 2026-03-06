@@ -14,16 +14,17 @@ use crate::tray::TrayManager;
 
 // ─── Palette ────────────────────────────────────────────────────────────────
 
-const BLUE: egui::Color32 = egui::Color32::from_rgb(0x0E, 0xA5, 0xE9);
-const GREEN: egui::Color32 = egui::Color32::from_rgb(0x22, 0xC5, 0x5E);
-const YELLOW: egui::Color32 = egui::Color32::from_rgb(0xEA, 0xB3, 0x08);
-const RED: egui::Color32 = egui::Color32::from_rgb(0xEF, 0x44, 0x44);
-const MUTED: egui::Color32 = egui::Color32::from_rgb(0x64, 0x74, 0x8B);
-const PANEL_BG: egui::Color32 = egui::Color32::from_rgb(0x0D, 0x14, 0x22);
-const LOG_TEXT: egui::Color32 = egui::Color32::from_rgb(0xCB, 0xD5, 0xE1);
-const LOG_WARN: egui::Color32 = egui::Color32::from_rgb(0xFB, 0xD3, 0x8D);
-const LOG_ERROR: egui::Color32 = egui::Color32::from_rgb(0xF8, 0x71, 0x71);
-const LOG_DIM: egui::Color32 = egui::Color32::from_rgb(0x47, 0x55, 0x69);
+const GRAPHITE: egui::Color32 = egui::Color32::from_rgb(0x2C, 0x30, 0x2E);
+const IRON_GREY: egui::Color32 = egui::Color32::from_rgb(0x47, 0x4A, 0x48);
+const GREY_OLIVE: egui::Color32 = egui::Color32::from_rgb(0x90, 0x95, 0x90);
+const CELADON: egui::Color32 = egui::Color32::from_rgb(0x9A, 0xE1, 0x9D);
+const FERN: egui::Color32 = egui::Color32::from_rgb(0x53, 0x7A, 0x5A);
+const PANEL_BG: egui::Color32 = egui::Color32::from_rgb(0x24, 0x27, 0x26);
+const PANEL_BG_ALT: egui::Color32 = egui::Color32::from_rgb(0x36, 0x3A, 0x38);
+const LOG_TEXT: egui::Color32 = egui::Color32::from_rgb(0xF2, 0xF5, 0xF2);
+const LOG_WARN: egui::Color32 = egui::Color32::from_rgb(0xD6, 0xE6, 0xB0);
+const LOG_ERROR: egui::Color32 = egui::Color32::from_rgb(0xD7, 0xA3, 0xA3);
+const LOG_DIM: egui::Color32 = egui::Color32::from_rgb(0x7D, 0x85, 0x7E);
 const POST_DOWNLOAD_RESTART_MAX_ATTEMPTS: u8 = 2;
 const POST_DOWNLOAD_RETRY_DELAY: Duration = Duration::from_secs(8);
 
@@ -167,11 +168,16 @@ impl ShardApp {
         // Style
         let mut visuals = egui::Visuals::dark();
         visuals.window_rounding = 8.0.into();
-        visuals.widgets.inactive.bg_fill = egui::Color32::from_rgb(0x1E, 0x29, 0x3B);
-        visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(0x27, 0x37, 0x4D);
-        visuals.widgets.active.bg_fill = egui::Color32::from_rgb(0x0E, 0xA5, 0xE9);
-        visuals.panel_fill = egui::Color32::from_rgb(0x09, 0x0F, 0x1A);
-        visuals.window_fill = egui::Color32::from_rgb(0x09, 0x0F, 0x1A);
+        visuals.widgets.inactive.bg_fill = PANEL_BG_ALT;
+        visuals.widgets.hovered.bg_fill = IRON_GREY;
+        visuals.widgets.active.bg_fill = FERN;
+        visuals.widgets.inactive.fg_stroke.color = LOG_TEXT;
+        visuals.widgets.hovered.fg_stroke.color = LOG_TEXT;
+        visuals.widgets.active.fg_stroke.color = LOG_TEXT;
+        visuals.selection.bg_fill = FERN;
+        visuals.selection.stroke.color = LOG_TEXT;
+        visuals.panel_fill = GRAPHITE;
+        visuals.window_fill = GRAPHITE;
         cc.egui_ctx.set_visuals(visuals);
 
         let config = AppConfig::load();
@@ -431,7 +437,7 @@ impl ShardApp {
         if self.is_running {
             let btn =
                 egui::Button::new(egui::RichText::new("Stop Node").color(egui::Color32::WHITE))
-                    .fill(egui::Color32::from_rgb(0x7F, 0x1D, 0x1D))
+                    .fill(IRON_GREY)
                     .rounding(6.0)
                     .min_size(egui::vec2(90.0, 28.0));
             if ui.add(btn).clicked() {
@@ -443,7 +449,7 @@ impl ShardApp {
         } else {
             let btn =
                 egui::Button::new(egui::RichText::new("Start Node").color(egui::Color32::WHITE))
-                    .fill(egui::Color32::from_rgb(0x06, 0x5F, 0x46))
+                    .fill(FERN)
                     .rounding(6.0)
                     .min_size(egui::vec2(90.0, 28.0));
             if ui.add(btn).clicked() {
@@ -454,14 +460,14 @@ impl ShardApp {
 
     fn status_display(&self) -> (egui::Color32, &'static str) {
         match &self.download_state {
-            DownloadState::InProgress { .. } => (BLUE, "Downloading model…"),
+            DownloadState::InProgress { .. } => (CELADON, "Downloading model…"),
             _ => {
                 if self.daemon_online {
-                    (GREEN, "Contributing")
+                    (CELADON, "Contributing")
                 } else if self.is_running {
-                    (YELLOW, "Starting…")
+                    (GREY_OLIVE, "Starting…")
                 } else {
-                    (RED, "Stopped")
+                    (IRON_GREY, "Stopped")
                 }
             }
         }
@@ -530,12 +536,12 @@ impl ShardApp {
                 egui::RichText::new("Downloading AI Model")
                     .size(16.0)
                     .strong()
-                    .color(BLUE),
+                    .color(CELADON),
             );
             ui.add_space(6.0);
             ui.label(
                 egui::RichText::new("Shard requires a BitNet model to contribute compute.")
-                    .color(MUTED),
+                    .color(GREY_OLIVE),
             );
             ui.add_space(20.0);
 
@@ -563,13 +569,13 @@ impl ShardApp {
                             total as f64 / 1e9,
                             progress * 100.0,
                         ))
-                        .color(MUTED)
+                        .color(GREY_OLIVE)
                         .size(12.0),
                     );
                 } else {
                     ui.label(
                         egui::RichText::new("Fetching manifest…")
-                            .color(MUTED)
+                            .color(GREY_OLIVE)
                             .size(12.0),
                     );
                 }
@@ -579,14 +585,14 @@ impl ShardApp {
 
     fn ui_download_error_banner(&mut self, ui: &mut egui::Ui, error: &str) {
         egui::Frame::none()
-            .fill(egui::Color32::from_rgb(0x3D, 0x1A, 0x08))
+            .fill(IRON_GREY)
             .rounding(6.0)
             .inner_margin(egui::Margin::symmetric(12.0, 8.0))
             .outer_margin(egui::Margin::symmetric(8.0, 4.0))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.colored_label(YELLOW, "⚠");
-                    ui.label(egui::RichText::new(error).color(YELLOW).size(12.0));
+                    ui.colored_label(CELADON, "⚠");
+                    ui.label(egui::RichText::new(error).color(CELADON).size(12.0));
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui.small_button("✕").clicked() {
                             if let DownloadState::Error(_, dismissed) = &mut self.download_state {
@@ -648,7 +654,7 @@ impl ShardApp {
     fn ui_log_panel(&self, ui: &mut egui::Ui, height: f32) {
         ui.horizontal(|ui| {
             ui.add_space(12.0);
-            ui.label(egui::RichText::new("Logs").strong().color(MUTED).size(12.0));
+            ui.label(egui::RichText::new("Logs").strong().color(GREY_OLIVE).size(12.0));
         });
         ui.add_space(2.0);
 
@@ -770,7 +776,7 @@ impl ShardApp {
                         let save_btn = egui::Button::new(
                             egui::RichText::new("Save & Restart Node").color(egui::Color32::WHITE),
                         )
-                        .fill(BLUE)
+                        .fill(FERN)
                         .rounding(6.0)
                         .min_size(egui::vec2(160.0, 30.0));
                         if ui.add(save_btn).clicked() {
@@ -788,11 +794,11 @@ impl ShardApp {
 
 fn tab_button(ui: &mut egui::Ui, label: &str, selected: bool) -> egui::Response {
     let fill = if selected {
-        egui::Color32::from_rgb(0x1E, 0x40, 0x5A)
+        PANEL_BG_ALT
     } else {
         egui::Color32::TRANSPARENT
     };
-    let text_color = if selected { BLUE } else { MUTED };
+    let text_color = if selected { CELADON } else { GREY_OLIVE };
     let btn = egui::Button::new(egui::RichText::new(label).color(text_color).size(13.0))
         .fill(fill)
         .rounding(5.0)
@@ -802,26 +808,26 @@ fn tab_button(ui: &mut egui::Ui, label: &str, selected: bool) -> egui::Response 
 
 fn role_chip(ui: &mut egui::Ui, role: &str) {
     let (fill, text) = match role {
-        "Shard" => (egui::Color32::from_rgb(0x05, 0x3A, 0x26), "⬡ Shard"),
-        _ => (egui::Color32::from_rgb(0x1E, 0x2A, 0x40), "◎ Scout"),
+        "Shard" => (FERN, "⬡ Shard"),
+        _ => (PANEL_BG_ALT, "◎ Scout"),
     };
     egui::Frame::none()
         .fill(fill)
         .rounding(4.0)
         .inner_margin(egui::Margin::symmetric(6.0, 2.0))
         .show(ui, |ui| {
-            ui.label(egui::RichText::new(text).size(11.0).color(BLUE));
+            ui.label(egui::RichText::new(text).size(11.0).color(CELADON));
         });
 }
 
 fn section_label(ui: &mut egui::Ui, label: &str) {
-    ui.label(egui::RichText::new(label).strong().size(13.0).color(BLUE));
+    ui.label(egui::RichText::new(label).strong().size(13.0).color(CELADON));
     ui.add(egui::Separator::default().spacing(4.0));
 }
 
 fn stat_row(ui: &mut egui::Ui, label: &str, value: &str) {
     ui.horizontal(|ui| {
-        ui.label(egui::RichText::new(label).color(MUTED).size(12.0));
+        ui.label(egui::RichText::new(label).color(GREY_OLIVE).size(12.0));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.label(egui::RichText::new(value).strong().size(13.0));
         });
@@ -830,7 +836,7 @@ fn stat_row(ui: &mut egui::Ui, label: &str, value: &str) {
 }
 
 fn settings_header(ui: &mut egui::Ui, label: &str) {
-    ui.label(egui::RichText::new(label).strong().color(MUTED));
+    ui.label(egui::RichText::new(label).strong().color(GREY_OLIVE));
     ui.label(""); // second column filler
 }
 

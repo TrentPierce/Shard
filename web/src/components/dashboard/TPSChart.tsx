@@ -70,22 +70,15 @@ export function TPSChart({ data }: TPSChartProps) {
                 })}
 
                 {/* Area fill */}
-                <path d={area} fill="url(#tpsGradient)" opacity="0.3" />
+                <path d={area} fill="rgba(154, 225, 157, 0.18)" />
 
                 {/* Line */}
-                <path d={line} fill="none" stroke="#7c83ff" strokeWidth="2"
+                <path d={line} fill="none" stroke="#9ae19d" strokeWidth="2"
                     strokeLinejoin="round" strokeLinecap="round" />
 
                 {/* Latest point */}
                 <circle cx={points[points.length - 1].x} cy={points[points.length - 1].y}
-                    r="3" fill="#7c83ff" />
-
-                <defs>
-                    <linearGradient id="tpsGradient" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="#7c83ff" stopOpacity="0.4" />
-                        <stop offset="100%" stopColor="#7c83ff" stopOpacity="0" />
-                    </linearGradient>
-                </defs>
+                    r="3" fill="#9ae19d" />
             </svg>
 
             <style jsx>{`
@@ -96,7 +89,7 @@ export function TPSChart({ data }: TPSChartProps) {
           text-align: right;
         }
         .current-value {
-          font-size: 20px; font-weight: 700; color: #7c83ff;
+          font-size: 20px; font-weight: 700; color: #9ae19d;
           font-variant-numeric: tabular-nums;
         }
         .current-label {

@@ -4,28 +4,28 @@
 
 :root {
   color-scheme: dark;
-  --deep-navy: #091540;
-  --cornflower-blue: #7692ff;
-  --icy-blue: #abd2fa;
-  --dusk-blue: #3d518c;
-  --persian-blue: #1b2cc1;
+  --graphite: #2c302e;
+  --iron-grey: #474a48;
+  --grey-olive: #909590;
+  --celadon: #9ae19d;
+  --fern: #537a5a;
 
-  --bg-primary: var(--deep-navy);
-  --bg-secondary: #11205d;
-  --bg-tertiary: var(--persian-blue);
-  --bg-elevated: var(--dusk-blue);
-  --primary: var(--cornflower-blue);
-  --primary-hover: var(--icy-blue);
-  --primary-muted: var(--persian-blue);
-  --secondary: var(--dusk-blue);
-  --secondary-hover: var(--cornflower-blue);
-  --text-primary: #f5f9ff;
-  --text-secondary: #deebff;
-  --text-muted: var(--icy-blue);
-  --text-inverse: var(--deep-navy);
-  --border: rgba(118, 146, 255, 0.22);
-  --border-hover: rgba(171, 210, 250, 0.48);
-  --primary-glow: rgba(118, 146, 255, 0.22);
+  --bg-primary: var(--graphite);
+  --bg-secondary: #363a38;
+  --bg-tertiary: var(--iron-grey);
+  --bg-elevated: #414542;
+  --primary: var(--celadon);
+  --primary-hover: #b5ecb7;
+  --primary-muted: var(--fern);
+  --secondary: var(--grey-olive);
+  --secondary-hover: var(--celadon);
+  --text-primary: #f2f5f2;
+  --text-secondary: #d7ddd7;
+  --text-muted: #b9c3b9;
+  --text-inverse: #1f231f;
+  --border: rgba(154, 225, 157, 0.2);
+  --border-hover: rgba(154, 225, 157, 0.38);
+  --primary-glow: rgba(154, 225, 157, 0.18);
 }
 
 html,

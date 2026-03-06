@@ -72,8 +72,8 @@ export function DropoffChart({ data }: DropoffChartProps) {
                     const x = padding.left + ((d.timestamp - minTime) / timeRange) * chartW
                     const barH = (d.delta / maxDelta) * chartH
                     const y = padding.top + chartH - barH
-                    const color = d.delta > maxDelta * 0.7 ? '#f87171' :
-                        d.delta > maxDelta * 0.3 ? '#fbbf24' : '#7c83ff'
+                    const color = d.delta > maxDelta * 0.7 ? '#9ae19d' :
+                        d.delta > maxDelta * 0.3 ? '#537a5a' : '#474a48'
                     return (
                         <rect key={i}
                             x={x - barWidth / 2} y={y}
@@ -92,7 +92,7 @@ export function DropoffChart({ data }: DropoffChartProps) {
           text-align: right;
         }
         .current-value {
-          font-size: 20px; font-weight: 700; color: #fbbf24;
+          font-size: 20px; font-weight: 700; color: #9ae19d;
           font-variant-numeric: tabular-nums;
         }
         .current-label {

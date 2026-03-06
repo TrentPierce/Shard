@@ -23,10 +23,10 @@ export default function SwarmThroughputCanvas({ samples }: SwarmThroughputCanvas
     const values = samples.map((sample) => sample.tflops)
 
     if (values.length === 0) {
-      context.fillStyle = "rgba(17, 24, 39, 0.95)"
+      context.fillStyle = "rgba(44, 48, 46, 0.96)"
       context.fillRect(0, 0, width, height)
       context.font = "12px IBM Plex Mono, monospace"
-      context.fillStyle = "rgba(148, 163, 184, 0.82)"
+      context.fillStyle = "rgba(185, 195, 185, 0.82)"
       context.fillText("Waiting for telemetry samples...", 14, height / 2)
       return
     }
@@ -35,10 +35,10 @@ export default function SwarmThroughputCanvas({ samples }: SwarmThroughputCanvas
     const max = Math.max(...values) + 4
     const range = max - min || 1
 
-    context.fillStyle = "rgba(17, 24, 39, 0.95)"
+    context.fillStyle = "rgba(44, 48, 46, 0.96)"
     context.fillRect(0, 0, width, height)
 
-    context.strokeStyle = "rgba(148, 163, 184, 0.18)"
+    context.strokeStyle = "rgba(154, 225, 157, 0.16)"
     context.lineWidth = 1
     for (let i = 1; i < 4; i += 1) {
       const y = (height / 4) * i
@@ -54,7 +54,7 @@ export default function SwarmThroughputCanvas({ samples }: SwarmThroughputCanvas
       return { x, y }
     })
 
-    context.strokeStyle = "rgba(118, 146, 255, 0.95)"
+    context.strokeStyle = "rgba(154, 225, 157, 0.95)"
     context.lineWidth = 2.2
     context.beginPath()
     points.forEach((point, idx) => {
@@ -66,7 +66,7 @@ export default function SwarmThroughputCanvas({ samples }: SwarmThroughputCanvas
     })
     context.stroke()
 
-    context.fillStyle = "rgba(118, 146, 255, 0.18)"
+    context.fillStyle = "rgba(154, 225, 157, 0.18)"
     context.beginPath()
     points.forEach((point, idx) => {
       if (idx === 0) {
@@ -82,12 +82,12 @@ export default function SwarmThroughputCanvas({ samples }: SwarmThroughputCanvas
 
     const lastPoint = points[points.length - 1]
     context.beginPath()
-    context.fillStyle = "#7692ff"
+    context.fillStyle = "#9ae19d"
     context.arc(lastPoint.x, lastPoint.y, 4, 0, Math.PI * 2)
     context.fill()
 
     context.font = "11px IBM Plex Mono, monospace"
-    context.fillStyle = "rgba(148, 163, 184, 0.95)"
+    context.fillStyle = "rgba(215, 221, 215, 0.95)"
     context.fillText(`${samples[samples.length - 1]?.timestamp ?? ""} UTC`, 14, height - 12)
     context.fillText(`${max.toFixed(1)} TFLOPs peak`, width - 118, 14)
   }, [samples])

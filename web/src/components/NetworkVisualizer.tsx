@@ -1,7 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
-import { useRouter } from "next/navigation"
+import { useEffect, useRef, useState } from "react"
 import { apiUrl } from "@/lib/config"
 
 interface PeerNode {
@@ -23,11 +22,10 @@ interface GraphData {
 }
 
 interface NetworkVisualizerProps {
-  pitchMode?: boolean
   onToast?: (message: string) => void
 }
 
-export default function NetworkVisualizer({ pitchMode = false, onToast }: NetworkVisualizerProps) {
+export default function NetworkVisualizer({ onToast }: NetworkVisualizerProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const animationRef = useRef<number>(0)
@@ -41,7 +39,6 @@ export default function NetworkVisualizer({ pitchMode = false, onToast }: Networ
   const [tps, setTps] = useState(0)
   const [latency, setLatency] = useState(0)
   const [nodePositions, setNodePositions] = useState<Map<string, { x: number; y: number; vx: number; vy: number }>>(new Map())
-  const router = useRouter()
 
   // Initialize node positions
   useEffect(() => {
@@ -220,7 +217,7 @@ export default function NetworkVisualizer({ pitchMode = false, onToast }: Networ
       ctx.clearRect(0, 0, width, height)
 
       // Draw links
-      ctx.strokeStyle = "rgba(100, 200, 255, 0.3)"
+      ctx.strokeStyle = "rgba(154, 225, 157, 0.28)"
       ctx.lineWidth = 2
       links.forEach(link => {
         const sourceId = typeof link.source === "string" ? link.source : link.source.id
@@ -246,28 +243,28 @@ export default function NetworkVisualizer({ pitchMode = false, onToast }: Networ
         ctx.arc(pos.x, pos.y, node.type === "local" ? 20 : 14, 0, Math.PI * 2)
 
         if (node.type === "local") {
-          ctx.fillStyle = "#10b981"
+          ctx.fillStyle = "#9ae19d"
         } else if (node.status === "joining") {
-          ctx.fillStyle = "#f59e0b"
+          ctx.fillStyle = "#909590"
         } else {
-          ctx.fillStyle = "#3b82f6"
+          ctx.fillStyle = "#537a5a"
         }
         ctx.fill()
 
         // Node border
-        ctx.strokeStyle = node.type === "local" ? "#059669" : "#1d4ed8"
+        ctx.strokeStyle = node.type === "local" ? "#537a5a" : "#474a48"
         ctx.lineWidth = 2
         ctx.stroke()
 
         // Node label
-        ctx.fillStyle = "#ffffff"
+        ctx.fillStyle = "#f2f5f2"
         ctx.font = "10px system-ui"
         ctx.textAlign = "center"
         ctx.fillText(node.name.slice(0, 12), pos.x, pos.y + 30)
 
         // Status indicator
         if (node.status === "joining") {
-          ctx.fillStyle = "#f59e0b"
+          ctx.fillStyle = "#909590"
           ctx.font = "9px system-ui"
           ctx.fillText("joining...", pos.x, pos.y + 42)
         }
@@ -293,9 +290,9 @@ export default function NetworkVisualizer({ pitchMode = false, onToast }: Networ
         width: "100%",
         height: "100%",
         minHeight: "250px",
-        background: "rgba(9, 21, 64, 0.92)",
+        background: "rgba(44, 48, 46, 0.94)",
         borderRadius: "12px",
-        border: "1px solid rgba(100, 200, 255, 0.2)",
+        border: "1px solid rgba(71, 74, 72, 0.8)",
         position: "relative",
         overflow: "hidden"
       }}
@@ -317,21 +314,21 @@ export default function NetworkVisualizer({ pitchMode = false, onToast }: Networ
           position: "absolute",
           top: "12px",
           left: "12px",
-          background: "rgba(0, 0, 0, 0.6)",
+          background: "rgba(36, 39, 38, 0.86)",
           padding: "8px 12px",
           borderRadius: "6px",
           fontSize: "11px",
           fontFamily: "var(--font-mono, monospace)",
-          color: "rgba(255, 255, 255, 0.9)"
+          color: "rgba(242, 245, 242, 0.92)"
         }}
       >
-        <div style={{ color: "#10b981", fontWeight: "bold" }}>
+        <div style={{ color: "#9ae19d", fontWeight: "bold" }}>
           TPS: {tps}
         </div>
-        <div style={{ color: "#60a5fa", marginTop: "4px" }}>
+        <div style={{ color: "#b9c3b9", marginTop: "4px" }}>
           Latency: {latency.toFixed(1)}ms
         </div>
-        <div style={{ color: "#a78bfa", marginTop: "4px" }}>
+        <div style={{ color: "#909590", marginTop: "4px" }}>
           Nodes: {graphData.nodes.length}
         </div>
       </div>
@@ -339,4 +336,5 @@ export default function NetworkVisualizer({ pitchMode = false, onToast }: Networ
     </div>
   )
 }
+
 

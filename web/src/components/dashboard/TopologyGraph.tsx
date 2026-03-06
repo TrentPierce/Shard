@@ -131,8 +131,8 @@ export function TopologyGraph({ peers, edges }: TopologyGraphProps) {
                 ctx!.moveTo(src.x, src.y)
                 ctx!.lineTo(tgt.x, tgt.y)
                 ctx!.strokeStyle = edge.healthy
-                    ? 'rgba(124, 131, 255, 0.3)'
-                    : 'rgba(248, 113, 113, 0.3)'
+                    ? 'rgba(154, 225, 157, 0.28)'
+                    : 'rgba(144, 149, 144, 0.35)'
                 ctx!.lineWidth = edge.healthy ? 1 : 2
                 ctx!.stroke()
 
@@ -149,8 +149,8 @@ export function TopologyGraph({ peers, edges }: TopologyGraphProps) {
             for (const node of nodes) {
                 const radius = node.role === 'Verifier' ? 10 : 7
                 const color = node.isHealthy
-                    ? (node.role === 'Verifier' ? '#a78bfa' : '#7c83ff')
-                    : '#f87171'
+                    ? (node.role === 'Verifier' ? '#9ae19d' : '#537a5a')
+                    : '#909590'
 
                 // Glow
                 ctx!.beginPath()

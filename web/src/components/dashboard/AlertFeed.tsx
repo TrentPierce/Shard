@@ -15,9 +15,9 @@ interface AlertFeedProps {
 }
 
 const SEVERITY_COLORS = {
-    critical: '#f87171',
-    warning: '#fbbf24',
-    info: '#60a5fa',
+    critical: '#909590',
+    warning: '#537a5a',
+    info: '#9ae19d',
 }
 
 const KIND_ICONS: Record<string, string> = {
@@ -86,13 +86,13 @@ export function AlertFeed({ alerts }: AlertFeedProps) {
           background: rgba(255,255,255,0.06);
         }
         .alert-item.severity-critical {
-          border-left-color: #f87171;
+          border-left-color: #909590;
         }
         .alert-item.severity-warning {
-          border-left-color: #fbbf24;
+          border-left-color: #537a5a;
         }
         .alert-item.severity-info {
-          border-left-color: #60a5fa;
+          border-left-color: #9ae19d;
         }
         .alert-icon {
           font-size: 18px;
