@@ -301,13 +301,11 @@ async def wait_for_browser_scout_supply(
     required = max(1, expected_scouts)
     while time.monotonic() < deadline:
         pool_health = await fetch_pool_health(client, verifier_pool)
-        observed_sessions = max(
+        observed_sessions = sum(
             (int(health.get("active_browser_sessions", 0) or 0) for health in pool_health),
-            default=0,
         )
-        observed_draft_capable = max(
+        observed_draft_capable = sum(
             (int(health.get("draft_capable_scouts", 0) or 0) for health in pool_health),
-            default=0,
         )
         if observed_sessions >= required and observed_draft_capable >= required:
             return True
@@ -853,17 +851,14 @@ async def run_orchestrator(
                     active_scout_target = (
                         await get_scout_target() if scout_mode == "synthetic" else max(0, scout_workers)
                     )
-                    observed_active_scouts = max(
+                    observed_active_scouts = sum(
                         (int(h.get("active_scouts", 0) or 0) for h in pool_health),
-                        default=0,
                     )
-                    observed_browser_sessions = max(
+                    observed_browser_sessions = sum(
                         (int(h.get("active_browser_sessions", 0) or 0) for h in pool_health),
-                        default=0,
                     )
-                    observed_draft_capable_scouts = max(
+                    observed_draft_capable_scouts = sum(
                         (int(h.get("draft_capable_scouts", 0) or 0) for h in pool_health),
-                        default=0,
                     )
                     top_errors = ", ".join(
                         f"{kind}:{count}" for kind, count in error_counts.most_common(2)

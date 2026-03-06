@@ -11,22 +11,25 @@ const DEFAULT_CONNECT_SOURCES = [
   "ws://localhost:*",
 ]
 
-const buildConnectSources = () => {
+const buildConnectSources = (pathname: string) => {
   const extraOrigins = (process.env.NEXT_PUBLIC_CONNECT_SRC_ALLOWLIST ?? "")
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean)
 
-  return [...DEFAULT_CONNECT_SOURCES, ...extraOrigins].join(" ")
+  const benchmarkExtras = pathname.startsWith("/benchmark/") ? ["http:", "ws:"] : []
+
+  return [...DEFAULT_CONNECT_SOURCES, ...extraOrigins, ...benchmarkExtras].join(" ")
 }
 
 export function middleware(request: NextRequest) {
+  const isBenchmarkRoute = request.nextUrl.pathname.startsWith("/benchmark/")
   const cspHeader = `
     default-src 'self';
     script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval' 'unsafe-inline' blob:;
     style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
     font-src 'self' data: https://fonts.gstatic.com;
-    connect-src ${buildConnectSources()};
+    connect-src ${buildConnectSources(request.nextUrl.pathname)};
     img-src 'self' data: blob: https:;
     worker-src 'self' blob:;
     child-src 'self' blob:;
@@ -34,7 +37,7 @@ export function middleware(request: NextRequest) {
     base-uri 'self';
     form-action 'self';
     frame-ancestors 'none';
-    upgrade-insecure-requests;
+    ${isBenchmarkRoute ? "" : "upgrade-insecure-requests;"}
   `
     .replace(/\s{2,}/g, " ")
     .trim()
