@@ -23,6 +23,12 @@ from pathlib import Path
 
 import httpx
 
+SUMMARY_QUEUE_BREAKDOWN_KEYS = (
+    "verifier_in_flight_depth",
+    "speculative_pending_depth",
+    "scout_work_queue_depth",
+)
+
 
 @dataclass
 class RequestRecord:
@@ -111,8 +117,9 @@ class LoadAwarePool:
                 resp = await client.get(f"{state.endpoint}/metrics/summary")
                 if resp.is_success:
                     data = resp.json()
-                    queue_depth = float(data.get("queue_depth", queue_depth) or 0.0)
-                    load = float(data.get("load", load) or 0.0)
+                    if summary_has_queue_breakdown(data):
+                        queue_depth = float(data.get("queue_depth", queue_depth) or 0.0)
+                        load = float(data.get("load", load) or 0.0)
             except Exception:
                 pass
             async with self._lock:
@@ -246,6 +253,10 @@ def summary_latency_signal_ms(summary: dict) -> float:
     return max(p95, avg)
 
 
+def summary_has_queue_breakdown(summary: dict) -> bool:
+    return all(key in summary for key in SUMMARY_QUEUE_BREAKDOWN_KEYS)
+
+
 async def wait_for_pool_readiness(
     client: httpx.AsyncClient,
     verifier_pool: list[str],
@@ -273,6 +284,10 @@ async def wait_for_pool_readiness(
             if not summary:
                 all_ready = False
                 reasons.append(f"{endpoint}:summary_unreachable")
+                continue
+            if not summary_has_queue_breakdown(summary):
+                all_ready = False
+                reasons.append(f"{endpoint}:stale_summary_schema")
                 continue
             queue_depth = float(summary.get("queue_depth", 0.0) or 0.0)
             if queue_depth > queue_depth_max:
