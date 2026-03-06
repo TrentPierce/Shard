@@ -850,7 +850,12 @@ fn compute_effective_scout_timeout_ms(
     active_scouts: usize,
     queue_depth: usize,
 ) -> u64 {
-    if active_scouts == 0 {
+    let min_active_scouts = std::env::var("SHARD_SCOUT_TIMEOUT_MIN_ACTIVE")
+        .ok()
+        .and_then(|v| v.trim().parse::<usize>().ok())
+        .map(|v| v.clamp(1, 32))
+        .unwrap_or(4);
+    if active_scouts < min_active_scouts {
         return 0;
     }
     // Keep speculative waits bounded while allowing enough budget for real scout
@@ -883,10 +888,7 @@ fn compute_effective_scout_timeout_ms(
     if queue_depth >= soft_queue {
         return bounded_base.min(800);
     }
-    if active_scouts <= 1 {
-        return bounded_base.min(1_100);
-    }
-    if active_scouts <= 3 {
+    if active_scouts <= min_active_scouts.saturating_add(1) {
         return bounded_base.min(950);
     }
     bounded_base.min(850)
@@ -1090,10 +1092,9 @@ async fn effective_speculative_timeout_ms(
     let supply = estimate_scout_supply(state).await;
     let active_scouts = supply.effective_active_scouts();
     let queue_depth = {
-        let scout_queue_depth = state.scout_work.lock().await.len();
         let pending_depth = state.speculative_pending.lock().await.len();
         let verifier_in_flight = state.in_flight_count.load(Ordering::Relaxed);
-        scout_queue_depth.max(pending_depth).max(verifier_in_flight)
+        pending_depth.max(verifier_in_flight)
     };
     let mut timeout_ms =
         compute_effective_scout_timeout_ms(config.scout_timeout_ms, active_scouts, queue_depth);
@@ -2343,8 +2344,9 @@ mod tests {
     #[test]
     fn adaptive_timeout_short_circuits_without_active_scouts() {
         assert_eq!(compute_effective_scout_timeout_ms(30_000, 0, 0), 0);
-        assert_eq!(compute_effective_scout_timeout_ms(30_000, 1, 0), 1_100);
-        assert_eq!(compute_effective_scout_timeout_ms(30_000, 2, 0), 950);
+        assert_eq!(compute_effective_scout_timeout_ms(30_000, 1, 0), 0);
+        assert_eq!(compute_effective_scout_timeout_ms(30_000, 3, 0), 0);
+        assert_eq!(compute_effective_scout_timeout_ms(30_000, 4, 0), 950);
         assert_eq!(compute_effective_scout_timeout_ms(30_000, 8, 3), 850);
         assert_eq!(compute_effective_scout_timeout_ms(30_000, 8, 8), 800);
         assert_eq!(compute_effective_scout_timeout_ms(30_000, 8, 14), 600);
