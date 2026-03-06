@@ -238,6 +238,16 @@ async def fetch_pool_summaries(client: httpx.AsyncClient, verifier_pool: list[st
     return summaries
 
 
+async def fetch_pool_health(client: httpx.AsyncClient, verifier_pool: list[str]) -> list[dict]:
+    health_rows: list[dict] = []
+    for endpoint in verifier_pool:
+        health = await fetch_health(client, endpoint)
+        if health:
+            health["_endpoint"] = endpoint
+            health_rows.append(health)
+    return health_rows
+
+
 def aggregate_speculative_totals(summaries: list[dict]) -> tuple[float, float]:
     accepted = 0.0
     total = 0.0
@@ -614,6 +624,7 @@ async def run_orchestrator(
                 summary_now = await fetch_summary(client, verifier_pool[0])
                 acceptance = float(summary_now.get("speculative_acceptance_rate", 0.0)) * 100.0
                 pool_summaries = await fetch_pool_summaries(client, verifier_pool)
+                pool_health = await fetch_pool_health(client, verifier_pool)
                 max_queue_depth = max(
                     (float(s.get("queue_depth", 0.0) or 0.0) for s in pool_summaries),
                     default=0.0,
@@ -639,13 +650,26 @@ async def run_orchestrator(
                 async with in_flight_lock:
                     active = in_flight
                 active_scout_target = await get_scout_target()
+                observed_active_scouts = max(
+                    (int(h.get("active_scouts", 0) or 0) for h in pool_health),
+                    default=0,
+                )
+                observed_browser_sessions = max(
+                    (int(h.get("active_browser_sessions", 0) or 0) for h in pool_health),
+                    default=0,
+                )
+                observed_draft_capable_scouts = max(
+                    (int(h.get("draft_capable_scouts", 0) or 0) for h in pool_health),
+                    default=0,
+                )
                 top_errors = ", ".join(
                     f"{kind}:{count}" for kind, count in error_counts.most_common(2)
                 )
                 if not top_errors:
                     top_errors = "none"
                 print(
-                    f"[{elapsed}s/{duration}s] InFlight: {active} | p95: {p95/1000.0:.2f}s | "
+                    f"[{elapsed}s/{duration}s] InFlight: {active} | obs_scouts: {observed_active_scouts} | "
+                    f"browser_sessions: {observed_browser_sessions} | p95: {p95/1000.0:.2f}s | "
                     f"accept: {acceptance:.1f}% | errors: {err_rate:.2f}% | "
                     f"scout_target: {active_scout_target} | max_q: {max_queue_depth:.1f} | max_p95: {max_p95_latency_ms:.0f}ms | "
                     f"blackout_nodes: {blackout_endpoints} | top_errors: {top_errors}"
@@ -653,7 +677,10 @@ async def run_orchestrator(
                 timeseries.append(
                     {
                         "t": elapsed,
-                        "active_scouts": active,
+                        "in_flight_requests": active,
+                        "observed_active_scouts": observed_active_scouts,
+                        "observed_active_browser_sessions": observed_browser_sessions,
+                        "observed_draft_capable_scouts": observed_draft_capable_scouts,
                         "scout_target": active_scout_target,
                         "max_queue_depth": round(max_queue_depth, 3),
                         "max_pool_p95_latency_ms": round(max_p95_latency_ms, 3),

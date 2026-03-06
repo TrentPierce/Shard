@@ -76,6 +76,7 @@ pub(crate) async fn health_handler(
         "status": status,
         "readiness_reason": readiness_reason,
         "ready_for_inference": ready_for_inference,
+        "scout_ingress_enabled": state.scout_ingress_enabled.load(Ordering::Relaxed),
         "rust_sidecar": "connected",
         "rust_version": env!("CARGO_PKG_VERSION"),
         "rust_uptime_ms": now_ms() - state.daemon_start,
@@ -111,6 +112,48 @@ pub(crate) async fn health_handler(
         "latency_ms": latency_ms,
         "engine_loaded": engine_loaded,
         "bitnet_model": std::env::var("BITNET_MODEL").unwrap_or_default(),
+    }))
+}
+
+pub(crate) async fn scout_ingress_handler(
+    AxumState(state): AxumState<SharedState>,
+) -> Json<serde_json::Value> {
+    Json(serde_json::json!({
+        "ok": true,
+        "scout_ingress_enabled": state.scout_ingress_enabled.load(Ordering::Relaxed),
+    }))
+}
+
+pub(crate) async fn scout_ingress_update_handler(
+    AxumState(state): AxumState<SharedState>,
+    headers: HeaderMap,
+    Json(req): Json<ScoutIngressUpdateRequest>,
+) -> Json<serde_json::Value> {
+    if let Some(admin_key) = state.admin_key.as_deref() {
+        let provided = headers
+            .get("x-shard-admin")
+            .and_then(|v| v.to_str().ok())
+            .map(str::trim)
+            .unwrap_or_default();
+        if provided != admin_key {
+            return Json(serde_json::json!({
+                "ok": false,
+                "detail": "admin key required for scout ingress updates",
+            }));
+        }
+    }
+
+    state
+        .scout_ingress_enabled
+        .store(req.enabled, Ordering::Relaxed);
+    if !req.enabled {
+        let mut blackout = state.scout_blackout.lock().await;
+        *blackout = ScoutBlackoutState::default();
+    }
+
+    Json(serde_json::json!({
+        "ok": true,
+        "scout_ingress_enabled": req.enabled,
     }))
 }
 
@@ -1759,6 +1802,17 @@ pub(crate) async fn pop_work_handler(
     AxumState(state): AxumState<SharedState>,
     Query(query): Query<ScoutWorkQuery>,
 ) -> Result<Json<serde_json::Value>, (axum::http::StatusCode, Json<serde_json::Value>)> {
+    if !state.scout_ingress_enabled.load(Ordering::Relaxed) {
+        return Err((
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({
+                "work": null,
+                "transient_error": true,
+                "detail": "scout_ingress_disabled",
+                "retry_after_ms": 1000,
+            })),
+        ));
+    }
     let scout_id = match require_scout_id(&query) {
         Ok(value) => value,
         Err(response) => return Err((axum::http::StatusCode::BAD_REQUEST, response)),
@@ -1995,6 +2049,16 @@ pub(crate) async fn process_draft_submission(
     state: &SharedState,
     mut submission: DraftResultSubmission,
 ) -> Result<Json<serde_json::Value>, (axum::http::StatusCode, Json<serde_json::Value>)> {
+    if !state.scout_ingress_enabled.load(Ordering::Relaxed) {
+        return Err((
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({
+                "ok": false,
+                "detail": "scout_ingress_disabled",
+                "retry_after_ms": 1000,
+            })),
+        ));
+    }
     submission.work_id = submission.work_id.trim().to_string();
     submission.scout_id = submission.scout_id.trim().to_string();
     submission.lease_id = submission
@@ -3326,6 +3390,10 @@ pub(crate) async fn metrics_summary_handler(
         serde_json::json!(unhealthy_nodes),
     );
     payload.insert("queue_depth".to_string(), serde_json::json!(queue_depth));
+    payload.insert(
+        "scout_ingress_enabled".to_string(),
+        serde_json::json!(state.scout_ingress_enabled.load(Ordering::Relaxed)),
+    );
     payload.insert(
         "verifier_in_flight_depth".to_string(),
         serde_json::json!(verifier_in_flight_depth),

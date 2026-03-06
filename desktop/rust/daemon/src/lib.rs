@@ -349,6 +349,11 @@ struct AdminApiKeyRequest {
     key: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct ScoutIngressUpdateRequest {
+    enabled: bool,
+}
+
 fn generate_api_key() -> String {
     let suffix: String = rand::thread_rng()
         .sample_iter(&Alphanumeric)
@@ -608,6 +613,7 @@ pub(crate) struct SharedState {
     bootstrap_registry_path: PathBuf,
     scheduler_decisions: Arc<Mutex<VecDeque<SchedulerDecisionLog>>>,
     canary_rollout: Arc<Mutex<CanaryRolloutController>>,
+    scout_ingress_enabled: Arc<AtomicBool>,
     shutdown: Arc<AtomicBool>,
     in_flight_count: Arc<AtomicUsize>,
     consensus: Option<Arc<LeaderElectionHandle>>,
@@ -2465,6 +2471,8 @@ fn create_router(
             "/v1/system/model-rollout/reset-rollback",
             post(model_rollout_reset_handler),
         )
+        .route("/v1/system/scout-ingress", get(scout_ingress_handler))
+        .route("/v1/system/scout-ingress", post(scout_ingress_update_handler))
         .route("/v1/system/scout-config", get(scout_config_handler))
         .route(
             "/browser-layer/register",
@@ -3004,6 +3012,7 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
             cli.model_id.clone(),
             canary_rollout_cfg,
         ))),
+        scout_ingress_enabled: Arc::new(AtomicBool::new(true)),
         shutdown: Arc::new(AtomicBool::new(false)),
         in_flight_count: Arc::new(AtomicUsize::new(0)),
         consensus: consensus_handle,

@@ -41,6 +41,11 @@ class Scenario:
     pool_kind: str  # one_node | two_node
 
 
+def scenario_inference_mode(scenario: Scenario, default_mode: str) -> str:
+    # "No scouts" scenarios are intended to measure verifier-only behavior.
+    return default_mode if scenario.use_scout_workers else "standard"
+
+
 SCENARIOS: list[Scenario] = [
     Scenario(name="one-node-no-scouts", use_scout_workers=False, pool_kind="one_node"),
     Scenario(name="one-node-with-scouts", use_scout_workers=True, pool_kind="one_node"),
@@ -100,6 +105,26 @@ def git_short_head() -> str:
         )
     except Exception:
         return "unknown"
+
+
+async def configure_scout_ingress(
+    verifier_pool: list[str],
+    enabled: bool,
+    timeout_s: float = 10.0,
+) -> None:
+    timeout = httpx.Timeout(timeout_s, connect=min(3.0, timeout_s))
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        for endpoint in verifier_pool:
+            resp = await client.post(
+                f"{endpoint.rstrip('/')}/v1/system/scout-ingress",
+                json={"enabled": enabled},
+            )
+            resp.raise_for_status()
+            payload = resp.json() or {}
+            if bool(payload.get("scout_ingress_enabled", enabled)) != enabled:
+                raise RuntimeError(
+                    f"{endpoint}: failed to set scout ingress to {enabled}"
+                )
 
 
 def evaluate_release_gates(aggregates: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
@@ -256,65 +281,74 @@ async def execute(args: argparse.Namespace) -> dict[str, Any]:
 
     one_pool = parse_pool(args.one_node_pool)
     two_pool = parse_pool(args.two_node_pool)
+    all_endpoints = list(dict.fromkeys(one_pool + two_pool))
     by_scenario: dict[str, list[dict[str, Any]]] = {scenario.name: [] for scenario in SCENARIOS}
 
-    for scenario in SCENARIOS:
-        pool = one_pool if scenario.pool_kind == "one_node" else two_pool
-        workers = args.scout_workers if scenario.use_scout_workers else 0
-        for run_idx in range(1, args.runs_per_scenario + 1):
-            out_path = run_dir / f"{scenario.name}-run{run_idx}.json"
-            print(
-                f"Running {scenario.name} (run {run_idx}/{args.runs_per_scenario}) "
-                f"pool={','.join(pool)} scout_workers={workers}"
-            )
-            exit_code = await run_orchestrator(
-                scouts=args.scouts,
-                rate=args.rate,
-                duration=args.duration,
-                verifier_pool=pool,
-                out_path=out_path,
-                inference_mode=args.inference_mode,
-                request_timeout_ms=args.request_timeout_ms,
-                max_attempts=args.max_attempts,
-                scout_workers=workers,
-                max_tokens=args.max_tokens,
-                readiness_timeout_s=args.readiness_timeout_s,
-                ready_queue_depth_max=args.ready_queue_depth_max,
-                require_no_blackout=not args.allow_readiness_blackout,
-                strict_readiness=args.strict_readiness,
-            )
-            try:
-                data = json.loads(out_path.read_text(encoding="utf-8"))
-            except Exception as exc:
-                data = {
-                    "error_rate_pct": 100.0,
-                    "p95_latency_ms": 0.0,
-                    "throughput_tps": 0.0,
-                    "run_error": f"failed_to_read_output: {exc}",
-                }
-            data["orchestrator_exit_code"] = exit_code
-            data["output_file"] = str(out_path.as_posix())
-            by_scenario[scenario.name].append(data)
-            if args.flush_timeout_s > 0:
+    try:
+        for scenario in SCENARIOS:
+            pool = one_pool if scenario.pool_kind == "one_node" else two_pool
+            workers = args.scout_workers if scenario.use_scout_workers else 0
+            await configure_scout_ingress(pool, enabled=scenario.use_scout_workers)
+            for run_idx in range(1, args.runs_per_scenario + 1):
+                out_path = run_dir / f"{scenario.name}-run{run_idx}.json"
                 print(
-                    "Flushing verifier queues before next run "
-                    f"(timeout={args.flush_timeout_s}s queue_max={args.flush_queue_depth_max})"
+                    f"Running {scenario.name} (run {run_idx}/{args.runs_per_scenario}) "
+                    f"pool={','.join(pool)} scout_workers={workers} "
+                    f"inference_mode={scenario_inference_mode(scenario, args.inference_mode)}"
                 )
-                flush_timeout = httpx.Timeout(
-                    connect=2.0,
-                    read=min(10.0, max(2.0, args.flush_timeout_s)),
-                    write=min(10.0, max(2.0, args.flush_timeout_s)),
-                    pool=min(10.0, max(2.0, args.flush_timeout_s)),
+                exit_code = await run_orchestrator(
+                    scouts=args.scouts,
+                    rate=args.rate,
+                    duration=args.duration,
+                    verifier_pool=pool,
+                    out_path=out_path,
+                    inference_mode=scenario_inference_mode(scenario, args.inference_mode),
+                    request_timeout_ms=args.request_timeout_ms,
+                    max_attempts=args.max_attempts,
+                    scout_workers=workers,
+                    max_tokens=args.max_tokens,
+                    readiness_timeout_s=args.readiness_timeout_s,
+                    ready_queue_depth_max=args.ready_queue_depth_max,
+                    require_no_blackout=not args.allow_readiness_blackout,
+                    strict_readiness=args.strict_readiness,
                 )
-                async with httpx.AsyncClient(timeout=flush_timeout) as flush_client:
-                    await wait_for_pool_readiness(
-                        client=flush_client,
-                        verifier_pool=pool,
-                        timeout_s=args.flush_timeout_s,
-                        queue_depth_max=args.flush_queue_depth_max,
-                        require_no_blackout=not args.allow_readiness_blackout,
-                        strict=args.strict_flush_readiness,
+                try:
+                    data = json.loads(out_path.read_text(encoding="utf-8"))
+                except Exception as exc:
+                    data = {
+                        "error_rate_pct": 100.0,
+                        "p95_latency_ms": 0.0,
+                        "throughput_tps": 0.0,
+                        "run_error": f"failed_to_read_output: {exc}",
+                    }
+                data["orchestrator_exit_code"] = exit_code
+                data["scenario_inference_mode"] = scenario_inference_mode(
+                    scenario, args.inference_mode
+                )
+                data["output_file"] = str(out_path.as_posix())
+                by_scenario[scenario.name].append(data)
+                if args.flush_timeout_s > 0:
+                    print(
+                        "Flushing verifier queues before next run "
+                        f"(timeout={args.flush_timeout_s}s queue_max={args.flush_queue_depth_max})"
                     )
+                    flush_timeout = httpx.Timeout(
+                        connect=2.0,
+                        read=min(10.0, max(2.0, args.flush_timeout_s)),
+                        write=min(10.0, max(2.0, args.flush_timeout_s)),
+                        pool=min(10.0, max(2.0, args.flush_timeout_s)),
+                    )
+                    async with httpx.AsyncClient(timeout=flush_timeout) as flush_client:
+                        await wait_for_pool_readiness(
+                            client=flush_client,
+                            verifier_pool=pool,
+                            timeout_s=args.flush_timeout_s,
+                            queue_depth_max=args.flush_queue_depth_max,
+                            require_no_blackout=not args.allow_readiness_blackout,
+                            strict=args.strict_flush_readiness,
+                        )
+    finally:
+        await configure_scout_ingress(all_endpoints, enabled=True)
 
     aggregates: dict[str, dict[str, Any]] = {}
     for scenario in SCENARIOS:
