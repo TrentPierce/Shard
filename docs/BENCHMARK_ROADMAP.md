@@ -20,6 +20,8 @@ Get to a state where:
 
 ## Phase 1: Separate Long-Run Runtime Profile
 
+Status: complete
+
 Problem:
 - `deploy/release/benchmark.env` is trying to serve two jobs:
   - protect the short RC release gate
@@ -41,6 +43,8 @@ Exit criteria:
 
 ## Phase 2: Long-Matrix Harness Defaults
 
+Status: complete
+
 Problem:
 - `long_scout_generation` still launches with fixed stress assumptions that collapse the baseline before scout uplift can be judged
 
@@ -61,6 +65,8 @@ Exit criteria:
 
 ## Phase 3: Clean Long No-Scout Baseline
 
+Status: complete
+
 Problem:
 - if long no-scout runs already fail, scout uplift claims are meaningless
 
@@ -75,6 +81,11 @@ Exit criteria:
 - long no-scout runs complete with low or zero `503` collapse
 - p95 and error rate become baseline measurements, not admission-failure artifacts
 - only after that do scout comparisons become actionable
+
+Current result:
+- `one-node-no-scouts` on `long_benchmark.env`: `928.404 ms` p95, `2.0167 TPS`, `0%` errors
+- `two-node-no-scouts` on `long_benchmark.env`: `937.711 ms` p95, `2.0167 TPS`, `0%` errors
+- the long verifier-only baseline is no longer admission-limited at the default `2.0 rps`
 
 ## Phase 4: Honest Long Scout Uplift
 
