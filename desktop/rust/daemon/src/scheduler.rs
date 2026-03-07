@@ -1019,14 +1019,13 @@ fn effective_draft_token_count_with(
     long_request_min: usize,
     long_request_count: usize,
 ) -> usize {
-    let boosted = if long_request_min > 0
-        && long_request_count > 0
-        && request_max_tokens >= long_request_min
-    {
-        default_count.max(long_request_count)
-    } else {
-        default_count
-    };
+    let boosted =
+        if long_request_min > 0 && long_request_count > 0 && request_max_tokens >= long_request_min
+        {
+            default_count.max(long_request_count)
+        } else {
+            default_count
+        };
     boosted.clamp(1, request_max_tokens.max(1))
 }
 
@@ -1055,14 +1054,11 @@ fn adapt_speculative_timeout_ms(
     let avg_latency_ms = state.avg_latency_ms.load(Ordering::Relaxed) as u64;
     if avg_latency_ms > 0 {
         let ratio = scout_timeout_verifier_ratio();
-        let verifier_cap =
-            ((avg_latency_ms as f64) * ratio).round() as u64;
-        adapted = adapted.min(
-            verifier_cap.clamp(
-                scout_timeout_verifier_floor_ms(),
-                scout_timeout_verifier_ceil_ms(),
-            ),
-        );
+        let verifier_cap = ((avg_latency_ms as f64) * ratio).round() as u64;
+        adapted = adapted.min(verifier_cap.clamp(
+            scout_timeout_verifier_floor_ms(),
+            scout_timeout_verifier_ceil_ms(),
+        ));
     }
     adapted
 }
@@ -1316,11 +1312,21 @@ async fn fetch_speculative_draft(
         tracker.is_in_cooldown()
     };
     if in_cooldown {
+        record_speculative_trace(
+            state,
+            request_id.to_string(),
+            "dispatch_skipped_cooldown",
+            None,
+            None,
+            None,
+        )
+        .await;
         tracing::debug!("skipping speculative dispatch while scout timeout cooldown is active");
         return None;
     }
 
-    let draft_token_count = effective_draft_token_count(config.draft_token_count, request_max_tokens);
+    let draft_token_count =
+        effective_draft_token_count(config.draft_token_count, request_max_tokens);
     let work = WorkRequest {
         request_id: request_id.to_string(),
         prompt_context: prompt.to_string(),
@@ -1339,10 +1345,32 @@ async fn fetch_speculative_draft(
         draft_token_count,
     );
     if scout_timeout_ms == 0 {
+        record_speculative_trace(
+            state,
+            request_id.to_string(),
+            "dispatch_skipped_zero_timeout",
+            None,
+            Some(format!(
+                "request_max_tokens={request_max_tokens}, draft_token_count={draft_token_count}"
+            )),
+            None,
+        )
+        .await;
         tracing::debug!("skipping speculative dispatch with zero effective timeout");
         return None;
     }
 
+    record_speculative_trace(
+        state,
+        request_id.to_string(),
+        "dispatch_started",
+        None,
+        Some(format!(
+            "draft_token_count={draft_token_count}, timeout_ms={scout_timeout_ms}"
+        )),
+        None,
+    )
+    .await;
     dispatch_scout_work(state, work.clone()).await;
     schedule_local_scout_fallback(state, &work).await;
 
@@ -1351,10 +1379,31 @@ async fn fetch_speculative_draft(
     let draft_latency = (now_ms() - draft_start) as u64;
     if let Some(mut draft) = draft {
         draft.latency_ms = draft_latency;
+        record_speculative_trace(
+            state,
+            request_id.to_string(),
+            "dispatch_completed_with_draft",
+            Some(draft.scout_id.clone()),
+            Some(format!(
+                "draft_latency_ms={draft_latency}, draft_tokens={}",
+                draft.draft_tokens.len()
+            )),
+            Some(draft_latency),
+        )
+        .await;
         let mut tracker = state.scout_timeout_tracker.lock().await;
         tracker.record_success();
         Some(draft)
     } else {
+        record_speculative_trace(
+            state,
+            request_id.to_string(),
+            "dispatch_completed_without_draft",
+            None,
+            Some(format!("timeout_ms={scout_timeout_ms}")),
+            Some(draft_latency),
+        )
+        .await;
         let in_cooldown = handle_scout_timeout(state, config).await;
         if in_cooldown {
             tracing::info!("scout in cooldown, using local generation");
@@ -1453,6 +1502,15 @@ pub(crate) async fn wait_for_scout_draft(
     timeout_ms: u64,
 ) -> Option<ScoutDraft> {
     state.system_metrics.inc_speculative_wait_request();
+    record_speculative_trace(
+        state,
+        work_id.to_string(),
+        "wait_started",
+        None,
+        Some(format!("timeout_ms={timeout_ms}")),
+        Some(0),
+    )
+    .await;
     {
         let mut pending = state.speculative_pending.lock().await;
         pending.entry(work_id.to_string()).or_insert_with(now_ms);
@@ -1476,12 +1534,46 @@ pub(crate) async fn wait_for_scout_draft(
                 wait_age_ms = age_ms,
                 "scout draft timeout"
             );
+            record_speculative_trace(
+                state,
+                work_id.to_string(),
+                "wait_timeout",
+                None,
+                Some(format!("timeout_ms={timeout_ms}")),
+                Some(age_ms),
+            )
+            .await;
+            set_speculative_terminal_state(
+                state,
+                work_id,
+                "timeout",
+                None,
+                Some(format!("timeout_ms={timeout_ms}")),
+            )
+            .await;
             clear_speculative_work_state(state, work_id).await;
             return None;
         }
 
         if let Some(draft) = pop_mailbox_draft(state, work_id).await {
             state.system_metrics.inc_speculative_wait_hit();
+            record_speculative_trace(
+                state,
+                work_id.to_string(),
+                "wait_hit_mailbox",
+                Some(draft.scout_id.clone()),
+                Some(format!("draft_tokens={}", draft.draft_tokens.len())),
+                Some(now_ms().saturating_sub(start) as u64),
+            )
+            .await;
+            set_speculative_terminal_state(
+                state,
+                work_id,
+                "mailbox_hit",
+                Some(draft.scout_id.clone()),
+                Some(format!("draft_tokens={}", draft.draft_tokens.len())),
+            )
+            .await;
             clear_speculative_work_state(state, work_id).await;
             return Some(draft);
         }
@@ -1492,6 +1584,23 @@ pub(crate) async fn wait_for_scout_draft(
         } {
             state.system_metrics.inc_speculative_wait_hit();
             let draft = scout_draft_from_work_response(&existing);
+            record_speculative_trace(
+                state,
+                work_id.to_string(),
+                "wait_hit_idempotent",
+                Some(draft.scout_id.clone()),
+                Some(format!("draft_tokens={}", draft.draft_tokens.len())),
+                Some(now_ms().saturating_sub(start) as u64),
+            )
+            .await;
+            set_speculative_terminal_state(
+                state,
+                work_id,
+                "idempotent_hit",
+                Some(draft.scout_id.clone()),
+                Some(format!("draft_tokens={}", draft.draft_tokens.len())),
+            )
+            .await;
             clear_speculative_work_state(state, work_id).await;
             return Some(draft);
         }
@@ -1927,14 +2036,7 @@ pub(crate) async fn chat_completions_handler(
 
     let speculative_draft = if use_speculative {
         if let Some(ref config) = speculative_config {
-            fetch_speculative_draft(
-                &state,
-                &request_id,
-                &prompt,
-                config,
-                max_tokens as usize,
-            )
-            .await
+            fetch_speculative_draft(&state, &request_id, &prompt, config, max_tokens as usize).await
         } else {
             None
         }
@@ -1989,13 +2091,40 @@ pub(crate) async fn chat_completions_handler(
                         if let Some(draft) = speculative_draft.take() {
                                 // Verify the draft against our model
                                 state.system_metrics.inc_speculative_verify_attempt();
+                                record_speculative_trace(
+                                    &state,
+                                    request_id.clone(),
+                                    "verify_started",
+                                    Some(draft.scout_id.clone()),
+                                    Some(format!("draft_tokens={}", draft.draft_tokens.len())),
+                                    None,
+                                ).await;
                                 let result = verify_draft_tokens(engine, &prompt_tokens, &draft.draft_tokens).await;
                                 let accepted_count = result.accepted_tokens.len() as u64;
                                 let draft_count = draft.draft_tokens.len() as u64;
                                 let rejected_count = draft_count.saturating_sub(accepted_count);
                                 if draft_count > 0 && accepted_count == 0 {
                                     state.system_metrics.inc_speculative_verify_zero_accept();
+                                    record_speculative_trace(
+                                        &state,
+                                        request_id.clone(),
+                                        "verify_zero_accept",
+                                        Some(draft.scout_id.clone()),
+                                        result.first_rejection_idx.map(|idx| format!("first_rejection_idx={idx}")),
+                                        None,
+                                    ).await;
                                 }
+                                record_speculative_trace(
+                                    &state,
+                                    request_id.clone(),
+                                    "verify_completed",
+                                    Some(draft.scout_id.clone()),
+                                    Some(format!(
+                                        "accepted_tokens={},draft_tokens={},rejected_tokens={}",
+                                        accepted_count, draft_count, rejected_count
+                                    )),
+                                    None,
+                                ).await;
                                 request_acceptance = Some(model_pair_acceptance_rates(
                                     draft_count,
                                     accepted_count,
@@ -2204,6 +2333,15 @@ pub(crate) async fn chat_completions_handler(
                         if let Some(draft) = speculative_draft.take() {
                             // Verify the draft against our model
                             state.system_metrics.inc_speculative_verify_attempt();
+                            record_speculative_trace(
+                                &state,
+                                request_id.clone(),
+                                "verify_started",
+                                Some(draft.scout_id.clone()),
+                                Some(format!("draft_tokens={}", draft.draft_tokens.len())),
+                                None,
+                            )
+                            .await;
                             let result =
                                 verify_draft_tokens(engine, &prompt_tokens, &draft.draft_tokens)
                                     .await;
@@ -2212,7 +2350,30 @@ pub(crate) async fn chat_completions_handler(
                             let rejected_count = draft_count.saturating_sub(accepted_count);
                             if draft_count > 0 && accepted_count == 0 {
                                 state.system_metrics.inc_speculative_verify_zero_accept();
+                                record_speculative_trace(
+                                    &state,
+                                    request_id.clone(),
+                                    "verify_zero_accept",
+                                    Some(draft.scout_id.clone()),
+                                    result
+                                        .first_rejection_idx
+                                        .map(|idx| format!("first_rejection_idx={idx}")),
+                                    None,
+                                )
+                                .await;
                             }
+                            record_speculative_trace(
+                                &state,
+                                request_id.clone(),
+                                "verify_completed",
+                                Some(draft.scout_id.clone()),
+                                Some(format!(
+                                    "accepted_tokens={},draft_tokens={},rejected_tokens={}",
+                                    accepted_count, draft_count, rejected_count
+                                )),
+                                None,
+                            )
+                            .await;
                             request_acceptance = Some(model_pair_acceptance_rates(
                                 draft_count,
                                 accepted_count,
@@ -2404,10 +2565,10 @@ pub(crate) async fn chat_completions_handler(
 #[cfg(test)]
 mod tests {
     use super::{
-        auth_required, compute_effective_scout_timeout_ms, endpoint_from_multiaddr,
-        effective_draft_token_count_with, enqueue_scout_work, infer_client_ip,
-        local_scout_fallback_allowed, mesh_forward_score, model_pair_acceptance_rates,
-        normalize_endpoint, parse_speculative_min_request_tokens, probe_allowed_for_request,
+        auth_required, compute_effective_scout_timeout_ms, effective_draft_token_count_with,
+        endpoint_from_multiaddr, enqueue_scout_work, infer_client_ip, local_scout_fallback_allowed,
+        mesh_forward_score, model_pair_acceptance_rates, normalize_endpoint,
+        parse_speculative_min_request_tokens, probe_allowed_for_request,
         remove_work_id_from_scout_queue, request_host_is_local, resolve_inference_mode,
         should_abort_on_degenerate_output, should_attempt_mesh_forward, should_forward_to_mesh,
         should_refuse_mesh_degraded, strip_control_tokens, InferenceMode, ScoutSupplyEstimate,

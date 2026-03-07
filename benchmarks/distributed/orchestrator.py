@@ -878,9 +878,11 @@ async def run_orchestrator(
                                 or (f"http_{record.status_code}" if record.status_code else "unknown")
                             )
                             error_counts[key] += 1
-                    summary_now = await fetch_summary(client, verifier_pool[0])
-                    acceptance = float(summary_now.get("speculative_acceptance_rate", 0.0)) * 100.0
                     pool_summaries = await fetch_pool_summaries(client, verifier_pool)
+                    current_accepted, current_total = aggregate_speculative_totals(pool_summaries)
+                    acceptance = (
+                        current_accepted / current_total * 100.0 if current_total > 0 else 0.0
+                    )
                     pool_health = await fetch_pool_health(client, verifier_pool)
                     max_queue_depth = max(
                         (float(s.get("queue_depth", 0.0) or 0.0) for s in pool_summaries),
@@ -1024,9 +1026,8 @@ async def run_orchestrator(
     if total_delta > 0:
         acceptance_rate_pct = accepted_delta / total_delta * 100.0
     else:
-        # If the verifier did not record speculative token samples for this run,
-        # don't hard-fail acceptance gates on missing telemetry.
-        acceptance_rate_pct = 100.0
+        # No speculative samples were recorded during the measured run window.
+        acceptance_rate_pct = 0.0
         acceptance_source = "no_speculative_samples"
 
     throughput_tps = oks / float(duration) if duration > 0 else 0.0
@@ -1069,7 +1070,7 @@ async def run_orchestrator(
     gates = {
         "p95_latency_ms": p95_latency_ms <= 3000.0,
         "error_rate_pct": error_rate_pct <= 0.1,
-        "acceptance_rate_pct": acceptance_rate_pct >= 65.0,
+        "acceptance_rate_pct": acceptance_rate_pct >= 65.0 or total_delta == 0,
     }
     passed = all(gates.values())
 

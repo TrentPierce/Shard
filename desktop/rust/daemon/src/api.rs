@@ -227,6 +227,18 @@ async fn reset_scout_runtime_state(state: &SharedState) -> serde_json::Value {
         pending.clear();
         count
     };
+    let cleared_terminal = {
+        let mut terminal = state.speculative_terminal.lock().await;
+        let count = terminal.len();
+        terminal.clear();
+        count
+    };
+    let cleared_trace = {
+        let mut trace = state.speculative_trace.lock().await;
+        let count = trace.len();
+        trace.clear();
+        count
+    };
     let cleared_draft_buffers = {
         let mut buffers = state.draft_buffers.lock().await;
         let count = buffers.len();
@@ -255,6 +267,8 @@ async fn reset_scout_runtime_state(state: &SharedState) -> serde_json::Value {
             "mailboxes": cleared_mailboxes,
             "notifiers": cleared_notifiers,
             "speculative_pending": cleared_pending,
+            "speculative_terminal": cleared_terminal,
+            "speculative_trace": cleared_trace,
             "draft_buffers": cleared_draft_buffers,
         }
     })
@@ -279,6 +293,86 @@ pub(crate) async fn scout_runtime_reset_handler(
     }
 
     Json(reset_scout_runtime_state(&state).await)
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct SpeculativeTraceQuery {
+    request_id: Option<String>,
+    limit: Option<usize>,
+}
+
+pub(crate) async fn speculative_trace_handler(
+    AxumState(state): AxumState<SharedState>,
+    Query(query): Query<SpeculativeTraceQuery>,
+) -> Json<serde_json::Value> {
+    prune_speculative_terminal_state(&state, now_ms()).await;
+    let limit = query.limit.unwrap_or(200).clamp(1, 1000);
+    let request_filter = query
+        .request_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty());
+    let terminal = state.speculative_terminal.lock().await;
+    let trace = state.speculative_trace.lock().await;
+    let mut events = trace
+        .iter()
+        .filter(|event| {
+            request_filter
+                .map(|request_id| event.request_id == request_id)
+                .unwrap_or(true)
+        })
+        .rev()
+        .take(limit)
+        .cloned()
+        .collect::<Vec<_>>();
+    events.reverse();
+    let terminal_state = request_filter.and_then(|request_id| terminal.get(request_id).cloned());
+    Json(serde_json::json!({
+        "ok": true,
+        "count": events.len(),
+        "events": events,
+        "terminal_state": terminal_state,
+    }))
+}
+
+pub(crate) async fn speculative_trace_reset_handler(
+    AxumState(state): AxumState<SharedState>,
+    headers: HeaderMap,
+) -> Json<serde_json::Value> {
+    if let Some(admin_key) = state.admin_key.as_deref() {
+        let provided = headers
+            .get("x-shard-admin")
+            .and_then(|v| v.to_str().ok())
+            .map(str::trim)
+            .unwrap_or_default();
+        if provided != admin_key {
+            return Json(serde_json::json!({
+                "ok": false,
+                "detail": "admin key required for speculative trace reset",
+            }));
+        }
+    }
+
+    let cleared_events = {
+        let mut trace = state.speculative_trace.lock().await;
+        let count = trace.len();
+        trace.clear();
+        count
+    };
+    let cleared_terminal = {
+        let mut terminal = state.speculative_terminal.lock().await;
+        let count = terminal.len();
+        terminal.clear();
+        count
+    };
+
+    Json(serde_json::json!({
+        "ok": true,
+        "cleared": {
+            "events": cleared_events,
+            "terminal": cleared_terminal,
+        }
+    }))
 }
 
 pub(crate) async fn connectivity_handler(
@@ -2215,6 +2309,28 @@ pub(crate) async fn pop_work_handler(
         let created_at_ms = work.created_at_ms.unwrap_or(now);
         let age_ms = now.saturating_sub(created_at_ms);
         if age_ms <= max_age_ms {
+            let is_locally_pending = {
+                let pending = state.speculative_pending.lock().await;
+                pending.contains_key(work.request_id.as_str())
+            };
+            if !is_locally_pending {
+                record_speculative_trace(
+                    &state,
+                    work.request_id.clone(),
+                    "lease_skipped_not_locally_pending",
+                    Some(scout_id.to_string()),
+                    Some("dropping scout work item that is not locally pending".to_string()),
+                    Some(age_ms as u64),
+                )
+                .await;
+                tracing::debug!(
+                    request_id = %work.request_id,
+                    scout_id = %scout_id,
+                    age_ms,
+                    "dropping scout work item because the verifier does not own the pending wait"
+                );
+                continue;
+            }
             let lease_id = uuid::Uuid::new_v4().to_string();
             let lease_expires_at_ms = now.saturating_add(scout_lease_ttl_ms());
             work.lease_id = Some(lease_id.clone());
@@ -2234,6 +2350,15 @@ pub(crate) async fn pop_work_handler(
             }
             state.system_metrics.inc_scout_work_lease_issued();
             state.system_metrics.inc_scout_work_assignment();
+            record_speculative_trace(
+                &state,
+                work.request_id.clone(),
+                "lease_issued",
+                Some(scout_id.to_string()),
+                Some(format!("lease_ttl_ms={}", scout_lease_ttl_ms())),
+                Some(age_ms as u64),
+            )
+            .await;
             tracing::debug!(
                 request_id = %work.request_id,
                 age_ms,
@@ -2394,16 +2519,16 @@ pub(crate) async fn process_draft_submission(
             .copied()
             .map(|issued_at| now.saturating_sub(issued_at) as u64)
     };
-    if pending_age_ms.is_none() {
-        state
-            .system_metrics
-            .inc_speculative_wait_mismatched_work_id();
-        tracing::warn!(
-            work_id = %submission.work_id,
-            scout_id = %submission.scout_id,
-            "received scout draft for non-pending work_id"
-        );
-    } else if let Some(age_ms) = pending_age_ms {
+    if let Some(age_ms) = pending_age_ms {
+        record_speculative_trace(
+            state,
+            submission.work_id.clone(),
+            "draft_submit_pending",
+            Some(submission.scout_id.clone()),
+            None,
+            Some(age_ms),
+        )
+        .await;
         tracing::debug!(
             work_id = %submission.work_id,
             scout_id = %submission.scout_id,
@@ -2439,6 +2564,11 @@ pub(crate) async fn process_draft_submission(
     let pending_exists = {
         let pending = state.speculative_pending.lock().await;
         pending.contains_key(submission.work_id.as_str())
+    };
+    let recent_terminal = if pending_exists {
+        None
+    } else {
+        speculative_terminal_state(state, submission.work_id.as_str()).await
     };
     let lease_id = submission.lease_id.clone().unwrap_or_default();
     let lease_validation_error = {
@@ -2492,6 +2622,55 @@ pub(crate) async fn process_draft_submission(
             }
         }
     };
+    if !pending_exists {
+        if let Some(terminal) = recent_terminal {
+            record_speculative_trace(
+                state,
+                submission.work_id.clone(),
+                "draft_submit_late",
+                Some(submission.scout_id.clone()),
+                Some(format!("terminal_outcome={}", terminal.outcome)),
+                pending_age_ms,
+            )
+            .await;
+            tracing::info!(
+                work_id = %submission.work_id,
+                scout_id = %submission.scout_id,
+                outcome = %terminal.outcome,
+                "ignoring late scout draft after request terminal state"
+            );
+            return Ok(Json(serde_json::json!({
+                "ok": true,
+                "detail": "late_draft_ignored",
+                "terminal_outcome": terminal.outcome,
+            })));
+        }
+        state
+            .system_metrics
+            .inc_speculative_wait_mismatched_work_id();
+        record_speculative_trace(
+            state,
+            submission.work_id.clone(),
+            "draft_submit_mismatched",
+            Some(submission.scout_id.clone()),
+            Some("no_pending_request".to_string()),
+            None,
+        )
+        .await;
+        tracing::warn!(
+            work_id = %submission.work_id,
+            scout_id = %submission.scout_id,
+            "received scout draft for non-pending work_id"
+        );
+        return Err((
+            axum::http::StatusCode::CONFLICT,
+            Json(serde_json::json!({
+                "ok": false,
+                "transient_error": true,
+                "detail": "scout_work_not_pending",
+            })),
+        ));
+    }
     if let Some((detail, status, transient_error, kind)) = lease_validation_error {
         state.system_metrics.inc_task_failures();
         match kind {
@@ -2502,6 +2681,15 @@ pub(crate) async fn process_draft_submission(
             }
             _ => state.system_metrics.inc_scout_draft_reject_lease_mismatch(),
         }
+        record_speculative_trace(
+            state,
+            submission.work_id.clone(),
+            "draft_submit_lease_rejected",
+            Some(submission.scout_id.clone()),
+            Some(detail.to_string()),
+            pending_age_ms,
+        )
+        .await;
         mark_node_failure(state, submission.scout_id.as_str()).await;
         return Err((
             status,
@@ -2605,6 +2793,15 @@ pub(crate) async fn process_draft_submission(
     };
     if duplicate_after_processing {
         state.system_metrics.inc_scout_draft_duplicate();
+        record_speculative_trace(
+            state,
+            response.request_id.clone(),
+            "draft_submit_duplicate",
+            Some(response.peer_id.clone()),
+            None,
+            pending_age_ms,
+        )
+        .await;
         mark_node_success(state, response.peer_id.as_str(), 0.0).await;
         return Ok(Json(serde_json::json!({
             "ok": true,
@@ -2661,6 +2858,15 @@ pub(crate) async fn process_draft_submission(
     match state.scout_draft_tx.try_send(draft_for_channel) {
         Ok(_) => {
             state.system_metrics.inc_scout_draft_channel_enqueued();
+            record_speculative_trace(
+                state,
+                response.request_id.clone(),
+                "draft_submit_enqueued",
+                Some(response.peer_id.clone()),
+                Some(format!("draft_tokens={}", response.draft_tokens.len())),
+                pending_age_ms,
+            )
+            .await;
             Ok(Json(
                 serde_json::json!({ "ok": true, "detail": "draft queued" }),
             ))
@@ -2669,6 +2875,15 @@ pub(crate) async fn process_draft_submission(
             state
                 .system_metrics
                 .inc_scout_draft_channel_enqueue_failure();
+            record_speculative_trace(
+                state,
+                response.request_id.clone(),
+                "draft_submit_mailbox_fallback_full",
+                Some(response.peer_id.clone()),
+                None,
+                pending_age_ms,
+            )
+            .await;
             tracing::warn!("scout draft channel full; using mailbox fallback");
             Ok(Json(serde_json::json!({
                 "ok": true,
@@ -2679,6 +2894,15 @@ pub(crate) async fn process_draft_submission(
             state
                 .system_metrics
                 .inc_scout_draft_channel_enqueue_failure();
+            record_speculative_trace(
+                state,
+                response.request_id.clone(),
+                "draft_submit_mailbox_fallback_closed",
+                Some(response.peer_id.clone()),
+                None,
+                pending_age_ms,
+            )
+            .await;
             tracing::warn!("scout draft channel closed; using mailbox fallback");
             Ok(Json(serde_json::json!({
                 "ok": true,

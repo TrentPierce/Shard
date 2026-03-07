@@ -594,6 +594,10 @@ pub(crate) struct SharedState {
     scout_draft_notifiers: Arc<Mutex<HashMap<String, Arc<Notify>>>>,
     /// Pending speculative requests keyed by work/request id with issue timestamp.
     speculative_pending: Arc<Mutex<HashMap<String, u128>>>,
+    /// Recent terminal outcomes for speculative requests, used to classify late drafts.
+    speculative_terminal: Arc<Mutex<HashMap<String, SpeculativeTerminalState>>>,
+    /// Bounded in-memory trace of speculative lifecycle events.
+    speculative_trace: Arc<Mutex<VecDeque<SpeculativeTraceEvent>>>,
     /// Buffered draft segments for out-of-order speculative submissions.
     draft_buffers: Arc<Mutex<HashMap<String, DraftBuffer>>>,
     /// Channel for announcing bans to the network
@@ -646,6 +650,104 @@ struct SpeculativeConfig {
     max_consecutive_timeouts: u32,
     /// Number of draft tokens to request from scout.
     draft_token_count: usize,
+}
+
+const SPECULATIVE_TRACE_MAX_EVENTS: usize = 4096;
+const SPECULATIVE_TERMINAL_TTL_MS: u128 = 2 * 60 * 1000;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct SpeculativeTerminalState {
+    pub outcome: String,
+    pub observed_at_ms: u128,
+    #[serde(default)]
+    pub scout_id: Option<String>,
+    #[serde(default)]
+    pub detail: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct SpeculativeTraceEvent {
+    pub request_id: String,
+    pub stage: String,
+    pub at_ms: u128,
+    #[serde(default)]
+    pub scout_id: Option<String>,
+    #[serde(default)]
+    pub detail: Option<String>,
+    #[serde(default)]
+    pub pending_age_ms: Option<u64>,
+}
+
+pub(crate) async fn record_speculative_trace(
+    state: &SharedState,
+    request_id: impl Into<String>,
+    stage: impl Into<String>,
+    scout_id: Option<String>,
+    detail: Option<String>,
+    pending_age_ms: Option<u64>,
+) {
+    let event = SpeculativeTraceEvent {
+        request_id: request_id.into(),
+        stage: stage.into(),
+        at_ms: now_ms(),
+        scout_id,
+        detail,
+        pending_age_ms,
+    };
+    let mut trace = state.speculative_trace.lock().await;
+    trace.push_back(event);
+    while trace.len() > SPECULATIVE_TRACE_MAX_EVENTS {
+        trace.pop_front();
+    }
+}
+
+pub(crate) async fn prune_speculative_terminal_state(state: &SharedState, now: u128) {
+    let mut terminal = state.speculative_terminal.lock().await;
+    terminal
+        .retain(|_, entry| now.saturating_sub(entry.observed_at_ms) <= SPECULATIVE_TERMINAL_TTL_MS);
+}
+
+pub(crate) async fn set_speculative_terminal_state(
+    state: &SharedState,
+    request_id: &str,
+    outcome: &str,
+    scout_id: Option<String>,
+    detail: Option<String>,
+) {
+    let now = now_ms();
+    {
+        let mut terminal = state.speculative_terminal.lock().await;
+        terminal.insert(
+            request_id.to_string(),
+            SpeculativeTerminalState {
+                outcome: outcome.to_string(),
+                observed_at_ms: now,
+                scout_id: scout_id.clone(),
+                detail: detail.clone(),
+            },
+        );
+        terminal.retain(|_, entry| {
+            now.saturating_sub(entry.observed_at_ms) <= SPECULATIVE_TERMINAL_TTL_MS
+        });
+    }
+    record_speculative_trace(
+        state,
+        request_id.to_string(),
+        format!("terminal:{outcome}"),
+        scout_id,
+        detail,
+        None,
+    )
+    .await;
+}
+
+pub(crate) async fn speculative_terminal_state(
+    state: &SharedState,
+    request_id: &str,
+) -> Option<SpeculativeTerminalState> {
+    prune_speculative_terminal_state(state, now_ms()).await;
+    let terminal = state.speculative_terminal.lock().await;
+    terminal.get(request_id).cloned()
 }
 
 impl Default for SpeculativeConfig {
@@ -2547,6 +2649,14 @@ fn create_router(
             "/v1/system/scout-runtime/reset",
             post(scout_runtime_reset_handler),
         )
+        .route(
+            "/v1/system/speculative-trace",
+            get(speculative_trace_handler),
+        )
+        .route(
+            "/v1/system/speculative-trace/reset",
+            post(speculative_trace_reset_handler),
+        )
         .route("/v1/system/scout-config", get(scout_config_handler))
         .route(
             "/browser-layer/register",
@@ -3071,6 +3181,8 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
         scout_draft_mailbox: Arc::new(Mutex::new(HashMap::new())),
         scout_draft_notifiers: Arc::new(Mutex::new(HashMap::new())),
         speculative_pending: Arc::new(Mutex::new(HashMap::new())),
+        speculative_terminal: Arc::new(Mutex::new(HashMap::new())),
+        speculative_trace: Arc::new(Mutex::new(VecDeque::new())),
         draft_buffers: Arc::new(Mutex::new(HashMap::new())),
         ban_tx,
         draft_publish_tx,
