@@ -2,6 +2,8 @@ param(
     [int]$ControlPort = 9191,
     [int]$TelemetryWsPort = 9193,
     [string]$ModelPath = "",
+    [ValidateSet("short","long","custom")]
+    [string]$BenchmarkProfile = "short",
     [string[]]$EnvFiles = @(
         "deploy/release/rc1.env",
         "deploy/release/benchmark.env"
@@ -9,6 +11,16 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+$defaultEnvFiles = switch ($BenchmarkProfile) {
+    "short" { @("deploy/release/rc1.env", "deploy/release/benchmark.env") }
+    "long" { @("deploy/release/rc1.env", "deploy/release/long_benchmark.env") }
+    default { $EnvFiles }
+}
+
+if ($BenchmarkProfile -ne "custom") {
+    $EnvFiles = $defaultEnvFiles
+}
 
 $root = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 $exe = Join-Path $root "desktop\rust\target\release\shard-daemon.exe"

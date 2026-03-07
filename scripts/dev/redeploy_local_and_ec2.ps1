@@ -3,7 +3,9 @@ param(
     [string]$Ec2User = "ubuntu",
     [string]$KeyPath = "E:/Clawdbot.pem",
     [string]$RemoteRepo = "/home/ubuntu/Shard",
-    [switch]$ApplyBenchmarkProfile = $true
+    [switch]$ApplyBenchmarkProfile = $true,
+    [ValidateSet("short","long")]
+    [string]$BenchmarkProfile = "short"
 )
 
 $ErrorActionPreference = "Stop"
@@ -14,12 +16,15 @@ $localRunScript = Join-Path $root "scripts\\dev\\run_local_daemon.cmd"
 $localExe = Join-Path $rustDir "target\\release\\shard-daemon.exe"
 $rc1Env = Join-Path $root "deploy\\release\\rc1.env"
 $benchmarkEnv = Join-Path $root "deploy\\release\\benchmark.env"
+$longBenchmarkEnv = Join-Path $root "deploy\\release\\long_benchmark.env"
+$selectedBenchmarkEnv = if ($BenchmarkProfile -eq "long") { $longBenchmarkEnv } else { $benchmarkEnv }
+$selectedRemoteBenchmarkEnvName = if ($BenchmarkProfile -eq "long") { "long_benchmark.env" } else { "benchmark.env" }
 
 if (-not (Test-Path $rc1Env)) {
     throw "Missing runtime profile: $rc1Env"
 }
-if ($ApplyBenchmarkProfile -and -not (Test-Path $benchmarkEnv)) {
-    throw "Missing benchmark profile: $benchmarkEnv"
+if ($ApplyBenchmarkProfile -and -not (Test-Path $selectedBenchmarkEnv)) {
+    throw "Missing benchmark profile: $selectedBenchmarkEnv"
 }
 
 Write-Host "==> Building local shard-daemon (release)"
@@ -32,16 +37,16 @@ Write-Host ("    local build time: {0}" -f $sw.Elapsed)
 
 Write-Host "==> Restarting local shard-daemon"
 taskkill /F /IM shard-daemon.exe 2>$null | Out-Null
-cmd /c start "" "$localRunScript" | Out-Null
+cmd /c start "" "$localRunScript" $BenchmarkProfile | Out-Null
 Start-Sleep -Seconds 3
 $localHealth = Invoke-RestMethod -Uri "http://127.0.0.1:9091/health" -Method Get
 Write-Host ("    local status={0} engine_loaded={1}" -f $localHealth.status, $localHealth.engine_loaded)
 
 $remoteRc1Env = "/tmp/rc1.env"
-$remoteBenchmarkEnv = "/tmp/benchmark.env"
+$remoteBenchmarkEnv = "/tmp/$selectedRemoteBenchmarkEnvName"
 scp -i $KeyPath $rc1Env "${Ec2User}@${Ec2Host}:${remoteRc1Env}" | Out-Null
 if ($ApplyBenchmarkProfile) {
-    scp -i $KeyPath $benchmarkEnv "${Ec2User}@${Ec2Host}:${remoteBenchmarkEnv}" | Out-Null
+    scp -i $KeyPath $selectedBenchmarkEnv "${Ec2User}@${Ec2Host}:${remoteBenchmarkEnv}" | Out-Null
 }
 
 $benchmarkEnvSetup = if ($ApplyBenchmarkProfile) {

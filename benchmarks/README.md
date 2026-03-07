@@ -89,6 +89,16 @@ Matrix classes:
 - `short_rc_stability`: defaults to short requests (`max_tokens=8`) and judges release stability, not scout uplift.
 - `long_scout_generation`: defaults to longer requests (`max_tokens=64`) and requires non-zero speculative samples.
 
+Runtime overlays:
+- `deploy/release/benchmark.env`: short RC stability profile
+- `deploy/release/long_benchmark.env`: long scout-generation profile
+
+Use the long overlay before running the long matrix:
+
+```bash
+pwsh -File scripts/dev/redeploy_local_and_ec2.ps1 -BenchmarkProfile long
+```
+
 ## Output Artifacts
 
 Each run writes to `benchmarks/results/mesh-scale-<timestamp>/`:

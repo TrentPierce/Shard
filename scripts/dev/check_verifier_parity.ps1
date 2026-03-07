@@ -28,12 +28,14 @@ $summary = [ordered]@{
         readiness_reason = $localHealth.readiness_reason
         race_timeout_ms = $localHealth.race_timeout_ms
         scout_profile = $localScoutConfig.config.profile
+        release_profile = $localScoutConfig.config.profile
         backpressure_start_queue_depth = $localScoutConfig.config.backpressure.start_queue_depth
         admission_queue_depth_soft = $localScoutConfig.config.admission.queue_depth_soft
         admission_queue_depth_hard = $localScoutConfig.config.admission.queue_depth_hard
         active_cap_base = $localScoutConfig.config.active_cap.base
         active_cap_soft = $localScoutConfig.config.active_cap.soft
         active_cap_hard = $localScoutConfig.config.active_cap.hard
+        verifier_queue_cap = $localHealth.verifier_queue_cap
     }
     remote = [ordered]@{
         url = $RemoteUrl
@@ -43,17 +45,19 @@ $summary = [ordered]@{
         readiness_reason = $remoteHealth.readiness_reason
         race_timeout_ms = $remoteHealth.race_timeout_ms
         scout_profile = $remoteScoutConfig.config.profile
+        release_profile = $remoteScoutConfig.config.profile
         backpressure_start_queue_depth = $remoteScoutConfig.config.backpressure.start_queue_depth
         admission_queue_depth_soft = $remoteScoutConfig.config.admission.queue_depth_soft
         admission_queue_depth_hard = $remoteScoutConfig.config.admission.queue_depth_hard
         active_cap_base = $remoteScoutConfig.config.active_cap.base
         active_cap_soft = $remoteScoutConfig.config.active_cap.soft
         active_cap_hard = $remoteScoutConfig.config.active_cap.hard
+        verifier_queue_cap = $remoteHealth.verifier_queue_cap
     }
 }
 
 $mismatches = @()
-foreach ($key in @("rust_version", "model_id", "race_timeout_ms", "scout_profile", "backpressure_start_queue_depth", "admission_queue_depth_soft", "admission_queue_depth_hard", "active_cap_base", "active_cap_soft", "active_cap_hard")) {
+foreach ($key in @("rust_version", "model_id", "race_timeout_ms", "scout_profile", "release_profile", "backpressure_start_queue_depth", "admission_queue_depth_soft", "admission_queue_depth_hard", "active_cap_base", "active_cap_soft", "active_cap_hard", "verifier_queue_cap")) {
     if ($summary.local[$key] -ne $summary.remote[$key]) {
         $mismatches += $key
     }

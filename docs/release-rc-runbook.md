@@ -9,6 +9,9 @@ This runbook is the operator procedure for running and judging a Shard release c
    - EC2 verifier
 2. Use one runtime profile on both verifiers:
    - `deploy/release/rc1.env`
+   - plus one explicit benchmark overlay:
+     - `deploy/release/benchmark.env` for `short_rc_stability`
+     - `deploy/release/long_benchmark.env` for `long_scout_generation`
 3. Verify parity on both hosts:
 
 ```bash
@@ -24,7 +27,7 @@ curl http://127.0.0.1:9091/v1/system/scout-config
 already loads both:
 
 - `deploy/release/rc1.env`
-- `deploy/release/benchmark.env`
+- one benchmark overlay env selected for the class under test
 
 ```bash
 docker compose -f deploy/demo/docker-compose.mesh.yml down -v
@@ -84,6 +87,21 @@ pwsh -File scripts/dev/check_verifier_parity.ps1 \
 
 The parity check must report `ok: true` before matrix runs.
 
+### Profile selection
+
+- Use `benchmark.env` for `short_rc_stability`
+- Use `long_benchmark.env` for `long_scout_generation`
+
+Local + EC2 redeploy helper:
+
+```bash
+# short RC stability
+pwsh -File scripts/dev/redeploy_local_and_ec2.ps1 -BenchmarkProfile short
+
+# long scout-generation baseline / uplift work
+pwsh -File scripts/dev/redeploy_local_and_ec2.ps1 -BenchmarkProfile long
+```
+
 ## 3. Run Release Matrices
 
 ### Short RC stability gate
@@ -115,6 +133,12 @@ python benchmarks/distributed/run_release_matrix.py \
 ```
 
 Use this class to answer whether scouts are actually engaging speculatively and improving long generations.
+
+Before the long matrix, deploy the long overlay profile:
+
+```bash
+pwsh -File scripts/dev/redeploy_local_and_ec2.ps1 -BenchmarkProfile long
+```
 
 The release matrix now fails closed by default:
 
