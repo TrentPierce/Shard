@@ -12,7 +12,7 @@ $ErrorActionPreference = "Stop"
 
 $root = (Resolve-Path (Join-Path $PSScriptRoot "..\\..")).Path
 $rustDir = Join-Path $root "desktop\\rust"
-$localRunScript = Join-Path $root "scripts\\dev\\run_local_daemon.cmd"
+$localRunScript = Join-Path $root "scripts\\dev\\run_local_release_daemon.cmd"
 $localExe = Join-Path $rustDir "target\\release\\shard-daemon.exe"
 $rc1Env = Join-Path $root "deploy\\release\\rc1.env"
 $benchmarkEnv = Join-Path $root "deploy\\release\\benchmark.env"
@@ -39,7 +39,7 @@ Write-Host "==> Restarting local shard-daemon"
 taskkill /F /IM shard-daemon.exe 2>$null | Out-Null
 cmd /c start "" "$localRunScript" $BenchmarkProfile | Out-Null
 Start-Sleep -Seconds 3
-$localHealth = Invoke-RestMethod -Uri "http://127.0.0.1:9091/health" -Method Get
+$localHealth = Invoke-RestMethod -Uri "http://127.0.0.1:9191/health" -Method Get
 Write-Host ("    local status={0} engine_loaded={1}" -f $localHealth.status, $localHealth.engine_loaded)
 
 $remoteRc1Env = "/tmp/rc1.env"
