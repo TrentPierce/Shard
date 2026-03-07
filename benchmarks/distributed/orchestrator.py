@@ -486,6 +486,8 @@ async def run_orchestrator(
         "requests_sent": 0,
     }
     effective_browser_warmup_request_max_tokens = browser_warmup_request_max_tokens
+    baseline_accepted = 0.0
+    baseline_total = 0.0
 
     try:
         async with httpx.AsyncClient(limits=limits, timeout=timeout) as client:
@@ -880,8 +882,12 @@ async def run_orchestrator(
                             error_counts[key] += 1
                     pool_summaries = await fetch_pool_summaries(client, verifier_pool)
                     current_accepted, current_total = aggregate_speculative_totals(pool_summaries)
+                    accepted_delta = max(0.0, current_accepted - baseline_accepted)
+                    current_total_delta = max(0.0, current_total - baseline_total)
                     acceptance = (
-                        current_accepted / current_total * 100.0 if current_total > 0 else 0.0
+                        accepted_delta / current_total_delta * 100.0
+                        if current_total_delta > 0
+                        else 0.0
                     )
                     pool_health = await fetch_pool_health(client, verifier_pool)
                     max_queue_depth = max(
@@ -946,6 +952,7 @@ async def run_orchestrator(
                             "blackout_endpoints": blackout_endpoints,
                             "p95_latency_ms": round(p95, 3),
                             "acceptance_rate_pct": round(acceptance, 3),
+                            "acceptance_samples": int(current_total_delta),
                             "error_rate_pct": round(err_rate, 4),
                         }
                     )

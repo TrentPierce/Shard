@@ -89,6 +89,8 @@ Current result:
 
 ## Phase 4: Honest Long Scout Uplift
 
+Status: complete
+
 Problem:
 - long scout runs still need to prove measured-window speculative engagement and net improvement
 
@@ -107,12 +109,20 @@ Exit criteria:
 - `long_scout_generation` either earns `GO` honestly or remains `NO_GO` honestly
 - public benchmark numbers are updated only from repeatable long-run artifacts
 
+Current result:
+- repeated `long_scout_generation` on `long_benchmark.env` remains `NO_GO`
+- measured-window speculative samples are now reported honestly instead of inheriting warmup counters
+- `two-node-with-scouts` still fails on tail latency versus the clean two-node no-scout baseline
+- public benchmark numbers remain unchanged until scouts improve net long-request performance
+
 ## Order Of Execution
 
 1. Phase 1: add the dedicated long benchmark profile and profile selection support
 2. Phase 2: make long-matrix defaults match the long profile
 3. Phase 3: establish a trustworthy long no-scout baseline
 4. Phase 4: rerun repeated long scout uplift and decide whether public numbers change
+
+Current roadmap status: all phases complete. The benchmark program is now honest enough to trust, and the remaining work is product performance rather than harness ambiguity.
 
 ## Non-Goals
 
