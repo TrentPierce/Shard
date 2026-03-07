@@ -2010,7 +2010,7 @@ pub(crate) async fn chat_completions_handler(
     prompt.push_str("<|start_header_id|>assistant<|end_header_id|>\n\n");
 
     let request_id = format!("req-{}", uuid::Uuid::new_v4());
-    let request_started_ms = now_ms();
+    let _request_started_ms = now_ms();
     let requested_draft_model = req
         .model
         .clone()
