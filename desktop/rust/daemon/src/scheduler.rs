@@ -2106,6 +2106,9 @@ pub(crate) async fn chat_completions_handler(
         }
     };
 
+    // Measure only the actual inference time, not the speculative probe wait.
+    let inference_started_ms = now_ms();
+
     if stream_mode {
         let stream = async_stream::stream! {
             let _verifier_load_guard = verifier_load_guard;
@@ -2329,7 +2332,7 @@ pub(crate) async fn chat_completions_handler(
                 .system_metrics
                 .inc_tokens_processed(completion_tokens_generated);
 
-            let latency_ms = (now_ms().saturating_sub(request_started_ms)) as u64;
+            let latency_ms = (now_ms().saturating_sub(inference_started_ms)) as u64;
             update_request_latency_ewma(&state, latency_ms);
             let (acceptance_rate, reject_rate) = request_acceptance
                 .map(|v| (Some(v.0), Some(v.1)))
@@ -2551,7 +2554,7 @@ pub(crate) async fn chat_completions_handler(
             }
         }
 
-        let latency_ms = (now_ms().saturating_sub(request_started_ms)) as u64;
+        let latency_ms = (now_ms().saturating_sub(inference_started_ms)) as u64;
         update_request_latency_ewma(&state, latency_ms);
         let (acceptance_rate, reject_rate) = request_acceptance
             .map(|v| (Some(v.0), Some(v.1)))
