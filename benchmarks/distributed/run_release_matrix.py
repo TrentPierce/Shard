@@ -47,9 +47,11 @@ class MatrixClass:
     name: str
     title: str
     purpose: str
+    recommended_profile: str
     default_rate: float
     default_duration: int
     default_max_tokens: int
+    default_auto_calibrate_rate: bool
     default_auto_calibrate_utilization: float
     default_auto_timeout_multiplier: float
     default_browser_warmup_timeout_s: int
@@ -77,9 +79,11 @@ MATRIX_CLASSES: dict[str, MatrixClass] = {
             "Short release gate focused on verifier/scout stability, readiness, and tail latency "
             "under brief requests. This class does not assume scouts must engage speculatively."
         ),
+        recommended_profile="benchmark.env",
         default_rate=2.0,
         default_duration=10,
         default_max_tokens=8,
+        default_auto_calibrate_rate=False,
         default_auto_calibrate_utilization=0.85,
         default_auto_timeout_multiplier=4.0,
         default_browser_warmup_timeout_s=45,
@@ -93,9 +97,11 @@ MATRIX_CLASSES: dict[str, MatrixClass] = {
             "Longer generation workload meant to exercise speculative routing and measure whether "
             "browser scouts produce accepted draft tokens and real throughput uplift."
         ),
+        recommended_profile="long_benchmark.env",
         default_rate=2.0,
         default_duration=60,
         default_max_tokens=64,
+        default_auto_calibrate_rate=True,
         default_auto_calibrate_utilization=0.55,
         default_auto_timeout_multiplier=6.0,
         default_browser_warmup_timeout_s=90,
@@ -462,6 +468,7 @@ def markdown_report(summary: dict[str, Any]) -> str:
     lines.append(f"- Commit: `{summary['git_commit']}`")
     lines.append(f"- Matrix class: `{matrix_class['name']}`")
     lines.append(f"- Matrix title: **{matrix_class['title']}**")
+    lines.append(f"- Recommended runtime overlay: `{matrix_class['recommended_profile']}`")
     lines.append(f"- Recommendation: **{summary['recommendation']}**")
     lines.append("")
     lines.append("## Matrix Purpose")
@@ -539,6 +546,7 @@ async def execute(args: argparse.Namespace) -> dict[str, Any]:
         if args.browser_warmup_request_max_tokens == 0
         else args.browser_warmup_request_max_tokens
     )
+    auto_calibrate_rate = args.auto_calibrate_rate or matrix_class.default_auto_calibrate_rate
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     suffix = f"-{args.tag.strip()}" if args.tag and args.tag.strip() else ""
     run_dir = Path(args.out_dir) / f"release-rc-{stamp}{suffix}"
@@ -557,7 +565,7 @@ async def execute(args: argparse.Namespace) -> dict[str, Any]:
             scenario_rate = rate
             scenario_timeout_ms = args.request_timeout_ms
             latency_probe_ms: dict[str, float] = {}
-            if args.auto_calibrate_rate:
+            if auto_calibrate_rate:
                 scenario_rate, scenario_timeout_ms, latency_probe_ms = await calibrate_scenario_load(
                     pool=pool,
                     configured_rate=rate,
@@ -691,6 +699,7 @@ async def execute(args: argparse.Namespace) -> dict[str, Any]:
             "inference_mode": args.inference_mode,
             "request_timeout_ms": args.request_timeout_ms,
             "auto_calibrate_rate": args.auto_calibrate_rate,
+            "effective_auto_calibrate_rate": auto_calibrate_rate,
             "auto_calibrate_utilization": auto_calibrate_utilization,
             "auto_timeout_multiplier": auto_timeout_multiplier,
             "max_attempts": args.max_attempts,
@@ -718,6 +727,7 @@ async def execute(args: argparse.Namespace) -> dict[str, Any]:
             "name": matrix_class.name,
             "title": matrix_class.title,
             "purpose": matrix_class.purpose,
+            "recommended_profile": matrix_class.recommended_profile,
         },
         "aggregates": aggregates,
         "gates": [],
