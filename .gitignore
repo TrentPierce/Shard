@@ -30,6 +30,7 @@ desktop/rust/vendor/
 **/*.rs.bk
 
 # Node / Web
+node_modules/
 web/node_modules/
 web/.next/
 web/out/
@@ -102,3 +103,6 @@ tmp_fix.py
 docs/devplan3326.md
 cpp/llama.cpp/.devops/*.srpm.spec
 reports/
+recent_changes.txt
+*.out.log
+docs/recent_changes.txt
