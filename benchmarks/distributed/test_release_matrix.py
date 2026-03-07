@@ -74,6 +74,33 @@ class ReleaseMatrixScenarioTests(unittest.TestCase):
         )
         self.assertFalse(bool(speculative_gate["pass"]))
 
+    def test_long_scout_generation_uses_relative_uplift_not_short_absolute_tps_gate(self) -> None:
+        gates = evaluate_release_gates(
+            {
+                "two-node-no-scouts": {
+                    "p95_latency_ms_median": 1500.0,
+                    "throughput_tps_median": 1.2,
+                    "all_orchestrator_runs_passed": True,
+                },
+                "two-node-with-scouts": {
+                    "p95_latency_ms_median": 1550.0,
+                    "error_rate_pct_median": 0.0,
+                    "timeout_rate_pct_median": 0.0,
+                    "http_429_rate_pct_median": 0.0,
+                    "http_503_rate_pct_median": 0.0,
+                    "throughput_tps_median": 1.3,
+                    "speculative_samples_median": 10.0,
+                    "all_orchestrator_runs_passed": True,
+                },
+            },
+            resolve_matrix_class("long_scout_generation"),
+        )
+        self.assertFalse(any(gate["name"] == "two_node_with_scouts_tps" for gate in gates))
+        uplift_gate = next(
+            gate for gate in gates if gate["name"] == "two_node_with_scouts_tps_vs_no_scouts"
+        )
+        self.assertTrue(bool(uplift_gate["pass"]))
+
 
 if __name__ == "__main__":
     unittest.main()

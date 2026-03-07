@@ -95,6 +95,11 @@ class LoadAwarePool:
                 return float("inf")
             return self._score(state)
 
+    async def ranked_endpoints(self, client: httpx.AsyncClient) -> list[str]:
+        await self.refresh(client)
+        async with self._lock:
+            return [state.endpoint for state in sorted(self._states.values(), key=self._score)]
+
     async def note_result(self, endpoint: str, ok: bool, latency_ms: float) -> None:
         async with self._lock:
             state = self._states.get(endpoint.rstrip("/"))
@@ -223,6 +228,17 @@ def adaptive_scout_target(
     if max_queue_depth <= 2.0 and max_p95_latency_ms <= 3500.0:
         return configured_max
     return max(1, min(configured_max, current))
+
+
+async def choose_browser_backends(
+    pool: LoadAwarePool,
+    client: httpx.AsyncClient,
+    count: int,
+) -> list[str]:
+    ranked = await pool.ranked_endpoints(client)
+    if not ranked:
+        raise RuntimeError("no verifier endpoints configured for browser scouts")
+    return [ranked[idx % len(ranked)] for idx in range(max(1, count))]
 
 
 async def fetch_summary(client: httpx.AsyncClient, base_url: str) -> dict:
@@ -435,6 +451,7 @@ async def run_orchestrator(
     browser_user_data_dir: str | None = None,
     browser_warmup_timeout_s: int = 45,
     browser_warmup_max_requests: int = 12,
+    browser_warmup_request_max_tokens: int | None = None,
     readiness_timeout_s: int = 120,
     ready_queue_depth_max: float = 8.0,
     require_no_blackout: bool = True,
@@ -468,6 +485,7 @@ async def run_orchestrator(
         "productive": False,
         "requests_sent": 0,
     }
+    effective_browser_warmup_request_max_tokens = browser_warmup_request_max_tokens
 
     try:
         async with httpx.AsyncClient(limits=limits, timeout=timeout) as client:
@@ -650,6 +668,7 @@ async def run_orchestrator(
                                 f"{endpoint}/v1/chat/completions",
                                 headers={
                                     "x-shard-inference-mode": inference_mode,
+                                    "x-shard-mesh-forward": "false",
                                 },
                                 json={
                                     "model": "shard-hybrid",
@@ -692,21 +711,26 @@ async def run_orchestrator(
                     async with in_flight_lock:
                         in_flight -= 1
 
-            async def warmup_one(seq: int) -> bool:
+            async def warmup_one(seq: int, endpoint_override: str | None = None) -> bool:
                 endpoint = None
                 t0 = time.monotonic()
                 ok = False
                 try:
-                    endpoint = await pool.next(client)
+                    endpoint = endpoint_override or await pool.next(client)
                     resp = await client.post(
                         f"{endpoint}/v1/chat/completions",
                         headers={
-                            "x-shard-inference-mode": inference_mode,
+                            "x-shard-inference-mode": "speculative",
                         },
                         json={
                             "model": "shard-hybrid",
                             "messages": [{"role": "user", "content": f"browser scout warmup {seq}"}],
-                            "max_tokens": max(4, max_tokens),
+                            "max_tokens": max(
+                                4,
+                                effective_browser_warmup_request_max_tokens
+                                if effective_browser_warmup_request_max_tokens is not None
+                                else max_tokens,
+                            ),
                         },
                     )
                     ok = resp.status_code < 400
@@ -722,6 +746,7 @@ async def run_orchestrator(
                         )
 
             async def warmup_browser_scouts() -> dict[str, object]:
+                nonlocal effective_browser_warmup_request_max_tokens
                 info: dict[str, object] = {
                     "attempted": True,
                     "ready": False,
@@ -746,6 +771,16 @@ async def run_orchestrator(
                 scout_config = await fetch_scout_config(client, verifier_pool[0])
                 speculative_cfg = scout_config.get("config", {}).get("speculative", {})
                 min_request_tokens = int(speculative_cfg.get("min_request_tokens", 0) or 0)
+                warmup_request_max_tokens = browser_warmup_request_max_tokens
+                if warmup_request_max_tokens is None:
+                    warmup_request_max_tokens = max(
+                        4,
+                        min(
+                            max_tokens,
+                            max(min_request_tokens, 16),
+                        ),
+                    )
+                effective_browser_warmup_request_max_tokens = warmup_request_max_tokens
                 if min_request_tokens > 0 and max_tokens < min_request_tokens:
                     info["speculative_bypassed_for_request"] = True
                     print(
@@ -770,9 +805,10 @@ async def run_orchestrator(
                 for seq in range(attempts):
                     if time.monotonic() >= deadline:
                         break
-                    await warmup_one(seq)
+                    warmup_endpoint = verifier_pool[seq % len(verifier_pool)]
+                    await warmup_one(seq, endpoint_override=warmup_endpoint)
                     info["requests_sent"] = int(info["requests_sent"]) + 1
-                    await asyncio.sleep(0.35)
+                    await asyncio.sleep(0.6)
                     pool_summaries = await fetch_pool_summaries(client, verifier_pool)
                     pool_health = await fetch_pool_health(client, verifier_pool)
                     submit_success_total = aggregate_counter(
@@ -914,10 +950,7 @@ async def run_orchestrator(
     
             scout_tasks: list[asyncio.Task] = []
             if scout_workers > 0 and scout_mode == "browser":
-                browser_backends = [
-                    await pool.best_endpoint_for_scout(client)
-                    for _ in range(max(1, scout_workers))
-                ]
+                browser_backends = await choose_browser_backends(pool, client, scout_workers)
                 print(
                     "[browser-scout-runner] selected backends: "
                     + ", ".join(browser_backends)
@@ -1132,6 +1165,12 @@ def parse_args() -> argparse.Namespace:
         help="Maximum untimed warmup requests used to prime real browser scouts",
     )
     parser.add_argument(
+        "--browser-warmup-request-max-tokens",
+        type=int,
+        default=0,
+        help="Override max_tokens for untimed browser scout warmup requests (0 uses scenario max_tokens)",
+    )
+    parser.add_argument(
         "--max-tokens",
         type=int,
         default=32,
@@ -1187,6 +1226,11 @@ def main() -> None:
             ready_queue_depth_max=args.ready_queue_depth_max,
             require_no_blackout=not args.allow_readiness_blackout,
             strict_readiness=args.strict_readiness,
+            browser_warmup_request_max_tokens=(
+                args.browser_warmup_request_max_tokens
+                if args.browser_warmup_request_max_tokens > 0
+                else None
+            ),
         )
     )
     raise SystemExit(exit_code)

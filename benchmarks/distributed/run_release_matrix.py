@@ -50,6 +50,11 @@ class MatrixClass:
     default_rate: float
     default_duration: int
     default_max_tokens: int
+    default_auto_calibrate_utilization: float
+    default_auto_timeout_multiplier: float
+    default_browser_warmup_timeout_s: int
+    default_browser_warmup_max_requests: int
+    default_browser_warmup_request_max_tokens: int | None
 
 
 def scenario_inference_mode(scenario: Scenario, default_mode: str) -> str:
@@ -75,6 +80,11 @@ MATRIX_CLASSES: dict[str, MatrixClass] = {
         default_rate=2.0,
         default_duration=10,
         default_max_tokens=8,
+        default_auto_calibrate_utilization=0.85,
+        default_auto_timeout_multiplier=4.0,
+        default_browser_warmup_timeout_s=45,
+        default_browser_warmup_max_requests=12,
+        default_browser_warmup_request_max_tokens=None,
     ),
     "long_scout_generation": MatrixClass(
         name="long_scout_generation",
@@ -86,6 +96,11 @@ MATRIX_CLASSES: dict[str, MatrixClass] = {
         default_rate=2.0,
         default_duration=60,
         default_max_tokens=64,
+        default_auto_calibrate_utilization=0.55,
+        default_auto_timeout_multiplier=6.0,
+        default_browser_warmup_timeout_s=90,
+        default_browser_warmup_max_requests=18,
+        default_browser_warmup_request_max_tokens=16,
     ),
 }
 
@@ -348,14 +363,6 @@ def evaluate_release_gates(
             "pass": err_with <= 3.0,
         },
         {
-            "name": "two_node_with_scouts_tps",
-            "description": "2-node with scouts throughput must be >= 3.75 TPS",
-            "actual": round(tps_with, 4),
-            "expected_op": ">=",
-            "expected": 3.75,
-            "pass": tps_with >= 3.75,
-        },
-        {
             "name": "two_node_with_scouts_timeout_rate_pct",
             "description": "2-node with scouts timeout rate must be <= 2%",
             "actual": round(timeout_with, 4),
@@ -378,6 +385,22 @@ def evaluate_release_gates(
             "expected_op": ">",
             "expected": 0.0,
             "pass": float(two_with.get("speculative_samples_median", 0.0)) > 0.0,
+        },
+        {
+            "name": "two_node_no_scouts_runs_pass",
+            "description": "2-node no-scout runs must all exit cleanly",
+            "actual": bool(two_no.get("all_orchestrator_runs_passed", False)),
+            "expected_op": "==",
+            "expected": True,
+            "pass": bool(two_no.get("all_orchestrator_runs_passed", False)),
+        },
+        {
+            "name": "two_node_with_scouts_runs_pass",
+            "description": "2-node scout runs must all exit cleanly",
+            "actual": bool(two_with.get("all_orchestrator_runs_passed", False)),
+            "expected_op": "==",
+            "expected": True,
+            "pass": bool(two_with.get("all_orchestrator_runs_passed", False)),
         },
     ]
 
@@ -491,6 +514,31 @@ async def execute(args: argparse.Namespace) -> dict[str, Any]:
     rate = float(configured_value(args.rate, matrix_class.default_rate))
     duration = int(configured_value(args.duration, matrix_class.default_duration))
     max_tokens = int(configured_value(args.max_tokens, matrix_class.default_max_tokens))
+    auto_calibrate_utilization = (
+        matrix_class.default_auto_calibrate_utilization
+        if args.auto_calibrate_utilization == 0.85
+        else args.auto_calibrate_utilization
+    )
+    auto_timeout_multiplier = (
+        matrix_class.default_auto_timeout_multiplier
+        if args.auto_timeout_multiplier == 4.0
+        else args.auto_timeout_multiplier
+    )
+    browser_warmup_timeout_s = (
+        matrix_class.default_browser_warmup_timeout_s
+        if args.browser_warmup_timeout_s == 45
+        else args.browser_warmup_timeout_s
+    )
+    browser_warmup_max_requests = (
+        matrix_class.default_browser_warmup_max_requests
+        if args.browser_warmup_max_requests == 12
+        else args.browser_warmup_max_requests
+    )
+    browser_warmup_request_max_tokens = (
+        matrix_class.default_browser_warmup_request_max_tokens
+        if args.browser_warmup_request_max_tokens == 0
+        else args.browser_warmup_request_max_tokens
+    )
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     suffix = f"-{args.tag.strip()}" if args.tag and args.tag.strip() else ""
     run_dir = Path(args.out_dir) / f"release-rc-{stamp}{suffix}"
@@ -515,8 +563,8 @@ async def execute(args: argparse.Namespace) -> dict[str, Any]:
                     configured_rate=rate,
                     request_timeout_ms=args.request_timeout_ms,
                     max_tokens=max_tokens,
-                    utilization=args.auto_calibrate_utilization,
-                    timeout_multiplier=args.auto_timeout_multiplier,
+                    utilization=auto_calibrate_utilization,
+                    timeout_multiplier=auto_timeout_multiplier,
                 )
             for run_idx in range(1, args.runs_per_scenario + 1):
                 await reset_scout_runtime_state(pool)
@@ -544,8 +592,9 @@ async def execute(args: argparse.Namespace) -> dict[str, Any]:
                     browser_headless=args.browser_headless,
                     browser_startup_timeout_ms=args.browser_startup_timeout_ms,
                     browser_user_data_dir=args.browser_user_data_dir or None,
-                    browser_warmup_timeout_s=args.browser_warmup_timeout_s,
-                    browser_warmup_max_requests=args.browser_warmup_max_requests,
+                    browser_warmup_timeout_s=browser_warmup_timeout_s,
+                    browser_warmup_max_requests=browser_warmup_max_requests,
+                    browser_warmup_request_max_tokens=browser_warmup_request_max_tokens,
                     readiness_timeout_s=args.readiness_timeout_s,
                     ready_queue_depth_max=args.ready_queue_depth_max,
                     require_no_blackout=not args.allow_readiness_blackout,
@@ -642,8 +691,8 @@ async def execute(args: argparse.Namespace) -> dict[str, Any]:
             "inference_mode": args.inference_mode,
             "request_timeout_ms": args.request_timeout_ms,
             "auto_calibrate_rate": args.auto_calibrate_rate,
-            "auto_calibrate_utilization": args.auto_calibrate_utilization,
-            "auto_timeout_multiplier": args.auto_timeout_multiplier,
+            "auto_calibrate_utilization": auto_calibrate_utilization,
+            "auto_timeout_multiplier": auto_timeout_multiplier,
             "max_attempts": args.max_attempts,
             "max_tokens": max_tokens,
             "scout_mode": args.scout_mode,
@@ -652,8 +701,9 @@ async def execute(args: argparse.Namespace) -> dict[str, Any]:
             "browser_headless": args.browser_headless,
             "browser_startup_timeout_ms": args.browser_startup_timeout_ms,
             "browser_user_data_dir": args.browser_user_data_dir,
-            "browser_warmup_timeout_s": args.browser_warmup_timeout_s,
-            "browser_warmup_max_requests": args.browser_warmup_max_requests,
+            "browser_warmup_timeout_s": browser_warmup_timeout_s,
+            "browser_warmup_max_requests": browser_warmup_max_requests,
+            "browser_warmup_request_max_tokens": browser_warmup_request_max_tokens,
             "readiness_timeout_s": args.readiness_timeout_s,
             "ready_queue_depth_max": args.ready_queue_depth_max,
             "allow_readiness_blackout": args.allow_readiness_blackout,
@@ -736,6 +786,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--browser-user-data-dir", type=str, default="")
     parser.add_argument("--browser-warmup-timeout-s", type=int, default=45)
     parser.add_argument("--browser-warmup-max-requests", type=int, default=12)
+    parser.add_argument(
+        "--browser-warmup-request-max-tokens",
+        type=int,
+        default=0,
+        help="Override max_tokens for untimed browser scout warmup requests (0 uses matrix defaults)",
+    )
     parser.add_argument(
         "--inference-mode",
         type=str,

@@ -498,6 +498,9 @@ const DEFAULT_SCOUT_LEASE_TTL_MS: u128 = 12_000;
 const DEFAULT_SCOUT_BLACKOUT_TRIGGER_MS: u128 = 15_000;
 const DEFAULT_SCOUT_BLACKOUT_DURATION_MS: u128 = 20_000;
 const DEFAULT_SCOUT_REOPEN_STAGE_MS: u128 = 12_000;
+const DEFAULT_SCOUT_BOOTSTRAP_ACTIVE_CAP: usize = 1;
+const DEFAULT_SCOUT_BOOTSTRAP_QUEUE_DEPTH_MAX: usize = 3;
+const DEFAULT_SCOUT_BOOTSTRAP_LATENCY_MAX_MS: u64 = 4_500;
 const DEFAULT_SCOUT_MIN_QUALITY_SCORE: i32 = 35;
 const DEFAULT_SCOUT_MIN_QUALITY_SAMPLES: usize = 6;
 
@@ -734,6 +737,30 @@ fn scout_reopen_stage_ms() -> u128 {
         .and_then(|v| v.trim().parse::<u128>().ok())
         .map(|v| v.clamp(1_000, 120_000))
         .unwrap_or(DEFAULT_SCOUT_REOPEN_STAGE_MS)
+}
+
+fn scout_bootstrap_active_cap() -> usize {
+    std::env::var("SHARD_SCOUT_BOOTSTRAP_ACTIVE_CAP")
+        .ok()
+        .and_then(|v| v.trim().parse::<usize>().ok())
+        .map(|v| v.clamp(1, 8))
+        .unwrap_or(DEFAULT_SCOUT_BOOTSTRAP_ACTIVE_CAP)
+}
+
+fn scout_bootstrap_queue_depth_max() -> usize {
+    std::env::var("SHARD_SCOUT_BOOTSTRAP_QUEUE_DEPTH_MAX")
+        .ok()
+        .and_then(|v| v.trim().parse::<usize>().ok())
+        .map(|v| v.clamp(1, 64))
+        .unwrap_or(DEFAULT_SCOUT_BOOTSTRAP_QUEUE_DEPTH_MAX)
+}
+
+fn scout_bootstrap_latency_max_ms() -> u64 {
+    std::env::var("SHARD_SCOUT_BOOTSTRAP_LATENCY_MAX_MS")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .map(|v| v.clamp(500, 20_000))
+        .unwrap_or(DEFAULT_SCOUT_BOOTSTRAP_LATENCY_MAX_MS)
 }
 
 fn scout_min_quality_score() -> i32 {
@@ -1059,6 +1086,65 @@ async fn recent_active_scouts(state: &SharedState, now: u128) -> std::collection
             }
         })
         .collect()
+}
+
+async fn scout_bootstrap_assignment_allowed(
+    state: &SharedState,
+    scout_id: &str,
+    queue_depth: usize,
+    p95_latency_ms: u64,
+    now: u128,
+) -> bool {
+    const SCOUT_SUBMIT_ACTIVE_WINDOW_MS: u128 = 90 * 1000;
+
+    if queue_depth > scout_bootstrap_queue_depth_max()
+        || p95_latency_ms > scout_bootstrap_latency_max_ms()
+    {
+        return false;
+    }
+
+    let (has_active_runtime, browser_draft_capable) = {
+        let mut runtime = state.scout_client_runtime.lock().await;
+        prune_scout_client_runtime(&mut runtime, now);
+        let has_active_runtime = runtime.get(scout_id).is_some_and(|status| {
+            status
+                .runtime_mode
+                .as_deref()
+                .map(|mode| mode.eq_ignore_ascii_case("webgpu"))
+                .unwrap_or(false)
+                && now.saturating_sub(status.last_event_ms) <= SCOUT_CLIENT_ACTIVE_WINDOW_MS
+        });
+        let browser_draft_capable = runtime
+            .values()
+            .filter(|status| {
+                status
+                    .runtime_mode
+                    .as_deref()
+                    .map(|mode| mode.eq_ignore_ascii_case("webgpu"))
+                    .unwrap_or(false)
+                    && now.saturating_sub(status.last_event_ms) <= SCOUT_CLIENT_ACTIVE_WINDOW_MS
+            })
+            .count();
+        (has_active_runtime, browser_draft_capable)
+    };
+    if !has_active_runtime || browser_draft_capable == 0 {
+        return false;
+    }
+
+    let recent_submitters = {
+        let mut submits = state.scout_draft_last_submit.lock().await;
+        prune_recent_activity_map(&mut submits, now, SCOUT_CLIENT_RUNTIME_TTL_MS);
+        submits
+            .values()
+            .filter(|ts| now.saturating_sub(**ts) <= SCOUT_SUBMIT_ACTIVE_WINDOW_MS)
+            .count()
+    };
+    if recent_submitters > 0 {
+        return false;
+    }
+
+    let active_scouts = recent_active_scouts(state, now).await;
+    active_scouts.contains(scout_id) || active_scouts.len() < scout_bootstrap_active_cap()
 }
 
 fn scout_assignment_backpressured(
@@ -2017,6 +2103,9 @@ pub(crate) async fn pop_work_handler(
     let queue_depth = effective_verifier_queue_depth(&state, pending_queue_depth);
     let (avg_latency_ms, p95_latency_ms) = verifier_latency_snapshot(&state);
     let blackout_mode = update_scout_blackout_state(&state, queue_depth, p95_latency_ms, now).await;
+    let bootstrap_lane =
+        scout_bootstrap_assignment_allowed(&state, scout_id, queue_depth, p95_latency_ms, now)
+            .await;
     if blackout_mode == ScoutBlackoutMode::Blackout {
         state.system_metrics.inc_scout_work_overload_reject();
         state.system_metrics.inc_scout_work_empty_poll();
@@ -2033,7 +2122,9 @@ pub(crate) async fn pop_work_handler(
         ));
     }
     let admission = scout_admission_decision(queue_depth, avg_latency_ms, p95_latency_ms);
-    if admission.mode != ScoutAdmissionMode::Allow {
+    let bootstrap_soft_backpressure =
+        bootstrap_lane && admission.mode == ScoutAdmissionMode::SoftBackpressure;
+    if admission.mode != ScoutAdmissionMode::Allow && !bootstrap_soft_backpressure {
         state.system_metrics.inc_scout_work_overload_reject();
         state.system_metrics.inc_scout_work_empty_poll();
         let detail = if admission.mode == ScoutAdmissionMode::HardCircuit {
@@ -2062,6 +2153,15 @@ pub(crate) async fn pop_work_handler(
                 "retry_after_ms": admission.retry_after_ms,
             })),
         ));
+    }
+    if bootstrap_soft_backpressure {
+        tracing::debug!(
+            scout_id = %scout_id,
+            queue_depth,
+            avg_latency_ms,
+            p95_latency_ms,
+            "allowing scout bootstrap poll despite soft backpressure"
+        );
     }
     let active_scouts = recent_active_scouts(&state, now).await;
     let active_cap =
@@ -2092,7 +2192,8 @@ pub(crate) async fn pop_work_handler(
             })),
         ));
     }
-    if scout_assignment_backpressured(scout_id, queue_depth, avg_latency_ms, now) {
+    if scout_assignment_backpressured(scout_id, queue_depth, avg_latency_ms, now) && !bootstrap_lane
+    {
         state.system_metrics.inc_scout_work_empty_poll();
         tracing::debug!(
             scout_id = %scout_id,
