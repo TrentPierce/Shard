@@ -2010,7 +2010,7 @@ pub(crate) async fn chat_completions_handler(
     prompt.push_str("<|start_header_id|>assistant<|end_header_id|>\n\n");
 
     let request_id = format!("req-{}", uuid::Uuid::new_v4());
-    let request_started_ms = now_ms();
+    let _request_started_ms = now_ms();
     let requested_draft_model = req
         .model
         .clone()
@@ -2105,6 +2105,9 @@ pub(crate) async fn chat_completions_handler(
                 .into_response();
         }
     };
+
+    // Measure only the actual inference time, not the speculative probe wait.
+    let inference_started_ms = now_ms();
 
     if stream_mode {
         let stream = async_stream::stream! {
@@ -2329,7 +2332,7 @@ pub(crate) async fn chat_completions_handler(
                 .system_metrics
                 .inc_tokens_processed(completion_tokens_generated);
 
-            let latency_ms = (now_ms().saturating_sub(request_started_ms)) as u64;
+            let latency_ms = (now_ms().saturating_sub(inference_started_ms)) as u64;
             update_request_latency_ewma(&state, latency_ms);
             let (acceptance_rate, reject_rate) = request_acceptance
                 .map(|v| (Some(v.0), Some(v.1)))
@@ -2551,7 +2554,7 @@ pub(crate) async fn chat_completions_handler(
             }
         }
 
-        let latency_ms = (now_ms().saturating_sub(request_started_ms)) as u64;
+        let latency_ms = (now_ms().saturating_sub(inference_started_ms)) as u64;
         update_request_latency_ewma(&state, latency_ms);
         let (acceptance_rate, reject_rate) = request_acceptance
             .map(|v| (Some(v.0), Some(v.1)))

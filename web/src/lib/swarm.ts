@@ -441,7 +441,12 @@ export async function startScoutWorker(
     onRequest?: (work: WorkRequest) => void,
     onResult?: (result: ScoutSubmissionResult) => void
 ): Promise<() => void> {
-    const pollIntervalMs = 900
+    // Default 200ms keeps average work-pickup latency under 100ms.
+    // Daemon enforces a per-scout minimum of 75ms (SHARD_SCOUT_POLL_MIN_INTERVAL_MS).
+    const pollIntervalMs = Math.max(
+        75,
+        parseInt(process.env.NEXT_PUBLIC_SCOUT_POLL_INTERVAL_MS || '200', 10) || 200,
+    )
     const maxBackoffMs = 15000
     let stopped = false
     let timer: ReturnType<typeof setTimeout> | null = null
