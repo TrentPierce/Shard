@@ -967,6 +967,14 @@ fn scout_timeout_verifier_ratio() -> f64 {
         .unwrap_or(0.55)
 }
 
+fn scout_timeout_verifier_ratio_long() -> f64 {
+    std::env::var("SHARD_SCOUT_TIMEOUT_VERIFIER_RATIO_LONG")
+        .ok()
+        .and_then(|v| v.trim().parse::<f64>().ok())
+        .filter(|v| v.is_finite() && *v > 0.0)
+        .unwrap_or(scout_timeout_verifier_ratio())
+}
+
 fn scout_timeout_verifier_floor_ms() -> u64 {
     std::env::var("SHARD_SCOUT_TIMEOUT_VERIFIER_FLOOR_MS")
         .ok()
@@ -1053,7 +1061,12 @@ fn adapt_speculative_timeout_ms(
     }
     let avg_latency_ms = state.avg_latency_ms.load(Ordering::Relaxed) as u64;
     if avg_latency_ms > 0 {
-        let ratio = scout_timeout_verifier_ratio();
+        let long_min = scout_long_request_min_tokens();
+        let ratio = if long_min > 0 && request_max_tokens >= long_min {
+            scout_timeout_verifier_ratio_long()
+        } else {
+            scout_timeout_verifier_ratio()
+        };
         let verifier_cap = ((avg_latency_ms as f64) * ratio).round() as u64;
         adapted = adapted.min(verifier_cap.clamp(
             scout_timeout_verifier_floor_ms(),
@@ -1222,6 +1235,19 @@ fn scout_probe_queue_max() -> usize {
         .unwrap_or(12)
 }
 
+fn acceptance_rate_min_timeout_ms(request_max_tokens: usize) -> u64 {
+    let long_min = scout_long_request_min_tokens();
+    if long_min > 0 && request_max_tokens >= long_min {
+        std::env::var("SHARD_SCOUT_TIMEOUT_ACCEPTANCE_FLOOR_LONG_MS")
+            .ok()
+            .and_then(|v| v.trim().parse::<u64>().ok())
+            .map(|v| v.clamp(250, 3_000))
+            .unwrap_or(800)
+    } else {
+        250 // existing behavior for short requests
+    }
+}
+
 fn probe_allowed_for_request(request_id: &str, modulus: u64) -> bool {
     if modulus <= 1 {
         return true;
@@ -1235,6 +1261,7 @@ async fn effective_speculative_timeout_ms(
     state: &SharedState,
     config: &SpeculativeConfig,
     request_id: &str,
+    request_max_tokens: usize,
 ) -> u64 {
     let supply = estimate_scout_supply(state).await;
     let active_scouts = supply.effective_active_scouts();
@@ -1287,10 +1314,12 @@ async fn effective_speculative_timeout_ms(
     if verify_attempts >= 5 && acceptance_rate < 0.25 {
         // When speculative acceptance is weak, aggressively shrink wait budget.
         let scaled = (timeout_ms as f64 * acceptance_rate.max(0.10)) as u64;
-        let capped = scaled.clamp(250, 1_000);
+        let floor_ms = acceptance_rate_min_timeout_ms(request_max_tokens);
+        let capped = scaled.clamp(floor_ms, 1_000.max(floor_ms));
         tracing::debug!(
             original_timeout_ms = timeout_ms,
             acceptance_rate = format!("{:.1}%", acceptance_rate * 100.0),
+            floor_ms,
             capped_timeout_ms = capped,
             "reducing scout timeout due to low acceptance rate"
         );
@@ -1340,7 +1369,7 @@ async fn fetch_speculative_draft(
 
     let scout_timeout_ms = adapt_speculative_timeout_ms(
         state,
-        effective_speculative_timeout_ms(state, config, request_id).await,
+        effective_speculative_timeout_ms(state, config, request_id, request_max_tokens).await,
         request_max_tokens,
         draft_token_count,
     );
@@ -1651,36 +1680,40 @@ pub(crate) async fn verify_draft_tokens(
 
     for (idx, &draft_token) in draft_tokens.iter().enumerate() {
         if let Ok(logits) = engine.get_logits(vocab_size) {
-            // Build top-k indices sorted by descending logit value.
-            // Use a partial sort approach: collect (index, logit) pairs,
-            // then sort only enough to find the top-k.
-            let mut indexed: Vec<(usize, f32)> =
-                logits.iter().enumerate().map(|(i, &v)| (i, v)).collect();
-            indexed.sort_unstable_by(|a, b| {
-                b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal)
-            });
-
-            let best_idx = indexed[0].0;
-            let best_val = indexed[0].1;
-
             let draft_logit = logits
                 .get(draft_token as usize)
                 .copied()
                 .unwrap_or(-f32::INFINITY);
+
+            // Partial sort (O(n) avg) instead of full sort of 128K logits.
+            // After select_nth_unstable_by(top_k, ...), indexed[..=top_k]
+            // holds the (top_k+1) highest-logit tokens in unspecified order.
+            let mut indexed: Vec<(usize, f32)> =
+                logits.iter().enumerate().map(|(i, &v)| (i, v)).collect();
+            indexed.select_nth_unstable_by(top_k, |a, b| {
+                b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal)
+            });
+
+            // Find best token via linear scan of the small top partition.
+            let (best_idx, best_val) = indexed[..=top_k]
+                .iter()
+                .fold((0usize, f32::NEG_INFINITY), |(bi, bv), &(i, v)| {
+                    if v > bv { (i, v) } else { (bi, bv) }
+                });
+
             let logit_gap = best_val - draft_logit;
 
             // Check acceptance: greedy match, top-k overlap, or logit gap
             let greedy_match = best_idx == draft_token as usize;
-            let in_top_k = indexed
+            let in_top_k = indexed[..top_k]
                 .iter()
-                .take(top_k)
                 .any(|(i, _)| *i == draft_token as usize);
             let within_tolerance = logit_gap < logit_tolerance;
 
             let is_accepted = greedy_match || in_top_k || within_tolerance;
 
-            // Find the draft token's rank in the sorted distribution
-            let draft_rank = indexed.iter().position(|(i, _)| *i == draft_token as usize);
+            // Rank not computed with partial sort (only used in tracing).
+            let draft_rank: Option<usize> = None;
 
             let accept_reason = if greedy_match {
                 "greedy_match"
@@ -1720,9 +1753,15 @@ pub(crate) async fn verify_draft_tokens(
                     break;
                 }
             } else {
-                // First rejection — log the top-5 for diagnostics
-                let top5_tokens: Vec<i32> =
-                    indexed.iter().take(5).map(|(i, _)| *i as i32).collect();
+                // First rejection — log the top-5 for diagnostics.
+                // Sort the small top partition (≤top_k+1 elements) to get true top-5.
+                let top5_tokens: Vec<i32> = {
+                    let mut top_part = indexed[..=top_k].to_vec();
+                    top_part.sort_unstable_by(|a, b| {
+                        b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal)
+                    });
+                    top_part.iter().take(5).map(|(i, _)| *i as i32).collect()
+                };
                 tracing::info!(
                     idx,
                     draft_token,
