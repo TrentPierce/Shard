@@ -102,17 +102,27 @@ class LoadAwarePool:
             ]
             if not healthy:
                 healthy = ranked
-            selected = min(
-                healthy,
-                key=lambda state: (
-                    state.inflight,
-                    state.dispatched_requests,
-                    state.queue_depth,
-                    state.load,
-                    state.error_ewma,
+            total_dispatched = sum(max(0, state.dispatched_requests) for state in healthy)
+            capacity_weights = {
+                state.endpoint: 1.0 / max(state.ewma_latency_ms, 1.0)
+                for state in healthy
+            }
+            total_capacity_weight = sum(capacity_weights.values()) or float(len(healthy))
+
+            def selection_score(state: EndpointState) -> tuple[float, float, float, float]:
+                target_share = capacity_weights[state.endpoint] / total_capacity_weight
+                actual_share = (
+                    state.dispatched_requests / total_dispatched if total_dispatched > 0 else 0.0
+                )
+                share_penalty = max(0.0, actual_share - target_share - 0.15) * 600.0
+                return (
                     self._score(state),
-                ),
-            )
+                    share_penalty,
+                    float(state.inflight),
+                    float(state.error_ewma),
+                )
+
+            selected = min(healthy, key=selection_score)
             selected.inflight += 1
             selected.dispatched_requests += 1
             return selected.endpoint
@@ -201,12 +211,15 @@ class LoadAwarePool:
     @staticmethod
     def _score(state: EndpointState) -> float:
         # Lower score is better.
+        latency_ms = max(state.ewma_latency_ms, 500.0)
+        inflight_penalty = float(state.inflight) * max(latency_ms * 0.9, 6000.0)
+        queue_penalty = float(state.queue_depth) * max(latency_ms * 0.6, 3000.0)
         return (
-            (state.inflight * 12.0)
-            + state.ewma_latency_ms
-            + (state.queue_depth * 25.0)
+            inflight_penalty
+            + latency_ms
+            + queue_penalty
             + (state.load * 15.0)
-            + (state.error_ewma * 3000.0)
+            + (state.error_ewma * 8000.0)
         )
 
 
