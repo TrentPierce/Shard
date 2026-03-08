@@ -106,7 +106,7 @@ MATRIX_CLASSES: dict[str, MatrixClass] = {
         default_auto_timeout_multiplier=6.0,
         default_browser_warmup_timeout_s=90,
         default_browser_warmup_max_requests=18,
-        default_browser_warmup_request_max_tokens=16,
+        default_browser_warmup_request_max_tokens=None,
     ),
 }
 

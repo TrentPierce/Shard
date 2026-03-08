@@ -867,21 +867,36 @@ async def run_orchestrator(
                 scout_config = await fetch_scout_config(client, verifier_pool[0])
                 speculative_cfg = scout_config.get("config", {}).get("speculative", {})
                 min_request_tokens = int(speculative_cfg.get("min_request_tokens", 0) or 0)
+                long_request_min_tokens = int(
+                    speculative_cfg.get("long_request_min_tokens", 0) or 0
+                )
+                warmup_min_request_tokens = min_request_tokens
+                if long_request_min_tokens > 0 and max_tokens >= long_request_min_tokens:
+                    warmup_min_request_tokens = max(
+                        warmup_min_request_tokens,
+                        long_request_min_tokens,
+                    )
                 warmup_request_max_tokens = browser_warmup_request_max_tokens
                 if warmup_request_max_tokens is None:
                     warmup_request_max_tokens = max(
                         4,
                         min(
                             max_tokens,
-                            max(min_request_tokens, 16),
+                            max(warmup_min_request_tokens, 16),
                         ),
                     )
+                elif warmup_min_request_tokens > 0:
+                    warmup_request_max_tokens = max(
+                        int(warmup_request_max_tokens),
+                        warmup_min_request_tokens,
+                    )
                 effective_browser_warmup_request_max_tokens = warmup_request_max_tokens
-                if min_request_tokens > 0 and max_tokens < min_request_tokens:
+                info["warmup_request_max_tokens"] = effective_browser_warmup_request_max_tokens
+                if warmup_min_request_tokens > 0 and max_tokens < warmup_min_request_tokens:
                     info["speculative_bypassed_for_request"] = True
                     print(
                         "[browser-warmup] request max_tokens is below the verifier speculative "
-                        f"threshold ({max_tokens} < {min_request_tokens}); treating ready scouts "
+                        f"threshold ({max_tokens} < {warmup_min_request_tokens}); treating ready scouts "
                         "as expected without submit-success warmup"
                     )
                     return info

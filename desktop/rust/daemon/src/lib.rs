@@ -1436,6 +1436,12 @@ impl LatencyHistogram {
         self.bucket_counts[self.bucket_counts.len() - 1].fetch_add(1, Ordering::Relaxed);
     }
 
+    fn reset(&self) {
+        for bucket in &self.bucket_counts {
+            bucket.store(0, Ordering::Relaxed);
+        }
+    }
+
     fn percentiles(&self) -> LatencyPercentiles {
         let counts: Vec<u64> = self
             .bucket_counts
@@ -5440,6 +5446,20 @@ mod tests {
         assert!(p.p50_ms >= 10);
         assert!(p.p90_ms >= 300);
         assert!(p.p99_ms >= p.p90_ms);
+    }
+
+    #[test]
+    fn latency_histogram_reset_clears_samples() {
+        let hist = LatencyHistogram::new();
+        hist.observe(25);
+        hist.observe(300);
+        assert!(hist.percentiles().samples > 0);
+
+        hist.reset();
+
+        let p = hist.percentiles();
+        assert_eq!(p.samples, 0);
+        assert_eq!(p.p95_ms, 0);
     }
 
     #[test]

@@ -253,6 +253,9 @@ async fn reset_scout_runtime_state(state: &SharedState) -> serde_json::Value {
         let mut tracker = state.scout_timeout_tracker.lock().await;
         *tracker = ScoutTimeoutTracker::new();
     }
+    state.avg_latency_ms.store(0, Ordering::Relaxed);
+    state.current_load.store(0, Ordering::Relaxed);
+    state.gossipsub_latency_hist.reset();
 
     serde_json::json!({
         "ok": true,

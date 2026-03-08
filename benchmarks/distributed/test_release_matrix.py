@@ -102,6 +102,10 @@ class ReleaseMatrixScenarioTests(unittest.TestCase):
         )
         self.assertTrue(bool(uplift_gate["pass"]))
 
+    def test_long_scout_generation_uses_auto_thresholded_browser_warmup_tokens(self) -> None:
+        matrix = resolve_matrix_class("long_scout_generation")
+        self.assertIsNone(matrix.default_browser_warmup_request_max_tokens)
+
     def test_validate_long_profile_observation_accepts_matching_snapshot(self) -> None:
         failures = validate_long_profile_observation(
             endpoint="http://127.0.0.1:9191",
