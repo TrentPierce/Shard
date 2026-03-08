@@ -1,8 +1,19 @@
 import fs from "node:fs/promises"
+import syncFs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import process from "node:process"
 import { chromium } from "playwright-core"
+
+const STALE_PROFILE_MAX_AGE_SECS = 60 * 60
+const STALE_PROFILE_PATTERNS = [
+  "shard-browser-scout-profiles-msedge",
+  "shard-browser-scout-profiles-chrome",
+  "shard-browser-scout-profile-chrome",
+  "shard-browser-scout-profile-chrome-idb",
+  "shard-browser-scout-profile-chrome-idb2",
+  "shard-browser-scout-profile-chrome-idb3",
+]
 
 function parseArgs(argv) {
   const args = {
@@ -38,6 +49,34 @@ function benchmarkUrl(pageBase, backend, slot) {
   url.searchParams.set("label", `Benchmark Scout ${slot + 1}`)
   url.searchParams.set("benchmark", "1")
   return url.toString()
+}
+
+async function cleanupStaleScoutProfiles() {
+  const tempRoot = os.tmpdir()
+  const now = Date.now()
+  for (const pattern of STALE_PROFILE_PATTERNS) {
+    const root = path.join(tempRoot, pattern)
+    let entries = []
+    try {
+      entries = await fs.readdir(root, { withFileTypes: true })
+    } catch {
+      continue
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory() || !entry.name.startsWith("run-")) continue
+      const target = path.join(root, entry.name)
+      try {
+        const stat = await fs.stat(target)
+        const ageSecs = Math.max(0, (now - stat.mtimeMs) / 1000)
+        if (ageSecs >= STALE_PROFILE_MAX_AGE_SECS) {
+          await fs.rm(target, { recursive: true, force: true })
+          console.log(`[browser-scout-runner] removed stale scout profile ${target}`)
+        }
+      } catch {
+        // Best-effort cleanup only.
+      }
+    }
+  }
 }
 
 async function waitForContribution(page, timeoutMs) {
@@ -76,6 +115,8 @@ async function main() {
   if (!Number.isFinite(args.count) || args.count <= 0) {
     throw new Error("--count must be >= 1")
   }
+
+  await cleanupStaleScoutProfiles()
 
   const defaultProfileRoot = path.join(os.tmpdir(), `shard-browser-scout-profiles-${args.channel}`)
   const profileRoot = path.resolve(args.userDataDir || defaultProfileRoot)
@@ -118,6 +159,15 @@ async function main() {
     }
   }
 
+  const cleanupSync = () => {
+    if (!ephemeralProfile) return
+    try {
+      syncFs.rmSync(userDataDir, { recursive: true, force: true })
+    } catch {
+      // Best-effort finalizer.
+    }
+  }
+
   let shuttingDown = false
   const handleSignal = async (signal) => {
     if (shuttingDown) return
@@ -128,6 +178,19 @@ async function main() {
   }
   process.on("SIGINT", handleSignal)
   process.on("SIGTERM", handleSignal)
+  process.on("exit", cleanupSync)
+  process.on("uncaughtException", async (error) => {
+    console.error(`[browser-scout-runner] uncaughtException: ${error instanceof Error ? error.stack || error.message : String(error)}`)
+    await cleanup()
+    cleanupSync()
+    process.exit(1)
+  })
+  process.on("unhandledRejection", async (reason) => {
+    console.error(`[browser-scout-runner] unhandledRejection: ${reason instanceof Error ? reason.stack || reason.message : String(reason)}`)
+    await cleanup()
+    cleanupSync()
+    process.exit(1)
+  })
 
   try {
     const pages = []
