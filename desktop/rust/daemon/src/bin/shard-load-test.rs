@@ -30,6 +30,12 @@ struct Args {
     out_dir: PathBuf,
     #[arg(long = "header")]
     headers: Vec<String>,
+    #[arg(long, default_value_t = 2)]
+    min_tokens: i32,
+    #[arg(long, default_value_t = 3)]
+    draft_token_count: usize,
+    #[arg(long, default_value_t = 16)]
+    prompt_repeat: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -86,6 +92,9 @@ struct ModeReport {
 #[derive(Debug, Clone, Serialize)]
 struct BenchmarkReport {
     timestamp_ms: u128,
+    min_tokens: i32,
+    draft_token_count: usize,
+    prompt_repeat: usize,
     baseline: Option<ModeReport>,
     distributed_signed: Option<ModeReport>,
     signature_validation_overhead_ms: f64,
@@ -131,11 +140,21 @@ fn make_signing_key(seed: u64) -> SigningKey {
     SigningKey::from_bytes(&sk_bytes)
 }
 
-fn build_work_request(request_id: String) -> WorkRequest {
+fn build_prompt(repeat: usize) -> String {
+    let clamped = repeat.clamp(1, 4096);
+    "benchmark prompt ".repeat(clamped).trim().to_string()
+}
+
+fn build_draft_tokens(count: usize) -> Vec<i32> {
+    let clamped = count.clamp(1, 128);
+    (0..clamped).map(|idx| 128001 + idx as i32).collect()
+}
+
+fn build_work_request(request_id: String, prompt_context: &str, min_tokens: i32) -> WorkRequest {
     WorkRequest {
         request_id,
-        prompt_context: "benchmark prompt".to_string(),
-        min_tokens: 2,
+        prompt_context: prompt_context.to_string(),
+        min_tokens,
         created_at_ms: Some(now_ms()),
         lease_id: None,
         lease_expires_at_ms: None,
@@ -263,14 +282,20 @@ async fn submit_signed_draft(
     nonce_counter: &Arc<AtomicU64>,
     work: &WorkRequest,
     scout_id: &str,
+    draft_tokens: &[i32],
 ) -> anyhow::Result<bool> {
     let draft = DraftResultSubmission {
         work_id: work.request_id.clone(),
         scout_id: scout_id.to_string(),
         lease_id: work.lease_id.clone(),
-        draft_text: "token-a token-b token-c".to_string(),
+        draft_text: draft_tokens
+            .iter()
+            .enumerate()
+            .map(|(idx, _)| format!("token-{idx}"))
+            .collect::<Vec<_>>()
+            .join(" "),
         prompt_context: Some(work.prompt_context.clone()),
-        draft_tokens: vec![128001, 128002, 128003],
+        draft_tokens: draft_tokens.to_vec(),
         timestamp: Some((now_ms() as f64) / 1000.0),
         scout_mode: Some("synthetic".to_string()),
         spot_check: None,
@@ -296,6 +321,7 @@ fn mode_report(
     successes: usize,
     failures: usize,
     offloaded_tokens: usize,
+    expected_offload_tokens_per_success: usize,
 ) -> ModeReport {
     let elapsed_s = started.elapsed().as_secs_f64().max(0.001);
     let throughput = successes as f64 / elapsed_s;
@@ -316,10 +342,12 @@ fn mode_report(
         p50_latency_ms: percentile(&latencies, 0.50),
         p95_latency_ms: percentile(&latencies, 0.95),
         p99_latency_ms: percentile(&latencies, 0.99),
-        offload_percent: if successes == 0 {
+        offload_percent: if successes == 0 || expected_offload_tokens_per_success == 0 {
             0.0
         } else {
-            (offloaded_tokens as f64 / (successes as f64 * 3.0)) * 100.0
+            (offloaded_tokens as f64
+                / (successes as f64 * expected_offload_tokens_per_success as f64))
+                * 100.0
         },
         failure_rate_percent: if requests == 0 {
             0.0
@@ -333,16 +361,21 @@ async fn run_baseline_mode(client: &Client, args: &Args) -> anyhow::Result<ModeR
     let sem = Arc::new(Semaphore::new(args.concurrency));
     let started = Instant::now();
     let mut tasks = Vec::with_capacity(args.requests);
+    let prompt_context = build_prompt(args.prompt_repeat);
+    let min_tokens = args.min_tokens;
+    let run_prefix = format!("baseline-{}", now_ms());
 
     for i in 0..args.requests {
         let permit = sem.clone().acquire_owned().await?;
         let client = client.clone();
         let base_url = args.base_url.clone();
+        let prompt_context = prompt_context.clone();
+        let run_prefix = run_prefix.clone();
         tasks.push(tokio::spawn(async move {
             let _permit = permit;
-            let req_id = format!("baseline-{i}");
+            let req_id = format!("{run_prefix}-{i}");
             let start = Instant::now();
-            let work = build_work_request(req_id.clone());
+            let work = build_work_request(req_id.clone(), &prompt_context, min_tokens);
             let sent = client
                 .post(format!("{base_url}/broadcast-work"))
                 .json(&work)
@@ -380,6 +413,7 @@ async fn run_baseline_mode(client: &Client, args: &Args) -> anyhow::Result<ModeR
         successes,
         failures,
         0,
+        0,
     ))
 }
 
@@ -387,6 +421,10 @@ async fn run_distributed_mode(client: &Client, args: &Args) -> anyhow::Result<Mo
     let started = Instant::now();
     let total_requests = args.requests;
     let concurrency = args.concurrency;
+    let prompt_context = build_prompt(args.prompt_repeat);
+    let min_tokens = args.min_tokens;
+    let draft_tokens = Arc::new(build_draft_tokens(args.draft_token_count));
+    let run_prefix = format!("distributed-{}", now_ms());
     let nonce_counter = Arc::new(AtomicU64::new((now_ms() % 1_000_000_000) as u64 * 1000));
     let finished = Arc::new(AtomicUsize::new(0));
     let offloaded_tokens = Arc::new(AtomicUsize::new(0));
@@ -399,6 +437,7 @@ async fn run_distributed_mode(client: &Client, args: &Args) -> anyhow::Result<Mo
         let nonce_counter = nonce_counter.clone();
         let finished = finished.clone();
         let offloaded_tokens = offloaded_tokens.clone();
+        let draft_tokens = draft_tokens.clone();
         scouts.push(tokio::spawn(async move {
             let key = make_signing_key(10_000 + scout_index as u64);
             let scout_id = hex::encode(key.verifying_key().to_bytes());
@@ -421,11 +460,13 @@ async fn run_distributed_mode(client: &Client, args: &Args) -> anyhow::Result<Mo
                                 &nonce_counter,
                                 &work,
                                 &scout_id,
+                                draft_tokens.as_slice(),
                             )
                             .await
                             .unwrap_or(false)
                             {
-                                offloaded_tokens.fetch_add(3, Ordering::Relaxed);
+                                offloaded_tokens
+                                    .fetch_add(draft_tokens.len(), Ordering::Relaxed);
                             }
                         } else {
                             idle_polls = idle_polls.saturating_add(1);
@@ -450,12 +491,14 @@ async fn run_distributed_mode(client: &Client, args: &Args) -> anyhow::Result<Mo
         let base_url = args.base_url.clone();
         let nonce_counter = nonce_counter.clone();
         let finished = finished.clone();
+        let prompt_context = prompt_context.clone();
+        let run_prefix = run_prefix.clone();
         tasks.push(tokio::spawn(async move {
             let _permit = permit;
-            let req_id = format!("distributed-{i}");
+            let req_id = format!("{run_prefix}-{i}");
             let start = Instant::now();
             let key = make_signing_key(i as u64);
-            let work = build_work_request(req_id.clone());
+            let work = build_work_request(req_id.clone(), &prompt_context, min_tokens);
             let sent = post_signed(
                 &client,
                 format!("{base_url}/signed/broadcast-work"),
@@ -501,6 +544,7 @@ async fn run_distributed_mode(client: &Client, args: &Args) -> anyhow::Result<Mo
         successes,
         failures,
         offloaded_tokens.load(Ordering::Relaxed),
+        draft_tokens.len(),
     ))
 }
 
@@ -535,6 +579,9 @@ async fn main() -> anyhow::Result<()> {
 
     let report = BenchmarkReport {
         timestamp_ms: now_ms(),
+        min_tokens: args.min_tokens,
+        draft_token_count: args.draft_token_count,
+        prompt_repeat: args.prompt_repeat,
         baseline,
         distributed_signed,
         signature_validation_overhead_ms: signature_overhead,
@@ -548,8 +595,11 @@ async fn main() -> anyhow::Result<()> {
     std::fs::write(&json_path, serde_json::to_vec_pretty(&report)?)?;
 
     let mut md = format!(
-        "# Shard Benchmark Report\n\n- **Timestamp:** `{}`\n- **Signature validation overhead:** `{:.2} ms`\n- **Estimated GPU savings:** `{:.2}%`\n\n",
+        "# Shard Benchmark Report\n\n- **Timestamp:** `{}`\n- **Min tokens:** `{}`\n- **Draft token count:** `{}`\n- **Prompt repeat:** `{}`\n- **Signature validation overhead:** `{:.2} ms`\n- **Estimated GPU savings:** `{:.2}%`\n\n",
         report.timestamp_ms,
+        report.min_tokens,
+        report.draft_token_count,
+        report.prompt_repeat,
         report.signature_validation_overhead_ms,
         report.estimated_gpu_savings_percent
     );
