@@ -75,6 +75,7 @@ $localExe = Join-Path $rustDir "target\\release\\shard-daemon.exe"
 $rc1Env = Join-Path $root "deploy\\release\\rc1.env"
 $benchmarkEnv = Join-Path $root "deploy\\release\\benchmark.env"
 $longBenchmarkEnv = Join-Path $root "deploy\\release\\long_benchmark.env"
+$localBenchmarkDropIn = Join-Path $env:TEMP "shard-30-benchmark.conf"
 $selectedBenchmarkEnv = if ($BenchmarkProfile -eq "long") { $longBenchmarkEnv } else { $benchmarkEnv }
 $selectedRemoteBenchmarkEnvName = if ($BenchmarkProfile -eq "long") { "long_benchmark.env" } else { "benchmark.env" }
 $expectedProfileMap = Get-EnvMap -Path $selectedBenchmarkEnv
@@ -107,15 +108,21 @@ Write-Host ("    local status={0} engine_loaded={1} verifier_queue_cap={2} profi
 
 $remoteRc1Env = "/tmp/rc1.env"
 $remoteBenchmarkEnv = "/tmp/$selectedRemoteBenchmarkEnvName"
+$remoteBenchmarkDropIn = "/tmp/30-benchmark.conf"
 scp -i $KeyPath $rc1Env "${Ec2User}@${Ec2Host}:${remoteRc1Env}" | Out-Null
 if ($ApplyBenchmarkProfile) {
+    @"
+[Service]
+EnvironmentFile=/etc/shard/benchmark.env
+"@ | Set-Content -Path $localBenchmarkDropIn -NoNewline
     scp -i $KeyPath $selectedBenchmarkEnv "${Ec2User}@${Ec2Host}:${remoteBenchmarkEnv}" | Out-Null
+    scp -i $KeyPath $localBenchmarkDropIn "${Ec2User}@${Ec2Host}:${remoteBenchmarkDropIn}" | Out-Null
 }
 
 $benchmarkEnvSetup = if ($ApplyBenchmarkProfile) {
 @"
 sudo install -m 0644 $remoteBenchmarkEnv /etc/shard/benchmark.env
-printf '%s\n' '[Service]' 'EnvironmentFile=/etc/shard/benchmark.env' | sudo tee /etc/systemd/system/shard-daemon.service.d/30-benchmark.conf > /dev/null
+sudo install -m 0644 $remoteBenchmarkDropIn /etc/systemd/system/shard-daemon.service.d/30-benchmark.conf
 "@
 } else {
 @"
