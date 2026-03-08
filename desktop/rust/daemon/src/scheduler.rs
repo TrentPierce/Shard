@@ -1,5 +1,5 @@
 use super::*;
-use axum::http::{HeaderName, HeaderValue, StatusCode};
+use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode};
 use libp2p::multiaddr::Protocol;
 use reqwest::Url;
 use std::collections::HashMap;
@@ -17,6 +17,24 @@ pub(crate) fn resolve_inference_mode(raw: Option<&str>) -> InferenceMode {
     match raw.map(|value| value.trim().to_ascii_lowercase()) {
         Some(mode) if mode == "distributed" || mode == "speculative" => InferenceMode::Speculative,
         _ => InferenceMode::Standard,
+    }
+}
+
+fn requested_request_id(headers: &HeaderMap) -> Option<String> {
+    let raw = headers
+        .get("x-shard-request-id")
+        .and_then(|value| value.to_str().ok())?
+        .trim();
+    if raw.is_empty() || raw.len() > 128 {
+        return None;
+    }
+    if raw
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | ':' | '.'))
+    {
+        Some(raw.to_string())
+    } else {
+        None
     }
 }
 
@@ -1949,6 +1967,9 @@ pub(crate) async fn chat_completions_handler(
                 if let Some(value) = headers.get("x-shard-inference-mode") {
                     request_builder = request_builder.header("x-shard-inference-mode", value);
                 }
+                if let Some(value) = headers.get("x-shard-request-id") {
+                    request_builder = request_builder.header("x-shard-request-id", value);
+                }
                 if let Some(value) = headers.get("x-shard-route") {
                     request_builder = request_builder.header("x-shard-route", value);
                 }
@@ -2023,7 +2044,8 @@ pub(crate) async fn chat_completions_handler(
     }
     prompt.push_str("<|start_header_id|>assistant<|end_header_id|>\n\n");
 
-    let request_id = format!("req-{}", uuid::Uuid::new_v4());
+    let request_id =
+        requested_request_id(&headers).unwrap_or_else(|| format!("req-{}", uuid::Uuid::new_v4()));
     let _request_started_ms = now_ms();
     let requested_draft_model = req
         .model
@@ -2623,7 +2645,8 @@ mod tests {
         endpoint_from_multiaddr, enqueue_scout_work, infer_client_ip, local_scout_fallback_allowed,
         mesh_forward_score, model_pair_acceptance_rates, normalize_endpoint,
         parse_speculative_min_request_tokens, probe_allowed_for_request,
-        remove_work_id_from_scout_queue, request_host_is_local, resolve_inference_mode,
+        remove_work_id_from_scout_queue, request_host_is_local, requested_request_id,
+        resolve_inference_mode,
         should_abort_on_degenerate_output, should_attempt_mesh_forward, should_forward_to_mesh,
         should_refuse_mesh_degraded, strip_control_tokens, InferenceMode, ScoutSupplyEstimate,
         WorkRequest,
@@ -2839,6 +2862,29 @@ mod tests {
         let mut remote = HeaderMap::new();
         remote.insert("host", HeaderValue::from_static("api.shardnetwork.live"));
         assert!(!request_host_is_local(&remote));
+    }
+
+    #[test]
+    fn accepts_benchmark_supplied_request_id_header() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "x-shard-request-id",
+            HeaderValue::from_static("bench:run-12_req-3.1"),
+        );
+        assert_eq!(
+            requested_request_id(&headers).as_deref(),
+            Some("bench:run-12_req-3.1")
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_benchmark_request_id_header() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "x-shard-request-id",
+            HeaderValue::from_static("bad request id!"),
+        );
+        assert!(requested_request_id(&headers).is_none());
     }
 
     #[test]

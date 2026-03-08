@@ -53,6 +53,7 @@ SPECULATIVE_DELTA_KEYS = (
 class RequestRecord:
     ok: bool
     latency_ms: float
+    request_id: str | None = None
     endpoint: str | None = None
     status_code: int | None = None
     error_kind: str | None = None
@@ -424,6 +425,36 @@ async def fetch_scout_config(client: httpx.AsyncClient, base_url: str) -> dict:
     return {}
 
 
+async def fetch_request_speculative_trace(
+    client: httpx.AsyncClient,
+    endpoint: str,
+    request_id: str,
+    *,
+    limit: int = 64,
+    attempts: int = 6,
+    delay_s: float = 0.1,
+) -> dict | None:
+    params = {"request_id": request_id, "limit": max(1, min(limit, 256))}
+    for attempt in range(max(1, attempts)):
+        try:
+            resp = await client.get(
+                endpoint_url(endpoint, "/v1/system/speculative-trace"),
+                headers=endpoint_headers(endpoint),
+                params=params,
+            )
+            if resp.is_success:
+                payload = resp.json() or {}
+                if payload.get("events") or payload.get("terminal_state"):
+                    payload["_endpoint"] = endpoint_display_name(endpoint)
+                    payload["_request_id"] = request_id
+                    return payload
+        except Exception:
+            pass
+        if attempt + 1 < max(1, attempts):
+            await asyncio.sleep(delay_s)
+    return None
+
+
 async def fetch_pool_summaries(client: httpx.AsyncClient, verifier_pool: list[str]) -> list[dict]:
     summaries: list[dict] = []
     for endpoint in verifier_pool:
@@ -592,6 +623,7 @@ def summarize_records_by_endpoint(
 def serialize_request_speculative_traces(records: list[RequestRecord]) -> list[dict[str, object]]:
     return [
         {
+            "request_id": record.request_id,
             "latency_ms": round(record.latency_ms, 3),
             "endpoint": endpoint_display_name(record.endpoint) if record.endpoint else None,
             "status_code": record.status_code,
@@ -956,14 +988,16 @@ async def run_orchestrator(
                     ok = False
                     final_status: int | None = None
                     final_error_kind: str | None = None
+                    request_id: str | None = None
                     request_spec_trace: dict | None = None
-                    for _attempt in range(max(1, max_attempts)):
+                    for attempt_idx in range(max(1, max_attempts)):
                         endpoint = None
                         try:
                             if len(verifier_pool) > 1:
                                 endpoint = await pool.next_pinned_balanced(client)
                             else:
                                 endpoint = await pool.next(client)
+                            request_id = f"bench-{int(time.time() * 1000)}-{seq}-{attempt_idx}"
                             endpoint_request_counts[endpoint_display_name(endpoint)] += 1
                             resp = await client.post(
                                 endpoint_url(endpoint, "/v1/chat/completions"),
@@ -972,6 +1006,7 @@ async def run_orchestrator(
                                     {
                                         "x-shard-inference-mode": inference_mode,
                                         "x-shard-mesh-forward": "false",
+                                        "x-shard-request-id": request_id,
                                     },
                                 ),
                                 json={
@@ -992,15 +1027,13 @@ async def run_orchestrator(
                             if attempt_ok:
                                 ok = True
                                 final_error_kind = None
-                                if inference_mode in ("speculative", "distributed"):
+                                if request_id and inference_mode in ("speculative", "distributed"):
                                     try:
-                                        trace_summary = await fetch_summary(client, endpoint)
-                                        request_spec_trace = {
-                                            key: float(trace_summary.get(key, 0.0) or 0.0)
-                                            for key in SPECULATIVE_DELTA_KEYS
-                                            if trace_summary.get(key) is not None
-                                        }
-                                        request_spec_trace["_endpoint"] = endpoint_display_name(endpoint)
+                                        request_spec_trace = await fetch_request_speculative_trace(
+                                            client,
+                                            endpoint,
+                                            request_id,
+                                        )
                                     except Exception:
                                         request_spec_trace = None
                                 break
@@ -1013,12 +1046,24 @@ async def run_orchestrator(
                                     latency_ms=(time.monotonic() - t0) * 1000.0,
                                 )
                         await asyncio.sleep(0.01)
+                    if request_id and endpoint and request_spec_trace is None and inference_mode in (
+                        "speculative",
+                        "distributed",
+                    ):
+                        request_spec_trace = await fetch_request_speculative_trace(
+                            client,
+                            endpoint,
+                            request_id,
+                            attempts=8,
+                            delay_s=0.15,
+                        )
                     latency_ms = (time.monotonic() - t0) * 1000.0
                     async with records_lock:
                         records.append(
                             RequestRecord(
                                 ok=ok,
                                 latency_ms=latency_ms,
+                                request_id=request_id,
                                 endpoint=endpoint if endpoint else None,
                                 status_code=final_status,
                                 error_kind=final_error_kind,

@@ -159,14 +159,17 @@ class ReleaseMatrixScenarioTests(unittest.TestCase):
         record = RequestRecord(
             ok=True,
             latency_ms=123.456,
+            request_id="bench-req-1",
             endpoint="https://shard-fly-bench-0308c.fly.dev|Fly-Force-Instance-Id=7819e44fd595e8",
             status_code=200,
             speculative_trace={
                 "_endpoint": "https://shard-fly-bench-0308c.fly.dev#fly:7819e44fd595e8",
-                "speculative_wait_hits_total": 2.0,
+                "_request_id": "bench-req-1",
+                "events": [{"stage": "wait_timeout"}],
             },
         )
-        self.assertEqual(record.speculative_trace["speculative_wait_hits_total"], 2.0)
+        self.assertEqual(record.request_id, "bench-req-1")
+        self.assertEqual(record.speculative_trace["_request_id"], "bench-req-1")
 
     def test_serialize_request_speculative_traces_includes_trace_shape(self) -> None:
         traces = serialize_request_speculative_traces(
@@ -174,16 +177,19 @@ class ReleaseMatrixScenarioTests(unittest.TestCase):
                 RequestRecord(
                     ok=True,
                     latency_ms=123.456,
+                    request_id="bench-req-2",
                     endpoint="https://shard-fly-bench-0308c.fly.dev|Fly-Force-Instance-Id=871426b02e5038",
                     status_code=200,
                     speculative_trace={
                         "_endpoint": "https://shard-fly-bench-0308c.fly.dev#fly:871426b02e5038",
-                        "speculative_draft_tokens_total": 4.0,
+                        "_request_id": "bench-req-2",
+                        "terminal_state": {"outcome": "timeout"},
                     },
                 ),
                 RequestRecord(
                     ok=False,
                     latency_ms=456.789,
+                    request_id="bench-req-3",
                     endpoint="https://shard-fly-bench-0308c.fly.dev|Fly-Force-Instance-Id=784929ef655498",
                     status_code=429,
                     speculative_trace=None,
@@ -191,14 +197,15 @@ class ReleaseMatrixScenarioTests(unittest.TestCase):
             ]
         )
         self.assertEqual(len(traces), 1)
+        self.assertEqual(traces[0]["request_id"], "bench-req-2")
         self.assertEqual(
             traces[0]["endpoint"],
             "https://shard-fly-bench-0308c.fly.dev#fly:871426b02e5038",
         )
         self.assertEqual(traces[0]["status_code"], 200)
         self.assertEqual(
-            traces[0]["speculative_trace"]["speculative_draft_tokens_total"],
-            4.0,
+            traces[0]["speculative_trace"]["terminal_state"]["outcome"],
+            "timeout",
         )
 
 
