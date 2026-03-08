@@ -59,7 +59,7 @@ if (-not $machines -or $machines.Count -lt 1) {
 $sourceMachineId = $machines[0].id
 foreach ($region in $Regions | Select-Object -Skip 1) {
     try {
-        flyctl machine clone $sourceMachineId --app $AppName --region $region -y | Out-Null
+        flyctl machine clone $sourceMachineId --app $AppName --region $region | Out-Null
     } catch {
         Write-Host ("machine clone skipped for {0}: {1}" -f $region, $_.Exception.Message)
     }
