@@ -8,20 +8,6 @@ param(
 $ErrorActionPreference = "Stop"
 $Regions = @($Regions | ForEach-Object { $_ -split "," } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 
-function Get-MachineHealth {
-    param(
-        [string]$App,
-        [string]$MachineId
-    )
-
-    $raw = flyctl ssh console -a $App --machine $MachineId -C "wget -qO- http://127.0.0.1:9091/health" 2>&1
-    $jsonLine = ($raw | Select-String -Pattern '^\{').Line
-    if (-not $jsonLine) {
-        throw "Failed to query local health for machine $MachineId"
-    }
-    return ($jsonLine | ConvertFrom-Json)
-}
-
 function Assert-FlySuccess {
     param([string]$Message)
     if ($LASTEXITCODE -ne 0) {
@@ -36,17 +22,17 @@ function Get-FlyMachines {
     @($machineJson | ConvertFrom-Json)
 }
 
-function Get-FlyMachineHealth {
-    param(
-        [string]$App,
-        [string]$MachineId
-    )
-    $healthRaw = flyctl ssh console -a $App --machine $MachineId -C "wget -qO- http://127.0.0.1:9091/health" 2>&1
-    $jsonLine = ($healthRaw | Select-String -Pattern '^\{').Line
-    if (-not $jsonLine) {
-        Assert-FlySuccess "Failed to fetch local health from machine $MachineId"
+function Get-FlyMachineControlHealth {
+    param([object]$Machine)
+    $check = $Machine.checks | Where-Object { $_.name -eq "control" } | Select-Object -First 1
+    if (-not $check -or [string]::IsNullOrWhiteSpace($check.output)) {
+        return $null
     }
-    $jsonLine | ConvertFrom-Json
+    try {
+        return ($check.output | ConvertFrom-Json)
+    } catch {
+        return $null
+    }
 }
 
 function Wait-FlyMachinesReady {
@@ -65,23 +51,18 @@ function Wait-FlyMachinesReady {
         $peerStates = @()
         $allReady = $true
         foreach ($machine in $machines) {
-            try {
-                $health = Get-FlyMachineHealth -App $App -MachineId $machine.id
-                if (-not $health.ready_for_inference -or [string]::IsNullOrWhiteSpace($health.peer_id)) {
-                    $allReady = $false
-                    break
-                }
-                $peerStates += [pscustomobject]@{
-                    id              = $machine.id
-                    region          = $machine.region
-                    private_ip      = $machine.private_ip
-                    peer_id         = $health.peer_id
-                    connected_peers = [int]$health.connected_peers
-                    known_peers     = [int]$health.known_peers
-                }
-            } catch {
+            $health = Get-FlyMachineControlHealth -Machine $machine
+            if (-not $health -or -not $health.ready_for_inference -or [string]::IsNullOrWhiteSpace($health.peer_id)) {
                 $allReady = $false
                 break
+            }
+            $peerStates += [pscustomobject]@{
+                id              = $machine.id
+                region          = $machine.region
+                private_ip      = $machine.private_ip
+                peer_id         = $health.peer_id
+                connected_peers = [int]$health.connected_peers
+                known_peers     = [int]$health.known_peers
             }
         }
 
