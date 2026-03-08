@@ -2,6 +2,7 @@ use clap::Parser;
 use ed25519_dalek::Signer;
 use ed25519_dalek::SigningKey;
 use reqwest::Client;
+use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::path::PathBuf;
@@ -26,6 +27,8 @@ struct Args {
     mode: String,
     #[arg(long, default_value = "benchmarks")]
     out_dir: PathBuf,
+    #[arg(long = "header")]
+    headers: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -98,6 +101,19 @@ fn now_ms() -> u128 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis()
+}
+
+fn parse_headers(raw_headers: &[String]) -> anyhow::Result<HeaderMap> {
+    let mut headers = HeaderMap::new();
+    for raw in raw_headers {
+        let Some((name, value)) = raw.split_once('=') else {
+            anyhow::bail!("invalid --header value `{raw}`; expected NAME=VALUE");
+        };
+        let header_name = HeaderName::from_bytes(name.trim().as_bytes())?;
+        let header_value = HeaderValue::from_str(value.trim())?;
+        headers.insert(header_name, header_value);
+    }
+    Ok(headers)
 }
 
 fn percentile(values: &[f64], p: f64) -> f64 {
@@ -341,7 +357,11 @@ async fn run_mode(
 async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     let key = SigningKey::from_bytes(&[9u8; 32]);
-    let client = Client::builder().timeout(Duration::from_secs(10)).build()?;
+    let headers = parse_headers(&args.headers)?;
+    let client = Client::builder()
+        .timeout(Duration::from_secs(10))
+        .default_headers(headers)
+        .build()?;
 
     let baseline = if args.mode == "all" || args.mode == "baseline" {
         Some(run_mode(&client, &args, "baseline", &key).await?)
