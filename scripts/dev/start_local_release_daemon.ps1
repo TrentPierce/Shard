@@ -85,8 +85,8 @@ $psi.CreateNoWindow = $true
 $psi.Arguments = @(
     "--control-port", $ControlPort,
     "--telemetry-ws-port", $TelemetryWsPort,
-    "--bootstrap-node", "/dns4/35.175.242.222.nip.io/tcp/4001/p2p/12D3KooWPQqkkZk7NeWA2b1FeWYuBFRW8X7Q9ugymnzxeKJHFLUV",
-    "--bootstrap-node", "/dns4/35.175.242.222.nip.io/udp/9092/quic-v1/p2p/12D3KooWPQqkkZk7NeWA2b1FeWYuBFRW8X7Q9ugymnzxeKJHFLUV",
+    "--bootstrap-node", "/ip4/35.175.242.222/tcp/4001/p2p/12D3KooWPQqkkZk7NeWA2b1FeWYuBFRW8X7Q9ugymnzxeKJHFLUV",
+    "--bootstrap-node", "/ip4/35.175.242.222/udp/9092/quic-v1/p2p/12D3KooWPQqkkZk7NeWA2b1FeWYuBFRW8X7Q9ugymnzxeKJHFLUV",
     "--contribute"
 ) -join " "
 

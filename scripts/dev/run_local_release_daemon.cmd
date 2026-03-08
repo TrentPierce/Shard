@@ -30,4 +30,4 @@ for %%F in ("%ROOT%\deploy\release\rc1.env" "%PROFILE_ENV%") do (
 echo [%DATE% %TIME%] launching local release daemon > "%LOG_FILE%"
 echo benchmark_profile=%BENCHMARK_PROFILE% >> "%LOG_FILE%"
 echo exe=%DAEMON_EXE% >> "%LOG_FILE%"
-"%DAEMON_EXE%" --control-port 9191 --telemetry-ws-port 9193 --bootstrap-node /dns4/35.175.242.222.nip.io/tcp/4001/p2p/12D3KooWPQqkkZk7NeWA2b1FeWYuBFRW8X7Q9ugymnzxeKJHFLUV --bootstrap-node /dns4/35.175.242.222.nip.io/udp/9092/quic-v1/p2p/12D3KooWPQqkkZk7NeWA2b1FeWYuBFRW8X7Q9ugymnzxeKJHFLUV --contribute >> "%LOG_FILE%" 2>&1
+"%DAEMON_EXE%" --control-port 9191 --telemetry-ws-port 9193 --bootstrap-node /ip4/35.175.242.222/tcp/4001/p2p/12D3KooWPQqkkZk7NeWA2b1FeWYuBFRW8X7Q9ugymnzxeKJHFLUV --bootstrap-node /ip4/35.175.242.222/udp/9092/quic-v1/p2p/12D3KooWPQqkkZk7NeWA2b1FeWYuBFRW8X7Q9ugymnzxeKJHFLUV --contribute >> "%LOG_FILE%" 2>&1
