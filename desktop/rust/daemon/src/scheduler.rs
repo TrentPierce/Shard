@@ -959,7 +959,7 @@ fn scout_short_request_timeout_cap_ms() -> u64 {
         .unwrap_or(450)
 }
 
-fn scout_timeout_verifier_ratio() -> f64 {
+pub(crate) fn scout_timeout_verifier_ratio() -> f64 {
     std::env::var("SHARD_SCOUT_TIMEOUT_VERIFIER_RATIO")
         .ok()
         .and_then(|v| v.trim().parse::<f64>().ok())
@@ -967,7 +967,7 @@ fn scout_timeout_verifier_ratio() -> f64 {
         .unwrap_or(0.55)
 }
 
-fn scout_timeout_verifier_ratio_long() -> f64 {
+pub(crate) fn scout_timeout_verifier_ratio_long() -> f64 {
     std::env::var("SHARD_SCOUT_TIMEOUT_VERIFIER_RATIO_LONG")
         .ok()
         .and_then(|v| v.trim().parse::<f64>().ok())
@@ -975,7 +975,7 @@ fn scout_timeout_verifier_ratio_long() -> f64 {
         .unwrap_or(scout_timeout_verifier_ratio())
 }
 
-fn scout_timeout_verifier_floor_ms() -> u64 {
+pub(crate) fn scout_timeout_verifier_floor_ms() -> u64 {
     std::env::var("SHARD_SCOUT_TIMEOUT_VERIFIER_FLOOR_MS")
         .ok()
         .and_then(|v| v.trim().parse::<u64>().ok())
@@ -983,7 +983,7 @@ fn scout_timeout_verifier_floor_ms() -> u64 {
         .unwrap_or(200)
 }
 
-fn scout_timeout_verifier_ceil_ms() -> u64 {
+pub(crate) fn scout_timeout_verifier_ceil_ms() -> u64 {
     std::env::var("SHARD_SCOUT_TIMEOUT_VERIFIER_CEIL_MS")
         .ok()
         .and_then(|v| v.trim().parse::<u64>().ok())
@@ -1235,7 +1235,7 @@ fn scout_probe_queue_max() -> usize {
         .unwrap_or(12)
 }
 
-fn acceptance_rate_min_timeout_ms(request_max_tokens: usize) -> u64 {
+pub(crate) fn acceptance_rate_min_timeout_ms(request_max_tokens: usize) -> u64 {
     let long_min = scout_long_request_min_tokens();
     if long_min > 0 && request_max_tokens >= long_min {
         std::env::var("SHARD_SCOUT_TIMEOUT_ACCEPTANCE_FLOOR_LONG_MS")

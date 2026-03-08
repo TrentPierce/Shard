@@ -129,6 +129,88 @@ def configured_value(value: float | int | None, fallback: float | int) -> float 
     return fallback if value is None else value
 
 
+def parse_env_file(path: Path) -> dict[str, str]:
+    values: dict[str, str] = {}
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        values[key.strip()] = value.strip()
+    return values
+
+
+def load_profile_expectations(profile_name: str) -> dict[str, Any]:
+    profile_path = Path(__file__).resolve().parents[2] / "deploy" / "release" / profile_name
+    values = parse_env_file(profile_path)
+    return {
+        "profile_path": str(profile_path),
+        "release_profile": values.get("SHARD_RELEASE_PROFILE", ""),
+        "verifier_queue_cap": int(values.get("SHARD_VERIFIER_QUEUE_CAP", "0") or 0),
+        "long_request_min_tokens": int(
+            values.get("SHARD_SCOUT_LONG_REQUEST_MIN_TOKENS", "0") or 0
+        ),
+        "verifier_ratio_long": (
+            float(values["SHARD_SCOUT_TIMEOUT_VERIFIER_RATIO_LONG"])
+            if values.get("SHARD_SCOUT_TIMEOUT_VERIFIER_RATIO_LONG")
+            else None
+        ),
+    }
+
+
+def validate_long_profile_observation(
+    endpoint: str,
+    health: dict[str, Any],
+    scout_config: dict[str, Any],
+    expected: dict[str, Any],
+) -> list[str]:
+    failures: list[str] = []
+    config = scout_config.get("config", {}) if isinstance(scout_config, dict) else {}
+    speculative = config.get("speculative", {}) if isinstance(config, dict) else {}
+    timeout_cfg = speculative.get("timeout", {}) if isinstance(speculative, dict) else {}
+
+    actual_profile = str(config.get("profile", "") or "")
+    expected_profile = str(expected.get("release_profile", "") or "")
+    if expected_profile and actual_profile != expected_profile:
+        failures.append(
+            f"{endpoint}: profile={actual_profile or 'missing'} expected={expected_profile}"
+        )
+
+    actual_queue_cap = int(health.get("verifier_queue_cap", 0) or 0)
+    expected_queue_cap = int(expected.get("verifier_queue_cap", 0) or 0)
+    if expected_queue_cap > 0 and actual_queue_cap != expected_queue_cap:
+        failures.append(
+            f"{endpoint}: verifier_queue_cap={actual_queue_cap} expected={expected_queue_cap}"
+        )
+
+    actual_long_min = int(speculative.get("long_request_min_tokens", 0) or 0)
+    expected_long_min = int(expected.get("long_request_min_tokens", 0) or 0)
+    if actual_long_min != expected_long_min:
+        failures.append(
+            f"{endpoint}: long_request_min_tokens={actual_long_min} expected={expected_long_min}"
+        )
+
+    expected_ratio_long = expected.get("verifier_ratio_long")
+    actual_ratio_long_raw = timeout_cfg.get("verifier_ratio_long")
+    if expected_ratio_long is not None:
+        try:
+            actual_ratio_long = float(actual_ratio_long_raw)
+        except (TypeError, ValueError):
+            actual_ratio_long = None
+        if actual_ratio_long is None:
+            failures.append(f"{endpoint}: timeout.verifier_ratio_long missing")
+        elif abs(actual_ratio_long - float(expected_ratio_long)) > 1e-6:
+            failures.append(
+                f"{endpoint}: timeout.verifier_ratio_long={actual_ratio_long} "
+                f"expected={expected_ratio_long}"
+            )
+
+    if not bool(health.get("ready_for_inference", False)):
+        failures.append(f"{endpoint}: ready_for_inference=false")
+
+    return failures
+
+
 def median_metric(rows: list[dict[str, Any]], key: str) -> float:
     values = [float(row.get(key, 0.0) or 0.0) for row in rows]
     if not values:
@@ -275,6 +357,46 @@ async def reset_scout_runtime_state(
             payload = resp.json() or {}
             if not bool(payload.get("ok")):
                 raise RuntimeError(f"{endpoint}: scout runtime reset did not report ok")
+
+
+async def assert_long_profile_parity(
+    endpoints: list[str],
+    matrix_class: MatrixClass,
+) -> list[dict[str, Any]]:
+    expected = load_profile_expectations(matrix_class.recommended_profile)
+    timeout = httpx.Timeout(15.0, connect=5.0)
+    snapshots: list[dict[str, Any]] = []
+    failures: list[str] = []
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        for endpoint in endpoints:
+            health_resp = await client.get(f"{endpoint.rstrip('/')}/health")
+            health_resp.raise_for_status()
+            health = health_resp.json() or {}
+            scout_config_resp = await client.get(f"{endpoint.rstrip('/')}/v1/system/scout-config")
+            scout_config_resp.raise_for_status()
+            scout_config = scout_config_resp.json() or {}
+            snapshots.append(
+                {
+                    "endpoint": endpoint,
+                    "health": health,
+                    "scout_config": scout_config,
+                }
+            )
+            failures.extend(
+                validate_long_profile_observation(
+                    endpoint=endpoint,
+                    health=health,
+                    scout_config=scout_config,
+                    expected=expected,
+                )
+            )
+    if failures:
+        raise RuntimeError(
+            "long_profile_parity_failed: "
+            + "; ".join(failures)
+            + f" (expected profile file: {expected['profile_path']})"
+        )
+    return snapshots
 
 
 def evaluate_release_gates(
@@ -556,6 +678,11 @@ async def execute(args: argparse.Namespace) -> dict[str, Any]:
     two_pool = parse_pool(args.two_node_pool)
     all_endpoints = list(dict.fromkeys(one_pool + two_pool))
     by_scenario: dict[str, list[dict[str, Any]]] = {scenario.name: [] for scenario in SCENARIOS}
+    preflight_snapshots: list[dict[str, Any]] = []
+    fatal_error: str | None = None
+
+    if matrix_class.name == "long_scout_generation":
+        preflight_snapshots = await assert_long_profile_parity(all_endpoints, matrix_class)
 
     try:
         for scenario in SCENARIOS:
@@ -583,31 +710,36 @@ async def execute(args: argparse.Namespace) -> dict[str, Any]:
                     f"inference_mode={scenario_inference_mode(scenario, args.inference_mode)} "
                     f"rate={scenario_rate:.4f} timeout_ms={scenario_timeout_ms}"
                 )
-                exit_code = await run_orchestrator(
-                    scouts=args.scouts,
-                    rate=scenario_rate,
-                    duration=duration,
-                    verifier_pool=pool,
-                    out_path=out_path,
-                    inference_mode=scenario_inference_mode(scenario, args.inference_mode),
-                    request_timeout_ms=scenario_timeout_ms,
-                    max_attempts=args.max_attempts,
-                    scout_workers=workers,
-                    max_tokens=max_tokens,
-                    scout_mode=args.scout_mode if scenario.use_scout_workers else "synthetic",
-                    browser_scout_page_base_url=args.browser_scout_page_base_url,
-                    browser_channel=args.browser_channel,
-                    browser_headless=args.browser_headless,
-                    browser_startup_timeout_ms=args.browser_startup_timeout_ms,
-                    browser_user_data_dir=args.browser_user_data_dir or None,
-                    browser_warmup_timeout_s=browser_warmup_timeout_s,
-                    browser_warmup_max_requests=browser_warmup_max_requests,
-                    browser_warmup_request_max_tokens=browser_warmup_request_max_tokens,
-                    readiness_timeout_s=args.readiness_timeout_s,
-                    ready_queue_depth_max=args.ready_queue_depth_max,
-                    require_no_blackout=not args.allow_readiness_blackout,
-                    strict_readiness=args.strict_readiness,
-                )
+                run_error: str | None = None
+                try:
+                    exit_code = await run_orchestrator(
+                        scouts=args.scouts,
+                        rate=scenario_rate,
+                        duration=duration,
+                        verifier_pool=pool,
+                        out_path=out_path,
+                        inference_mode=scenario_inference_mode(scenario, args.inference_mode),
+                        request_timeout_ms=scenario_timeout_ms,
+                        max_attempts=args.max_attempts,
+                        scout_workers=workers,
+                        max_tokens=max_tokens,
+                        scout_mode=args.scout_mode if scenario.use_scout_workers else "synthetic",
+                        browser_scout_page_base_url=args.browser_scout_page_base_url,
+                        browser_channel=args.browser_channel,
+                        browser_headless=args.browser_headless,
+                        browser_startup_timeout_ms=args.browser_startup_timeout_ms,
+                        browser_user_data_dir=args.browser_user_data_dir or None,
+                        browser_warmup_timeout_s=browser_warmup_timeout_s,
+                        browser_warmup_max_requests=browser_warmup_max_requests,
+                        browser_warmup_request_max_tokens=browser_warmup_request_max_tokens,
+                        readiness_timeout_s=args.readiness_timeout_s,
+                        ready_queue_depth_max=args.ready_queue_depth_max,
+                        require_no_blackout=not args.allow_readiness_blackout,
+                        strict_readiness=args.strict_readiness,
+                    )
+                except Exception as exc:
+                    exit_code = 1
+                    run_error = str(exc)
                 try:
                     data = json.loads(out_path.read_text(encoding="utf-8"))
                 except Exception as exc:
@@ -617,6 +749,8 @@ async def execute(args: argparse.Namespace) -> dict[str, Any]:
                         "throughput_tps": 0.0,
                         "run_error": f"failed_to_read_output: {exc}",
                     }
+                if run_error:
+                    data["run_error"] = run_error
                 data["orchestrator_exit_code"] = exit_code
                 data["scenario_inference_mode"] = scenario_inference_mode(
                     scenario, args.inference_mode
@@ -626,6 +760,9 @@ async def execute(args: argparse.Namespace) -> dict[str, Any]:
                 data["scenario_latency_probe_ms"] = latency_probe_ms
                 data["output_file"] = str(out_path.as_posix())
                 by_scenario[scenario.name].append(data)
+                if run_error and run_error.startswith("browser_warmup_invalid:"):
+                    fatal_error = run_error
+                    break
                 if args.flush_timeout_s > 0:
                     print(
                         "Flushing verifier queues before next run "
@@ -646,6 +783,8 @@ async def execute(args: argparse.Namespace) -> dict[str, Any]:
                             require_no_blackout=not args.allow_readiness_blackout,
                             strict=args.strict_flush_readiness,
                         )
+            if fatal_error:
+                break
     finally:
         await configure_scout_ingress(all_endpoints, enabled=True)
 
@@ -728,6 +867,10 @@ async def execute(args: argparse.Namespace) -> dict[str, Any]:
             "title": matrix_class.title,
             "purpose": matrix_class.purpose,
             "recommended_profile": matrix_class.recommended_profile,
+        },
+        "preflight": {
+            "long_profile_snapshots": preflight_snapshots,
+            "fatal_error": fatal_error,
         },
         "aggregates": aggregates,
         "gates": [],

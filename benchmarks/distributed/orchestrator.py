@@ -844,6 +844,17 @@ async def run_orchestrator(
                     f"signal appeared after {info['requests_sent']} warmup requests"
                 )
                 return info
+
+            def browser_warmup_invalid_reason(info: dict[str, object]) -> str | None:
+                if not bool(info.get("attempted")):
+                    return None
+                if not bool(info.get("ready")):
+                    return "scouts never became draft-capable during warmup"
+                if bool(info.get("speculative_bypassed_for_request")):
+                    return None
+                if not bool(info.get("productive")):
+                    return "scouts became draft-capable but never became productive during warmup"
+                return None
     
             launch_tasks: list[asyncio.Task] = []
     
@@ -979,6 +990,10 @@ async def run_orchestrator(
                         f"browser scout runner exited early with code {browser_scout_proc.returncode}"
                     )
                 browser_warmup = await warmup_browser_scouts()
+                warmup_invalid_reason = browser_warmup_invalid_reason(browser_warmup)
+                if warmup_invalid_reason:
+                    browser_warmup["invalid_reason"] = warmup_invalid_reason
+                    raise RuntimeError(f"browser_warmup_invalid: {warmup_invalid_reason}")
 
             baseline_summaries = await fetch_pool_summaries(client, verifier_pool)
             baseline_accepted, baseline_total = aggregate_speculative_totals(baseline_summaries)
