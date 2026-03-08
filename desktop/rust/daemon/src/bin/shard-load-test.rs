@@ -1,11 +1,12 @@
 use clap::Parser;
-use ed25519_dalek::Signer;
 use ed25519_dalek::SigningKey;
 use reqwest::Client;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
+use shard_common::common::signed_envelope::SignedEnvelope;
+use shard_common::types::WorkRequest;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::Semaphore;
@@ -32,17 +33,11 @@ struct Args {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct WorkRequest {
-    request_id: String,
-    prompt_context: String,
-    min_tokens: i32,
-    created_at_ms: Option<u128>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 struct DraftResultSubmission {
     work_id: String,
     scout_id: String,
+    #[serde(default)]
+    lease_id: Option<String>,
     draft_text: String,
     #[serde(default)]
     prompt_context: Option<String>,
@@ -56,14 +51,15 @@ struct DraftResultSubmission {
     spot_check: Option<serde_json::Value>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct SignedEnvelope<T> {
-    signer_pubkey_hex: String,
-    nonce: u64,
-    timestamp_ms: u128,
-    payload_hash_hex: String,
-    payload: T,
-    signature_hex: String,
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct WorkPollResponse {
+    work: Option<WorkRequest>,
+    #[serde(default)]
+    transient_error: bool,
+    #[serde(default)]
+    detail: Option<String>,
+    #[serde(default)]
+    retry_after_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -126,201 +122,181 @@ fn percentile(values: &[f64], p: f64) -> f64 {
     sorted[idx]
 }
 
-fn sign_payload<T: Serialize + Clone>(
-    payload: T,
-    key: &SigningKey,
-    nonce: u64,
-    timestamp_ms: u128,
-) -> SignedRequest<T> {
-    let signer_pubkey_hex = hex::encode(key.verifying_key().to_bytes());
-    let payload_bytes = serde_json::to_vec(&payload).unwrap_or_default();
-    let payload_hash_hex = hex::encode(Sha256::digest(payload_bytes));
-    let body = format!(
-        "{}|{}|{}|{}",
-        signer_pubkey_hex, nonce, timestamp_ms, payload_hash_hex
-    );
-    let signature_hex = hex::encode(key.sign(body.as_bytes()).to_bytes());
-    SignedRequest {
-        envelope: SignedEnvelope {
-            signer_pubkey_hex,
-            nonce,
-            timestamp_ms,
-            payload_hash_hex,
-            payload,
-            signature_hex,
-        },
+fn make_signing_key(seed: u64) -> SigningKey {
+    let mut sk_bytes = [0u8; 32];
+    for b in 0..8 {
+        sk_bytes[b] = (seed >> (b * 8)) as u8;
+        sk_bytes[b + 8] = ((now_ms() as u64) >> (b * 8)) as u8;
+    }
+    SigningKey::from_bytes(&sk_bytes)
+}
+
+fn build_work_request(request_id: String) -> WorkRequest {
+    WorkRequest {
+        request_id,
+        prompt_context: "benchmark prompt".to_string(),
+        min_tokens: 2,
+        created_at_ms: Some(now_ms()),
+        lease_id: None,
+        lease_expires_at_ms: None,
+        assigned_scout_id: None,
+        preferred_endpoint: None,
     }
 }
 
-async fn run_mode(
+async fn post_signed<T: Serialize + Clone>(
     client: &Client,
-    args: &Args,
-    mode: &str,
-    _key: &SigningKey,
-) -> anyhow::Result<ModeReport> {
-    let mode_owned = mode.to_string();
-    let sem = Arc::new(Semaphore::new(args.concurrency));
-    let started = Instant::now();
-    let mut tasks = Vec::with_capacity(args.requests);
-    let signed = mode == "distributed";
-    let nonce_counter = Arc::new(std::sync::atomic::AtomicU64::new(
-        (now_ms() % 1_000_000_000) as u64 * 1000,
-    ));
+    url: String,
+    payload: T,
+    key: &SigningKey,
+    nonce_counter: &Arc<AtomicU64>,
+) -> reqwest::Result<reqwest::Response> {
+    let nonce = nonce_counter.fetch_add(1, Ordering::Relaxed);
+    let body = SignedRequest {
+        envelope: SignedEnvelope::sign(payload, key, nonce, now_ms()),
+    };
+    client.post(url).json(&body).send().await
+}
 
-    for i in 0..args.requests {
-        let permit = sem.clone().acquire_owned().await?;
-        let client = client.clone();
-        let base_url = args.base_url.clone();
-        let mode = mode_owned.clone();
-        let nonce_counter = nonce_counter.clone();
-        tasks.push(tokio::spawn(async move {
-            let mut sk_bytes = [0u8; 32];
-            for b in 0..8 {
-                sk_bytes[b] = ((i as u64) >> (b * 8)) as u8;
-                sk_bytes[b + 8] = ((now_ms() as u64) >> (b * 8)) as u8;
-            }
-            let key = ed25519_dalek::SigningKey::from_bytes(&sk_bytes);
+async fn ensure_pow_verified(
+    client: &Client,
+    base_url: &str,
+    scout_pubkey: &str,
+) -> anyhow::Result<()> {
+    let response = client
+        .get(format!(
+            "{base_url}/v1/pow/challenge?peer_id={scout_pubkey}&hardware_concurrency=8"
+        ))
+        .send()
+        .await?;
+    let value = response.json::<serde_json::Value>().await?;
+    let challenge = value
+        .get("challenge")
+        .ok_or_else(|| anyhow::anyhow!("missing pow challenge payload"))?;
+    let challenge_hex = challenge["challenge_bytes_hex"]
+        .as_str()
+        .ok_or_else(|| anyhow::anyhow!("missing pow challenge bytes"))?;
+    let difficulty = challenge["difficulty"]
+        .as_u64()
+        .ok_or_else(|| anyhow::anyhow!("missing pow difficulty"))? as u8;
+    let challenge_bytes = hex::decode(challenge_hex)?;
+    let solution = tokio::task::spawn_blocking(move || {
+        shard_common::common::pow_challenge::solve_challenge(&challenge_bytes, difficulty)
+    })
+    .await
+    .map_err(|err| anyhow::anyhow!("pow worker join failed: {err}"))?
+    .ok_or_else(|| anyhow::anyhow!("failed to solve pow challenge"))?;
+    let verify = client
+        .post(format!("{base_url}/v1/pow/verify"))
+        .json(&serde_json::json!({
+            "peer_id": scout_pubkey,
+            "nonce": solution.nonce,
+            "hash_hex": solution.hash_hex,
+        }))
+        .send()
+        .await?;
+    let verify_json = verify.json::<serde_json::Value>().await?;
+    anyhow::ensure!(
+        verify_json["ok"].as_bool() == Some(true),
+        "pow verify rejected: {}",
+        verify_json
+    );
+    Ok(())
+}
 
-            let _permit = permit;
-            let req_id = format!("{}-{}", mode, i);
-            let start = Instant::now();
-
-            let work = WorkRequest {
-                request_id: req_id.clone(),
-                prompt_context: "benchmark prompt".to_string(),
-                min_tokens: 2,
-                created_at_ms: Some(now_ms()),
-            };
-
-            let sent = if signed {
-                let n = nonce_counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                let body = sign_payload(work, &key, n, now_ms());
-                client
-                    .post(format!("{base_url}/signed/broadcast-work"))
-                    .json(&body)
-                    .send()
-                    .await
-            } else {
-                client
-                    .post(format!("{base_url}/broadcast-work"))
-                    .json(&work)
-                    .send()
-                    .await
-            };
-
-            if sent.is_err() {
-                return (false, start.elapsed().as_millis() as f64, 0usize);
-            }
-
-            let scout_pubkey = hex::encode(key.verifying_key().to_bytes());
-            if let Ok(res) = client
-                .get(format!(
-                    "{base_url}/v1/pow/challenge?peer_id={scout_pubkey}&hardware_concurrency=8"
-                ))
-                .send()
-                .await
-            {
-                if let Ok(val) = res.json::<serde_json::Value>().await {
-                    if let Some(c) = val.get("challenge") {
-                        let c_hex = c["challenge_bytes_hex"].as_str().unwrap_or("");
-                        let diff = c["difficulty"].as_u64().unwrap_or(0) as u8;
-                        if let Ok(c_bytes) = hex::decode(c_hex) {
-                            let sol = tokio::task::spawn_blocking(move || {
-                                shard_common::common::pow_challenge::solve_challenge(&c_bytes, diff)
-                            })
-                            .await
-                            .unwrap_or(None);
-
-                            if let Some(sol) = sol {
-                                let _ = client
-                                    .post(format!("{base_url}/v1/pow/verify"))
-                                    .json(&serde_json::json!({
-                                        "peer_id": scout_pubkey,
-                                        "nonce": sol.nonce,
-                                        "hash_hex": sol.hash_hex,
-                                    }))
-                                    .send()
-                                    .await;
-                            }
-                        }
-                    }
+async fn poll_result_until_complete(
+    client: &Client,
+    base_url: &str,
+    request_id: &str,
+    timeout: Duration,
+) -> bool {
+    let deadline = Instant::now() + timeout;
+    while Instant::now() < deadline {
+        let polled = client
+            .get(format!("{base_url}/pop-result"))
+            .query(&[("request_id", request_id)])
+            .send()
+            .await;
+        if let Ok(res) = polled {
+            if let Ok(v) = res.json::<serde_json::Value>().await {
+                if v.get("result").is_some() && !v["result"].is_null() {
+                    return true;
                 }
             }
-
-            let draft = DraftResultSubmission {
-                work_id: req_id.clone(),
-                scout_id: scout_pubkey.clone(),
-                draft_text: "token-a token-b token-c".to_string(),
-                prompt_context: None,
-                draft_tokens: vec![128001, 128002, 128003],
-                timestamp: Some((now_ms() as f64) / 1000.0),
-                scout_mode: None,
-                spot_check: None,
-            };
-
-            let submit_res = if signed {
-                let n = nonce_counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                let body = sign_payload(draft, &key, n, now_ms());
-                client
-                    .post(format!("{base_url}/signed/submit-draft"))
-                    .json(&body)
-                    .send()
-                    .await
-            } else {
-                client
-                    .post(format!("{base_url}/submit-draft"))
-                    .json(&draft)
-                    .send()
-                    .await
-            };
-
-            let is_submit_err = submit_res.is_err();
-            if let Ok(res) = submit_res {
-                if let Ok(json) = res.json::<serde_json::Value>().await {
-                    if json["ok"].as_bool() == Some(false) {
-                        println!("Submission rejected: {:?}", json["detail"]);
-                    }
-                }
-            }
-            if is_submit_err {
-                return (false, start.elapsed().as_millis() as f64, 0usize);
-            }
-
-            for _ in 0..20 {
-                let polled = client
-                    .get(format!("{base_url}/pop-result"))
-                    .query(&[("request_id", req_id.as_str())])
-                    .send()
-                    .await;
-                if let Ok(res) = polled {
-                    if let Ok(v) = res.json::<serde_json::Value>().await {
-                        if v.get("result").is_some() && !v["result"].is_null() {
-                            return (true, start.elapsed().as_millis() as f64, 3usize);
-                        }
-                    }
-                }
-                tokio::time::sleep(Duration::from_millis(20)).await;
-            }
-
-            (false, start.elapsed().as_millis() as f64, 0usize)
-        }));
-    }
-
-    let mut latencies = Vec::with_capacity(args.requests);
-    let mut successes = 0usize;
-    let mut failures = 0usize;
-    let mut offloaded_tokens = 0usize;
-    for task in tasks {
-        let (ok, latency, tokens) = task.await?;
-        latencies.push(latency);
-        if ok {
-            successes += 1;
-            offloaded_tokens += tokens;
-        } else {
-            failures += 1;
         }
+        tokio::time::sleep(Duration::from_millis(50)).await;
     }
+    false
+}
 
+async fn poll_for_work(
+    client: &Client,
+    base_url: &str,
+    scout_id: &str,
+) -> anyhow::Result<WorkPollResponse> {
+    let response = client
+        .get(format!("{base_url}/v1/scout/work?scout_id={scout_id}"))
+        .send()
+        .await?;
+    let status = response.status();
+    let payload = response
+        .json::<WorkPollResponse>()
+        .await
+        .unwrap_or_else(|_| WorkPollResponse::default());
+    if !status.is_success() {
+        return Ok(WorkPollResponse {
+            transient_error: status.as_u16() == 429 || status.as_u16() == 503 || status.is_server_error(),
+            detail: payload
+                .detail
+                .or_else(|| Some(format!("HTTP {}", status.as_u16()))),
+            retry_after_ms: payload.retry_after_ms,
+            ..payload
+        });
+    }
+    Ok(payload)
+}
+
+async fn submit_signed_draft(
+    client: &Client,
+    base_url: &str,
+    key: &SigningKey,
+    nonce_counter: &Arc<AtomicU64>,
+    work: &WorkRequest,
+    scout_id: &str,
+) -> anyhow::Result<bool> {
+    let draft = DraftResultSubmission {
+        work_id: work.request_id.clone(),
+        scout_id: scout_id.to_string(),
+        lease_id: work.lease_id.clone(),
+        draft_text: "token-a token-b token-c".to_string(),
+        prompt_context: Some(work.prompt_context.clone()),
+        draft_tokens: vec![128001, 128002, 128003],
+        timestamp: Some((now_ms() as f64) / 1000.0),
+        scout_mode: Some("synthetic".to_string()),
+        spot_check: None,
+    };
+    let response = post_signed(
+        client,
+        format!("{base_url}/signed/submit-draft"),
+        draft,
+        key,
+        nonce_counter,
+    )
+    .await?;
+    let payload = response.json::<serde_json::Value>().await.unwrap_or_default();
+    Ok(payload["ok"].as_bool() == Some(true))
+}
+
+fn mode_report(
+    mode: &str,
+    requests: usize,
+    concurrency: usize,
+    started: Instant,
+    latencies: Vec<f64>,
+    successes: usize,
+    failures: usize,
+    offloaded_tokens: usize,
+) -> ModeReport {
     let elapsed_s = started.elapsed().as_secs_f64().max(0.001);
     let throughput = successes as f64 / elapsed_s;
     let average = if latencies.is_empty() {
@@ -329,10 +305,10 @@ async fn run_mode(
         latencies.iter().sum::<f64>() / latencies.len() as f64
     };
 
-    Ok(ModeReport {
+    ModeReport {
         mode: mode.to_string(),
-        requests: args.requests,
-        concurrency: args.concurrency,
+        requests,
+        concurrency,
         successes,
         failures,
         throughput_rps: throughput,
@@ -345,18 +321,192 @@ async fn run_mode(
         } else {
             (offloaded_tokens as f64 / (successes as f64 * 3.0)) * 100.0
         },
-        failure_rate_percent: if args.requests == 0 {
+        failure_rate_percent: if requests == 0 {
             0.0
         } else {
-            (failures as f64 / args.requests as f64) * 100.0
+            (failures as f64 / requests as f64) * 100.0
         },
-    })
+    }
+}
+
+async fn run_baseline_mode(client: &Client, args: &Args) -> anyhow::Result<ModeReport> {
+    let sem = Arc::new(Semaphore::new(args.concurrency));
+    let started = Instant::now();
+    let mut tasks = Vec::with_capacity(args.requests);
+
+    for i in 0..args.requests {
+        let permit = sem.clone().acquire_owned().await?;
+        let client = client.clone();
+        let base_url = args.base_url.clone();
+        tasks.push(tokio::spawn(async move {
+            let _permit = permit;
+            let req_id = format!("baseline-{i}");
+            let start = Instant::now();
+            let work = build_work_request(req_id.clone());
+            let sent = client
+                .post(format!("{base_url}/broadcast-work"))
+                .json(&work)
+                .send()
+                .await;
+            if sent.is_err() {
+                return (false, start.elapsed().as_millis() as f64, 0usize);
+            }
+            let ok =
+                poll_result_until_complete(&client, &base_url, &req_id, Duration::from_secs(10))
+                    .await;
+            (ok, start.elapsed().as_millis() as f64, 0usize)
+        }));
+    }
+
+    let mut latencies = Vec::with_capacity(args.requests);
+    let mut successes = 0usize;
+    let mut failures = 0usize;
+    for task in tasks {
+        let (ok, latency, _tokens) = task.await?;
+        latencies.push(latency);
+        if ok {
+            successes += 1;
+        } else {
+            failures += 1;
+        }
+    }
+
+    Ok(mode_report(
+        "baseline",
+        args.requests,
+        args.concurrency,
+        started,
+        latencies,
+        successes,
+        failures,
+        0,
+    ))
+}
+
+async fn run_distributed_mode(client: &Client, args: &Args) -> anyhow::Result<ModeReport> {
+    let started = Instant::now();
+    let total_requests = args.requests;
+    let concurrency = args.concurrency;
+    let nonce_counter = Arc::new(AtomicU64::new((now_ms() % 1_000_000_000) as u64 * 1000));
+    let finished = Arc::new(AtomicUsize::new(0));
+    let offloaded_tokens = Arc::new(AtomicUsize::new(0));
+
+    let scout_workers = concurrency.clamp(1, total_requests.max(1));
+    let mut scouts = Vec::with_capacity(scout_workers);
+    for scout_index in 0..scout_workers {
+        let client = client.clone();
+        let base_url = args.base_url.clone();
+        let nonce_counter = nonce_counter.clone();
+        let finished = finished.clone();
+        let offloaded_tokens = offloaded_tokens.clone();
+        scouts.push(tokio::spawn(async move {
+            let key = make_signing_key(10_000 + scout_index as u64);
+            let scout_id = hex::encode(key.verifying_key().to_bytes());
+            if ensure_pow_verified(&client, &base_url, &scout_id).await.is_err() {
+                return;
+            }
+            let mut idle_polls = 0usize;
+            loop {
+                if finished.load(Ordering::Relaxed) >= total_requests && idle_polls >= 8 {
+                    break;
+                }
+                match poll_for_work(&client, &base_url, &scout_id).await {
+                    Ok(payload) => {
+                        if let Some(work) = payload.work {
+                            idle_polls = 0;
+                            if submit_signed_draft(
+                                &client,
+                                &base_url,
+                                &key,
+                                &nonce_counter,
+                                &work,
+                                &scout_id,
+                            )
+                            .await
+                            .unwrap_or(false)
+                            {
+                                offloaded_tokens.fetch_add(3, Ordering::Relaxed);
+                            }
+                        } else {
+                            idle_polls = idle_polls.saturating_add(1);
+                            let delay_ms = payload.retry_after_ms.unwrap_or(40).clamp(10, 500);
+                            tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+                        }
+                    }
+                    Err(_) => {
+                        idle_polls = idle_polls.saturating_add(1);
+                        tokio::time::sleep(Duration::from_millis(50)).await;
+                    }
+                }
+            }
+        }));
+    }
+
+    let sem = Arc::new(Semaphore::new(concurrency));
+    let mut tasks = Vec::with_capacity(total_requests);
+    for i in 0..total_requests {
+        let permit = sem.clone().acquire_owned().await?;
+        let client = client.clone();
+        let base_url = args.base_url.clone();
+        let nonce_counter = nonce_counter.clone();
+        let finished = finished.clone();
+        tasks.push(tokio::spawn(async move {
+            let _permit = permit;
+            let req_id = format!("distributed-{i}");
+            let start = Instant::now();
+            let key = make_signing_key(i as u64);
+            let work = build_work_request(req_id.clone());
+            let sent = post_signed(
+                &client,
+                format!("{base_url}/signed/broadcast-work"),
+                work,
+                &key,
+                &nonce_counter,
+            )
+            .await;
+            if sent.is_err() {
+                finished.fetch_add(1, Ordering::Relaxed);
+                return (false, start.elapsed().as_millis() as f64);
+            }
+            let ok =
+                poll_result_until_complete(&client, &base_url, &req_id, Duration::from_secs(12))
+                    .await;
+            finished.fetch_add(1, Ordering::Relaxed);
+            (ok, start.elapsed().as_millis() as f64)
+        }));
+    }
+
+    let mut latencies = Vec::with_capacity(args.requests);
+    let mut successes = 0usize;
+    let mut failures = 0usize;
+    for task in tasks {
+        let (ok, latency) = task.await?;
+        latencies.push(latency);
+        if ok {
+            successes += 1;
+        } else {
+            failures += 1;
+        }
+    }
+    for scout in scouts {
+        let _ = scout.await;
+    }
+
+    Ok(mode_report(
+        "distributed",
+        total_requests,
+        concurrency,
+        started,
+        latencies,
+        successes,
+        failures,
+        offloaded_tokens.load(Ordering::Relaxed),
+    ))
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
-    let key = SigningKey::from_bytes(&[9u8; 32]);
     let headers = parse_headers(&args.headers)?;
     let client = Client::builder()
         .timeout(Duration::from_secs(10))
@@ -364,12 +514,12 @@ async fn main() -> anyhow::Result<()> {
         .build()?;
 
     let baseline = if args.mode == "all" || args.mode == "baseline" {
-        Some(run_mode(&client, &args, "baseline", &key).await?)
+        Some(run_baseline_mode(&client, &args).await?)
     } else {
         None
     };
     let distributed_signed = if args.mode == "all" || args.mode == "distributed" {
-        Some(run_mode(&client, &args, "distributed", &key).await?)
+        Some(run_distributed_mode(&client, &args).await?)
     } else {
         None
     };
