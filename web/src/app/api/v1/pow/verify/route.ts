@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server"
 import {
   fetchWithBackendFailover,
   forwardRequestHeaders,
+  preferredBackendCandidatesFromHeaders,
   shardBackendUrls,
 } from "@/lib/server/shard-backend"
 
@@ -11,6 +12,7 @@ export const dynamic = "force-dynamic"
 export async function POST(request: NextRequest) {
   const path = "/v1/pow/verify"
   const candidates = shardBackendUrls(path)
+  const preferredCandidates = preferredBackendCandidatesFromHeaders(path)
 
   try {
     const body = await request.text()
@@ -18,6 +20,9 @@ export async function POST(request: NextRequest) {
       method: "POST",
       headers: forwardRequestHeaders(),
       body,
+      maxAttempts: preferredCandidates?.length || 3,
+      preferredCandidates,
+      loadAware: !preferredCandidates,
       timeoutMs: 15_000,
       failoverOnStatuses: [500, 502, 503, 504, 521, 530],
     })

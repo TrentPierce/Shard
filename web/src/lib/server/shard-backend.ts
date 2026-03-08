@@ -31,6 +31,25 @@ function dedupe(urls: string[]): string[] {
   return Array.from(new Set(urls))
 }
 
+export function preferredBackendCandidatesFromHeaders(path: string = ""): string[] | undefined {
+  try {
+    const incoming = headers()
+    const raw = incoming.get("x-shard-backend-url") || ""
+    if (!raw.trim()) return undefined
+    const cleanPath = path.startsWith("/") ? path : `/${path}`
+    const candidates = dedupe(
+      raw
+        .split(",")
+        .map((item) => normalizeUrl(item))
+        .filter((item) => item.length > 0)
+        .map((base) => `${base}${cleanPath}`),
+    )
+    return candidates.length > 0 ? candidates : undefined
+  } catch {
+    return undefined
+  }
+}
+
 type BackendRuntimeState = {
   inflight: number
   ewmaLatencyMs: number
@@ -263,6 +282,12 @@ export async function fetchWithBackendFailover(
   } = options
 
   let candidates = shardBackendUrls(path)
+  if (preferredCandidates && preferredCandidates.length > 0) {
+    candidates = dedupe([
+      ...preferredCandidates.map(normalizeUrl),
+      ...candidates,
+    ])
+  }
   candidates = prioritizePreferredCandidates(candidates, preferredCandidates)
   if (loadAware && candidates.length > 1) {
     await refreshLoadHints(candidates)
@@ -351,7 +376,7 @@ export function forwardRequestHeaders(contentType = "application/json"): Headers
     incoming.forEach((v, k) => {
       const lowerK = k.toLowerCase()
       // Skip headers that should not be forwarded to the backend
-      if (["host", "connection", "content-length", "content-type", "x-forwarded-for", "cf-ray", "cf-connecting-ip"].includes(lowerK)) {
+      if (["host", "connection", "content-length", "content-type", "x-forwarded-for", "cf-ray", "cf-connecting-ip", "x-shard-backend-url"].includes(lowerK)) {
         return
       }
       out[k] = v

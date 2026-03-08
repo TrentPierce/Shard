@@ -10,6 +10,7 @@ export const API_BASE = process.env.NEXT_PUBLIC_API_URL || (isTauri ? "http://lo
 export const RUST_BASE = process.env.NEXT_PUBLIC_RUST_URL || "http://localhost:9091"
 export const SHARD_BACKEND_BASE = process.env.NEXT_PUBLIC_SHARD_BACKEND_URL || "http://localhost:9091"
 const RUNTIME_API_BASE_OVERRIDE_KEY = "shard_runtime_api_base_override"
+const RUNTIME_API_HEADER_OVERRIDE_KEY = "shard_runtime_api_header_override"
 
 /**
  * Whether the browser should prefer local shard mode when a localhost daemon is detected.
@@ -43,6 +44,32 @@ function getRuntimeApiBaseOverride(): string {
   }
 }
 
+export function getRuntimeApiHeaderOverrides(): Record<string, string> {
+  if (typeof window === "undefined") return {}
+  const win = window as typeof window & { __SHARD_API_HEADER_OVERRIDES__?: Record<string, string> }
+  const direct = win.__SHARD_API_HEADER_OVERRIDES__
+  if (direct && typeof direct === "object") {
+    return Object.fromEntries(
+      Object.entries(direct)
+        .map(([key, value]) => [String(key).trim(), String(value ?? "").trim()])
+        .filter(([key, value]) => key.length > 0 && value.length > 0),
+    )
+  }
+  try {
+    const raw = window.sessionStorage.getItem(RUNTIME_API_HEADER_OVERRIDE_KEY) || ""
+    if (!raw.trim()) return {}
+    const parsed = JSON.parse(raw)
+    if (!parsed || typeof parsed !== "object") return {}
+    return Object.fromEntries(
+      Object.entries(parsed as Record<string, unknown>)
+        .map(([key, value]) => [String(key).trim(), String(value ?? "").trim()])
+        .filter(([key, value]) => key.length > 0 && value.length > 0),
+    )
+  } catch {
+    return {}
+  }
+}
+
 export function setRuntimeApiBaseOverride(base: string | null): void {
   if (typeof window === "undefined") return
   const clean = (base || "").trim()
@@ -56,6 +83,68 @@ export function setRuntimeApiBaseOverride(base: string | null): void {
     }
   } catch {
     // Best effort only.
+  }
+}
+
+export function setRuntimeApiHeaderOverrides(headers: Record<string, string> | null): void {
+  if (typeof window === "undefined") return
+  const clean = Object.fromEntries(
+    Object.entries(headers || {})
+      .map(([key, value]) => [String(key).trim(), String(value ?? "").trim()])
+      .filter(([key, value]) => key.length > 0 && value.length > 0),
+  )
+  const win = window as typeof window & { __SHARD_API_HEADER_OVERRIDES__?: Record<string, string> }
+  win.__SHARD_API_HEADER_OVERRIDES__ = Object.keys(clean).length > 0 ? clean : undefined
+  try {
+    if (Object.keys(clean).length > 0) {
+      window.sessionStorage.setItem(RUNTIME_API_HEADER_OVERRIDE_KEY, JSON.stringify(clean))
+    } else {
+      window.sessionStorage.removeItem(RUNTIME_API_HEADER_OVERRIDE_KEY)
+    }
+  } catch {
+    // Best effort only.
+  }
+}
+
+export function mergeRuntimeApiHeaders(
+  headers?: HeadersInit,
+  options: { allowOverride?: boolean } = {},
+): Headers {
+  const merged = new Headers(headers || {})
+  const runtimeHeaders = getRuntimeApiHeaderOverrides()
+  for (const [key, value] of Object.entries(runtimeHeaders)) {
+    if (!options.allowOverride && merged.has(key)) {
+      continue
+    }
+    merged.set(key, value)
+  }
+  return merged
+}
+
+export function parseRuntimeApiEndpointSpec(spec: string): {
+  backendUrl: string
+  headers: Record<string, string>
+} {
+  const parts = String(spec || "")
+    .split("|")
+    .map((item) => item.trim())
+    .filter(Boolean)
+  if (parts.length === 0) {
+    return { backendUrl: "", headers: {} }
+  }
+  const [backendUrl, ...rawHeaders] = parts
+  const headers: Record<string, string> = {}
+  for (const raw of rawHeaders) {
+    const separatorIndex = raw.indexOf("=")
+    if (separatorIndex <= 0) continue
+    const key = raw.slice(0, separatorIndex).trim()
+    const value = raw.slice(separatorIndex + 1).trim()
+    if (!key || !value) continue
+    headers[key] = value
+  }
+  return {
+    backendUrl: backendUrl.trim(),
+    headers,
   }
 }
 

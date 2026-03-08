@@ -32,7 +32,14 @@ import httpx
 if __package__ is None or __package__ == "":
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from benchmarks.distributed.orchestrator import run_orchestrator, wait_for_pool_readiness
+from benchmarks.distributed.orchestrator import (
+    endpoint_display_name,
+    endpoint_headers,
+    endpoint_url,
+    merge_headers,
+    run_orchestrator,
+    wait_for_pool_readiness,
+)
 
 
 @dataclass(frozen=True)
@@ -279,11 +286,14 @@ async def probe_endpoint_latency_ms(
     started = datetime.now(UTC).timestamp()
     async with httpx.AsyncClient(timeout=timeout) as client:
         resp = await client.post(
-            f"{endpoint.rstrip('/')}/v1/chat/completions",
-            headers={
-                "x-shard-inference-mode": "standard",
-                "x-shard-mesh-forward": "false",
-            },
+            endpoint_url(endpoint, "/v1/chat/completions"),
+            headers=merge_headers(
+                endpoint_headers(endpoint),
+                {
+                    "x-shard-inference-mode": "standard",
+                    "x-shard-mesh-forward": "false",
+                },
+            ),
             json=payload,
         )
         resp.raise_for_status()
@@ -329,8 +339,8 @@ async def configure_scout_ingress(
     async with httpx.AsyncClient(timeout=timeout) as client:
         for endpoint in verifier_pool:
             resp = await client.post(
-                f"{endpoint.rstrip('/')}/v1/system/scout-ingress",
-                headers=headers,
+                endpoint_url(endpoint, "/v1/system/scout-ingress"),
+                headers=merge_headers(endpoint_headers(endpoint), headers),
                 json={"enabled": enabled},
             )
             resp.raise_for_status()
@@ -350,8 +360,8 @@ async def reset_scout_runtime_state(
     async with httpx.AsyncClient(timeout=timeout) as client:
         for endpoint in verifier_pool:
             resp = await client.post(
-                f"{endpoint.rstrip('/')}/v1/system/scout-runtime/reset",
-                headers=headers,
+                endpoint_url(endpoint, "/v1/system/scout-runtime/reset"),
+                headers=merge_headers(endpoint_headers(endpoint), headers),
             )
             resp.raise_for_status()
             payload = resp.json() or {}
@@ -369,22 +379,28 @@ async def assert_long_profile_parity(
     failures: list[str] = []
     async with httpx.AsyncClient(timeout=timeout) as client:
         for endpoint in endpoints:
-            health_resp = await client.get(f"{endpoint.rstrip('/')}/health")
+            health_resp = await client.get(
+                endpoint_url(endpoint, "/health"),
+                headers=endpoint_headers(endpoint),
+            )
             health_resp.raise_for_status()
             health = health_resp.json() or {}
-            scout_config_resp = await client.get(f"{endpoint.rstrip('/')}/v1/system/scout-config")
+            scout_config_resp = await client.get(
+                endpoint_url(endpoint, "/v1/system/scout-config"),
+                headers=endpoint_headers(endpoint),
+            )
             scout_config_resp.raise_for_status()
             scout_config = scout_config_resp.json() or {}
             snapshots.append(
                 {
-                    "endpoint": endpoint,
+                    "endpoint": endpoint_display_name(endpoint),
                     "health": health,
                     "scout_config": scout_config,
                 }
             )
             failures.extend(
                 validate_long_profile_observation(
-                    endpoint=endpoint,
+                    endpoint=endpoint_display_name(endpoint),
                     health=health,
                     scout_config=scout_config,
                     expected=expected,

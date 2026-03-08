@@ -1,7 +1,11 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState } from "react"
-import { setRuntimeApiBaseOverride } from "@/lib/config"
+import {
+  parseRuntimeApiEndpointSpec,
+  setRuntimeApiBaseOverride,
+  setRuntimeApiHeaderOverrides,
+} from "@/lib/config"
 import { detectScoutCapability, type ScoutCapabilityResult } from "@/lib/scout-capability"
 import { generateDrafts, initScoutEngine } from "@/lib/scout-engine"
 import { setContributionStatus } from "@/lib/contribution-status"
@@ -34,6 +38,7 @@ export default function BenchmarkScoutPage() {
   const backend = query.backend
   const slot = query.slot
   const label = query.label
+  const parsedBackend = useMemo(() => parseRuntimeApiEndpointSpec(backend), [backend])
   const [state, setState] = useState<BenchmarkState>("booting")
   const [detail, setDetail] = useState("Preparing browser scout benchmark")
   const [capability, setCapability] = useState<ScoutCapabilityResult | null>(null)
@@ -89,7 +94,14 @@ export default function BenchmarkScoutPage() {
 
     const boot = async () => {
       try {
-        setRuntimeApiBaseOverride(backend || null)
+        const runtimeHeaders = parsedBackend.backendUrl
+          ? {
+              "x-shard-backend-url": parsedBackend.backendUrl,
+              ...parsedBackend.headers,
+            }
+          : {}
+        setRuntimeApiBaseOverride(null)
+        setRuntimeApiHeaderOverrides(runtimeHeaders)
         setRuntimeRegistered(false)
         setState("checking_capability")
         setDetail("Checking WebGPU support")
@@ -178,13 +190,15 @@ export default function BenchmarkScoutPage() {
       stopWorkerRef.current?.()
       stopWorkerRef.current = null
       setRuntimeApiBaseOverride(null)
+      setRuntimeApiHeaderOverrides(null)
     }
-  }, [backend])
+  }, [parsedBackend.backendUrl, parsedBackend.headers])
 
   useEffect(() => {
     if (typeof window === "undefined") return
     ;(window as typeof window & { __SHARD_BENCHMARK_SCOUT__?: Record<string, unknown> }).__SHARD_BENCHMARK_SCOUT__ = {
       backend,
+      resolvedBackend: parsedBackend.backendUrl,
       slot,
       label,
       state,
@@ -194,7 +208,7 @@ export default function BenchmarkScoutPage() {
       lastSuccessAtMs,
       runtimeRegistered,
     }
-  }, [backend, capability?.capability, detail, label, lastSuccessAtMs, progress?.progress, runtimeRegistered, slot, state])
+  }, [backend, capability?.capability, detail, label, lastSuccessAtMs, parsedBackend.backendUrl, progress?.progress, runtimeRegistered, slot, state])
 
   useEffect(() => {
     const suffix = progress ? ` progress=${Math.round(progress.progress * 100)}%` : ""
@@ -220,7 +234,7 @@ export default function BenchmarkScoutPage() {
 
         <div className="mt-6 grid gap-3 sm:grid-cols-2">
           <StatusCard label="State" value={state} />
-          <StatusCard label="Backend" value={backend || "relative /api proxy"} />
+          <StatusCard label="Backend" value={parsedBackend.backendUrl || "relative /api proxy"} />
           <StatusCard label="Capability" value={capability?.capability || "pending"} />
           <StatusCard label="Runtime" value={runtimeRegistered ? "registered" : "pending"} />
           <StatusCard label="Last success" value={lastSuccessAtMs ? new Date(lastSuccessAtMs).toLocaleTimeString() : "waiting"} />

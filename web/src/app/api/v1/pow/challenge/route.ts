@@ -1,6 +1,11 @@
 export const runtime = 'edge';
 import { NextRequest, NextResponse } from "next/server"
-import { fetchWithBackendFailover, shardBackendUrls } from "@/lib/server/shard-backend"
+import {
+  fetchWithBackendFailover,
+  forwardRequestHeaders,
+  preferredBackendCandidatesFromHeaders,
+  shardBackendUrls,
+} from "@/lib/server/shard-backend"
 
 export const dynamic = "force-dynamic"
 
@@ -8,10 +13,15 @@ export async function GET(request: NextRequest) {
   const search = request.nextUrl.search || ""
   const path = `/v1/pow/challenge${search}`
   const candidates = shardBackendUrls(path)
+  const preferredCandidates = preferredBackendCandidatesFromHeaders(path)
 
   try {
     const { response, backend, attempts } = await fetchWithBackendFailover(path, {
       method: "GET",
+      headers: forwardRequestHeaders(),
+      maxAttempts: preferredCandidates?.length || 3,
+      preferredCandidates,
+      loadAware: !preferredCandidates,
       timeoutMs: 10_000,
       failoverOnStatuses: [500, 502, 503, 504, 521, 530],
     })

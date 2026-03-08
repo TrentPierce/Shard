@@ -1,4 +1,4 @@
-import { apiUrl } from "./config"
+import { apiUrl, mergeRuntimeApiHeaders } from "./config"
 
 export interface DraftSubmission {
   work_id: string
@@ -132,7 +132,11 @@ async function fetchWithTimeout(
   const controller = new AbortController()
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
   try {
-    return await fetch(input, { ...init, signal: controller.signal })
+    return await fetch(input, {
+      ...init,
+      headers: mergeRuntimeApiHeaders(init.headers),
+      signal: controller.signal,
+    })
   } finally {
     clearTimeout(timeoutId)
   }
@@ -360,9 +364,9 @@ async function submitDraftOnce(
     await ensurePowVerifiedForScout(submission.scout_id, cfg)
     const response = await fetch(apiUrl("/v1/scout/draft"), {
       method: "POST",
-      headers: {
+      headers: mergeRuntimeApiHeaders({
         "Content-Type": "application/json",
-      },
+      }),
       body: JSON.stringify(submission),
       signal: controller.signal,
     })
@@ -595,9 +599,9 @@ export async function pollForWork(
         apiUrl(`/v1/scout/work?scout_id=${encodeURIComponent(scoutIdValue)}`),
         {
           method: "GET",
-          headers: {
+          headers: mergeRuntimeApiHeaders({
             "Content-Type": "application/json",
-          },
+          }),
           signal: controller.signal,
         }
       )

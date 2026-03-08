@@ -38,12 +38,19 @@ primary_region = "iad"
     method = "get"
     path = "/health"
 
+[http_service]
+  internal_port = 9091
+  force_https = true
+  auto_start_machines = true
+  auto_stop_machines = "off"
+
 [[services]]
   internal_port = 9091
   protocol = "tcp"
 
   [[services.ports]]
     port = 9091
+    handlers = ["http"]
 
 [[services]]
   internal_port = 4001

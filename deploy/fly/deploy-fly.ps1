@@ -173,6 +173,11 @@ if (-not $machines -or $machines.Count -lt 1) {
 
 $sourceMachineId = $machines[0].id
 foreach ($region in $Regions | Select-Object -Skip 1) {
+    $existingInRegion = @($machines | Where-Object { $_.region -eq $region -and $_.state -ne "destroyed" })
+    if ($existingInRegion.Count -gt 0) {
+        Write-Host ("machine clone skipped for {0}: already has {1} machine(s)" -f $region, $existingInRegion.Count)
+        continue
+    }
     try {
         flyctl machine clone $sourceMachineId --app $AppName --region $region | Out-Null
     } catch {

@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server"
 import {
   fetchWithBackendFailover,
   forwardRequestHeaders,
+  preferredBackendCandidatesFromHeaders,
   shardBackendUrls,
 } from "@/lib/server/shard-backend"
 import {
@@ -38,6 +39,7 @@ function inBackendCooldown(): boolean {
 export async function POST(request: NextRequest) {
   const path = "/v1/scout/draft"
   const candidates = shardBackendUrls(path)
+  const requestedCandidates = preferredBackendCandidatesFromHeaders(path)
   let workId = ""
 
   if (inBackendCooldown()) {
@@ -60,18 +62,29 @@ export async function POST(request: NextRequest) {
     } catch {
       workId = ""
     }
-    const preferredCandidate = workId ? preferredCandidateForWork(workId, path) : null
+    const preferredCandidate =
+      requestedCandidates && requestedCandidates.length > 0
+        ? null
+        : workId
+          ? preferredCandidateForWork(workId, path)
+          : null
+    const preferredCandidates =
+      requestedCandidates && requestedCandidates.length > 0
+        ? requestedCandidates
+        : preferredCandidate
+          ? [preferredCandidate]
+          : undefined
     const { response, backend, attempts } = await fetchWithBackendFailover(path, {
       method: "POST",
       headers: forwardRequestHeaders(),
       body,
       timeoutMs: 4_000,
       totalTimeoutMs: 6_500,
-      maxAttempts: preferredCandidate ? 1 : 2,
+      maxAttempts: preferredCandidates?.length || 2,
       retryJitterMs: 180,
       failoverOnStatuses: [500, 502, 503, 504, 521, 530],
-      preferredCandidates: preferredCandidate ? [preferredCandidate] : undefined,
-      loadAware: !preferredCandidate,
+      preferredCandidates,
+      loadAware: !preferredCandidates,
     })
     const data = await response.json().catch(() => ({}))
     if (!response.ok) {

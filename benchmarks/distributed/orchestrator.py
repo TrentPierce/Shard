@@ -70,10 +70,65 @@ class EndpointState:
     last_refresh_monotonic: float = 0.0
 
 
+def normalize_endpoint_spec(spec: str) -> str:
+    return str(spec or "").strip()
+
+
+def split_endpoint_spec(spec: str) -> tuple[str, dict[str, str]]:
+    parts = [item.strip() for item in str(spec or "").split("|") if item.strip()]
+    if not parts:
+        return "", {}
+    base_url = parts[0].rstrip("/")
+    headers: dict[str, str] = {}
+    for raw in parts[1:]:
+        if "=" not in raw:
+            continue
+        name, value = raw.split("=", 1)
+        name = name.strip()
+        value = value.strip()
+        if name and value:
+            headers[name] = value
+    return base_url, headers
+
+
+def endpoint_base_url(spec: str) -> str:
+    base_url, _ = split_endpoint_spec(spec)
+    return base_url
+
+
+def endpoint_headers(spec: str) -> dict[str, str]:
+    _, headers = split_endpoint_spec(spec)
+    return headers
+
+
+def endpoint_url(spec: str, path: str) -> str:
+    clean_path = path if path.startswith("/") else f"/{path}"
+    return f"{endpoint_base_url(spec)}{clean_path}"
+
+
+def endpoint_display_name(spec: str) -> str:
+    base_url, headers = split_endpoint_spec(spec)
+    fly_instance = headers.get("Fly-Force-Instance-Id", "").strip()
+    if fly_instance:
+        return f"{base_url}#fly:{fly_instance}"
+    return base_url or normalize_endpoint_spec(spec)
+
+
+def merge_headers(*header_sets: dict[str, str] | None) -> dict[str, str]:
+    merged: dict[str, str] = {}
+    for header_set in header_sets:
+        if not header_set:
+            continue
+        for key, value in header_set.items():
+            if key and value:
+                merged[key] = value
+    return merged
+
+
 class LoadAwarePool:
     def __init__(self, endpoints: list[str]) -> None:
         self._states = {
-            ep.rstrip("/"): EndpointState(endpoint=ep.rstrip("/"))
+            normalize_endpoint_spec(ep): EndpointState(endpoint=normalize_endpoint_spec(ep))
             for ep in endpoints
             if ep.strip()
         }
@@ -146,7 +201,7 @@ class LoadAwarePool:
     async def score_for(self, endpoint: str, client: httpx.AsyncClient) -> float:
         await self.refresh(client)
         async with self._lock:
-            state = self._states.get(endpoint.rstrip("/"))
+            state = self._states.get(normalize_endpoint_spec(endpoint))
             if state is None:
                 return float("inf")
             return self._score(state)
@@ -158,7 +213,7 @@ class LoadAwarePool:
 
     async def note_result(self, endpoint: str, ok: bool, latency_ms: float) -> None:
         async with self._lock:
-            state = self._states.get(endpoint.rstrip("/"))
+            state = self._states.get(normalize_endpoint_spec(endpoint))
             if state is None:
                 return
             state.inflight = max(0, state.inflight - 1)
@@ -179,7 +234,10 @@ class LoadAwarePool:
             load = state.load
             latency_ms = state.ewma_latency_ms
             try:
-                resp = await client.get(f"{state.endpoint}/metrics/summary")
+                resp = await client.get(
+                    endpoint_url(state.endpoint, "/metrics/summary"),
+                    headers=endpoint_headers(state.endpoint),
+                )
                 if resp.is_success:
                     data = resp.json()
                     if summary_has_queue_breakdown(data):
@@ -302,7 +360,10 @@ async def choose_browser_backends(
 
 async def fetch_summary(client: httpx.AsyncClient, base_url: str) -> dict:
     try:
-        resp = await client.get(f"{base_url.rstrip('/')}/metrics/summary")
+        resp = await client.get(
+            endpoint_url(base_url, "/metrics/summary"),
+            headers=endpoint_headers(base_url),
+        )
         if resp.is_success:
             return resp.json()
     except Exception:
@@ -312,7 +373,10 @@ async def fetch_summary(client: httpx.AsyncClient, base_url: str) -> dict:
 
 async def fetch_health(client: httpx.AsyncClient, base_url: str) -> dict:
     try:
-        resp = await client.get(f"{base_url.rstrip('/')}/health")
+        resp = await client.get(
+            endpoint_url(base_url, "/health"),
+            headers=endpoint_headers(base_url),
+        )
         if resp.is_success:
             return resp.json()
     except Exception:
@@ -322,7 +386,10 @@ async def fetch_health(client: httpx.AsyncClient, base_url: str) -> dict:
 
 async def fetch_scout_config(client: httpx.AsyncClient, base_url: str) -> dict:
     try:
-        resp = await client.get(f"{base_url.rstrip('/')}/v1/system/scout-config")
+        resp = await client.get(
+            endpoint_url(base_url, "/v1/system/scout-config"),
+            headers=endpoint_headers(base_url),
+        )
         if resp.is_success:
             return resp.json()
     except Exception:
@@ -455,7 +522,7 @@ def summarize_records_by_endpoint(
     for record in records:
         if not record.endpoint:
             continue
-        grouped.setdefault(record.endpoint.rstrip("/"), []).append(record)
+        grouped.setdefault(endpoint_display_name(record.endpoint), []).append(record)
 
     summary: dict[str, dict[str, float | int | dict[str, int]]] = {}
     for endpoint, endpoint_records in grouped.items():
@@ -694,7 +761,8 @@ async def run_orchestrator(
     
             async def ensure_pow_for_scout(endpoint: str, scout_id: str) -> bool:
                 challenge_resp = await client.get(
-                    f"{endpoint}/v1/pow/challenge",
+                    endpoint_url(endpoint, "/v1/pow/challenge"),
+                    headers=endpoint_headers(endpoint),
                     params={
                         "peer_id": scout_id,
                         "hardware_concurrency": 8,
@@ -711,7 +779,8 @@ async def run_orchestrator(
                     return False
                 nonce, hash_hex = await asyncio.to_thread(solve_pow, challenge_hex, difficulty)
                 verify_resp = await client.post(
-                    f"{endpoint}/v1/pow/verify",
+                    endpoint_url(endpoint, "/v1/pow/verify"),
+                    headers=endpoint_headers(endpoint),
                     json={"peer_id": scout_id, "nonce": nonce, "hash_hex": hash_hex},
                 )
                 if not verify_resp.is_success:
@@ -752,7 +821,8 @@ async def run_orchestrator(
                             verified_endpoints.add(endpoint)
     
                         work_resp = await client.get(
-                            f"{endpoint}/v1/scout/work",
+                            endpoint_url(endpoint, "/v1/scout/work"),
+                            headers=endpoint_headers(endpoint),
                             params={"scout_id": scout_id},
                         )
                         if not work_resp.is_success:
@@ -796,11 +866,14 @@ async def run_orchestrator(
     
                         # Draft with standard mode so this helper path does not recurse into speculative work.
                         gen_resp = await client.post(
-                            f"{endpoint}/v1/chat/completions",
-                            headers={
-                                "x-shard-inference-mode": "standard",
-                                "x-shard-mesh-forward": "false",
-                            },
+                            endpoint_url(endpoint, "/v1/chat/completions"),
+                            headers=merge_headers(
+                                endpoint_headers(endpoint),
+                                {
+                                    "x-shard-inference-mode": "standard",
+                                    "x-shard-mesh-forward": "false",
+                                },
+                            ),
                             json={
                                 "model": "shard-hybrid",
                                 "messages": [{"role": "user", "content": user_prompt}],
@@ -820,7 +893,8 @@ async def run_orchestrator(
                         draft_text = (str(generated).strip() or "ok")[:256]
     
                         await client.post(
-                            f"{endpoint}/v1/scout/draft",
+                            endpoint_url(endpoint, "/v1/scout/draft"),
+                            headers=endpoint_headers(endpoint),
                             json={
                                 "work_id": work.get("request_id"),
                                 "scout_id": scout_id,
@@ -849,13 +923,16 @@ async def run_orchestrator(
                                 endpoint = await pool.next_balanced(client)
                             else:
                                 endpoint = await pool.next(client)
-                            endpoint_request_counts[endpoint.rstrip("/")] += 1
+                            endpoint_request_counts[endpoint_display_name(endpoint)] += 1
                             resp = await client.post(
-                                f"{endpoint}/v1/chat/completions",
-                                headers={
-                                    "x-shard-inference-mode": inference_mode,
-                                    "x-shard-mesh-forward": "false",
-                                },
+                                endpoint_url(endpoint, "/v1/chat/completions"),
+                                headers=merge_headers(
+                                    endpoint_headers(endpoint),
+                                    {
+                                        "x-shard-inference-mode": inference_mode,
+                                        "x-shard-mesh-forward": "false",
+                                    },
+                                ),
                                 json={
                                     "model": "shard-hybrid",
                                     "messages": [{"role": "user", "content": f"hello from scout {seq}"}],
@@ -890,7 +967,7 @@ async def run_orchestrator(
                             RequestRecord(
                                 ok=ok,
                                 latency_ms=latency_ms,
-                                endpoint=endpoint.rstrip("/") if endpoint else None,
+                                endpoint=endpoint if endpoint else None,
                                 status_code=final_status,
                                 error_kind=final_error_kind,
                             )
@@ -905,11 +982,14 @@ async def run_orchestrator(
                 try:
                     endpoint = endpoint_override or await pool.next(client)
                     resp = await client.post(
-                        f"{endpoint}/v1/chat/completions",
-                        headers={
-                            "x-shard-inference-mode": "speculative",
-                            "x-shard-mesh-forward": "false",
-                        },
+                        endpoint_url(endpoint, "/v1/chat/completions"),
+                        headers=merge_headers(
+                            endpoint_headers(endpoint),
+                            {
+                                "x-shard-inference-mode": "speculative",
+                                "x-shard-mesh-forward": "false",
+                            },
+                        ),
                         json={
                             "model": "shard-hybrid",
                             "messages": [{"role": "user", "content": f"browser scout warmup {seq}"}],
@@ -943,7 +1023,7 @@ async def run_orchestrator(
                     "speculative_bypassed_for_request": False,
                 }
                 target_backends = selected_browser_backends or [
-                    endpoint.rstrip("/") for endpoint in verifier_pool if endpoint.strip()
+                    normalize_endpoint_spec(endpoint) for endpoint in verifier_pool if endpoint.strip()
                 ]
                 info["target_backends"] = target_backends
                 ready = await wait_for_browser_scout_supply(

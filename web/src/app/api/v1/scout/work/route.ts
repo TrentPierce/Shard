@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server"
 import {
   fetchWithBackendFailover,
   forwardRequestHeaders,
+  preferredBackendCandidatesFromHeaders,
   shardBackendUrls,
 } from "@/lib/server/shard-backend"
 import { rememberWorkAffinity } from "@/lib/server/scout-affinity"
@@ -36,6 +37,7 @@ export async function GET(request: NextRequest) {
   const search = request.nextUrl.search || ""
   const path = `/v1/scout/work${search}`
   const candidates = shardBackendUrls(path)
+  const preferredCandidates = preferredBackendCandidatesFromHeaders(path)
 
   if (inBackendCooldown()) {
     return NextResponse.json(
@@ -56,9 +58,11 @@ export async function GET(request: NextRequest) {
       headers: forwardRequestHeaders(),
       timeoutMs: 2_500,
       totalTimeoutMs: 3_800,
-      maxAttempts: 3,
+      maxAttempts: preferredCandidates?.length || 3,
       retryJitterMs: 180,
       failoverOnStatuses: [429, 500, 502, 503, 504, 521, 530],
+      preferredCandidates,
+      loadAware: !preferredCandidates,
     })
     const data = await response.json().catch(() => ({}))
     if (!response.ok) {
