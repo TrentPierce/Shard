@@ -28,7 +28,7 @@ fi
 
 echo "[fly-start] starting shard-daemon with model ${MODEL_PATH}"
 args=(
-  --public-api true
+  --public-api
   --control-port "${CONTROL_PORT:-9091}"
   --telemetry-ws-port "${TELEMETRY_WS_PORT:-9093}"
   --tcp-port "${TCP_PORT:-4001}"
