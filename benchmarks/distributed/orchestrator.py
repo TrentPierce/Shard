@@ -56,6 +56,7 @@ class RequestRecord:
     endpoint: str | None = None
     status_code: int | None = None
     error_kind: str | None = None
+    speculative_trace: dict | None = None
 
 
 @dataclass
@@ -178,6 +179,32 @@ class LoadAwarePool:
                 )
 
             selected = min(healthy, key=selection_score)
+            selected.inflight += 1
+            selected.dispatched_requests += 1
+            return selected.endpoint
+
+    async def next_pinned_balanced(self, client: httpx.AsyncClient) -> str:
+        """Route to the healthiest least-dispatched endpoint for a strict even spread."""
+        await self.refresh(client)
+        async with self._lock:
+            if not self._states:
+                raise RuntimeError("no verifier endpoints configured")
+            candidates = list(self._states.values())
+            healthy = [
+                state
+                for state in candidates
+                if state.error_ewma < 0.75 and state.queue_depth < 10.0
+            ]
+            if not healthy:
+                healthy = candidates
+            selected = min(
+                healthy,
+                key=lambda state: (
+                    state.dispatched_requests,
+                    state.inflight,
+                    self._score(state),
+                ),
+            )
             selected.inflight += 1
             selected.dispatched_requests += 1
             return selected.endpoint
@@ -562,6 +589,19 @@ def summarize_records_by_endpoint(
     return summary
 
 
+def serialize_request_speculative_traces(records: list[RequestRecord]) -> list[dict[str, object]]:
+    return [
+        {
+            "latency_ms": round(record.latency_ms, 3),
+            "endpoint": endpoint_display_name(record.endpoint) if record.endpoint else None,
+            "status_code": record.status_code,
+            "speculative_trace": record.speculative_trace,
+        }
+        for record in records
+        if record.speculative_trace
+    ]
+
+
 async def wait_for_browser_scout_supply(
     client: httpx.AsyncClient,
     verifier_pool: list[str],
@@ -916,11 +956,12 @@ async def run_orchestrator(
                     ok = False
                     final_status: int | None = None
                     final_error_kind: str | None = None
+                    request_spec_trace: dict | None = None
                     for _attempt in range(max(1, max_attempts)):
                         endpoint = None
                         try:
                             if len(verifier_pool) > 1:
-                                endpoint = await pool.next_balanced(client)
+                                endpoint = await pool.next_pinned_balanced(client)
                             else:
                                 endpoint = await pool.next(client)
                             endpoint_request_counts[endpoint_display_name(endpoint)] += 1
@@ -951,6 +992,17 @@ async def run_orchestrator(
                             if attempt_ok:
                                 ok = True
                                 final_error_kind = None
+                                if inference_mode in ("speculative", "distributed"):
+                                    try:
+                                        trace_summary = await fetch_summary(client, endpoint)
+                                        request_spec_trace = {
+                                            key: float(trace_summary.get(key, 0.0) or 0.0)
+                                            for key in SPECULATIVE_DELTA_KEYS
+                                            if trace_summary.get(key) is not None
+                                        }
+                                        request_spec_trace["_endpoint"] = endpoint_display_name(endpoint)
+                                    except Exception:
+                                        request_spec_trace = None
                                 break
                         except Exception as exc:
                             final_error_kind = exc.__class__.__name__
@@ -970,6 +1022,7 @@ async def run_orchestrator(
                                 endpoint=endpoint if endpoint else None,
                                 status_code=final_status,
                                 error_kind=final_error_kind,
+                                speculative_trace=request_spec_trace,
                             )
                         )
                     async with in_flight_lock:
@@ -1394,6 +1447,7 @@ async def run_orchestrator(
         "error_breakdown": dict(error_breakdown),
         "endpoint_request_counts": dict(endpoint_request_counts),
         "endpoint_latency_summary": summarize_records_by_endpoint(records),
+        "per_request_speculative_traces": serialize_request_speculative_traces(records),
         "endpoint_speculative_deltas": collect_endpoint_counter_deltas(
             baseline_summary_rows,
             after_summary_rows,

@@ -1,5 +1,6 @@
 import unittest
 
+from benchmarks.distributed.orchestrator import RequestRecord, serialize_request_speculative_traces
 from benchmarks.distributed.run_release_matrix import (
     Scenario,
     evaluate_release_gates,
@@ -153,6 +154,52 @@ class ReleaseMatrixScenarioTests(unittest.TestCase):
         self.assertTrue(any("long_request_min_tokens=0 expected=32" in item for item in failures))
         self.assertTrue(any("timeout.verifier_ratio_long missing" in item for item in failures))
         self.assertTrue(any("ready_for_inference=false" in item for item in failures))
+
+    def test_request_record_can_store_speculative_trace(self) -> None:
+        record = RequestRecord(
+            ok=True,
+            latency_ms=123.456,
+            endpoint="https://shard-fly-bench-0308c.fly.dev|Fly-Force-Instance-Id=7819e44fd595e8",
+            status_code=200,
+            speculative_trace={
+                "_endpoint": "https://shard-fly-bench-0308c.fly.dev#fly:7819e44fd595e8",
+                "speculative_wait_hits_total": 2.0,
+            },
+        )
+        self.assertEqual(record.speculative_trace["speculative_wait_hits_total"], 2.0)
+
+    def test_serialize_request_speculative_traces_includes_trace_shape(self) -> None:
+        traces = serialize_request_speculative_traces(
+            [
+                RequestRecord(
+                    ok=True,
+                    latency_ms=123.456,
+                    endpoint="https://shard-fly-bench-0308c.fly.dev|Fly-Force-Instance-Id=871426b02e5038",
+                    status_code=200,
+                    speculative_trace={
+                        "_endpoint": "https://shard-fly-bench-0308c.fly.dev#fly:871426b02e5038",
+                        "speculative_draft_tokens_total": 4.0,
+                    },
+                ),
+                RequestRecord(
+                    ok=False,
+                    latency_ms=456.789,
+                    endpoint="https://shard-fly-bench-0308c.fly.dev|Fly-Force-Instance-Id=784929ef655498",
+                    status_code=429,
+                    speculative_trace=None,
+                ),
+            ]
+        )
+        self.assertEqual(len(traces), 1)
+        self.assertEqual(
+            traces[0]["endpoint"],
+            "https://shard-fly-bench-0308c.fly.dev#fly:871426b02e5038",
+        )
+        self.assertEqual(traces[0]["status_code"], 200)
+        self.assertEqual(
+            traces[0]["speculative_trace"]["speculative_draft_tokens_total"],
+            4.0,
+        )
 
 
 if __name__ == "__main__":
