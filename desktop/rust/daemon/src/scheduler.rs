@@ -1215,7 +1215,7 @@ fn scout_probe_every_n_requests() -> u64 {
     std::env::var("SHARD_SCOUT_PROBE_EVERY_N")
         .ok()
         .and_then(|v| v.trim().parse::<u64>().ok())
-        .map(|v| v.clamp(2, 128))
+        .map(|v| v.clamp(1, 128))
         .unwrap_or(8)
 }
 
