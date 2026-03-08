@@ -53,6 +53,7 @@ SPECULATIVE_DELTA_KEYS = (
 class RequestRecord:
     ok: bool
     latency_ms: float
+    endpoint: str | None = None
     status_code: int | None = None
     error_kind: str | None = None
 
@@ -432,6 +433,53 @@ def summary_latency_signal_ms(summary: dict) -> float:
 
 def summary_has_queue_breakdown(summary: dict) -> bool:
     return all(key in summary for key in SUMMARY_QUEUE_BREAKDOWN_KEYS)
+
+
+def summarize_records_by_endpoint(
+    records: list[RequestRecord],
+) -> dict[str, dict[str, float | int | dict[str, int]]]:
+    grouped: dict[str, list[RequestRecord]] = {}
+    for record in records:
+        if not record.endpoint:
+            continue
+        grouped.setdefault(record.endpoint.rstrip("/"), []).append(record)
+
+    summary: dict[str, dict[str, float | int | dict[str, int]]] = {}
+    for endpoint, endpoint_records in grouped.items():
+        latencies = [record.latency_ms for record in endpoint_records]
+        status_counts: Counter[str] = Counter()
+        error_breakdown: Counter[str] = Counter()
+        successes = 0
+        for record in endpoint_records:
+            if record.ok:
+                successes += 1
+            if record.status_code is not None:
+                status_counts[str(record.status_code)] += 1
+            if not record.ok:
+                key = (
+                    record.error_kind
+                    or (f"http_{record.status_code}" if record.status_code else "unknown")
+                )
+                error_breakdown[key] += 1
+
+        summary[endpoint] = {
+            "requests": len(endpoint_records),
+            "successful_requests": successes,
+            "error_requests": len(endpoint_records) - successes,
+            "error_rate_pct": round(
+                ((len(endpoint_records) - successes) / len(endpoint_records) * 100.0)
+                if endpoint_records
+                else 0.0,
+                4,
+            ),
+            "mean_latency_ms": round(sum(latencies) / len(latencies), 3) if latencies else 0.0,
+            "p50_latency_ms": round(percentile(latencies, 0.50), 3) if latencies else 0.0,
+            "p95_latency_ms": round(percentile(latencies, 0.95), 3) if latencies else 0.0,
+            "status_counts": dict(status_counts),
+            "error_breakdown": dict(error_breakdown),
+        }
+
+    return summary
 
 
 async def wait_for_browser_scout_supply(
@@ -829,6 +877,7 @@ async def run_orchestrator(
                             RequestRecord(
                                 ok=ok,
                                 latency_ms=latency_ms,
+                                endpoint=endpoint.rstrip("/") if endpoint else None,
                                 status_code=final_status,
                                 error_kind=final_error_kind,
                             )
@@ -1245,6 +1294,7 @@ async def run_orchestrator(
         "status_counts": dict(status_counts),
         "error_breakdown": dict(error_breakdown),
         "endpoint_request_counts": dict(endpoint_request_counts),
+        "endpoint_latency_summary": summarize_records_by_endpoint(records),
         "endpoint_speculative_deltas": collect_endpoint_counter_deltas(
             baseline_summary_rows,
             after_summary_rows,
