@@ -1263,6 +1263,8 @@ async fn effective_speculative_timeout_ms(
     request_id: &str,
     request_max_tokens: usize,
 ) -> u64 {
+    let draft_token_count =
+        effective_draft_token_count(config.draft_token_count, request_max_tokens);
     let supply = estimate_scout_supply(state).await;
     let active_scouts = supply.effective_active_scouts();
     let queue_depth = {
@@ -1282,13 +1284,23 @@ async fn effective_speculative_timeout_ms(
             && queue_depth <= probe_queue_max
             && probe_allowed_for_request(request_id, probe_modulus)
         {
-            let probe_timeout = scout_probe_timeout_ms();
+            let probe_floor_ms = acceptance_rate_min_timeout_ms(request_max_tokens);
+            let probe_timeout = adapt_speculative_timeout_ms(
+                state,
+                config.scout_timeout_ms.max(scout_probe_timeout_ms()),
+                request_max_tokens,
+                draft_token_count,
+            )
+            .max(probe_floor_ms);
             tracing::debug!(
                 probe_timeout,
+                probe_floor_ms,
                 candidate_scouts,
                 probe_modulus,
                 probe_queue_max,
-                "speculative probe enabled with no productive scouts yet"
+                request_max_tokens,
+                draft_token_count,
+                "speculative probe enabled with request-aware timeout and no productive scouts yet"
             );
             return probe_timeout;
         }

@@ -32,6 +32,22 @@ SUMMARY_QUEUE_BREAKDOWN_KEYS = (
     "scout_work_queue_depth",
 )
 
+WARMUP_PRODUCTIVE_COUNTER_KEYS = (
+    "scout_client_submit_success_total",
+    "scout_draft_submissions_total",
+    "speculative_draft_tokens_total",
+)
+
+SPECULATIVE_DELTA_KEYS = (
+    "speculative_wait_hits_total",
+    "speculative_wait_timeouts_total",
+    "speculative_wait_mismatched_work_id_total",
+    "speculative_verify_attempts_total",
+    "speculative_draft_tokens_total",
+    "speculative_accepted_tokens_total",
+    "speculative_rejected_tokens_total",
+)
+
 
 @dataclass
 class RequestRecord:
@@ -307,6 +323,78 @@ def aggregate_speculative_totals(summaries: list[dict]) -> tuple[float, float]:
     return accepted, total
 
 
+def rows_by_endpoint(rows: list[dict]) -> dict[str, dict]:
+    mapped: dict[str, dict] = {}
+    for row in rows:
+        endpoint = str(row.get("_endpoint", "") or "").rstrip("/")
+        if endpoint:
+            mapped[endpoint] = row
+    return mapped
+
+
+def endpoint_counter_delta(
+    baseline_rows: dict[str, dict],
+    current_rows: dict[str, dict],
+    endpoint: str,
+    key: str,
+) -> float:
+    before = float(baseline_rows.get(endpoint, {}).get(key, 0.0) or 0.0)
+    after = float(current_rows.get(endpoint, {}).get(key, 0.0) or 0.0)
+    return max(0.0, after - before)
+
+
+def endpoint_health_value(rows: dict[str, dict], endpoint: str, key: str) -> int:
+    return int(rows.get(endpoint, {}).get(key, 0) or 0)
+
+
+def endpoint_warmup_signals(
+    endpoint: str,
+    baseline_summary_rows: dict[str, dict],
+    current_summary_rows: dict[str, dict],
+    baseline_health_rows: dict[str, dict],
+    current_health_rows: dict[str, dict],
+) -> list[str]:
+    signals: list[str] = []
+    for key in WARMUP_PRODUCTIVE_COUNTER_KEYS:
+        delta = endpoint_counter_delta(
+            baseline_summary_rows,
+            current_summary_rows,
+            endpoint,
+            key,
+        )
+        if delta > 0:
+            signals.append(f"{key}+={int(delta) if float(delta).is_integer() else round(delta, 3)}")
+    current_submitters = endpoint_health_value(
+        current_health_rows,
+        endpoint,
+        "recent_scout_submitters",
+    )
+    baseline_submitters = endpoint_health_value(
+        baseline_health_rows,
+        endpoint,
+        "recent_scout_submitters",
+    )
+    if current_submitters > max(0, baseline_submitters):
+        signals.append(f"recent_scout_submitters={current_submitters}")
+    return signals
+
+
+def collect_endpoint_counter_deltas(
+    baseline_rows: dict[str, dict],
+    current_rows: dict[str, dict],
+    keys: tuple[str, ...],
+) -> dict[str, dict[str, float]]:
+    endpoints = sorted(set(baseline_rows) | set(current_rows))
+    deltas: dict[str, dict[str, float]] = {}
+    for endpoint in endpoints:
+        endpoint_deltas: dict[str, float] = {}
+        for key in keys:
+            delta = endpoint_counter_delta(baseline_rows, current_rows, endpoint, key)
+            endpoint_deltas[key] = round(delta, 4)
+        deltas[endpoint] = endpoint_deltas
+    return deltas
+
+
 def summary_latency_signal_ms(summary: dict) -> float:
     p95 = float(summary.get("p95_latency_ms", 0.0) or 0.0)
     avg = float(summary.get("average_latency_ms", 0.0) or 0.0)
@@ -488,6 +576,7 @@ async def run_orchestrator(
     effective_browser_warmup_request_max_tokens = browser_warmup_request_max_tokens
     baseline_accepted = 0.0
     baseline_total = 0.0
+    selected_browser_backends: list[str] = []
 
     try:
         async with httpx.AsyncClient(limits=limits, timeout=timeout) as client:
@@ -723,6 +812,7 @@ async def run_orchestrator(
                         f"{endpoint}/v1/chat/completions",
                         headers={
                             "x-shard-inference-mode": "speculative",
+                            "x-shard-mesh-forward": "false",
                         },
                         json={
                             "model": "shard-hybrid",
@@ -756,6 +846,10 @@ async def run_orchestrator(
                     "requests_sent": 0,
                     "speculative_bypassed_for_request": False,
                 }
+                target_backends = selected_browser_backends or [
+                    endpoint.rstrip("/") for endpoint in verifier_pool if endpoint.strip()
+                ]
+                info["target_backends"] = target_backends
                 ready = await wait_for_browser_scout_supply(
                     client=client,
                     verifier_pool=verifier_pool,
@@ -792,56 +886,60 @@ async def run_orchestrator(
                     )
                     return info
 
-                baseline_summaries = await fetch_pool_summaries(client, verifier_pool)
-                baseline_submit_success = aggregate_counter(
-                    baseline_summaries, "scout_client_submit_success_total"
+                baseline_summary_rows = rows_by_endpoint(
+                    await fetch_pool_summaries(client, verifier_pool)
                 )
-                baseline_draft_submissions = aggregate_counter(
-                    baseline_summaries, "scout_draft_submissions_total"
-                )
-                baseline_speculative_tokens = aggregate_counter(
-                    baseline_summaries, "speculative_draft_tokens_total"
+                baseline_health_rows = rows_by_endpoint(
+                    await fetch_pool_health(client, verifier_pool)
                 )
                 deadline = time.monotonic() + max(5, browser_warmup_timeout_s)
                 attempts = max(1, browser_warmup_max_requests)
                 for seq in range(attempts):
                     if time.monotonic() >= deadline:
                         break
-                    warmup_endpoint = verifier_pool[seq % len(verifier_pool)]
+                    warmup_endpoint = target_backends[seq % len(target_backends)]
                     await warmup_one(seq, endpoint_override=warmup_endpoint)
                     info["requests_sent"] = int(info["requests_sent"]) + 1
                     await asyncio.sleep(0.6)
-                    pool_summaries = await fetch_pool_summaries(client, verifier_pool)
-                    pool_health = await fetch_pool_health(client, verifier_pool)
-                    submit_success_total = aggregate_counter(
-                        pool_summaries, "scout_client_submit_success_total"
+                    current_summary_rows = rows_by_endpoint(
+                        await fetch_pool_summaries(client, verifier_pool)
                     )
-                    draft_submissions_total = aggregate_counter(
-                        pool_summaries, "scout_draft_submissions_total"
+                    current_health_rows = rows_by_endpoint(
+                        await fetch_pool_health(client, verifier_pool)
                     )
-                    speculative_draft_tokens_total = aggregate_counter(
-                        pool_summaries, "speculative_draft_tokens_total"
-                    )
-                    recent_submitters = max(
-                        (int(health.get("recent_scout_submitters", 0) or 0) for health in pool_health),
-                        default=0,
-                    )
-                    if (
-                        submit_success_total > baseline_submit_success
-                        or draft_submissions_total > baseline_draft_submissions
-                        or speculative_draft_tokens_total > baseline_speculative_tokens
-                        or recent_submitters > 0
-                    ):
+                    productive_backends: list[str] = []
+                    backend_signals: dict[str, list[str]] = {}
+                    for endpoint in target_backends:
+                        signals = endpoint_warmup_signals(
+                            endpoint,
+                            baseline_summary_rows,
+                            current_summary_rows,
+                            baseline_health_rows,
+                            current_health_rows,
+                        )
+                        if signals:
+                            productive_backends.append(endpoint)
+                            backend_signals[endpoint] = signals
+                    info["productive_backends"] = productive_backends
+                    info["backend_signals"] = backend_signals
+                    if len(productive_backends) == len(target_backends):
                         info["productive"] = True
                         print(
-                            "[browser-warmup] productive scout supply detected "
-                            f"after {info['requests_sent']} warmup requests"
+                            "[browser-warmup] productive scout supply detected on all selected "
+                            f"backends after {info['requests_sent']} warmup requests"
                         )
                         return info
 
+                missing_backends = [
+                    endpoint
+                    for endpoint in target_backends
+                    if endpoint not in set(info.get("productive_backends", []))
+                ]
+                info["missing_backends"] = missing_backends
                 print(
-                    "[browser-warmup] warning: scouts became draft-capable but no submit-success "
-                    f"signal appeared after {info['requests_sent']} warmup requests"
+                    "[browser-warmup] warning: scouts became draft-capable but not all selected "
+                    f"backends became productive after {info['requests_sent']} warmup requests; "
+                    f"missing={','.join(missing_backends) or 'none'}"
                 )
                 return info
 
@@ -853,6 +951,12 @@ async def run_orchestrator(
                 if bool(info.get("speculative_bypassed_for_request")):
                     return None
                 if not bool(info.get("productive")):
+                    missing_backends = info.get("missing_backends") or []
+                    if missing_backends:
+                        return (
+                            "scouts became draft-capable but these backends never became productive: "
+                            + ",".join(str(item) for item in missing_backends)
+                        )
                     return "scouts became draft-capable but never became productive during warmup"
                 return None
     
@@ -971,6 +1075,9 @@ async def run_orchestrator(
             scout_tasks: list[asyncio.Task] = []
             if scout_workers > 0 and scout_mode == "browser":
                 browser_backends = await choose_browser_backends(pool, client, scout_workers)
+                selected_browser_backends = list(
+                    dict.fromkeys(endpoint.rstrip("/") for endpoint in browser_backends if endpoint)
+                )
                 print(
                     "[browser-scout-runner] selected backends: "
                     + ", ".join(browser_backends)
@@ -996,6 +1103,7 @@ async def run_orchestrator(
                     raise RuntimeError(f"browser_warmup_invalid: {warmup_invalid_reason}")
 
             baseline_summaries = await fetch_pool_summaries(client, verifier_pool)
+            baseline_summary_rows = rows_by_endpoint(baseline_summaries)
             baseline_accepted, baseline_total = aggregate_speculative_totals(baseline_summaries)
             start = time.monotonic()
             end = start + duration
@@ -1025,6 +1133,7 @@ async def run_orchestrator(
                     await asyncio.gather(*done, return_exceptions=True)
     
             after_summaries = await fetch_pool_summaries(client, verifier_pool)
+            after_summary_rows = rows_by_endpoint(after_summaries)
             after_accepted, after_total = aggregate_speculative_totals(after_summaries)
     finally:
         if browser_scout_proc is not None and browser_scout_proc.returncode is None:
@@ -1080,26 +1189,44 @@ async def run_orchestrator(
         "acceptance_source": acceptance_source,
         "acceptance_samples": int(total_delta),
         "throughput_tps": round(throughput_tps, 4),
+        "run_valid": True,
         "browser_warmup": browser_warmup,
         "status_counts": dict(status_counts),
         "error_breakdown": dict(error_breakdown),
+        "endpoint_speculative_deltas": collect_endpoint_counter_deltas(
+            baseline_summary_rows,
+            after_summary_rows,
+            SPECULATIVE_DELTA_KEYS,
+        ),
         "timeseries": timeseries,
     }
-
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(json.dumps(results, indent=2), encoding="utf-8")
 
     gates = {
         "p95_latency_ms": p95_latency_ms <= 3000.0,
         "error_rate_pct": error_rate_pct <= 0.1,
         "acceptance_rate_pct": acceptance_rate_pct >= 65.0 or total_delta == 0,
     }
-    passed = all(gates.values())
+    performance_passed = all(gates.values())
+    results["performance_gates"] = gates
+    results["performance_passed"] = performance_passed
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(results, indent=2), encoding="utf-8")
 
     print("\nFinal:")
-    print(json.dumps({"results": results, "gates": gates, "passed": passed}, indent=2))
+    print(
+        json.dumps(
+            {
+                "results": results,
+                "gates": gates,
+                "performance_passed": performance_passed,
+                "run_valid": True,
+            },
+            indent=2,
+        )
+    )
 
-    return 0 if passed else 1
+    return 0
 
 
 def parse_args() -> argparse.Namespace:

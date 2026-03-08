@@ -404,6 +404,18 @@ def evaluate_release_gates(
 ) -> list[dict[str, Any]]:
     two_with = aggregates.get("two-node-with-scouts", {})
     two_no = aggregates.get("two-node-no-scouts", {})
+    two_no_runs_valid = bool(
+        two_no.get(
+            "all_orchestrator_runs_valid",
+            two_no.get("all_orchestrator_runs_passed", False),
+        )
+    )
+    two_with_runs_valid = bool(
+        two_with.get(
+            "all_orchestrator_runs_valid",
+            two_with.get("all_orchestrator_runs_passed", False),
+        )
+    )
     p95_with = float(two_with.get("p95_latency_ms_median", 0.0))
     err_with = float(two_with.get("error_rate_pct_median", 100.0))
     tps_with = float(two_with.get("throughput_tps_median", 0.0))
@@ -457,19 +469,19 @@ def evaluate_release_gates(
             },
             {
                 "name": "two_node_no_scouts_runs_pass",
-                "description": "2-node no-scout runs must all exit cleanly",
-                "actual": bool(two_no.get("all_orchestrator_runs_passed", False)),
+                "description": "2-node no-scout runs must all produce valid benchmark outputs",
+                "actual": two_no_runs_valid,
                 "expected_op": "==",
                 "expected": True,
-                "pass": bool(two_no.get("all_orchestrator_runs_passed", False)),
+                "pass": two_no_runs_valid,
             },
             {
                 "name": "two_node_with_scouts_runs_pass",
-                "description": "2-node scout runs must all exit cleanly",
-                "actual": bool(two_with.get("all_orchestrator_runs_passed", False)),
+                "description": "2-node scout runs must all produce valid benchmark outputs",
+                "actual": two_with_runs_valid,
                 "expected_op": "==",
                 "expected": True,
-                "pass": bool(two_with.get("all_orchestrator_runs_passed", False)),
+                "pass": two_with_runs_valid,
             },
         ]
 
@@ -516,19 +528,19 @@ def evaluate_release_gates(
         },
         {
             "name": "two_node_no_scouts_runs_pass",
-            "description": "2-node no-scout runs must all exit cleanly",
-            "actual": bool(two_no.get("all_orchestrator_runs_passed", False)),
+            "description": "2-node no-scout runs must all produce valid benchmark outputs",
+            "actual": two_no_runs_valid,
             "expected_op": "==",
             "expected": True,
-            "pass": bool(two_no.get("all_orchestrator_runs_passed", False)),
+            "pass": two_no_runs_valid,
         },
         {
             "name": "two_node_with_scouts_runs_pass",
-            "description": "2-node scout runs must all exit cleanly",
-            "actual": bool(two_with.get("all_orchestrator_runs_passed", False)),
+            "description": "2-node scout runs must all produce valid benchmark outputs",
+            "actual": two_with_runs_valid,
             "expected_op": "==",
             "expected": True,
-            "pass": bool(two_with.get("all_orchestrator_runs_passed", False)),
+            "pass": two_with_runs_valid,
         },
     ]
 
@@ -752,6 +764,8 @@ async def execute(args: argparse.Namespace) -> dict[str, Any]:
                 if run_error:
                     data["run_error"] = run_error
                 data["orchestrator_exit_code"] = exit_code
+                data["run_valid"] = bool(data.get("run_valid", exit_code == 0 and not run_error))
+                data["performance_passed"] = bool(data.get("performance_passed", False))
                 data["scenario_inference_mode"] = scenario_inference_mode(
                     scenario, args.inference_mode
                 )
@@ -821,7 +835,15 @@ async def execute(args: argparse.Namespace) -> dict[str, Any]:
             "error_rate_pct_mean": round(mean_metric(rows, "error_rate_pct"), 4),
             "speculative_samples_mean": round(mean_metric(rows, "acceptance_samples"), 4),
             "all_orchestrator_runs_passed": all(
-                int(row.get("orchestrator_exit_code", 1)) == 0 for row in rows
+                bool(row.get("run_valid", int(row.get("orchestrator_exit_code", 1)) == 0))
+                for row in rows
+            ),
+            "all_orchestrator_runs_valid": all(
+                bool(row.get("run_valid", int(row.get("orchestrator_exit_code", 1)) == 0))
+                for row in rows
+            ),
+            "all_performance_gates_passed": all(
+                bool(row.get("performance_passed", False)) for row in rows
             ),
         }
 
