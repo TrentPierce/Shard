@@ -1085,10 +1085,16 @@ async def run_orchestrator(
                 )
                 deadline = time.monotonic() + max(5, browser_warmup_timeout_s)
                 attempts = max(1, browser_warmup_max_requests)
+                productive_backends: list[str] = []
+                backend_signals: dict[str, list[str]] = {}
                 for seq in range(attempts):
                     if time.monotonic() >= deadline:
                         break
-                    warmup_endpoint = target_backends[seq % len(target_backends)]
+                    pending_backends = [
+                        endpoint for endpoint in target_backends if endpoint not in set(productive_backends)
+                    ]
+                    current_targets = pending_backends or target_backends
+                    warmup_endpoint = current_targets[seq % len(current_targets)]
                     await warmup_one(seq, endpoint_override=warmup_endpoint)
                     info["requests_sent"] = int(info["requests_sent"]) + 1
                     await asyncio.sleep(0.6)
@@ -1098,8 +1104,8 @@ async def run_orchestrator(
                     current_health_rows = rows_by_endpoint(
                         await fetch_pool_health(client, verifier_pool)
                     )
-                    productive_backends: list[str] = []
-                    backend_signals: dict[str, list[str]] = {}
+                    productive_backends = []
+                    backend_signals = {}
                     for endpoint in target_backends:
                         signals = endpoint_warmup_signals(
                             endpoint,
@@ -1567,6 +1573,8 @@ def main() -> None:
             browser_headless=args.browser_headless,
             browser_startup_timeout_ms=args.browser_startup_timeout_ms,
             browser_user_data_dir=args.browser_user_data_dir or None,
+            browser_warmup_timeout_s=args.browser_warmup_timeout_s,
+            browser_warmup_max_requests=args.browser_warmup_max_requests,
             readiness_timeout_s=args.readiness_timeout_s,
             ready_queue_depth_max=args.ready_queue_depth_max,
             require_no_blackout=not args.allow_readiness_blackout,

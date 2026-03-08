@@ -25,7 +25,15 @@ export async function GET(request: NextRequest) {
       timeoutMs: 10_000,
       failoverOnStatuses: [500, 502, 503, 504, 521, 530],
     })
-    const data = await response.json().catch(() => ({}))
+    const payloadText = await response.text().catch(() => "")
+    let data: Record<string, unknown> = {}
+    if (payloadText.trim()) {
+      try {
+        data = JSON.parse(payloadText)
+      } catch {
+        data = { raw_body_preview: payloadText.slice(0, 400) }
+      }
+    }
     return NextResponse.json(
       { ...data, backend, backend_attempts: attempts },
       { status: response.status },

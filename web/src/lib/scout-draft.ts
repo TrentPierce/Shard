@@ -186,6 +186,22 @@ type PowChallengePayload = {
   difficulty: number
 }
 
+function extractPowChallengePayload(payload: any): PowChallengePayload | null {
+  const candidate = payload?.challenge ?? payload
+  if (
+    candidate &&
+    typeof candidate.challenge_bytes_hex === "string" &&
+    Number.isFinite(candidate.difficulty) &&
+    Number(candidate.difficulty) > 0
+  ) {
+    return {
+      challenge_bytes_hex: String(candidate.challenge_bytes_hex),
+      difficulty: Number(candidate.difficulty),
+    }
+  }
+  return null
+}
+
 function getHardwareConcurrency(): number {
   if (typeof navigator === "undefined") return 4
   const raw = Number((navigator as any).hardwareConcurrency ?? 4)
@@ -268,12 +284,14 @@ async function ensurePowVerifiedForScout(scoutIdValue: string, cfg: ScoutConfig)
         }
 
         const challengeJson = await challengeRes.json()
-        const challenge = challengeJson?.challenge as PowChallengePayload | undefined
-        if (
-          !challenge?.challenge_bytes_hex ||
-          !Number.isFinite(challenge.difficulty) ||
-          challenge.difficulty <= 0
-        ) {
+        const challenge = extractPowChallengePayload(challengeJson)
+        if (!challenge) {
+          console.warn(
+            "Invalid PoW challenge payload:",
+            typeof challengeJson === "string"
+              ? challengeJson
+              : JSON.stringify(challengeJson).slice(0, 400),
+          )
           throw new Error("PoW challenge payload is invalid")
         }
 
@@ -305,8 +323,13 @@ async function ensurePowVerifiedForScout(scoutIdValue: string, cfg: ScoutConfig)
         powRetryNotBeforeMs = 0
         return true
       } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error)
+        const isInvalidChallengePayload = detail.includes("PoW challenge payload is invalid")
         if (attempt >= cfg.powRetries) {
-          powRetryNotBeforeMs = Date.now() + getJitteredBackoff(cfg.powFailureCooldownMs, 0, cfg.powFailureCooldownMs * 2)
+          const cooldownBaseMs = isInvalidChallengePayload
+            ? Math.min(cfg.powFailureCooldownMs, 1500)
+            : cfg.powFailureCooldownMs
+          powRetryNotBeforeMs = Date.now() + getJitteredBackoff(cooldownBaseMs, 0, cooldownBaseMs * 2)
           throw error
         }
         await sleep(getJitteredBackoff(cfg.powRetryBackoffMs, attempt, cfg.powFailureCooldownMs))
