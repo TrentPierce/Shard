@@ -94,19 +94,21 @@ class LoadAwarePool:
             if not self._states:
                 raise RuntimeError("no verifier endpoints configured")
             ranked = sorted(self._states.values(), key=self._score)
-            best_score = self._score(ranked[0])
-            viable = [
+            healthy = [
                 state
                 for state in ranked
-                if self._score(state) <= max(best_score * 1.35, best_score + 900.0)
+                if state.error_ewma < 0.75 and state.queue_depth < 10.0 and state.load < 100.0
             ]
-            if not viable:
-                viable = ranked[:1]
+            if not healthy:
+                healthy = ranked
             selected = min(
-                viable,
+                healthy,
                 key=lambda state: (
                     state.inflight,
                     state.dispatched_requests,
+                    state.queue_depth,
+                    state.load,
+                    state.error_ewma,
                     self._score(state),
                 ),
             )
@@ -782,7 +784,7 @@ async def run_orchestrator(
                     for _attempt in range(max(1, max_attempts)):
                         endpoint = None
                         try:
-                            if inference_mode == "distributed" and len(verifier_pool) > 1:
+                            if len(verifier_pool) > 1:
                                 endpoint = await pool.next_balanced(client)
                             else:
                                 endpoint = await pool.next(client)
@@ -1190,6 +1192,8 @@ async def run_orchestrator(
             except asyncio.TimeoutError:
                 browser_scout_proc.kill()
                 await browser_scout_proc.wait()
+        if scout_mode == "browser" and scout_workers > 0:
+            await asyncio.sleep(3.0)
 
     latencies = [r.latency_ms for r in records]
     total = len(records)

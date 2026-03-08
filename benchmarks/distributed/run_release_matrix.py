@@ -701,6 +701,16 @@ async def execute(args: argparse.Namespace) -> dict[str, Any]:
             pool = one_pool if scenario.pool_kind == "one_node" else two_pool
             workers = args.scout_workers if scenario.use_scout_workers else 0
             await configure_scout_ingress(pool, enabled=scenario.use_scout_workers)
+            await reset_scout_runtime_state(pool)
+            async with httpx.AsyncClient(timeout=httpx.Timeout(10.0)) as reset_client:
+                await wait_for_pool_readiness(
+                    client=reset_client,
+                    verifier_pool=pool,
+                    timeout_s=min(20, args.readiness_timeout_s),
+                    queue_depth_max=args.ready_queue_depth_max,
+                    require_no_blackout=not args.allow_readiness_blackout,
+                    strict=args.strict_readiness,
+                )
             scenario_rate = rate
             scenario_timeout_ms = args.request_timeout_ms
             latency_probe_ms: dict[str, float] = {}
