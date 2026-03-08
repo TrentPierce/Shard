@@ -61,6 +61,7 @@ class RequestRecord:
 class EndpointState:
     endpoint: str
     inflight: int = 0
+    dispatched_requests: int = 0
     ewma_latency_ms: float = 1200.0
     error_ewma: float = 0.0
     queue_depth: float = 0.0
@@ -86,6 +87,32 @@ class LoadAwarePool:
             endpoint = ranked[0].endpoint
             self._states[endpoint].inflight += 1
             return endpoint
+
+    async def next_balanced(self, client: httpx.AsyncClient) -> str:
+        await self.refresh(client)
+        async with self._lock:
+            if not self._states:
+                raise RuntimeError("no verifier endpoints configured")
+            ranked = sorted(self._states.values(), key=self._score)
+            best_score = self._score(ranked[0])
+            viable = [
+                state
+                for state in ranked
+                if self._score(state) <= max(best_score * 1.35, best_score + 900.0)
+            ]
+            if not viable:
+                viable = ranked[:1]
+            selected = min(
+                viable,
+                key=lambda state: (
+                    state.inflight,
+                    state.dispatched_requests,
+                    self._score(state),
+                ),
+            )
+            selected.inflight += 1
+            selected.dispatched_requests += 1
+            return selected.endpoint
 
     async def best_endpoint_for_scout(
         self, client: httpx.AsyncClient, preferred: list[str] | None = None
@@ -551,6 +578,7 @@ async def run_orchestrator(
     pool = LoadAwarePool(verifier_pool)
     semaphore = asyncio.Semaphore(max(1, scouts))
     records: list[RequestRecord] = []
+    endpoint_request_counts: Counter[str] = Counter()
     records_lock = asyncio.Lock()
     in_flight = 0
     in_flight_lock = asyncio.Lock()
@@ -754,7 +782,11 @@ async def run_orchestrator(
                     for _attempt in range(max(1, max_attempts)):
                         endpoint = None
                         try:
-                            endpoint = await pool.next(client)
+                            if inference_mode == "distributed" and len(verifier_pool) > 1:
+                                endpoint = await pool.next_balanced(client)
+                            else:
+                                endpoint = await pool.next(client)
+                            endpoint_request_counts[endpoint.rstrip("/")] += 1
                             resp = await client.post(
                                 f"{endpoint}/v1/chat/completions",
                                 headers={
@@ -1208,6 +1240,7 @@ async def run_orchestrator(
         "browser_warmup": browser_warmup,
         "status_counts": dict(status_counts),
         "error_breakdown": dict(error_breakdown),
+        "endpoint_request_counts": dict(endpoint_request_counts),
         "endpoint_speculative_deltas": collect_endpoint_counter_deltas(
             baseline_summary_rows,
             after_summary_rows,

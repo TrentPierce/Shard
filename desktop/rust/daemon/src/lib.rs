@@ -4381,10 +4381,28 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
 
                                     let work = envelope.payload;
 
-                                    // If we are acting as a Scout, pick up this work
-                                    {
+                                    // Browser/API scouts attached to this verifier can only submit
+                                    // drafts back here, so only expose work we locally own.
+                                    let locally_pending = {
+                                        let pending = state.speculative_pending.lock().await;
+                                        pending.contains_key(work.request_id.as_str())
+                                    };
+                                    if locally_pending {
                                         let mut queue = state.scout_work.lock().await;
                                         enqueue_scout_work(&mut queue, work.clone());
+                                    } else {
+                                        record_speculative_trace(
+                                            &state,
+                                            work.request_id.clone(),
+                                            "gossip_work_skip_browser_queue",
+                                            None,
+                                            Some(
+                                                "received foreign speculative work; not exposing it to local browser scouts"
+                                                    .to_string(),
+                                            ),
+                                            None,
+                                        )
+                                        .await;
                                     }
 
                                     // ── Daemon-side scout worker ──
