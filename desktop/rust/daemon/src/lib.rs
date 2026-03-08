@@ -2211,6 +2211,24 @@ fn unique_addrs(addrs: Vec<String>) -> Vec<String> {
     out
 }
 
+fn env_flag(name: &str) -> bool {
+    std::env::var(name)
+        .ok()
+        .map(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
+        .unwrap_or(false)
+}
+
+fn should_enable_ipv6_p2p_listeners() -> bool {
+    env_flag("SHARD_P2P_LISTEN_IPV6")
+        || std::env::var_os("FLY_APP_NAME").is_some()
+        || std::env::var_os("FLY_PRIVATE_IP").is_some()
+}
+
 fn normalize_public_host(raw: &str) -> Option<String> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
@@ -2238,10 +2256,36 @@ fn normalize_public_host(raw: &str) -> Option<String> {
     }
 }
 
+fn fly_private_ipv6() -> Option<String> {
+    std::env::var("FLY_PRIVATE_IP")
+        .ok()
+        .map(|value| value.trim().trim_matches(['[', ']']).to_string())
+        .filter(|value| value.parse::<std::net::Ipv6Addr>().is_ok())
+}
+
+fn p2p_listen_multiaddrs(cli: &Cli) -> anyhow::Result<Vec<Multiaddr>> {
+    let mut addrs = vec![
+        format!("/ip4/0.0.0.0/tcp/{}", cli.tcp_port).parse()?,
+        format!("/ip4/0.0.0.0/tcp/{}/ws", cli.tcp_port + 100).parse()?,
+        format!("/ip4/0.0.0.0/udp/{}/webrtc-direct", cli.webrtc_port).parse()?,
+        format!("/ip4/0.0.0.0/udp/{}/quic-v1", cli.quic_port).parse()?,
+    ];
+    if let Some(ipv6) = fly_private_ipv6() {
+        addrs.push(format!("/ip6/{ipv6}/tcp/{}", cli.tcp_port).parse()?);
+        addrs.push(format!("/ip6/{ipv6}/tcp/{}/ws", cli.tcp_port + 100).parse()?);
+        addrs.push(format!("/ip6/{ipv6}/udp/{}/webrtc-direct", cli.webrtc_port).parse()?);
+        addrs.push(format!("/ip6/{ipv6}/udp/{}/quic-v1", cli.quic_port).parse()?);
+    }
+    Ok(addrs)
+}
+
 fn host_multiaddr_prefix(host: &str) -> (String, String) {
     match host.parse::<IpAddr>() {
         Ok(IpAddr::V4(_)) => ("ip4".to_string(), host.to_string()),
         Ok(IpAddr::V6(_)) => ("ip6".to_string(), host.to_string()),
+        Err(_) if host.ends_with(".internal") || host.ends_with(".internal.") => {
+            ("dns6".to_string(), host.to_string())
+        }
         Err(_) => ("dns4".to_string(), host.to_string()),
     }
 }
@@ -2815,6 +2859,7 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
     if let Err(detail) = preflight_ports(&cli) {
         return Err(anyhow::anyhow!(detail));
     }
+    let p2p_listen_addrs = p2p_listen_multiaddrs(&cli)?;
 
     use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
     let filter_layer = tracing_subscriber::EnvFilter::try_from_default_env()
@@ -3561,15 +3606,28 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
     }
 
     // ── listen addresses ──
-    let tcp_addr: Multiaddr = format!("/ip4/0.0.0.0/tcp/{}", cli.tcp_port).parse()?;
-    let ws_addr: Multiaddr = format!("/ip4/0.0.0.0/tcp/{}/ws", cli.tcp_port + 100).parse()?;
-    swarm.listen_on(tcp_addr)?;
-    swarm.listen_on(ws_addr)?;
-    let webrtc_addr: Multiaddr =
-        format!("/ip4/0.0.0.0/udp/{}/webrtc-direct", cli.webrtc_port).parse()?;
-    swarm.listen_on(webrtc_addr)?;
-    let quic_addr: Multiaddr = format!("/ip4/0.0.0.0/udp/{}/quic-v1", cli.quic_port).parse()?;
-    swarm.listen_on(quic_addr)?;
+    for addr in p2p_listen_addrs {
+        swarm.listen_on(addr)?;
+    }
+    if should_enable_ipv6_p2p_listeners() {
+        for addr_str in [
+            format!("/ip6/::/tcp/{}", cli.tcp_port),
+            format!("/ip6/::/tcp/{}/ws", cli.tcp_port + 100),
+            format!("/ip6/::/udp/{}/webrtc-direct", cli.webrtc_port),
+            format!("/ip6/::/udp/{}/quic-v1", cli.quic_port),
+        ] {
+            match addr_str.parse::<Multiaddr>() {
+                Ok(addr) => {
+                    if let Err(error) = swarm.listen_on(addr.clone()) {
+                        tracing::warn!(%addr, %error, "failed to bind optional IPv6 p2p listener");
+                    }
+                }
+                Err(error) => {
+                    tracing::warn!(%addr_str, %error, "failed to parse optional IPv6 p2p listener");
+                }
+            }
+        }
+    }
 
     // ── bootstrap peers ──
     for addr_str in &bootstrap_addrs {
@@ -5101,9 +5159,17 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
                                 let observed_addr = info.observed_addr;
                                 tracing::debug!(%peer_id, "observed address received");
                                 let mut topo = state.topology.lock().await;
-                                // Update with observed public address if behind NAT
-                                if topo.public_api_addr.is_none() && !observed_addr.to_string().starts_with("/ip4/127.0.0.1") && !observed_addr.to_string().starts_with("/ip6/::1") {
-                                    topo.public_api_addr = Some(format!("{}/p2p/{}", observed_addr, local_peer_id));
+                                let observed_is_loopback = observed_addr.to_string().starts_with("/ip4/127.")
+                                    || observed_addr.to_string().starts_with("/ip6/::1");
+                                let observed_is_private = is_non_public_bootstrap_addr(&observed_addr);
+                                if !observed_is_loopback
+                                    && (!observed_is_private || allow_private_bootstrap)
+                                {
+                                    swarm.add_external_address(observed_addr.clone());
+                                    if topo.public_api_addr.is_none() {
+                                        topo.public_api_addr =
+                                            Some(format!("{}/p2p/{}", observed_addr, local_peer_id));
+                                    }
                                 }
 
                                 let mut learned_addrs = Vec::new();

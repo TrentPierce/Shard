@@ -53,6 +53,13 @@ primary_region = "iad"
     port = 4001
 
 [[services]]
+  internal_port = 4101
+  protocol = "tcp"
+
+  [[services.ports]]
+    port = 4101
+
+[[services]]
   internal_port = 9090
   protocol = "udp"
 
