@@ -2006,7 +2006,9 @@ pub(crate) async fn chat_completions_handler(
     let use_speculative = inference_mode == InferenceMode::Speculative;
 
     let speculative_config = if use_speculative {
-        Some(SpeculativeConfig::default())
+        let mut config = SpeculativeConfig::default();
+        config.scout_timeout_ms = state.scout_timeout_ms.load(Ordering::Relaxed).clamp(100, 60_000);
+        Some(config)
     } else {
         None
     };
@@ -2059,10 +2061,8 @@ pub(crate) async fn chat_completions_handler(
     // If historical acceptance rate is too low, skip speculative decoding entirely
     // to avoid the costly TTFT penalty (waiting for scouts that produce rejected drafts).
     if use_speculative {
-        let bypass_threshold: f64 = std::env::var("SHARD_SPECULATIVE_BYPASS_THRESHOLD")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(0.20); // Default: bypass if < 20% acceptance
+        let bypass_threshold =
+            acceptance_threshold_from_bps(state.acceptance_threshold_bps.load(Ordering::Relaxed));
         let min_samples: u64 = std::env::var("SHARD_SPECULATIVE_BYPASS_MIN_SAMPLES")
             .ok()
             .and_then(|v| v.parse().ok())

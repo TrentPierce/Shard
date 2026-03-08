@@ -124,6 +124,94 @@ async fn recent_scout_submitters_count(state: &SharedState, now: u128) -> usize 
         .count()
 }
 
+fn live_scout_timeout_ms(state: &SharedState) -> u64 {
+    state.scout_timeout_ms.load(Ordering::Relaxed).clamp(100, 60_000)
+}
+
+fn live_max_scouts(state: &SharedState) -> usize {
+    state.max_scouts.load(Ordering::Relaxed).clamp(1, 256)
+}
+
+fn live_acceptance_threshold(state: &SharedState) -> f64 {
+    acceptance_threshold_from_bps(state.acceptance_threshold_bps.load(Ordering::Relaxed))
+}
+
+fn live_heartbeat_interval_seconds(state: &SharedState) -> u64 {
+    state.heartbeat_interval_seconds.load(Ordering::Relaxed).clamp(2, 300)
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct NetworkConfigUpdateRequest {
+    scout_timeout_ms: Option<u64>,
+    max_scouts: Option<usize>,
+    acceptance_threshold: Option<f64>,
+    heartbeat_interval_seconds: Option<u64>,
+}
+
+pub(crate) async fn network_config_handler(
+    AxumState(state): AxumState<SharedState>,
+) -> Json<serde_json::Value> {
+    Json(serde_json::json!({
+        "ok": true,
+        "network_config": {
+            "scout_timeout_ms": live_scout_timeout_ms(&state),
+            "max_scouts": live_max_scouts(&state),
+            "acceptance_threshold": live_acceptance_threshold(&state),
+            "heartbeat_interval_seconds": live_heartbeat_interval_seconds(&state),
+        }
+    }))
+}
+
+pub(crate) async fn network_config_update_handler(
+    AxumState(state): AxumState<SharedState>,
+    headers: HeaderMap,
+    Json(req): Json<NetworkConfigUpdateRequest>,
+) -> Json<serde_json::Value> {
+    if let Some(admin_key) = state.admin_key.as_deref() {
+        let provided = headers
+            .get("x-shard-admin")
+            .and_then(|v| v.to_str().ok())
+            .map(str::trim)
+            .unwrap_or_default();
+        if provided != admin_key {
+            return Json(serde_json::json!({
+                "ok": false,
+                "detail": "admin key required for network config updates",
+            }));
+        }
+    }
+
+    if let Some(value) = req.scout_timeout_ms {
+        state
+            .scout_timeout_ms
+            .store(value.clamp(100, 60_000), Ordering::Relaxed);
+    }
+    if let Some(value) = req.max_scouts {
+        state.max_scouts.store(value.clamp(1, 256), Ordering::Relaxed);
+    }
+    if let Some(value) = req.acceptance_threshold {
+        let bounded = value.clamp(0.0, 1.0);
+        state
+            .acceptance_threshold_bps
+            .store((bounded * 10_000.0).round() as u64, Ordering::Relaxed);
+    }
+    if let Some(value) = req.heartbeat_interval_seconds {
+        state
+            .heartbeat_interval_seconds
+            .store(value.clamp(2, 300), Ordering::Relaxed);
+    }
+
+    Json(serde_json::json!({
+        "ok": true,
+        "network_config": {
+            "scout_timeout_ms": live_scout_timeout_ms(&state),
+            "max_scouts": live_max_scouts(&state),
+            "acceptance_threshold": live_acceptance_threshold(&state),
+            "heartbeat_interval_seconds": live_heartbeat_interval_seconds(&state),
+        }
+    }))
+}
+
 pub(crate) async fn scout_ingress_handler(
     AxumState(state): AxumState<SharedState>,
 ) -> Json<serde_json::Value> {
@@ -588,7 +676,6 @@ const DEFAULT_SCOUT_ADMISSION_RETRY_MAX_MS: u64 = 4_000;
 const DEFAULT_SCOUT_POLL_MIN_INTERVAL_MS: u128 = 75;
 const DEFAULT_SCOUT_DRAFT_MIN_INTERVAL_MS: u128 = 50;
 const DEFAULT_SCOUT_RATE_LIMIT_RETENTION_MS: u128 = 10 * 60 * 1000;
-const DEFAULT_SCOUT_ACTIVE_CAP: usize = 4;
 const DEFAULT_SCOUT_ACTIVE_CAP_SOFT: usize = 2;
 const DEFAULT_SCOUT_ACTIVE_CAP_HARD: usize = 1;
 const DEFAULT_SCOUT_LEASE_TTL_MS: u128 = 12_000;
@@ -780,12 +867,8 @@ fn scout_draft_min_interval_ms() -> u128 {
         .unwrap_or(DEFAULT_SCOUT_DRAFT_MIN_INTERVAL_MS)
 }
 
-fn scout_active_cap() -> usize {
-    std::env::var("SHARD_SCOUT_ACTIVE_CAP")
-        .ok()
-        .and_then(|v| v.trim().parse::<usize>().ok())
-        .filter(|v| *v > 0)
-        .unwrap_or(DEFAULT_SCOUT_ACTIVE_CAP)
+fn scout_active_cap(state: &SharedState) -> usize {
+    live_max_scouts(state).max(1)
 }
 
 fn scout_active_cap_soft() -> usize {
@@ -1009,8 +1092,8 @@ fn deterministic_sample_bucket(scout_id: &str, window: u128, modulus: u64) -> u6
     hasher.finish() % m
 }
 
-fn scout_active_cap_for_mode(mode: ScoutAdmissionMode) -> usize {
-    let base = scout_active_cap();
+fn scout_active_cap_for_mode(state: &SharedState, mode: ScoutAdmissionMode) -> usize {
+    let base = scout_active_cap(state);
     let soft = scout_active_cap_soft().min(base.max(1));
     let hard = scout_active_cap_hard().min(soft.max(1));
     match mode {
@@ -2014,7 +2097,7 @@ pub(crate) async fn webgpu_coverage_handler(
     Json(stats.coverage_summary())
 }
 
-fn scout_config_snapshot_json() -> serde_json::Value {
+fn scout_config_snapshot_json(state: &SharedState) -> serde_json::Value {
     serde_json::json!({
         "profile": std::env::var("SHARD_RELEASE_PROFILE").unwrap_or_else(|_| "default".to_string()),
         "scout_work_max_age_ms": scout_work_max_age_ms(),
@@ -2041,7 +2124,7 @@ fn scout_config_snapshot_json() -> serde_json::Value {
             "retention_ms": DEFAULT_SCOUT_RATE_LIMIT_RETENTION_MS,
         },
         "active_cap": {
-            "base": scout_active_cap(),
+            "base": scout_active_cap(state),
             "soft": scout_active_cap_soft(),
             "hard": scout_active_cap_hard(),
         },
@@ -2072,6 +2155,12 @@ fn scout_config_snapshot_json() -> serde_json::Value {
             "min_score": scout_min_quality_score(),
             "min_samples": scout_min_quality_samples(),
         },
+        "network_config": {
+            "scout_timeout_ms": live_scout_timeout_ms(state),
+            "max_scouts": live_max_scouts(state),
+            "acceptance_threshold": live_acceptance_threshold(state),
+            "heartbeat_interval_seconds": live_heartbeat_interval_seconds(state),
+        },
     })
 }
 
@@ -2086,12 +2175,14 @@ pub(crate) async fn scout_config_handler(
     let admission = scout_admission_decision(queue_depth, avg_latency_ms, p95_latency_ms);
     let blackout_mode = update_scout_blackout_state(&state, queue_depth, p95_latency_ms, now).await;
     let active_scouts = recent_active_scouts(&state, now).await;
-    let active_cap =
-        scout_active_cap_for_blackout(blackout_mode, scout_active_cap_for_mode(admission.mode));
+    let active_cap = scout_active_cap_for_blackout(
+        blackout_mode,
+        scout_active_cap_for_mode(&state, admission.mode),
+    );
     let lease_count = state.scout_work_leases.lock().await.len();
     Json(serde_json::json!({
         "ok": true,
-        "config": scout_config_snapshot_json(),
+        "config": scout_config_snapshot_json(&state),
         "runtime": {
             "queue_depth": queue_depth,
             "average_latency_ms": avg_latency_ms,
@@ -2271,8 +2362,10 @@ pub(crate) async fn pop_work_handler(
         );
     }
     let active_scouts = recent_active_scouts(&state, now).await;
-    let active_cap =
-        scout_active_cap_for_blackout(blackout_mode, scout_active_cap_for_mode(admission.mode));
+    let active_cap = scout_active_cap_for_blackout(
+        blackout_mode,
+        scout_active_cap_for_mode(&state, admission.mode),
+    );
     if active_cap == 0 {
         state.system_metrics.inc_scout_work_overload_reject();
         return Err((

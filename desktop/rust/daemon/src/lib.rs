@@ -554,7 +554,10 @@ pub(crate) struct SharedState {
     resource_policy: ResourcePolicy,
     event_log: Arc<Mutex<VecDeque<String>>>,
     node_public_key: String,
-    heartbeat_interval_seconds: u64,
+    heartbeat_interval_seconds: Arc<AtomicU64>,
+    scout_timeout_ms: Arc<AtomicU64>,
+    max_scouts: Arc<AtomicUsize>,
+    acceptance_threshold_bps: Arc<AtomicU64>,
     public_host: Option<String>,
     tcp_port: u16,
     webrtc_port: u16,
@@ -621,6 +624,37 @@ pub(crate) struct SharedState {
     shutdown: Arc<AtomicBool>,
     in_flight_count: Arc<AtomicUsize>,
     consensus: Option<Arc<LeaderElectionHandle>>,
+}
+
+fn env_live_scout_timeout_ms() -> u64 {
+    std::env::var("SHARD_SCOUT_TIMEOUT_MS")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .map(|v| v.clamp(100, 60_000))
+        .unwrap_or(2_000)
+}
+
+fn env_live_max_scouts() -> usize {
+    std::env::var("SHARD_MAX_SCOUTS")
+        .ok()
+        .or_else(|| std::env::var("SHARD_SCOUT_ACTIVE_CAP").ok())
+        .and_then(|v| v.trim().parse::<usize>().ok())
+        .map(|v| v.clamp(1, 256))
+        .unwrap_or(8)
+}
+
+fn env_live_acceptance_threshold_bps() -> u64 {
+    let threshold = std::env::var("SHARD_ACCEPTANCE_THRESHOLD")
+        .ok()
+        .or_else(|| std::env::var("SHARD_SPECULATIVE_BYPASS_THRESHOLD").ok())
+        .and_then(|v| v.trim().parse::<f64>().ok())
+        .map(|v| v.clamp(0.0, 1.0))
+        .unwrap_or(0.20);
+    (threshold * 10_000.0).round() as u64
+}
+
+pub(crate) fn acceptance_threshold_from_bps(raw: u64) -> f64 {
+    (raw.min(10_000) as f64) / 10_000.0
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -2664,6 +2698,12 @@ fn create_router(
             post(speculative_trace_reset_handler),
         )
         .route("/v1/system/scout-config", get(scout_config_handler))
+        .route("/network-config", get(network_config_handler))
+        .route("/v1/system/network-config", get(network_config_handler))
+        .route(
+            "/v1/system/network-config",
+            post(network_config_update_handler),
+        )
         .route(
             "/browser-layer/register",
             post(browser_layer_register_handler),
@@ -3156,7 +3196,14 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
         },
         event_log: Arc::new(Mutex::new(VecDeque::new())),
         node_public_key: node_wallet.clone(),
-        heartbeat_interval_seconds: node_cfg.heartbeat_interval_seconds,
+        heartbeat_interval_seconds: Arc::new(AtomicU64::new(
+            node_cfg.heartbeat_interval_seconds.clamp(2, 300),
+        )),
+        scout_timeout_ms: Arc::new(AtomicU64::new(env_live_scout_timeout_ms())),
+        max_scouts: Arc::new(AtomicUsize::new(env_live_max_scouts())),
+        acceptance_threshold_bps: Arc::new(AtomicU64::new(
+            env_live_acceptance_threshold_bps(),
+        )),
         public_host: cli
             .public_host
             .clone()
@@ -3725,10 +3772,11 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
         }
 
         loop {
-            tokio::time::sleep(Duration::from_secs(
-                heartbeat_state.heartbeat_interval_seconds,
-            ))
-            .await;
+            let interval_secs = heartbeat_state
+                .heartbeat_interval_seconds
+                .load(Ordering::Relaxed)
+                .clamp(2, 300);
+            tokio::time::sleep(Duration::from_secs(interval_secs)).await;
             let heartbeat = SignedEnvelope::sign(
                 NodeHeartbeat {
                     node_pubkey: pubkey.clone(),

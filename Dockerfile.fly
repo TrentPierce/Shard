@@ -1,0 +1,39 @@
+FROM rust:1.89-slim AS rust-builder
+WORKDIR /app
+COPY desktop/rust/ ./desktop/rust/
+RUN cd desktop/rust && cargo build --release --bin shard-daemon
+
+FROM debian:bookworm-slim AS engine-builder
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    cmake \
+    git \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+COPY cpp/ ./cpp/
+RUN cmake -S cpp/shard-bridge -B cpp/build -DCMAKE_BUILD_TYPE=Release \
+    && cmake --build cpp/build --config Release --target shard_engine -j"$(nproc)"
+RUN mkdir -p /opt/shard/lib \
+    && find cpp/build -type f \( -name "libshard_engine.so*" -o -name "libllama.so*" -o -name "libggml*.so*" \) -exec cp {} /opt/shard/lib/ \;
+
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    wget \
+    libstdc++6 \
+    libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=rust-builder /app/desktop/rust/target/release/shard-daemon /usr/local/bin/
+COPY --from=engine-builder /opt/shard/lib/ /opt/shard/lib/
+COPY deploy/fly/start-daemon.sh /usr/local/bin/start-daemon.sh
+RUN chmod +x /usr/local/bin/start-daemon.sh \
+    && set -eux; \
+    cd /opt/shard/lib; \
+    ln -sf libllama.so.0.0.0 libllama.so.0; \
+    ln -sf libggml.so.0.9.5 libggml.so.0; \
+    ln -sf libggml-base.so.0.9.5 libggml-base.so.0; \
+    ln -sf libggml-cpu.so.0.9.5 libggml-cpu.so.0
+ENV LD_LIBRARY_PATH="/opt/shard/lib"
+EXPOSE 9091 4001 9090/udp 9092/udp
+ENTRYPOINT ["start-daemon.sh"]
