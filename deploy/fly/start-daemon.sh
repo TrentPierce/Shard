@@ -6,6 +6,7 @@ MODEL_NAME="${MODEL_NAME:-Llama-3.2-1B-Instruct-Q4_K_M.gguf}"
 MODEL_URL="${BITNET_MODEL_URL:-https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q4_K_M.gguf}"
 MODEL_SHA256="${BITNET_MODEL_SHA256:-6f85a640a97cf2bf5b8e764087b1e83da0fdb51d7c9fab7d0fece9385611df83}"
 MODEL_PATH="${BITNET_MODEL:-${MODEL_DIR}/${MODEL_NAME}}"
+export SHARD_DATA_DIR="${SHARD_DATA_DIR:-/data}"
 PUBLIC_HOST_VALUE="${PUBLIC_HOST:-}"
 if [[ -z "${PUBLIC_HOST_VALUE}" && -n "${FLY_APP_NAME:-}" ]]; then
   PUBLIC_HOST_VALUE="${FLY_APP_NAME}.fly.dev"
