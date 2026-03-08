@@ -27,7 +27,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 if ($BootstrapNode) {
-    flyctl secrets set SHARD_DEFAULT_BOOTSTRAP="$BootstrapNode" -a $AppName | Out-Null
+    flyctl secrets set SHARD_DEFAULT_BOOTSTRAP="$BootstrapNode" -a $AppName --stage | Out-Null
     if ($LASTEXITCODE -ne 0) {
         throw "Failed to set SHARD_DEFAULT_BOOTSTRAP for $AppName"
     }
