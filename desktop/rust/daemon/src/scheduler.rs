@@ -2358,10 +2358,16 @@ pub(crate) async fn chat_completions_handler(
     if mesh_gate {
         let queue_weight_ms = mesh_forward_queue_weight_ms();
         let local_queue_depth = verifier_request_depth(&state) as f64;
-        let local_latency_ms = state.avg_latency_ms.load(Ordering::Relaxed) as f64;
+        let raw_local_latency_ms = state.avg_latency_ms.load(Ordering::Relaxed) as f64;
+        let local_latency_ms = if raw_local_latency_ms > 0.0 {
+            raw_local_latency_ms
+        } else {
+            1500.0
+        };
         let local_score = mesh_forward_score(local_latency_ms, local_queue_depth, queue_weight_ms);
         tracing::debug!(
             local_queue_depth,
+            raw_local_latency_ms,
             local_latency_ms,
             local_score,
             queue_weight_ms,
