@@ -3626,6 +3626,10 @@ pub(crate) async fn upsert_node_snapshot(
     queue_depth: u64,
     node_latency_ms: u64,
     uptime_seconds: u64,
+    capability_tier: Option<String>,
+    gpu_available: Option<bool>,
+    accepts_scout_work: Option<bool>,
+    public_api: Option<bool>,
     reported_at_ms: u128,
 ) {
     let now = now_ms();
@@ -3639,6 +3643,10 @@ pub(crate) async fn upsert_node_snapshot(
             queue_depth,
             node_latency_ms,
             uptime_seconds,
+            capability_tier,
+            gpu_available,
+            accepts_scout_work,
+            public_api,
             last_report_ms: reported_at_ms,
             healthy,
         },
@@ -3731,6 +3739,10 @@ pub(crate) async fn signed_register_node_handler(
         0,
         0,
         0,
+        None,
+        None,
+        None,
+        None,
         ts,
     )
     .await;
@@ -3783,6 +3795,10 @@ pub(crate) async fn signed_heartbeat_handler(
         heartbeat.queue_depth,
         heartbeat.node_latency_ms,
         heartbeat.uptime_seconds,
+        heartbeat.capability_tier,
+        heartbeat.gpu_available,
+        heartbeat.accepts_scout_work,
+        heartbeat.public_api,
         ts,
     )
     .await;
@@ -3835,6 +3851,10 @@ pub(crate) async fn signed_metrics_report_handler(
         report.queue_depth,
         report.node_latency_ms,
         report.uptime_seconds,
+        report.capability_tier.clone(),
+        report.gpu_available,
+        report.accepts_scout_work,
+        report.public_api,
         ts,
     )
     .await;
@@ -4461,6 +4481,7 @@ pub(crate) async fn bootstrap_handler(
                 "multiaddr": p.addrs.first().cloned().unwrap_or_default(),
                 "uptime_hours": (now.saturating_sub(p.first_seen_at)) / (1000 * 60 * 60),
                 "stability_score": stability_score,
+                "role": "peer",
             })
         })
         .collect();
@@ -4479,6 +4500,11 @@ pub(crate) async fn bootstrap_handler(
                 "uptime_hours": entry.uptime_hours,
                 "stability_score": entry.stability_score,
                 "version": entry.version,
+                "role": entry.role,
+                "capability_tier": entry.capability_tier,
+                "gpu_available": entry.gpu_available,
+                "accepts_scout_work": entry.accepts_scout_work,
+                "public_api": entry.public_api,
                 "updated_at_ms": entry.updated_at_ms,
             })
         })
@@ -4562,6 +4588,16 @@ pub(crate) struct RegisterBootstrapRequest {
     pub stability_score: u32,
     pub uptime_hours: u64,
     pub version: String,
+    #[serde(default)]
+    pub role: Option<String>,
+    #[serde(default)]
+    pub capability_tier: Option<String>,
+    #[serde(default)]
+    pub gpu_available: Option<bool>,
+    #[serde(default)]
+    pub accepts_scout_work: Option<bool>,
+    #[serde(default)]
+    pub public_api: Option<bool>,
 }
 
 pub(crate) async fn register_bootstrap_handler(
@@ -4588,6 +4624,11 @@ pub(crate) async fn register_bootstrap_handler(
         stability_score: req.stability_score,
         uptime_hours: req.uptime_hours,
         version: req.version.clone(),
+        role: req.role.clone(),
+        capability_tier: req.capability_tier.clone(),
+        gpu_available: req.gpu_available,
+        accepts_scout_work: req.accepts_scout_work,
+        public_api: req.public_api,
         updated_at_ms: now_ms(),
     };
     upsert_bootstrap_entry(&state, entry).await;

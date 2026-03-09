@@ -151,6 +151,14 @@ pub struct NodeMetricReport {
     pub node_latency_ms: u64,
     pub uptime_seconds: u64,
     #[serde(default)]
+    pub capability_tier: Option<String>,
+    #[serde(default)]
+    pub gpu_available: Option<bool>,
+    #[serde(default)]
+    pub accepts_scout_work: Option<bool>,
+    #[serde(default)]
+    pub public_api: Option<bool>,
+    #[serde(default)]
     pub timestamp_ms: Option<u128>,
 }
 
@@ -173,6 +181,10 @@ pub struct NodeMetricSnapshot {
     pub queue_depth: u64,
     pub node_latency_ms: u64,
     pub uptime_seconds: u64,
+    pub capability_tier: Option<String>,
+    pub gpu_available: Option<bool>,
+    pub accepts_scout_work: Option<bool>,
+    pub public_api: Option<bool>,
     pub last_report_ms: u128,
     pub healthy: bool,
 }

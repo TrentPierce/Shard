@@ -16,6 +16,16 @@ pub struct BootstrapPeer {
     pub uptime_hours: Option<u64>,
     #[serde(default)]
     pub version: Option<String>,
+    #[serde(default)]
+    pub role: Option<String>,
+    #[serde(default)]
+    pub capability_tier: Option<String>,
+    #[serde(default)]
+    pub gpu_available: Option<bool>,
+    #[serde(default)]
+    pub accepts_scout_work: Option<bool>,
+    #[serde(default)]
+    pub public_api: Option<bool>,
 }
 
 /// Request to register as a bootstrap peer
@@ -26,6 +36,16 @@ pub struct BootstrapRegistration {
     pub stability_score: u32,
     pub uptime_hours: u64,
     pub version: String,
+    #[serde(default)]
+    pub role: Option<String>,
+    #[serde(default)]
+    pub capability_tier: Option<String>,
+    #[serde(default)]
+    pub gpu_available: Option<bool>,
+    #[serde(default)]
+    pub accepts_scout_work: Option<bool>,
+    #[serde(default)]
+    pub public_api: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

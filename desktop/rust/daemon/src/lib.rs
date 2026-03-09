@@ -112,6 +112,7 @@ use shard_scheduler::scheduler::{
 
 // Maximum consecutive connection failures before removing a bootstrap peer
 const MAX_BOOTSTRAP_FAILURES: u32 = 3;
+const COLD_BOOTSTRAP_FAILURES: u32 = 10;
 
 #[derive(Parser, Debug, Clone)]
 #[command(name = "shard-daemon", version, about = "Shard P2P Daemon")]
@@ -447,6 +448,16 @@ pub(crate) struct BootstrapRegistryEntry {
     stability_score: u32,
     uptime_hours: u64,
     version: String,
+    #[serde(default)]
+    role: Option<String>,
+    #[serde(default)]
+    capability_tier: Option<String>,
+    #[serde(default)]
+    gpu_available: Option<bool>,
+    #[serde(default)]
+    accepts_scout_work: Option<bool>,
+    #[serde(default)]
+    public_api: Option<bool>,
     updated_at_ms: u128,
 }
 
@@ -462,6 +473,16 @@ struct BootstrapAnnouncement {
     stability_score: u32,
     uptime_hours: u64,
     version: String,
+    #[serde(default)]
+    role: Option<String>,
+    #[serde(default)]
+    capability_tier: Option<String>,
+    #[serde(default)]
+    gpu_available: Option<bool>,
+    #[serde(default)]
+    accepts_scout_work: Option<bool>,
+    #[serde(default)]
+    public_api: Option<bool>,
     announced_at_ms: u128,
 }
 
@@ -501,6 +522,16 @@ struct PeerInfo {
     avg_latency_ms: f32,
     /// Number of consecutive connection failures (for bootstrap removal)
     pub connection_failures: u32,
+}
+
+#[derive(Debug, Clone)]
+struct PeerReconnectStats {
+    stability_score: u32,
+    successful_handshakes: u32,
+    connection_failures: u32,
+    avg_latency_ms: f32,
+    bootstrap_failures: u32,
+    is_cold: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1099,6 +1130,14 @@ struct NodeHeartbeat {
     queue_depth: u64,
     node_latency_ms: u64,
     uptime_seconds: u64,
+    #[serde(default)]
+    capability_tier: Option<String>,
+    #[serde(default)]
+    gpu_available: Option<bool>,
+    #[serde(default)]
+    accepts_scout_work: Option<bool>,
+    #[serde(default)]
+    public_api: Option<bool>,
     #[serde(default)]
     timestamp_ms: Option<u128>,
 }
@@ -1824,6 +1863,11 @@ pub(crate) async fn upsert_bootstrap_entry(
                     || existing.stability_score != entry.stability_score
                     || existing.uptime_hours != entry.uptime_hours
                     || existing.version != entry.version
+                    || existing.role != entry.role
+                    || existing.capability_tier != entry.capability_tier
+                    || existing.gpu_available != entry.gpu_available
+                    || existing.accepts_scout_work != entry.accepts_scout_work
+                    || existing.public_api != entry.public_api
             })
             .unwrap_or(true);
         if replace {
@@ -2020,6 +2064,69 @@ fn reconnect_addr_sort_key(addr_str: &str) -> (u8, String) {
     (u8::MAX, addr_str.to_string())
 }
 
+fn node_capability_tier(role: &str, max_gpu_usage: f32, relay_mode: bool, public_api: bool) -> String {
+    if role.eq_ignore_ascii_case("scout") {
+        return "scout_only".to_string();
+    }
+    if relay_mode && !public_api {
+        return "relay_only".to_string();
+    }
+    if max_gpu_usage >= 0.75 {
+        "gpu_fast".to_string()
+    } else if max_gpu_usage >= 0.4 {
+        "cpu_standard".to_string()
+    } else {
+        "cpu_slow".to_string()
+    }
+}
+
+fn node_gpu_available_for_tier(capability_tier: &str) -> bool {
+    capability_tier.starts_with("gpu_")
+}
+
+fn node_accepts_scout_work(role: &str, participation_enabled: bool, relay_mode: bool) -> bool {
+    participation_enabled && !role.eq_ignore_ascii_case("scout") && !relay_mode
+}
+
+fn reconnect_backoff_ms_for_failures(failures: u32) -> u128 {
+    if failures >= COLD_BOOTSTRAP_FAILURES {
+        return 60 * 60 * 1000;
+    }
+    ((20_000u128) << failures.min(4)).min(300_000)
+}
+
+fn peer_reconnect_stats_for_addr(
+    addr_str: &str,
+    registry: &HashMap<String, BootstrapRegistryEntry>,
+    peers: &HashMap<String, PeerInfo>,
+    bootstrap_failures: &HashMap<String, u32>,
+) -> PeerReconnectStats {
+    let peer_id = peer_id_from_addr_str(addr_str);
+    let peer_snapshot = peer_id
+        .as_ref()
+        .and_then(|id| peers.get(id));
+    let registry_entry = peer_id
+        .as_ref()
+        .and_then(|id| registry.get(id));
+    let bootstrap_failure_count = peer_id
+        .as_ref()
+        .and_then(|id| bootstrap_failures.get(id))
+        .copied()
+        .unwrap_or(0);
+    PeerReconnectStats {
+        stability_score: registry_entry.map(|entry| entry.stability_score).unwrap_or(0),
+        successful_handshakes: peer_snapshot
+            .map(|peer| peer.successful_handshakes)
+            .unwrap_or(0),
+        connection_failures: peer_snapshot
+            .map(|peer| peer.connection_failures)
+            .unwrap_or(0),
+        avg_latency_ms: peer_snapshot.map(|peer| peer.avg_latency_ms).unwrap_or(0.0),
+        bootstrap_failures: bootstrap_failure_count,
+        is_cold: bootstrap_failure_count >= COLD_BOOTSTRAP_FAILURES,
+    }
+}
+
 fn max_reconnect_dials_per_tick() -> usize {
     static MAX_DIALS: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
     *MAX_DIALS.get_or_init(|| {
@@ -2052,8 +2159,9 @@ fn record_bootstrap_failure(
     *count += 1;
     if *count >= MAX_BOOTSTRAP_FAILURES {
         // Keep bootstrap peers in the known set to preserve recovery after
-        // restarts/transient WAN faults. Reconnect backoff handles retry pacing.
-        *count = MAX_BOOTSTRAP_FAILURES;
+        // restarts/transient WAN faults. Reconnect backoff + cold demotion
+        // handle retry pacing instead of hard deletion.
+        *count = (*count).min(COLD_BOOTSTRAP_FAILURES);
         return false;
     }
     false
@@ -3831,12 +3939,27 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
                 drop(topo);
 
                 if let Some(multiaddr) = addrs.first() {
+                    let capability_tier = node_capability_tier(
+                        advertise_state.node_role.as_str(),
+                        advertise_state.resource_policy.max_gpu_usage,
+                        cli.relay_mode,
+                        cli.public_api,
+                    );
                     let registration = bootstrap_discovery::BootstrapRegistration {
                         peer_id: local_peer_id.clone(),
                         multiaddr: multiaddr.clone(),
                         stability_score: 100, // TODO: calculate dynamically
                         uptime_hours: uptime_hours_u64,
                         version: env!("CARGO_PKG_VERSION").to_string(),
+                        role: Some(advertise_state.node_role.clone()),
+                        capability_tier: Some(capability_tier.clone()),
+                        gpu_available: Some(node_gpu_available_for_tier(capability_tier.as_str())),
+                        accepts_scout_work: Some(node_accepts_scout_work(
+                            advertise_state.node_role.as_str(),
+                            advertise_state.participation_enabled.load(Ordering::Relaxed),
+                            cli.relay_mode,
+                        )),
+                        public_api: Some(cli.public_api),
                     };
 
                     if let Err(_e) =
@@ -3923,6 +4046,10 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
                 0,
                 0,
                 0,
+                None,
+                None,
+                None,
+                None,
                 now_ms(),
             )
             .await;
@@ -3939,6 +4066,12 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
                 .load(Ordering::Relaxed)
                 .clamp(2, 300);
             tokio::time::sleep(Duration::from_secs(interval_secs)).await;
+            let capability_tier = node_capability_tier(
+                heartbeat_state.node_role.as_str(),
+                heartbeat_state.resource_policy.max_gpu_usage,
+                cli.relay_mode,
+                cli.public_api,
+            );
             let heartbeat = SignedEnvelope::sign(
                 NodeHeartbeat {
                     node_pubkey: pubkey.clone(),
@@ -3947,6 +4080,14 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
                     node_latency_ms: heartbeat_state.avg_latency_ms.load(Ordering::Relaxed) as u64,
                     uptime_seconds: ((now_ms().saturating_sub(heartbeat_state.daemon_start)) / 1000)
                         as u64,
+                    capability_tier: Some(capability_tier.clone()),
+                    gpu_available: Some(node_gpu_available_for_tier(capability_tier.as_str())),
+                    accepts_scout_work: Some(node_accepts_scout_work(
+                        heartbeat_state.node_role.as_str(),
+                        heartbeat_state.participation_enabled.load(Ordering::Relaxed),
+                        cli.relay_mode,
+                    )),
+                    public_api: Some(cli.public_api),
                     timestamp_ms: Some(now_ms()),
                 },
                 &heartbeat_signing_key,
@@ -3974,6 +4115,10 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
                 payload.queue_depth,
                 payload.node_latency_ms,
                 payload.uptime_seconds,
+                payload.capability_tier,
+                payload.gpu_available,
+                payload.accepts_scout_work,
+                payload.public_api,
                 payload.timestamp_ms.unwrap_or_else(now_ms),
             )
             .await;
@@ -4184,8 +4329,37 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
             }
             _ = reconnect_tick.tick() => {
                 let mut known = state.known_peers.lock().await.clone();
-                known.sort_by_key(|addr| reconnect_addr_sort_key(addr));
-                let connected: HashSet<String> = state.peers.lock().await.keys().cloned().collect();
+                let registry_snapshot = state.bootstrap_registry.lock().await.clone();
+                let peers_snapshot = state.peers.lock().await.clone();
+                let bootstrap_failure_snapshot = state.bootstrap_failures.lock().await.clone();
+                known.sort_by(|a, b| {
+                    let a_stats = peer_reconnect_stats_for_addr(
+                        a,
+                        &registry_snapshot,
+                        &peers_snapshot,
+                        &bootstrap_failure_snapshot,
+                    );
+                    let b_stats = peer_reconnect_stats_for_addr(
+                        b,
+                        &registry_snapshot,
+                        &peers_snapshot,
+                        &bootstrap_failure_snapshot,
+                    );
+                    a_stats
+                        .is_cold
+                        .cmp(&b_stats.is_cold)
+                        .then(a_stats.bootstrap_failures.cmp(&b_stats.bootstrap_failures))
+                        .then(b_stats.stability_score.cmp(&a_stats.stability_score))
+                        .then(b_stats.successful_handshakes.cmp(&a_stats.successful_handshakes))
+                        .then(a_stats.connection_failures.cmp(&b_stats.connection_failures))
+                        .then_with(|| {
+                            a_stats
+                                .avg_latency_ms
+                                .total_cmp(&b_stats.avg_latency_ms)
+                        })
+                        .then_with(|| reconnect_addr_sort_key(a).cmp(&reconnect_addr_sort_key(b)))
+                });
+                let connected: HashSet<String> = peers_snapshot.keys().cloned().collect();
                 let now = now_ms();
                 if let Some(url) = bootstrap_url.as_deref() {
                     if now >= next_bootstrap_url_refresh_ms {
@@ -4208,6 +4382,11 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
                                             .min(100),
                                         uptime_hours: peer.uptime_hours.unwrap_or(0),
                                         version: peer.version.unwrap_or_else(|| "unknown".to_string()),
+                                        role: peer.role.clone(),
+                                        capability_tier: peer.capability_tier.clone(),
+                                        gpu_available: peer.gpu_available,
+                                        accepts_scout_work: peer.accepts_scout_work,
+                                        public_api: peer.public_api,
                                         updated_at_ms: now,
                                     };
                                     if upsert_bootstrap_entry(&state, entry).await {
@@ -4303,7 +4482,7 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
                                 // Record failure with backoff: min(20s * 2^failures, 300s)
                                 let entry = reconnect_backoff.entry(peer_ref).or_insert((0, 0));
                                 entry.0 += 1;
-                                let backoff_ms = ((20_000u128) << entry.0.min(4)).min(300_000);
+                                let backoff_ms = reconnect_backoff_ms_for_failures(entry.0);
                                 entry.1 = now + backoff_ms;
                             } else {
                                 tracing::info!(peer_id = %peer_ref, "reconnect dial attempted for disconnected peer");
@@ -4327,12 +4506,27 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
                             topo.listen_addrs.clone()
                         };
                         if let Some(multiaddr) = preferred_bootstrap_multiaddr(&addrs) {
+                            let capability_tier = node_capability_tier(
+                                state.node_role.as_str(),
+                                state.resource_policy.max_gpu_usage,
+                                cli.relay_mode,
+                                cli.public_api,
+                            );
                             let announcement = BootstrapAnnouncement {
                                 peer_id: local_peer_id.to_string(),
                                 multiaddr,
                                 stability_score: 100,
                                 uptime_hours: uptime_hours as u64,
                                 version: env!("CARGO_PKG_VERSION").to_string(),
+                                role: Some(state.node_role.clone()),
+                                capability_tier: Some(capability_tier.clone()),
+                                gpu_available: Some(node_gpu_available_for_tier(capability_tier.as_str())),
+                                accepts_scout_work: Some(node_accepts_scout_work(
+                                    state.node_role.as_str(),
+                                    state.participation_enabled.load(Ordering::Relaxed),
+                                    cli.relay_mode,
+                                )),
+                                public_api: Some(cli.public_api),
                                 announced_at_ms: now,
                             };
                             if let Ok(payload) = serde_json::to_vec(&announcement) {
@@ -4824,6 +5018,11 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
                                         stability_score: ann.stability_score.min(100),
                                         uptime_hours: ann.uptime_hours,
                                         version: ann.version.clone(),
+                                        role: ann.role.clone(),
+                                        capability_tier: ann.capability_tier.clone(),
+                                        gpu_available: ann.gpu_available,
+                                        accepts_scout_work: ann.accepts_scout_work,
+                                        public_api: ann.public_api,
                                         updated_at_ms: ann.announced_at_ms.max(now_ms()),
                                     };
                                     let changed = upsert_bootstrap_entry(&state, entry).await;
@@ -5133,6 +5332,15 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
                                     if let Some(info) = peers.get_mut(&peer.to_string()) {
                                         info.verified = true;
                                         info.last_seen_at = now_ms();
+                                        info.successful_handshakes =
+                                            info.successful_handshakes.saturating_add(1);
+                                        info.connection_failures = 0;
+                                        let latency_sample = latency as f32;
+                                        info.avg_latency_ms = if info.avg_latency_ms <= 0.0 {
+                                            latency_sample
+                                        } else {
+                                            (info.avg_latency_ms * 0.7) + (latency_sample * 0.3)
+                                        };
                                     }
                                 }
                             }
@@ -5144,6 +5352,9 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
                                     info.last_seen_at = now_ms();
                                     if response.kind == "PONG" {
                                         info.verified = true;
+                                        info.successful_handshakes =
+                                            info.successful_handshakes.saturating_add(1);
+                                        info.connection_failures = 0;
                                     }
                                 }
                             }
@@ -5550,21 +5761,24 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
 
                         {
                             let mut peers = state.peers.lock().await;
-                            peers.insert(
-                                peer_id.to_string(),
-                                PeerInfo {
-                                    peer_id: peer_id.to_string(),
-                                    connected_at: now_ms(),
-                                    last_seen_at: now_ms(),
-                                    addrs: vec![remote_addr.clone()],
-                                    verified: false,
-                                    handshake_failures: 0,
-                                    first_seen_at: now_ms(),
-                                    successful_handshakes: 0,
-                                    avg_latency_ms: 0.0,
-                                    connection_failures: 0,
-                                },
-                            );
+                            let now = now_ms();
+                            let entry = peers.entry(peer_id.to_string()).or_insert_with(|| PeerInfo {
+                                peer_id: peer_id.to_string(),
+                                connected_at: now,
+                                last_seen_at: now,
+                                addrs: vec![],
+                                verified: false,
+                                handshake_failures: 0,
+                                first_seen_at: now,
+                                successful_handshakes: 0,
+                                avg_latency_ms: 0.0,
+                                connection_failures: 0,
+                            });
+                            entry.connected_at = now;
+                            entry.last_seen_at = now;
+                            entry.addrs.push(remote_addr.clone());
+                            entry.addrs = unique_addrs(entry.addrs.clone());
+                            entry.connection_failures = 0;
                         }
 
                         if let Ok(remote_multiaddr) = remote_addr.parse::<Multiaddr>() {
@@ -5653,8 +5867,7 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
                                         let entry =
                                             reconnect_backoff.entry(peer_ref.clone()).or_insert((0, 0));
                                         entry.0 += 1;
-                                        let backoff_ms =
-                                            ((20_000u128) << entry.0.min(4)).min(300_000);
+                                        let backoff_ms = reconnect_backoff_ms_for_failures(entry.0);
                                         entry.1 = now + backoff_ms;
                                     }
                                 }
@@ -5730,7 +5943,8 @@ mod tests {
         unique_addrs, validate_work_request, BootstrapRegistryEntry, CanaryRolloutConfig,
         CanaryRolloutController, HardcodedBootstrapMode, InFlightRequestGuard, LatencyHistogram,
         ModelManifestEntry, ScoutPenaltyBook, ScoutPenaltyUpdate, ScoutTimeoutTracker,
-        SpeculativeConfig, WorkRequest, MAX_BOOTSTRAP_FAILURES,
+        SpeculativeConfig, WorkRequest, COLD_BOOTSTRAP_FAILURES, MAX_BOOTSTRAP_FAILURES,
+        reconnect_backoff_ms_for_failures,
     };
     use crate::network::policy::{NetworkMode, NetworkPolicy, PolicyDecision};
     use libp2p::{Multiaddr, PeerId};
@@ -6222,6 +6436,11 @@ mod tests {
                 stability_score: 90,
                 uptime_hours: 4,
                 version: "0.6.2".to_string(),
+                role: Some("bootstrap".to_string()),
+                capability_tier: Some("cpu_standard".to_string()),
+                gpu_available: Some(false),
+                accepts_scout_work: Some(false),
+                public_api: Some(true),
                 updated_at_ms: 42,
             },
         );
@@ -6248,6 +6467,11 @@ mod tests {
                 stability_score: 92,
                 uptime_hours: 12,
                 version: "0.6.2".to_string(),
+                role: Some("bootstrap".to_string()),
+                capability_tier: Some("gpu_fast".to_string()),
+                gpu_available: Some(true),
+                accepts_scout_work: Some(false),
+                public_api: Some(true),
                 updated_at_ms: now - 10_000,
             },
         );
@@ -6259,6 +6483,11 @@ mod tests {
                 stability_score: 95,
                 uptime_hours: 24,
                 version: "0.6.2".to_string(),
+                role: Some("bootstrap".to_string()),
+                capability_tier: Some("cpu_slow".to_string()),
+                gpu_available: Some(false),
+                accepts_scout_work: Some(true),
+                public_api: Some(true),
                 updated_at_ms: now - 120_000,
             },
         );
@@ -6287,6 +6516,20 @@ mod tests {
         assert_eq!(removed, 1);
         assert!(known.iter().all(|addr| !addr.contains(&drop_peer)));
         assert!(known.iter().any(|addr| addr.contains(&keep_peer)));
+    }
+
+    #[test]
+    fn reconnect_backoff_demotes_cold_peers_to_hourly_retry() {
+        assert_eq!(reconnect_backoff_ms_for_failures(0), 20_000);
+        assert_eq!(reconnect_backoff_ms_for_failures(4), 300_000);
+        assert_eq!(
+            reconnect_backoff_ms_for_failures(COLD_BOOTSTRAP_FAILURES),
+            60 * 60 * 1000
+        );
+        assert_eq!(
+            reconnect_backoff_ms_for_failures(COLD_BOOTSTRAP_FAILURES + 5),
+            60 * 60 * 1000
+        );
     }
 
     #[test]
