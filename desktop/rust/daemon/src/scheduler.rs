@@ -1025,6 +1025,7 @@ pub(crate) fn speculative_fast_verifier_sticky_ms() -> u64 {
         .unwrap_or(0)
 }
 
+#[allow(dead_code)]
 fn should_bypass_speculative_for_fast_verifier(avg_latency_ms: u64, threshold_ms: u64) -> bool {
     threshold_ms > 0 && (avg_latency_ms == 0 || avg_latency_ms <= threshold_ms)
 }
@@ -1116,6 +1117,10 @@ fn adapt_speculative_timeout_ms(
             scout_timeout_verifier_ceil_ms(),
         ));
     }
+    let adaptive_budget = adaptive_speculative_budget_ms(state);
+    if adaptive_budget != u64::MAX {
+        adapted = adapted.min(adaptive_budget);
+    }
     adapted
 }
 
@@ -1129,6 +1134,61 @@ fn update_request_latency_ewma(state: &SharedState, latency_ms: u64) {
         ((((previous as u64) * 7) + ((sample as u64) * 3)) / 10) as u32
     };
     state.avg_latency_ms.store(next, Ordering::Relaxed);
+}
+
+fn update_draft_arrival_ewma(state: &SharedState, arrival_ms: u64) {
+    let sample = arrival_ms.min(u32::MAX as u64) as u32;
+    let previous = state.avg_draft_arrival_ms.load(Ordering::Relaxed);
+    let next = if previous == 0 {
+        sample
+    } else {
+        ((((previous as u64) * 7) + ((sample as u64) * 3)) / 10) as u32
+    };
+    state.avg_draft_arrival_ms.store(next, Ordering::Relaxed);
+}
+
+fn update_accepted_tokens_ewma(state: &SharedState, accepted: u64) {
+    let sample_x100 = (accepted * 100).min(u32::MAX as u64) as u32;
+    let previous = state.avg_accepted_tokens_x100.load(Ordering::Relaxed);
+    let next = if previous == 0 {
+        sample_x100
+    } else {
+        ((((previous as u64) * 7) + ((sample_x100 as u64) * 3)) / 10) as u32
+    };
+    state.avg_accepted_tokens_x100.store(next, Ordering::Relaxed);
+}
+
+/// Compute an adaptive speculative wait budget based on observed draft timing
+/// and acceptance data.  Returns 0 when waiting would add more latency than
+/// the accepted draft tokens would save.  Returns u64::MAX when there is not
+/// enough data yet (fall through to existing timeout logic).
+fn adaptive_speculative_budget_ms(state: &SharedState) -> u64 {
+    let avg_verifier_ms = state.avg_latency_ms.load(Ordering::Relaxed) as u64;
+    let avg_draft_ms = state.avg_draft_arrival_ms.load(Ordering::Relaxed) as u64;
+    let avg_accepted_x100 = state.avg_accepted_tokens_x100.load(Ordering::Relaxed) as u64;
+    if avg_verifier_ms == 0 || avg_draft_ms == 0 || avg_accepted_x100 == 0 {
+        return u64::MAX;
+    }
+    let avg_accepted_tokens = avg_accepted_x100 as f64 / 100.0;
+    let tokens_per_ms = 10.0 / (avg_verifier_ms as f64).max(1.0);
+    let saved_ms = (avg_accepted_tokens / tokens_per_ms) as u64;
+    if avg_draft_ms >= saved_ms {
+        tracing::debug!(
+            avg_draft_ms, saved_ms,
+            avg_accepted_tokens = format!("{avg_accepted_tokens:.1}"),
+            avg_verifier_ms,
+            "adaptive budget: draft wait cost exceeds expected savings, budget=0"
+        );
+        return 0;
+    }
+    let budget = saved_ms.min(avg_verifier_ms / 2);
+    tracing::debug!(
+        budget, avg_draft_ms, saved_ms,
+        avg_accepted_tokens = format!("{avg_accepted_tokens:.1}"),
+        avg_verifier_ms,
+        "adaptive budget: speculative wait budget computed"
+    );
+    budget
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1480,6 +1540,7 @@ async fn fetch_speculative_draft(
     let draft_latency = (now_ms() - draft_start) as u64;
     if let Some(mut draft) = draft {
         draft.latency_ms = draft_latency;
+        update_draft_arrival_ewma(state, draft_latency);
         record_speculative_trace(
             state,
             request_id.to_string(),
@@ -1728,9 +1789,10 @@ pub(crate) async fn verify_draft_tokens(
     engine: &mut impl shard_verifier::inference::VerifierModel,
     prompt_tokens: &[i32],
     draft_tokens: &[i32],
+    eval_prompt: bool,
 ) -> DraftVerificationResult {
     // 1. Evaluate the prompt context first to build KV cache
-    if engine.eval(prompt_tokens).is_err() {
+    if eval_prompt && engine.eval(prompt_tokens).is_err() {
         tracing::warn!("verify_draft_tokens: prompt eval failed");
         return DraftVerificationResult {
             accepted_tokens: Vec::new(),
@@ -2120,45 +2182,6 @@ pub(crate) async fn chat_completions_handler(
             use_speculative = false;
         }
     }
-    if use_speculative {
-        let avg_latency_ms = state.avg_latency_ms.load(Ordering::Relaxed) as u64;
-        let fast_verifier_bypass_ms = speculative_fast_verifier_avg_bypass_ms();
-        let now_for_bypass = now_ms() as u64;
-        let sticky_bypass_ms = speculative_fast_verifier_sticky_ms();
-        let sticky_active = fast_verifier_bypass_active(&state, now_for_bypass);
-        let direct_fast_bypass =
-            should_bypass_speculative_for_fast_verifier(avg_latency_ms, fast_verifier_bypass_ms);
-        if sticky_active || direct_fast_bypass {
-            if direct_fast_bypass && sticky_bypass_ms > 0 {
-                state.fast_verifier_bypass_until_ms.store(
-                    now_for_bypass.saturating_add(sticky_bypass_ms),
-                    Ordering::Relaxed,
-                );
-            }
-            tracing::info!(
-                request_max_tokens = max_tokens,
-                avg_latency_ms,
-                fast_verifier_bypass_ms,
-                sticky_active,
-                sticky_bypass_ms,
-                "adaptive bypass: skipping speculative path on fast verifier"
-            );
-            record_speculative_trace(
-                &state,
-                request_id.clone(),
-                "dispatch_skipped_fast_verifier",
-                None,
-                Some(format!(
-                    "request_max_tokens={max_tokens}, avg_latency_ms={avg_latency_ms}, threshold_ms={fast_verifier_bypass_ms}, sticky_active={sticky_active}, sticky_bypass_ms={sticky_bypass_ms}"
-                )),
-                None,
-            )
-            .await;
-            state.system_metrics.inc_speculative_bypass();
-            use_speculative = false;
-        }
-    }
-
 
     // ── Adaptive Speculative Bypass ──
     // If historical acceptance rate is too low, skip speculative decoding entirely
@@ -2256,8 +2279,9 @@ pub(crate) async fn chat_completions_handler(
                                     Some(format!("draft_tokens={}", draft.draft_tokens.len())),
                                     None,
                                 ).await;
-                                let result = verify_draft_tokens(engine, &prompt_tokens, &draft.draft_tokens).await;
+                                let result = verify_draft_tokens(engine, &prompt_tokens, &draft.draft_tokens, true).await;
                                 let accepted_count = result.accepted_tokens.len() as u64;
+                                update_accepted_tokens_ewma(&state, accepted_count);
                                 let draft_count = draft.draft_tokens.len() as u64;
                                 let rejected_count = draft_count.saturating_sub(accepted_count);
                                 if draft_count > 0 && accepted_count == 0 {
@@ -2500,9 +2524,10 @@ pub(crate) async fn chat_completions_handler(
                             )
                             .await;
                             let result =
-                                verify_draft_tokens(engine, &prompt_tokens, &draft.draft_tokens)
+                                verify_draft_tokens(engine, &prompt_tokens, &draft.draft_tokens, true)
                                     .await;
                             let accepted_count = result.accepted_tokens.len() as u64;
+                            update_accepted_tokens_ewma(&state, accepted_count);
                             let draft_count = draft.draft_tokens.len() as u64;
                             let rejected_count = draft_count.saturating_sub(accepted_count);
                             if draft_count > 0 && accepted_count == 0 {

@@ -624,6 +624,10 @@ pub(crate) struct SharedState {
     scout_ingress_enabled: Arc<AtomicBool>,
     shutdown: Arc<AtomicBool>,
     in_flight_count: Arc<AtomicUsize>,
+    /// EWMA of scout draft arrival latency in ms (for adaptive wait budget).
+    avg_draft_arrival_ms: Arc<AtomicU32>,
+    /// EWMA of accepted draft tokens ×100 for fixed-point precision.
+    avg_accepted_tokens_x100: Arc<AtomicU32>,
     consensus: Option<Arc<LeaderElectionHandle>>,
 }
 
@@ -3206,6 +3210,8 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
         current_load: Arc::new(AtomicU32::new(0)),
         avg_latency_ms: Arc::new(AtomicU32::new(0)),
         fast_verifier_bypass_until_ms: Arc::new(AtomicU64::new(0)),
+        avg_draft_arrival_ms: Arc::new(AtomicU32::new(0)),
+        avg_accepted_tokens_x100: Arc::new(AtomicU32::new(0)),
         gossipsub_latency_hist: Arc::new(LatencyHistogram::new()),
         credit_nonce: Arc::new(AtomicU64::new(initial_credit_nonce)),
         scout_penalties: Arc::new(Mutex::new(ScoutPenaltyBook::default())),

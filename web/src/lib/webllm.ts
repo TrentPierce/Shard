@@ -348,7 +348,7 @@ export async function initWebLLM(
                             appConfig: getScoutAppConfig(),
                         },
                         {
-                            context_window_size: 2048,
+                            context_window_size: 512,
                         }
                     )
                 }
@@ -362,7 +362,7 @@ export async function initWebLLM(
                         appConfig: getScoutAppConfig(),
                     },
                     {
-                        context_window_size: 2048,
+                        context_window_size: 512,
                     }
                 )
             } catch (workerError: any) {
@@ -378,7 +378,7 @@ export async function initWebLLM(
                         appConfig: getScoutAppConfig(),
                     },
                     {
-                        context_window_size: 2048,
+                        context_window_size: 512,
                     }
                 )
             }
