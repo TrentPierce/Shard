@@ -1848,10 +1848,19 @@ fn preferred_bootstrap_multiaddr(addrs: &[String]) -> Option<String> {
     fallbacks.into_iter().next()
 }
 
+fn canonical_bootstrap_multiaddr(addr: &str, peer_id: &str) -> String {
+    let trimmed = addr.trim();
+    if trimmed.is_empty() || peer_id.trim().is_empty() || trimmed.contains("/p2p/") {
+        return trimmed.to_string();
+    }
+    format!("{trimmed}/p2p/{peer_id}")
+}
+
 pub(crate) async fn upsert_bootstrap_entry(
     state: &SharedState,
-    entry: BootstrapRegistryEntry,
+    mut entry: BootstrapRegistryEntry,
 ) -> bool {
+    entry.multiaddr = canonical_bootstrap_multiaddr(&entry.multiaddr, &entry.peer_id);
     let mut registry_changed = false;
     {
         let mut registry = state.bootstrap_registry.lock().await;
@@ -2640,7 +2649,10 @@ async fn load_bootstrap_registry(path: &Path) -> HashMap<String, BootstrapRegist
     parsed
         .entries
         .into_iter()
-        .map(|entry| (entry.peer_id.clone(), entry))
+        .map(|mut entry| {
+            entry.multiaddr = canonical_bootstrap_multiaddr(&entry.multiaddr, &entry.peer_id);
+            (entry.peer_id.clone(), entry)
+        })
         .collect()
 }
 
@@ -4506,6 +4518,8 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
                             topo.listen_addrs.clone()
                         };
                         if let Some(multiaddr) = preferred_bootstrap_multiaddr(&addrs) {
+                            let canonical_multiaddr =
+                                canonical_bootstrap_multiaddr(&multiaddr, &local_peer_id.to_string());
                             let capability_tier = node_capability_tier(
                                 state.node_role.as_str(),
                                 state.resource_policy.max_gpu_usage,
@@ -4514,7 +4528,7 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
                             );
                             let announcement = BootstrapAnnouncement {
                                 peer_id: local_peer_id.to_string(),
-                                multiaddr,
+                                multiaddr: canonical_multiaddr,
                                 stability_score: 100,
                                 uptime_hours: uptime_hours as u64,
                                 version: env!("CARGO_PKG_VERSION").to_string(),
@@ -5944,7 +5958,7 @@ mod tests {
         CanaryRolloutController, HardcodedBootstrapMode, InFlightRequestGuard, LatencyHistogram,
         ModelManifestEntry, ScoutPenaltyBook, ScoutPenaltyUpdate, ScoutTimeoutTracker,
         SpeculativeConfig, WorkRequest, COLD_BOOTSTRAP_FAILURES, MAX_BOOTSTRAP_FAILURES,
-        reconnect_backoff_ms_for_failures,
+        canonical_bootstrap_multiaddr, reconnect_backoff_ms_for_failures,
     };
     use crate::network::policy::{NetworkMode, NetworkPolicy, PolicyDecision};
     use libp2p::{Multiaddr, PeerId};
@@ -6515,6 +6529,22 @@ mod tests {
         let seeded = bootstrap_registry_seed_addrs(&registry, now, ttl_ms, 80);
         assert_eq!(seeded.len(), 1);
         assert!(seeded[0].contains("12D3KooWfresh"));
+    }
+
+    #[test]
+    fn canonical_bootstrap_multiaddr_appends_missing_peer_id() {
+        let peer = "12D3KooWExamplePeer";
+        assert_eq!(
+            canonical_bootstrap_multiaddr("/ip4/35.175.242.222/tcp/4001", peer),
+            format!("/ip4/35.175.242.222/tcp/4001/p2p/{peer}")
+        );
+        assert_eq!(
+            canonical_bootstrap_multiaddr(
+                &format!("/ip4/35.175.242.222/tcp/4001/p2p/{peer}"),
+                peer
+            ),
+            format!("/ip4/35.175.242.222/tcp/4001/p2p/{peer}")
+        );
     }
 
     #[test]

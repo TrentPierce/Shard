@@ -4476,9 +4476,13 @@ pub(crate) async fn bootstrap_handler(
                 0.0
             };
             let stability_score = (((1.0 - failure_rate) * 100.0) as u32).min(100);
+            let multiaddr = canonical_bootstrap_multiaddr(
+                p.addrs.first().cloned().unwrap_or_default().as_str(),
+                id.as_str(),
+            );
             serde_json::json!({
                 "peer_id": id,
-                "multiaddr": p.addrs.first().cloned().unwrap_or_default(),
+                "multiaddr": multiaddr,
                 "uptime_hours": (now.saturating_sub(p.first_seen_at)) / (1000 * 60 * 60),
                 "stability_score": stability_score,
                 "role": "peer",
@@ -4494,9 +4498,11 @@ pub(crate) async fn bootstrap_handler(
     let persisted_bootstraps: Vec<serde_json::Value> = registered
         .values()
         .map(|entry| {
+            let multiaddr =
+                canonical_bootstrap_multiaddr(entry.multiaddr.as_str(), entry.peer_id.as_str());
             serde_json::json!({
                 "peer_id": entry.peer_id,
-                "multiaddr": entry.multiaddr,
+                "multiaddr": multiaddr,
                 "uptime_hours": entry.uptime_hours,
                 "stability_score": entry.stability_score,
                 "version": entry.version,
