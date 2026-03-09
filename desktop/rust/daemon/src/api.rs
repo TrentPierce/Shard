@@ -4486,6 +4486,7 @@ pub(crate) async fn bootstrap_handler(
                 "uptime_hours": (now.saturating_sub(p.first_seen_at)) / (1000 * 60 * 60),
                 "stability_score": stability_score,
                 "role": "peer",
+                "public_api_addr": serde_json::Value::Null,
             })
         })
         .collect();
@@ -4511,6 +4512,7 @@ pub(crate) async fn bootstrap_handler(
                 "gpu_available": entry.gpu_available,
                 "accepts_scout_work": entry.accepts_scout_work,
                 "public_api": entry.public_api,
+                "public_api_addr": entry.public_api_addr,
                 "updated_at_ms": entry.updated_at_ms,
             })
         })
@@ -4604,6 +4606,8 @@ pub(crate) struct RegisterBootstrapRequest {
     pub accepts_scout_work: Option<bool>,
     #[serde(default)]
     pub public_api: Option<bool>,
+    #[serde(default)]
+    pub public_api_addr: Option<String>,
 }
 
 pub(crate) async fn register_bootstrap_handler(
@@ -4635,6 +4639,7 @@ pub(crate) async fn register_bootstrap_handler(
         gpu_available: req.gpu_available,
         accepts_scout_work: req.accepts_scout_work,
         public_api: req.public_api,
+        public_api_addr: req.public_api_addr.clone(),
         updated_at_ms: now_ms(),
     };
     upsert_bootstrap_entry(&state, entry).await;

@@ -534,9 +534,18 @@ async fn discover_mesh_endpoints(state: &SharedState) -> Vec<MeshEndpointCandida
             300.0
         };
         for addr in &peer.addrs {
-            if let Some(endpoint) = endpoint_from_multiaddr(addr, control_port) {
-                let registry_entry = peer_id_from_addr_str(addr)
-                    .and_then(|peer_id| bootstrap_registry.get(&peer_id).cloned());
+            let registry_entry = peer_id_from_addr_str(addr)
+                .and_then(|peer_id| bootstrap_registry.get(&peer_id).cloned());
+            let endpoint = registry_entry
+                .as_ref()
+                .and_then(|candidate| {
+                    candidate
+                        .public_api_addr
+                        .as_deref()
+                        .and_then(|endpoint| normalize_endpoint(endpoint, control_port))
+                })
+                .or_else(|| endpoint_from_multiaddr(addr, control_port));
+            if let Some(endpoint) = endpoint {
                 let entry = discovered
                     .entry(endpoint.clone())
                     .or_insert(MeshEndpointCandidate {

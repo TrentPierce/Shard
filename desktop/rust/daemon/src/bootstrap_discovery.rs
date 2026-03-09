@@ -26,6 +26,8 @@ pub struct BootstrapPeer {
     pub accepts_scout_work: Option<bool>,
     #[serde(default)]
     pub public_api: Option<bool>,
+    #[serde(default)]
+    pub public_api_addr: Option<String>,
 }
 
 /// Request to register as a bootstrap peer
@@ -46,6 +48,8 @@ pub struct BootstrapRegistration {
     pub accepts_scout_work: Option<bool>,
     #[serde(default)]
     pub public_api: Option<bool>,
+    #[serde(default)]
+    pub public_api_addr: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

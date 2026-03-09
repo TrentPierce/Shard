@@ -458,6 +458,8 @@ pub(crate) struct BootstrapRegistryEntry {
     accepts_scout_work: Option<bool>,
     #[serde(default)]
     public_api: Option<bool>,
+    #[serde(default)]
+    public_api_addr: Option<String>,
     updated_at_ms: u128,
 }
 
@@ -483,6 +485,8 @@ struct BootstrapAnnouncement {
     accepts_scout_work: Option<bool>,
     #[serde(default)]
     public_api: Option<bool>,
+    #[serde(default)]
+    public_api_addr: Option<String>,
     announced_at_ms: u128,
 }
 
@@ -1138,6 +1142,8 @@ struct NodeHeartbeat {
     accepts_scout_work: Option<bool>,
     #[serde(default)]
     public_api: Option<bool>,
+    #[serde(default)]
+    public_api_addr: Option<String>,
     #[serde(default)]
     timestamp_ms: Option<u128>,
 }
@@ -1877,6 +1883,7 @@ pub(crate) async fn upsert_bootstrap_entry(
                     || existing.gpu_available != entry.gpu_available
                     || existing.accepts_scout_work != entry.accepts_scout_work
                     || existing.public_api != entry.public_api
+                    || existing.public_api_addr != entry.public_api_addr
             })
             .unwrap_or(true);
         if replace {
@@ -3948,6 +3955,10 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
                 // Get our advertised addresses
                 let topo = advertise_state.topology.lock().await;
                 let addrs = topo.listen_addrs.clone();
+                let public_api_addr = advertise_state
+                    .public_host
+                    .clone()
+                    .or(topo.public_api_addr.clone());
                 drop(topo);
 
                 if let Some(multiaddr) = addrs.first() {
@@ -3972,6 +3983,7 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
                             cli.relay_mode,
                         )),
                         public_api: Some(cli.public_api),
+                        public_api_addr,
                     };
 
                     if let Err(_e) =
@@ -4084,6 +4096,13 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
                 cli.relay_mode,
                 cli.public_api,
             );
+            let public_api_addr = {
+                let topo = heartbeat_state.topology.lock().await;
+                heartbeat_state
+                    .public_host
+                    .clone()
+                    .or(topo.public_api_addr.clone())
+            };
             let heartbeat = SignedEnvelope::sign(
                 NodeHeartbeat {
                     node_pubkey: pubkey.clone(),
@@ -4100,6 +4119,7 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
                         cli.relay_mode,
                     )),
                     public_api: Some(cli.public_api),
+                    public_api_addr,
                     timestamp_ms: Some(now_ms()),
                 },
                 &heartbeat_signing_key,
@@ -4399,6 +4419,7 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
                                         gpu_available: peer.gpu_available,
                                         accepts_scout_work: peer.accepts_scout_work,
                                         public_api: peer.public_api,
+                                        public_api_addr: peer.public_api_addr.clone(),
                                         updated_at_ms: now,
                                     };
                                     if upsert_bootstrap_entry(&state, entry).await {
@@ -4513,9 +4534,12 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
                 if now >= next_bootstrap_gossip_ms {
                     let uptime_hours = (now.saturating_sub(state.daemon_start)) / (1000 * 60 * 60);
                     if uptime_hours >= stability_threshold_hours as u128 {
-                        let addrs = {
+                        let (addrs, public_api_addr) = {
                             let topo = state.topology.lock().await;
-                            topo.listen_addrs.clone()
+                            (
+                                topo.listen_addrs.clone(),
+                                state.public_host.clone().or(topo.public_api_addr.clone()),
+                            )
                         };
                         if let Some(multiaddr) = preferred_bootstrap_multiaddr(&addrs) {
                             let canonical_multiaddr =
@@ -4541,6 +4565,7 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
                                     cli.relay_mode,
                                 )),
                                 public_api: Some(cli.public_api),
+                                public_api_addr,
                                 announced_at_ms: now,
                             };
                             if let Ok(payload) = serde_json::to_vec(&announcement) {
@@ -5037,6 +5062,7 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
                                         gpu_available: ann.gpu_available,
                                         accepts_scout_work: ann.accepts_scout_work,
                                         public_api: ann.public_api,
+                                        public_api_addr: ann.public_api_addr.clone(),
                                         updated_at_ms: ann.announced_at_ms.max(now_ms()),
                                     };
                                     let changed = upsert_bootstrap_entry(&state, entry).await;
@@ -6472,6 +6498,7 @@ mod tests {
                 gpu_available: Some(false),
                 accepts_scout_work: Some(false),
                 public_api: Some(true),
+                public_api_addr: Some("http://127.0.0.1:9091".to_string()),
                 updated_at_ms: 42,
             },
         );
@@ -6503,6 +6530,7 @@ mod tests {
                 gpu_available: Some(true),
                 accepts_scout_work: Some(false),
                 public_api: Some(true),
+                public_api_addr: Some("https://fresh.shardnetwork.live".to_string()),
                 updated_at_ms: now - 10_000,
             },
         );
@@ -6519,6 +6547,7 @@ mod tests {
                 gpu_available: Some(false),
                 accepts_scout_work: Some(true),
                 public_api: Some(true),
+                public_api_addr: Some("https://stale.shardnetwork.live".to_string()),
                 updated_at_ms: now - 120_000,
             },
         );
