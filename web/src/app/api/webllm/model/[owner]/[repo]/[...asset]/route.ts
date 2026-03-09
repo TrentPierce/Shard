@@ -41,21 +41,47 @@ async function handleProxy(request: Request, context: RouteContext): Promise<Res
     return badRequest("webllm_asset_path_invalid", 404)
   }
 
-  const upstreamUrl = new URL(
-    `https://huggingface.co/${normalizedOwner}/${normalizedRepo}/${normalizedAsset.join("/")}`,
-  )
+  const assetPath = normalizedAsset.join("/")
+  const upstreamUrl = `https://huggingface.co/${normalizedOwner}/${normalizedRepo}/${assetPath}`
+
   const upstreamHeaders = new Headers()
   copyHeaderIfPresent(upstreamHeaders, request.headers, "range")
   copyHeaderIfPresent(upstreamHeaders, request.headers, "if-none-match")
   copyHeaderIfPresent(upstreamHeaders, request.headers, "if-modified-since")
   copyHeaderIfPresent(upstreamHeaders, request.headers, "accept")
 
-  const upstream = await fetch(upstreamUrl, {
-    method: request.method,
-    headers: upstreamHeaders,
-    redirect: "follow",
-    cache: "force-cache",
-  })
+  let upstream: Response
+  try {
+    upstream = await fetch(upstreamUrl, {
+      method: request.method,
+      headers: upstreamHeaders,
+      redirect: "follow",
+      signal: AbortSignal.timeout(15_000),
+    })
+  } catch (fetchError) {
+    const errorMessage = fetchError instanceof Error ? fetchError.message : String(fetchError)
+    return Response.json(
+      {
+        ok: false,
+        detail: "upstream_fetch_failed",
+        upstream_url: upstreamUrl,
+        error: errorMessage,
+      },
+      { status: 502 },
+    )
+  }
+
+  if (!upstream.ok && upstream.status >= 500) {
+    return Response.json(
+      {
+        ok: false,
+        detail: "upstream_server_error",
+        upstream_url: upstreamUrl,
+        upstream_status: upstream.status,
+      },
+      { status: 502 },
+    )
+  }
 
   const responseHeaders = new Headers()
   const passthroughHeaders = [
