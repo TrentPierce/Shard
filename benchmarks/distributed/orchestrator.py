@@ -477,6 +477,30 @@ async def fetch_pool_health(client: httpx.AsyncClient, verifier_pool: list[str])
     return health_rows
 
 
+async def reset_endpoint_measurement_state(
+    client: httpx.AsyncClient,
+    endpoint: str,
+) -> None:
+    reset_paths = (
+        "/v1/system/latency/reset",
+        "/v1/system/speculative-trace/reset",
+    )
+    for path in reset_paths:
+        resp = await client.post(
+            endpoint_url(endpoint, path),
+            headers=endpoint_headers(endpoint),
+        )
+        resp.raise_for_status()
+
+
+async def reset_pool_measurement_state(
+    client: httpx.AsyncClient,
+    verifier_pool: list[str],
+) -> None:
+    for endpoint in verifier_pool:
+        await reset_endpoint_measurement_state(client, endpoint)
+
+
 def aggregate_counter(summaries: list[dict], key: str) -> float:
     total = 0.0
     for summary in summaries:
@@ -1398,6 +1422,7 @@ async def run_orchestrator(
                 if warmup_invalid_reason:
                     browser_warmup["invalid_reason"] = warmup_invalid_reason
                     raise RuntimeError(f"browser_warmup_invalid: {warmup_invalid_reason}")
+                await reset_pool_measurement_state(client, verifier_pool)
 
             baseline_summaries = await fetch_pool_summaries(client, verifier_pool)
             baseline_summary_rows = rows_by_endpoint(baseline_summaries)

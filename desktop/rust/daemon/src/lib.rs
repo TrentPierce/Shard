@@ -2734,6 +2734,10 @@ fn create_router(
             post(scout_runtime_reset_handler),
         )
         .route(
+            "/v1/system/latency/reset",
+            post(latency_runtime_reset_handler),
+        )
+        .route(
             "/v1/system/speculative-trace",
             get(speculative_trace_handler),
         )

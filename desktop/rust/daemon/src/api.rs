@@ -365,6 +365,21 @@ async fn reset_scout_runtime_state(state: &SharedState) -> serde_json::Value {
     })
 }
 
+pub(crate) async fn latency_runtime_reset_handler(
+    AxumState(state): AxumState<SharedState>,
+) -> Json<serde_json::Value> {
+    state.avg_latency_ms.store(0, Ordering::Relaxed);
+    state.gossipsub_latency_hist.reset();
+
+    Json(serde_json::json!({
+        "ok": true,
+        "cleared": {
+            "average_latency_ms": true,
+            "gossipsub_latency_hist": true,
+        }
+    }))
+}
+
 pub(crate) async fn scout_runtime_reset_handler(
     AxumState(state): AxumState<SharedState>,
     headers: HeaderMap,
