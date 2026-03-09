@@ -106,6 +106,10 @@ Use separate benchmark classes and do not blend their claims:
 - `slow-node speculative uplift`
 - `mixed-mesh routing efficiency`
 
+## Deferred Work
+
+- Add streaming mesh-forward proxy support so forwarded `/v1/chat/completions` requests can preserve SSE chunking instead of falling back to non-stream-only forwarding.
+
 ## Immediate Implementation Order
 
 1. Tiered verifier routing
