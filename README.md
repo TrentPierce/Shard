@@ -97,7 +97,7 @@ What this means:
 - The 3-node Fly mesh is stable and benchmarkable.
 - Fast Fly nodes no longer regress when browser scouts are attached because the daemon now bypasses speculative waits and the browser scout loop backs off instead of polling aggressively.
 - Slower nodes remain the best current target for browser scouts. The latest long-generation local check cut p95 from `7.96s` to `3.47s`.
-- The live `shardnetwork.live/benchmark/scout` page still has a WebLLM asset-route issue (`500` on `/api/webllm/model/.../mlc-chat-config.json`), so the pinned harness remains the source of truth for benchmark publication.
+- The live `shardnetwork.live/benchmark/scout` page now completes the full browser scout bootstrap path. The pinned harness remains the source of truth because it is the repeatable benchmark path.
 
 Raw artifacts:
 

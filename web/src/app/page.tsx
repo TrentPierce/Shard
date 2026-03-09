@@ -74,7 +74,7 @@ const benchmarkRows: BenchmarkRow[] = [
 const takeaways = [
   "Fast Fly verifiers now stay neutral with browser scouts attached because the daemon bypasses speculative waits and the scouts back off instead of polling aggressively.",
   "Slower nodes are where browser scouts currently help. The latest local long-generation check dropped p95 from 7.96s to 3.47s with browser scouts active.",
-  "The production benchmark page on shardnetwork.live still needs a WebLLM asset-route fix, so the pinned benchmark harness remains the source of truth for these numbers.",
+  "The live shardnetwork.live benchmark page now completes the full browser scout bootstrap path. The pinned harness remains the source of truth because it is the repeatable benchmark path.",
 ]
 
 function formatCompact(value: number) {
