@@ -6333,6 +6333,23 @@ mod tests {
     }
 
     #[test]
+    fn bootstrap_failures_eventually_reach_cold_threshold() {
+        let peer = PeerId::random();
+        let addr = format!("/ip4/127.0.0.1/tcp/4001/p2p/{peer}");
+        let mut known = vec![addr];
+        let mut failures = HashMap::new();
+
+        for _ in 0..(COLD_BOOTSTRAP_FAILURES + 2) {
+            let _ = record_bootstrap_failure(&mut known, &mut failures, &peer);
+        }
+
+        assert_eq!(
+            failures.get(&peer.to_string()).copied(),
+            Some(COLD_BOOTSTRAP_FAILURES)
+        );
+    }
+
+    #[test]
     fn peer_id_parser_extracts_peer_from_multiaddr_string() {
         let peer = PeerId::random();
         let addr = format!("/ip4/127.0.0.1/tcp/4001/p2p/{peer}");

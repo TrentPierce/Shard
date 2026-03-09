@@ -394,6 +394,8 @@ fn mesh_forward_client() -> &'static reqwest::Client {
 struct MeshEndpointCandidate {
     endpoint: String,
     peer_latency_ms: f64,
+    capability_tier: Option<String>,
+    public_api: Option<bool>,
 }
 
 #[derive(Debug, Clone)]
@@ -403,6 +405,7 @@ struct MeshEndpointScore {
     latency_ms: f64,
     score: f64,
     tier: &'static str,
+    capability_tier: Option<String>,
 }
 
 fn mesh_forward_fast_tier_only(request_max_tokens: usize) -> bool {
@@ -418,6 +421,17 @@ fn classify_mesh_endpoint_tier(
     best_latency_ms: f64,
     best_score: f64,
 ) -> &'static str {
+    if let Some(capability_tier) = score.capability_tier.as_deref() {
+        if capability_tier.eq_ignore_ascii_case("gpu_fast") {
+            return "fast";
+        }
+        if capability_tier.eq_ignore_ascii_case("cpu_standard") {
+            return "standard";
+        }
+        if matches!(capability_tier, "cpu_slow" | "relay_only" | "scout_only") {
+            return "slow";
+        }
+    }
     let fast_latency_limit = best_latency_ms + mesh_forward_fast_tier_latency_slack_ms();
     let fast_score_limit = best_score + mesh_forward_fast_tier_score_slack_ms();
     if score.latency_ms <= fast_latency_limit && score.score <= fast_score_limit {
@@ -494,17 +508,25 @@ fn filter_mesh_forward_candidates(
 
 async fn discover_mesh_endpoints(state: &SharedState) -> Vec<MeshEndpointCandidate> {
     let control_port = mesh_forward_port();
-    let mut discovered: HashMap<String, f64> = HashMap::new();
+    let mut discovered: HashMap<String, MeshEndpointCandidate> = HashMap::new();
 
     if let Ok(raw) = std::env::var("SHARD_MESH_FORWARD_ENDPOINTS") {
         for endpoint in raw.split(',') {
             if let Some(normalized) = normalize_endpoint(endpoint, control_port) {
-                discovered.entry(normalized).or_insert(300.0);
+                discovered
+                    .entry(normalized.clone())
+                    .or_insert(MeshEndpointCandidate {
+                        endpoint: normalized,
+                        peer_latency_ms: 300.0,
+                        capability_tier: None,
+                        public_api: None,
+                    });
             }
         }
     }
 
     let peers = state.peers.lock().await.clone();
+    let bootstrap_registry = state.bootstrap_registry.lock().await.clone();
     for peer in peers.values() {
         let peer_latency = if peer.avg_latency_ms > 0.0 {
             peer.avg_latency_ms as f64
@@ -513,9 +535,28 @@ async fn discover_mesh_endpoints(state: &SharedState) -> Vec<MeshEndpointCandida
         };
         for addr in &peer.addrs {
             if let Some(endpoint) = endpoint_from_multiaddr(addr, control_port) {
-                let entry = discovered.entry(endpoint).or_insert(peer_latency);
-                if peer_latency < *entry {
-                    *entry = peer_latency;
+                let registry_entry = peer_id_from_addr_str(addr)
+                    .and_then(|peer_id| bootstrap_registry.get(&peer_id).cloned());
+                let entry = discovered
+                    .entry(endpoint.clone())
+                    .or_insert(MeshEndpointCandidate {
+                        endpoint,
+                        peer_latency_ms: peer_latency,
+                        capability_tier: registry_entry
+                            .as_ref()
+                            .and_then(|candidate| candidate.capability_tier.clone()),
+                        public_api: registry_entry.as_ref().and_then(|candidate| candidate.public_api),
+                    });
+                if peer_latency < entry.peer_latency_ms {
+                    entry.peer_latency_ms = peer_latency;
+                }
+                if entry.capability_tier.is_none() {
+                    entry.capability_tier = registry_entry
+                        .as_ref()
+                        .and_then(|candidate| candidate.capability_tier.clone());
+                }
+                if entry.public_api.is_none() {
+                    entry.public_api = registry_entry.as_ref().and_then(|candidate| candidate.public_api);
                 }
             }
         }
@@ -523,8 +564,8 @@ async fn discover_mesh_endpoints(state: &SharedState) -> Vec<MeshEndpointCandida
 
     let mut out = discovered
         .into_iter()
-        .filter_map(|(endpoint, peer_latency_ms)| {
-            let host = Url::parse(endpoint.as_str())
+        .filter_map(|(_, candidate)| {
+            let host = Url::parse(candidate.endpoint.as_str())
                 .ok()
                 .and_then(|url| url.host_str().map(|h| h.to_string()))
                 .unwrap_or_default();
@@ -535,10 +576,10 @@ async fn discover_mesh_endpoints(state: &SharedState) -> Vec<MeshEndpointCandida
             {
                 return None;
             }
-            Some(MeshEndpointCandidate {
-                endpoint,
-                peer_latency_ms,
-            })
+            if matches!(candidate.public_api, Some(false)) {
+                return None;
+            }
+            Some(candidate)
         })
         .collect::<Vec<_>>();
 
@@ -580,6 +621,7 @@ async fn score_mesh_endpoint(
         latency_ms,
         score: mesh_forward_score(latency_ms, queue_depth, queue_weight_ms),
         tier: "unknown",
+        capability_tier: None,
     })
 }
 
@@ -596,9 +638,10 @@ async fn choose_mesh_forward_target(
     let probe_limit = mesh_forward_probe_limit();
     let mut scored = Vec::new();
     for candidate in candidates.into_iter().take(probe_limit) {
-        if let Some(score) =
+        if let Some(mut score) =
             score_mesh_endpoint(client, candidate.endpoint.as_str(), queue_weight_ms).await
         {
+            score.capability_tier = candidate.capability_tier.clone();
             scored.push(score);
         }
     }
@@ -2936,7 +2979,7 @@ pub(crate) async fn chat_completions_handler(
 mod tests {
     use super::{
         adaptive_speculative_budget_ms_with, auth_required, compute_effective_scout_timeout_ms,
-        effective_draft_token_count_with, endpoint_from_multiaddr, enqueue_scout_work,
+        classify_mesh_endpoint_tier, effective_draft_token_count_with, endpoint_from_multiaddr, enqueue_scout_work,
         filter_mesh_forward_candidates, infer_client_ip, local_scout_fallback_allowed,
         mesh_forward_score, model_pair_acceptance_rates, normalize_endpoint,
         parse_speculative_min_request_tokens, probe_allowed_for_request,
@@ -3292,6 +3335,7 @@ mod tests {
                 latency_ms: 120.0,
                 score: 120.0,
                 tier: "unknown",
+                capability_tier: None,
             },
             MeshEndpointScore {
                 endpoint: "http://fast-b:9091".to_string(),
@@ -3299,6 +3343,7 @@ mod tests {
                 latency_ms: 220.0,
                 score: 320.0,
                 tier: "unknown",
+                capability_tier: None,
             },
             MeshEndpointScore {
                 endpoint: "http://slow:9091".to_string(),
@@ -3306,6 +3351,7 @@ mod tests {
                 latency_ms: 680.0,
                 score: 920.0,
                 tier: "unknown",
+                capability_tier: None,
             },
         ];
 
@@ -3327,6 +3373,7 @@ mod tests {
                 latency_ms: 120.0,
                 score: 120.0,
                 tier: "unknown",
+                capability_tier: None,
             },
             MeshEndpointScore {
                 endpoint: "http://standard:9091".to_string(),
@@ -3334,6 +3381,7 @@ mod tests {
                 latency_ms: 320.0,
                 score: 560.0,
                 tier: "unknown",
+                capability_tier: None,
             },
             MeshEndpointScore {
                 endpoint: "http://slow:9091".to_string(),
@@ -3341,6 +3389,7 @@ mod tests {
                 latency_ms: 880.0,
                 score: 1360.0,
                 tier: "unknown",
+                capability_tier: None,
             },
         ];
 
@@ -3378,5 +3427,28 @@ mod tests {
             Some("http://35.175.242.222:9091")
         );
         assert!(endpoint_from_multiaddr(relay.as_str(), 9091).is_none());
+    }
+
+    #[test]
+    fn capability_tier_can_promote_fast_endpoint_before_probe_history() {
+        let fast = MeshEndpointScore {
+            endpoint: "http://gpu-fast:9091".to_string(),
+            queue_depth: 0.0,
+            latency_ms: 480.0,
+            score: 980.0,
+            tier: "unknown",
+            capability_tier: Some("gpu_fast".to_string()),
+        };
+        let slow = MeshEndpointScore {
+            endpoint: "http://cpu-slow:9091".to_string(),
+            queue_depth: 0.0,
+            latency_ms: 180.0,
+            score: 180.0,
+            tier: "unknown",
+            capability_tier: Some("cpu_slow".to_string()),
+        };
+
+        assert_eq!(classify_mesh_endpoint_tier(&fast, 180.0, 180.0), "fast");
+        assert_eq!(classify_mesh_endpoint_tier(&slow, 180.0, 180.0), "slow");
     }
 }
