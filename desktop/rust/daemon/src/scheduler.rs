@@ -1117,7 +1117,7 @@ fn adapt_speculative_timeout_ms(
             scout_timeout_verifier_ceil_ms(),
         ));
     }
-    let adaptive_budget = adaptive_speculative_budget_ms(state);
+    let adaptive_budget = adaptive_speculative_budget_ms(state, request_max_tokens);
     if adaptive_budget != u64::MAX {
         adapted = adapted.min(adaptive_budget);
     }
@@ -1158,34 +1158,88 @@ fn update_accepted_tokens_ewma(state: &SharedState, accepted: u64) {
     state.avg_accepted_tokens_x100.store(next, Ordering::Relaxed);
 }
 
-/// Compute an adaptive speculative wait budget based on observed draft timing
-/// and acceptance data.  Returns 0 when waiting would add more latency than
-/// the accepted draft tokens would save.  Returns u64::MAX when there is not
-/// enough data yet (fall through to existing timeout logic).
-fn adaptive_speculative_budget_ms(state: &SharedState) -> u64 {
-    let avg_verifier_ms = state.avg_latency_ms.load(Ordering::Relaxed) as u64;
-    let avg_draft_ms = state.avg_draft_arrival_ms.load(Ordering::Relaxed) as u64;
-    let avg_accepted_x100 = state.avg_accepted_tokens_x100.load(Ordering::Relaxed) as u64;
+fn speculative_prior_draft_arrival_ms() -> u64 {
+    std::env::var("SHARD_SCOUT_TIMEOUT_DRAFT_ARRIVAL_PRIOR_MS")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .map(|v| v.clamp(100, 5_000))
+        .unwrap_or(600)
+}
+
+fn speculative_prior_accepted_tokens_x100() -> u64 {
+    std::env::var("SHARD_SCOUT_TIMEOUT_ACCEPTED_TOKENS_PRIOR")
+        .ok()
+        .and_then(|v| v.trim().parse::<f64>().ok())
+        .filter(|v| v.is_finite() && *v >= 0.0)
+        .map(|v| (v * 100.0).round() as u64)
+        .unwrap_or(400)
+}
+
+fn adaptive_speculative_budget_ms_with(
+    avg_verifier_ms: u64,
+    avg_draft_ms: u64,
+    avg_accepted_x100: u64,
+    request_max_tokens: usize,
+) -> u64 {
     if avg_verifier_ms == 0 || avg_draft_ms == 0 || avg_accepted_x100 == 0 {
         return u64::MAX;
     }
     let avg_accepted_tokens = avg_accepted_x100 as f64 / 100.0;
-    let tokens_per_ms = 10.0 / (avg_verifier_ms as f64).max(1.0);
+    let expected_tokens_per_request = request_max_tokens.max(1) as f64;
+    let tokens_per_ms = expected_tokens_per_request / (avg_verifier_ms as f64).max(1.0);
+    if !tokens_per_ms.is_finite() || tokens_per_ms <= 0.0 {
+        return u64::MAX;
+    }
     let saved_ms = (avg_accepted_tokens / tokens_per_ms) as u64;
     if avg_draft_ms >= saved_ms {
-        tracing::debug!(
-            avg_draft_ms, saved_ms,
-            avg_accepted_tokens = format!("{avg_accepted_tokens:.1}"),
-            avg_verifier_ms,
-            "adaptive budget: draft wait cost exceeds expected savings, budget=0"
-        );
         return 0;
     }
-    let budget = saved_ms.min(avg_verifier_ms / 2);
-    tracing::debug!(
-        budget, avg_draft_ms, saved_ms,
-        avg_accepted_tokens = format!("{avg_accepted_tokens:.1}"),
+    saved_ms.min(avg_verifier_ms / 2)
+}
+
+/// Compute an adaptive speculative wait budget based on observed draft timing
+/// and acceptance data.  Returns 0 when waiting would add more latency than
+/// the accepted draft tokens would save.  Returns u64::MAX when there is not
+/// enough data yet (fall through to existing timeout logic).
+fn adaptive_speculative_budget_ms(state: &SharedState, request_max_tokens: usize) -> u64 {
+    let avg_verifier_ms = state.avg_latency_ms.load(Ordering::Relaxed) as u64;
+    if avg_verifier_ms == 0 {
+        return u64::MAX;
+    }
+    let avg_draft_ms = state.avg_draft_arrival_ms.load(Ordering::Relaxed) as u64;
+    let avg_accepted_x100 = state.avg_accepted_tokens_x100.load(Ordering::Relaxed) as u64;
+    let effective_draft_ms = if avg_draft_ms == 0 {
+        speculative_prior_draft_arrival_ms()
+    } else {
+        avg_draft_ms
+    };
+    let effective_accepted_x100 = if avg_accepted_x100 == 0 {
+        speculative_prior_accepted_tokens_x100()
+    } else {
+        avg_accepted_x100
+    };
+    let budget = adaptive_speculative_budget_ms_with(
         avg_verifier_ms,
+        effective_draft_ms,
+        effective_accepted_x100,
+        request_max_tokens,
+    );
+    if budget == 0 {
+        tracing::debug!(
+            avg_draft_ms = effective_draft_ms,
+            avg_accepted_tokens = format!("{:.1}", effective_accepted_x100 as f64 / 100.0),
+            avg_verifier_ms,
+            request_max_tokens,
+            "adaptive budget: draft wait cost exceeds expected savings, budget=0"
+        );
+        return budget;
+    }
+    tracing::debug!(
+        budget,
+        avg_draft_ms = effective_draft_ms,
+        avg_accepted_tokens = format!("{:.1}", effective_accepted_x100 as f64 / 100.0),
+        avg_verifier_ms,
+        request_max_tokens,
         "adaptive budget: speculative wait budget computed"
     );
     budget
@@ -2747,7 +2801,8 @@ pub(crate) async fn chat_completions_handler(
 #[cfg(test)]
 mod tests {
     use super::{
-        auth_required, compute_effective_scout_timeout_ms, effective_draft_token_count_with,
+        adaptive_speculative_budget_ms_with, auth_required, compute_effective_scout_timeout_ms,
+        effective_draft_token_count_with,
         endpoint_from_multiaddr, enqueue_scout_work, infer_client_ip, local_scout_fallback_allowed,
         mesh_forward_score, model_pair_acceptance_rates, normalize_endpoint,
         parse_speculative_min_request_tokens, probe_allowed_for_request,
@@ -2893,6 +2948,16 @@ mod tests {
         assert_eq!(compute_effective_scout_timeout_ms(30_000, 8, 8), 800);
         assert_eq!(compute_effective_scout_timeout_ms(30_000, 8, 14), 600);
         assert_eq!(compute_effective_scout_timeout_ms(30_000, 8, 24), 0);
+    }
+
+    #[test]
+    fn adaptive_budget_uses_request_size_for_savings_math() {
+        let budget = adaptive_speculative_budget_ms_with(1_300, 600, 400, 64);
+        assert_eq!(budget, 0);
+
+        let budget_small_wait = adaptive_speculative_budget_ms_with(1_300, 120, 800, 64);
+        assert!(budget_small_wait > 0);
+        assert!(budget_small_wait <= 650);
     }
 
     #[test]
