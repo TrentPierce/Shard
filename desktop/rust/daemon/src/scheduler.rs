@@ -917,7 +917,7 @@ fn compute_effective_scout_timeout_ms(
         .and_then(|v| v.trim().parse::<usize>().ok())
         .map(|v| v.clamp(1, 32))
         .unwrap_or(4);
-    if active_scouts < min_active_scouts {
+    if active_scouts == 0 {
         return 0;
     }
     // Keep speculative waits bounded while allowing enough budget for real scout
@@ -955,7 +955,7 @@ fn compute_effective_scout_timeout_ms(
         .and_then(|v| v.trim().parse::<u64>().ok())
         .map(|v| v.clamp(600, 5_000))
         .unwrap_or(950);
-    if active_scouts <= min_active_scouts.saturating_add(1) {
+    if active_scouts < min_active_scouts.saturating_add(1) {
         return bounded_base.min(low_supply_cap);
     }
     bounded_base.min(850)
@@ -1138,7 +1138,11 @@ impl ScoutSupplyEstimate {
     }
 
     fn effective_active_scouts(self) -> usize {
-        self.remote_active_scouts()
+        let remote = self.remote_active_scouts();
+        if remote > 0 {
+            return remote;
+        }
+        self.candidate_remote_scouts()
     }
 }
 
@@ -1285,6 +1289,7 @@ async fn effective_speculative_timeout_ms(
         effective_draft_token_count(config.draft_token_count, request_max_tokens);
     let supply = estimate_scout_supply(state).await;
     let active_scouts = supply.effective_active_scouts();
+    let candidate_scouts = supply.candidate_remote_scouts();
     let queue_depth = {
         let pending_depth = state.speculative_pending.lock().await.len();
         let verifier_in_flight = state.in_flight_count.load(Ordering::Relaxed);
@@ -1295,7 +1300,6 @@ async fn effective_speculative_timeout_ms(
     if timeout_ms == 0 {
         // Cold-start discovery: only probe occasionally and only when there are
         // scout candidates, with a very short timeout budget.
-        let candidate_scouts = supply.candidate_remote_scouts();
         let probe_modulus = scout_probe_every_n_requests();
         let probe_queue_max = scout_probe_queue_max();
         if candidate_scouts > 0
@@ -1404,13 +1408,26 @@ async fn fetch_speculative_draft(
         draft_token_count,
     );
     if scout_timeout_ms == 0 {
+        let supply = estimate_scout_supply(state).await;
+        let queue_depth = {
+            let pending_depth = state.speculative_pending.lock().await.len();
+            let verifier_in_flight = state.in_flight_count.load(Ordering::Relaxed);
+            pending_depth.max(verifier_in_flight)
+        };
         record_speculative_trace(
             state,
             request_id.to_string(),
             "dispatch_skipped_zero_timeout",
             None,
             Some(format!(
-                "request_max_tokens={request_max_tokens}, draft_token_count={draft_token_count}"
+                "request_max_tokens={request_max_tokens}, draft_token_count={draft_token_count}, active_scouts={}, candidate_scouts={}, productive_runtime_scouts={}, browser_draft_capable={}, recent_pollers={}, recent_submitters={}, healthy_scout_reports={}, queue_depth={queue_depth}",
+                supply.effective_active_scouts(),
+                supply.candidate_remote_scouts(),
+                supply.productive_runtime_scouts,
+                supply.browser_draft_capable,
+                supply.recent_pollers,
+                supply.recent_submitters,
+                supply.healthy_scout_reports,
             )),
             None,
         )
@@ -1425,7 +1442,7 @@ async fn fetch_speculative_draft(
         "dispatch_started",
         None,
         Some(format!(
-            "draft_token_count={draft_token_count}, timeout_ms={scout_timeout_ms}"
+            "draft_token_count={draft_token_count}, timeout_ms={scout_timeout_ms}, request_max_tokens={request_max_tokens}"
         )),
         None,
     )
@@ -2779,8 +2796,8 @@ mod tests {
     #[test]
     fn adaptive_timeout_short_circuits_without_active_scouts() {
         assert_eq!(compute_effective_scout_timeout_ms(30_000, 0, 0), 0);
-        assert_eq!(compute_effective_scout_timeout_ms(30_000, 1, 0), 0);
-        assert_eq!(compute_effective_scout_timeout_ms(30_000, 3, 0), 0);
+        assert_eq!(compute_effective_scout_timeout_ms(30_000, 1, 0), 950);
+        assert_eq!(compute_effective_scout_timeout_ms(30_000, 3, 0), 950);
         assert_eq!(compute_effective_scout_timeout_ms(30_000, 4, 0), 950);
         assert_eq!(compute_effective_scout_timeout_ms(30_000, 8, 3), 850);
         assert_eq!(compute_effective_scout_timeout_ms(30_000, 8, 8), 800);
@@ -2815,7 +2832,7 @@ mod tests {
     }
 
     #[test]
-    fn scout_supply_counts_only_remote_activity() {
+    fn scout_supply_uses_candidate_activity_when_productive_supply_is_absent() {
         let empty = ScoutSupplyEstimate {
             productive_runtime_scouts: 0,
             browser_draft_capable: 0,
@@ -2836,6 +2853,17 @@ mod tests {
         assert_eq!(remote_present.remote_active_scouts(), 1);
         assert_eq!(remote_present.candidate_remote_scouts(), 2);
         assert_eq!(remote_present.effective_active_scouts(), 1);
+
+        let warm_candidate = ScoutSupplyEstimate {
+            productive_runtime_scouts: 0,
+            browser_draft_capable: 1,
+            recent_pollers: 0,
+            recent_submitters: 0,
+            healthy_scout_reports: 0,
+        };
+        assert_eq!(warm_candidate.remote_active_scouts(), 0);
+        assert_eq!(warm_candidate.candidate_remote_scouts(), 1);
+        assert_eq!(warm_candidate.effective_active_scouts(), 1);
     }
 
     #[test]

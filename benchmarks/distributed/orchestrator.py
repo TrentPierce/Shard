@@ -383,7 +383,9 @@ async def choose_browser_backends(
     ranked = await pool.ranked_endpoints(client)
     if not ranked:
         raise RuntimeError("no verifier endpoints configured for browser scouts")
-    return [ranked[idx % len(ranked)] for idx in range(max(1, count))]
+    pinned_fly = [endpoint for endpoint in ranked if "Fly-Force-Instance-Id=" in endpoint]
+    candidates = pinned_fly or ranked
+    return [candidates[idx % len(candidates)] for idx in range(max(1, count))]
 
 
 async def fetch_summary(client: httpx.AsyncClient, base_url: str) -> dict:

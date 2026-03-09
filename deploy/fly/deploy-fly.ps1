@@ -1,5 +1,5 @@
 param(
-    [string]$AppName = "shard-fly-bench",
+    [string]$AppName = "shard-fly-bench-0308c",
     [string[]]$Regions = @("iad", "lax", "lhr"),
     [int]$VolumeSizeGb = 20,
     [string]$BootstrapNode = ""

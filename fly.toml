@@ -1,4 +1,4 @@
-app = "shard-fly-bench"
+app = "shard-fly-bench-0308c"
 primary_region = "iad"
 
 [build]
