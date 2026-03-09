@@ -191,6 +191,50 @@ fn mesh_forward_local_queue_trigger() -> f64 {
     })
 }
 
+fn mesh_forward_fast_tier_max_tokens() -> usize {
+    static TOKENS: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *TOKENS.get_or_init(|| {
+        std::env::var("SHARD_MESH_FORWARD_FAST_TIER_MAX_TOKENS")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .filter(|v| *v > 0)
+            .unwrap_or(128)
+    })
+}
+
+fn mesh_forward_fast_tier_latency_slack_ms() -> f64 {
+    static SLACK: std::sync::OnceLock<f64> = std::sync::OnceLock::new();
+    *SLACK.get_or_init(|| {
+        std::env::var("SHARD_MESH_FORWARD_FAST_TIER_LATENCY_SLACK_MS")
+            .ok()
+            .and_then(|v| v.parse::<f64>().ok())
+            .filter(|v| v.is_finite() && *v >= 0.0)
+            .unwrap_or(200.0)
+    })
+}
+
+fn mesh_forward_fast_tier_score_slack_ms() -> f64 {
+    static SLACK: std::sync::OnceLock<f64> = std::sync::OnceLock::new();
+    *SLACK.get_or_init(|| {
+        std::env::var("SHARD_MESH_FORWARD_FAST_TIER_SCORE_SLACK_MS")
+            .ok()
+            .and_then(|v| v.parse::<f64>().ok())
+            .filter(|v| v.is_finite() && *v >= 0.0)
+            .unwrap_or(300.0)
+    })
+}
+
+fn mesh_forward_slow_tier_min_tokens() -> usize {
+    static TOKENS: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *TOKENS.get_or_init(|| {
+        std::env::var("SHARD_MESH_FORWARD_SLOW_TIER_MIN_TOKENS")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .filter(|v| *v > 0)
+            .unwrap_or(384)
+    })
+}
+
 fn overload_retry_after_seconds(depth: usize, cap: usize) -> u64 {
     let headroom = depth.saturating_sub(cap);
     (1 + headroom.min(4)) as u64
@@ -358,6 +402,94 @@ struct MeshEndpointScore {
     queue_depth: f64,
     latency_ms: f64,
     score: f64,
+    tier: &'static str,
+}
+
+fn mesh_forward_fast_tier_only(request_max_tokens: usize) -> bool {
+    request_max_tokens <= mesh_forward_fast_tier_max_tokens()
+}
+
+fn mesh_forward_allows_slow_tier(request_max_tokens: usize) -> bool {
+    request_max_tokens >= mesh_forward_slow_tier_min_tokens()
+}
+
+fn classify_mesh_endpoint_tier(
+    score: &MeshEndpointScore,
+    best_latency_ms: f64,
+    best_score: f64,
+) -> &'static str {
+    let fast_latency_limit = best_latency_ms + mesh_forward_fast_tier_latency_slack_ms();
+    let fast_score_limit = best_score + mesh_forward_fast_tier_score_slack_ms();
+    if score.latency_ms <= fast_latency_limit && score.score <= fast_score_limit {
+        "fast"
+    } else if score.score <= fast_score_limit * 1.75 {
+        "standard"
+    } else {
+        "slow"
+    }
+}
+
+fn filter_mesh_forward_candidates(
+    mut scored: Vec<MeshEndpointScore>,
+    request_max_tokens: usize,
+) -> Vec<MeshEndpointScore> {
+    if scored.is_empty() {
+        return scored;
+    }
+    let best_latency_ms = scored
+        .iter()
+        .map(|candidate| candidate.latency_ms)
+        .fold(f64::INFINITY, f64::min);
+    let best_score = scored
+        .iter()
+        .map(|candidate| candidate.score)
+        .fold(f64::INFINITY, f64::min);
+
+    for candidate in &mut scored {
+        candidate.tier = classify_mesh_endpoint_tier(candidate, best_latency_ms, best_score);
+    }
+
+    if mesh_forward_fast_tier_only(request_max_tokens) {
+        let mut fast = scored
+            .iter()
+            .filter(|candidate| candidate.tier == "fast")
+            .cloned()
+            .collect::<Vec<_>>();
+        if !fast.is_empty() {
+            fast.sort_by(|a, b| {
+                a.score
+                    .total_cmp(&b.score)
+                    .then_with(|| a.latency_ms.total_cmp(&b.latency_ms))
+                    .then_with(|| a.endpoint.cmp(&b.endpoint))
+            });
+            return fast;
+        }
+    }
+
+    if !mesh_forward_allows_slow_tier(request_max_tokens) {
+        let mut trimmed = scored
+            .iter()
+            .filter(|candidate| candidate.tier != "slow")
+            .cloned()
+            .collect::<Vec<_>>();
+        if !trimmed.is_empty() {
+            trimmed.sort_by(|a, b| {
+                a.score
+                    .total_cmp(&b.score)
+                    .then_with(|| a.latency_ms.total_cmp(&b.latency_ms))
+                    .then_with(|| a.endpoint.cmp(&b.endpoint))
+            });
+            return trimmed;
+        }
+    }
+
+    scored.sort_by(|a, b| {
+        a.score
+            .total_cmp(&b.score)
+            .then_with(|| a.latency_ms.total_cmp(&b.latency_ms))
+            .then_with(|| a.endpoint.cmp(&b.endpoint))
+    });
+    scored
 }
 
 async fn discover_mesh_endpoints(state: &SharedState) -> Vec<MeshEndpointCandidate> {
@@ -447,10 +579,14 @@ async fn score_mesh_endpoint(
         queue_depth,
         latency_ms,
         score: mesh_forward_score(latency_ms, queue_depth, queue_weight_ms),
+        tier: "unknown",
     })
 }
 
-async fn choose_mesh_forward_target(state: &SharedState) -> Option<MeshEndpointScore> {
+async fn choose_mesh_forward_target(
+    state: &SharedState,
+    request_max_tokens: usize,
+) -> Option<MeshEndpointScore> {
     let candidates = discover_mesh_endpoints(state).await;
     if candidates.is_empty() {
         return None;
@@ -466,12 +602,9 @@ async fn choose_mesh_forward_target(state: &SharedState) -> Option<MeshEndpointS
             scored.push(score);
         }
     }
-    scored.sort_by(|a, b| {
-        a.score
-            .total_cmp(&b.score)
-            .then_with(|| a.endpoint.cmp(&b.endpoint))
-    });
-    scored.into_iter().next()
+    filter_mesh_forward_candidates(scored, request_max_tokens)
+        .into_iter()
+        .next()
 }
 
 fn strip_control_tokens(raw: &str) -> String {
@@ -2104,7 +2237,7 @@ pub(crate) async fn chat_completions_handler(
         let local_queue_depth = verifier_request_depth(&state) as f64;
         let local_latency_ms = state.avg_latency_ms.load(Ordering::Relaxed) as f64;
         let local_score = mesh_forward_score(local_latency_ms, local_queue_depth, queue_weight_ms);
-        if let Some(target) = choose_mesh_forward_target(&state).await {
+        if let Some(target) = choose_mesh_forward_target(&state, max_tokens as usize).await {
             if should_forward_to_mesh(
                 local_score,
                 target.score,
@@ -2150,6 +2283,7 @@ pub(crate) async fn chat_completions_handler(
                             }
                             tracing::info!(
                                 target = %target.endpoint,
+                                target_tier = target.tier,
                                 queue_depth = target.queue_depth,
                                 target_latency_ms = target.latency_ms,
                                 local_queue_depth,
@@ -2802,16 +2936,16 @@ pub(crate) async fn chat_completions_handler(
 mod tests {
     use super::{
         adaptive_speculative_budget_ms_with, auth_required, compute_effective_scout_timeout_ms,
-        effective_draft_token_count_with,
-        endpoint_from_multiaddr, enqueue_scout_work, infer_client_ip, local_scout_fallback_allowed,
+        effective_draft_token_count_with, endpoint_from_multiaddr, enqueue_scout_work,
+        filter_mesh_forward_candidates, infer_client_ip, local_scout_fallback_allowed,
         mesh_forward_score, model_pair_acceptance_rates, normalize_endpoint,
         parse_speculative_min_request_tokens, probe_allowed_for_request,
         remove_work_id_from_scout_queue, request_host_is_local, requested_request_id,
         resolve_inference_mode,
         should_bypass_speculative_for_fast_verifier,
         should_abort_on_degenerate_output, should_attempt_mesh_forward, should_forward_to_mesh,
-        should_refuse_mesh_degraded, strip_control_tokens, InferenceMode, ScoutSupplyEstimate,
-        WorkRequest,
+        should_refuse_mesh_degraded, strip_control_tokens, InferenceMode, MeshEndpointScore,
+        ScoutSupplyEstimate, WorkRequest,
     };
     use axum::http::{HeaderMap, HeaderValue};
     use std::collections::VecDeque;
@@ -3147,6 +3281,79 @@ mod tests {
             100.0,
             2.0
         ));
+    }
+
+    #[test]
+    fn short_requests_trim_mesh_targets_to_fast_tier() {
+        let scored = vec![
+            MeshEndpointScore {
+                endpoint: "http://fast-a:9091".to_string(),
+                queue_depth: 0.0,
+                latency_ms: 120.0,
+                score: 120.0,
+                tier: "unknown",
+            },
+            MeshEndpointScore {
+                endpoint: "http://fast-b:9091".to_string(),
+                queue_depth: 1.0,
+                latency_ms: 220.0,
+                score: 320.0,
+                tier: "unknown",
+            },
+            MeshEndpointScore {
+                endpoint: "http://slow:9091".to_string(),
+                queue_depth: 2.0,
+                latency_ms: 680.0,
+                score: 920.0,
+                tier: "unknown",
+            },
+        ];
+
+        let filtered = filter_mesh_forward_candidates(scored, 64);
+        let endpoints = filtered
+            .iter()
+            .map(|candidate| candidate.endpoint.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(endpoints, vec!["http://fast-a:9091", "http://fast-b:9091"]);
+        assert!(filtered.iter().all(|candidate| candidate.tier == "fast"));
+    }
+
+    #[test]
+    fn long_requests_keep_slow_mesh_targets_available() {
+        let scored = vec![
+            MeshEndpointScore {
+                endpoint: "http://fast-a:9091".to_string(),
+                queue_depth: 0.0,
+                latency_ms: 120.0,
+                score: 120.0,
+                tier: "unknown",
+            },
+            MeshEndpointScore {
+                endpoint: "http://standard:9091".to_string(),
+                queue_depth: 2.0,
+                latency_ms: 320.0,
+                score: 560.0,
+                tier: "unknown",
+            },
+            MeshEndpointScore {
+                endpoint: "http://slow:9091".to_string(),
+                queue_depth: 4.0,
+                latency_ms: 880.0,
+                score: 1360.0,
+                tier: "unknown",
+            },
+        ];
+
+        let filtered = filter_mesh_forward_candidates(scored, 512);
+        let endpoints = filtered
+            .iter()
+            .map(|candidate| candidate.endpoint.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            endpoints,
+            vec!["http://fast-a:9091", "http://standard:9091", "http://slow:9091"]
+        );
+        assert_eq!(filtered.last().map(|candidate| candidate.tier), Some("slow"));
     }
 
     #[test]
