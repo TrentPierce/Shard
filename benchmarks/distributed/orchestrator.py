@@ -482,14 +482,16 @@ async def reset_endpoint_measurement_state(
     endpoint: str,
 ) -> None:
     reset_paths = (
-        "/v1/system/latency/reset",
-        "/v1/system/speculative-trace/reset",
+        ("/v1/system/latency/reset", True),
+        ("/v1/system/speculative-trace/reset", False),
     )
-    for path in reset_paths:
+    for path, optional in reset_paths:
         resp = await client.post(
             endpoint_url(endpoint, path),
             headers=endpoint_headers(endpoint),
         )
+        if optional and resp.status_code == 404:
+            continue
         resp.raise_for_status()
 
 

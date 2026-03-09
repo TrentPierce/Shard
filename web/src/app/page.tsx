@@ -67,14 +67,16 @@ const joinPaths: JoinPath[] = [
 const benchmarkRows: BenchmarkRow[] = [
   { scenario: "3 Fly nodes, verifier-only", p95Ms: 986.605, tps: 0.55, errorPct: 0, verdict: "Current fast-node baseline on pinned Fly hardware" },
   { scenario: "3 Fly nodes, browser scouts attached", p95Ms: 965.127, tps: 0.55, errorPct: 0, verdict: "Fast nodes stay neutral because scouts back off when bypass is active" },
-  { scenario: "1 slower local node, verifier-only", p95Ms: 7958.929, tps: 0.2167, errorPct: 0, verdict: "Current slow-node long-generation baseline" },
-  { scenario: "1 slower local node, browser scouts active", p95Ms: 3471.707, tps: 0.2167, errorPct: 0, verdict: "Browser scouts cut tail latency on slower hardware" },
+  { scenario: "1 slower local node, verifier-only", p95Ms: 7958.929, tps: 0.2167, errorPct: 0, verdict: "Local slow-node long-generation baseline" },
+  { scenario: "1 slower local node, browser scouts active", p95Ms: 3471.707, tps: 0.2167, errorPct: 0, verdict: "Browser scouts cut tail latency on this local slow node" },
+  { scenario: "EC2 public path, verifier-only", p95Ms: 1054.272, tps: 0.2333, errorPct: 0, verdict: "Live production slow-node baseline" },
+  { scenario: "EC2 public path, live browser scouts", p95Ms: 1419.182, tps: 0.2333, errorPct: 0, verdict: "Scouts engage (100% acceptance, 5 draft tokens) but add overhead on this path" },
 ]
 
 const takeaways = [
-  "Fast Fly verifiers now stay neutral with browser scouts attached because the daemon bypasses speculative waits and the scouts back off instead of polling aggressively.",
-  "Slower nodes are where browser scouts currently help. The latest local long-generation check dropped p95 from 7.96s to 3.47s with browser scouts active.",
-  "The live shardnetwork.live benchmark page now completes the full browser scout bootstrap path. The pinned harness remains the source of truth because it is the repeatable benchmark path.",
+  "Fast Fly verifiers stay neutral with browser scouts attached because the daemon bypasses speculative waits and scouts back off instead of polling aggressively.",
+  "Browser scouts can engage successfully on slower nodes with real accepted speculative work. On one local slow node, scouts cut p95 from 7.96s to 3.47s. On the live EC2 public path, scouts engaged (100% acceptance, 5 draft tokens per request) but did not beat verifier-only latency.",
+  "Slower-node uplift is node- and path-dependent, not yet a universal production claim. The live shardnetwork.live benchmark page now completes the full browser scout bootstrap path. The pinned harness remains the source of truth.",
 ]
 
 function formatCompact(value: number) {
@@ -255,7 +257,7 @@ export default function HomePage() {
           <p className="text-xs uppercase tracking-[0.22em] text-ink-400">Latest validated benchmark result</p>
           <h2 className="mt-2 text-3xl font-semibold text-ink-50">What works right now</h2>
           <p className="mt-3 text-sm leading-6 text-ink-300">
-            These numbers reflect the latest validated tests on March 9, 2026. The Fly rows come from the pinned 3-node production-like comparison, and the local rows come from the long-generation browser-scout check on slower hardware.
+            These numbers reflect the latest validated tests on March 9, 2026. The Fly rows are from the pinned 3-node production-like comparison. The local rows are from the long-generation browser-scout check on slower hardware. The EC2 rows are from a live production-path comparison using shardnetwork.live.
           </p>
           <div className="mt-5 overflow-hidden rounded-2xl border border-ring">
             <table className="min-w-full divide-y divide-ring text-left text-sm">
