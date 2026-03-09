@@ -1145,6 +1145,7 @@ async def run_orchestrator(
                     "productive": False,
                     "requests_sent": 0,
                     "speculative_bypassed_for_request": False,
+                    "fast_verifier_bypass_expected": False,
                 }
                 target_backends = selected_browser_backends or [
                     normalize_endpoint_spec(endpoint) for endpoint in verifier_pool if endpoint.strip()
@@ -1164,8 +1165,31 @@ async def run_orchestrator(
                     )
                     return info
 
-                scout_config = await fetch_scout_config(client, verifier_pool[0])
-                speculative_cfg = scout_config.get("config", {}).get("speculative", {})
+                scout_configs = []
+                for endpoint in target_backends:
+                    scout_configs.append(await fetch_scout_config(client, endpoint))
+                speculative_cfg = (scout_configs[0] if scout_configs else {}).get("config", {}).get(
+                    "speculative", {}
+                )
+                fast_bypass_thresholds = [
+                    int(
+                        (
+                            config.get("config", {})
+                            .get("speculative", {})
+                            .get("fast_verifier_bypass_avg_ms", 0)
+                        )
+                        or 0
+                    )
+                    for config in scout_configs
+                ]
+                if fast_bypass_thresholds and all(value > 0 for value in fast_bypass_thresholds):
+                    info["fast_verifier_bypass_expected"] = True
+                    info["speculative_bypassed_for_request"] = True
+                    print(
+                        "[browser-warmup] all selected backends advertise fast-verifier bypass; "
+                        "treating draft-capable scouts as sufficient and skipping productive warmup"
+                    )
+                    return info
                 min_request_tokens = int(speculative_cfg.get("min_request_tokens", 0) or 0)
                 long_request_min_tokens = int(
                     speculative_cfg.get("long_request_min_tokens", 0) or 0
