@@ -518,6 +518,7 @@ pub(crate) struct SharedState {
     capacity: Arc<AtomicU32>,
     current_load: Arc<AtomicU32>,
     avg_latency_ms: Arc<AtomicU32>,
+    fast_verifier_bypass_until_ms: Arc<AtomicU64>,
     gossipsub_latency_hist: Arc<LatencyHistogram>,
     credit_nonce: Arc<AtomicU64>,
     scout_penalties: Arc<Mutex<ScoutPenaltyBook>>,
@@ -3204,6 +3205,7 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
         capacity: Arc::new(AtomicU32::new(100)), // Default: 100 tokens/sec
         current_load: Arc::new(AtomicU32::new(0)),
         avg_latency_ms: Arc::new(AtomicU32::new(0)),
+        fast_verifier_bypass_until_ms: Arc::new(AtomicU64::new(0)),
         gossipsub_latency_hist: Arc::new(LatencyHistogram::new()),
         credit_nonce: Arc::new(AtomicU64::new(initial_credit_nonce)),
         scout_penalties: Arc::new(Mutex::new(ScoutPenaltyBook::default())),

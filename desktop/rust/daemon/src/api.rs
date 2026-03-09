@@ -342,6 +342,9 @@ async fn reset_scout_runtime_state(state: &SharedState) -> serde_json::Value {
         *tracker = ScoutTimeoutTracker::new();
     }
     state.avg_latency_ms.store(0, Ordering::Relaxed);
+    state
+        .fast_verifier_bypass_until_ms
+        .store(0, Ordering::Relaxed);
     state.current_load.store(0, Ordering::Relaxed);
     state.gossipsub_latency_hist.reset();
 
@@ -361,6 +364,7 @@ async fn reset_scout_runtime_state(state: &SharedState) -> serde_json::Value {
             "speculative_terminal": cleared_terminal,
             "speculative_trace": cleared_trace,
             "draft_buffers": cleared_draft_buffers,
+            "fast_verifier_bypass_until_ms": true,
         }
     })
 }
@@ -369,12 +373,16 @@ pub(crate) async fn latency_runtime_reset_handler(
     AxumState(state): AxumState<SharedState>,
 ) -> Json<serde_json::Value> {
     state.avg_latency_ms.store(0, Ordering::Relaxed);
+    state
+        .fast_verifier_bypass_until_ms
+        .store(0, Ordering::Relaxed);
     state.gossipsub_latency_hist.reset();
 
     Json(serde_json::json!({
         "ok": true,
         "cleared": {
             "average_latency_ms": true,
+            "fast_verifier_bypass_until_ms": true,
             "gossipsub_latency_hist": true,
         }
     }))
@@ -2151,6 +2159,7 @@ fn scout_config_snapshot_json(state: &SharedState) -> serde_json::Value {
             "long_request_min_tokens": scout_long_request_min_tokens(),
             "long_request_draft_token_count": scout_long_request_draft_token_count(),
             "fast_verifier_bypass_avg_ms": speculative_fast_verifier_avg_bypass_ms(),
+            "fast_verifier_bypass_sticky_ms": speculative_fast_verifier_sticky_ms(),
             "timeout": {
                 "verifier_ratio": scout_timeout_verifier_ratio(),
                 "verifier_ratio_long": scout_timeout_verifier_ratio_long(),

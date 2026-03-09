@@ -1017,8 +1017,21 @@ pub(crate) fn speculative_fast_verifier_avg_bypass_ms() -> u64 {
         .unwrap_or(0)
 }
 
+pub(crate) fn speculative_fast_verifier_sticky_ms() -> u64 {
+    std::env::var("SHARD_SPECULATIVE_FAST_VERIFIER_STICKY_MS")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .map(|v| v.clamp(0, 3_600_000))
+        .unwrap_or(0)
+}
+
 fn should_bypass_speculative_for_fast_verifier(avg_latency_ms: u64, threshold_ms: u64) -> bool {
     threshold_ms > 0 && (avg_latency_ms == 0 || avg_latency_ms <= threshold_ms)
+}
+
+fn fast_verifier_bypass_active(state: &SharedState, now_ms: u64) -> bool {
+    let until = state.fast_verifier_bypass_until_ms.load(Ordering::Relaxed);
+    until > now_ms
 }
 
 fn parse_speculative_min_request_tokens(raw: Option<&str>) -> usize {
@@ -2110,11 +2123,24 @@ pub(crate) async fn chat_completions_handler(
     if use_speculative {
         let avg_latency_ms = state.avg_latency_ms.load(Ordering::Relaxed) as u64;
         let fast_verifier_bypass_ms = speculative_fast_verifier_avg_bypass_ms();
-        if should_bypass_speculative_for_fast_verifier(avg_latency_ms, fast_verifier_bypass_ms) {
+        let now_for_bypass = now_ms() as u64;
+        let sticky_bypass_ms = speculative_fast_verifier_sticky_ms();
+        let sticky_active = fast_verifier_bypass_active(&state, now_for_bypass);
+        let direct_fast_bypass =
+            should_bypass_speculative_for_fast_verifier(avg_latency_ms, fast_verifier_bypass_ms);
+        if sticky_active || direct_fast_bypass {
+            if direct_fast_bypass && sticky_bypass_ms > 0 {
+                state.fast_verifier_bypass_until_ms.store(
+                    now_for_bypass.saturating_add(sticky_bypass_ms),
+                    Ordering::Relaxed,
+                );
+            }
             tracing::info!(
                 request_max_tokens = max_tokens,
                 avg_latency_ms,
                 fast_verifier_bypass_ms,
+                sticky_active,
+                sticky_bypass_ms,
                 "adaptive bypass: skipping speculative path on fast verifier"
             );
             record_speculative_trace(
@@ -2123,7 +2149,7 @@ pub(crate) async fn chat_completions_handler(
                 "dispatch_skipped_fast_verifier",
                 None,
                 Some(format!(
-                    "request_max_tokens={max_tokens}, avg_latency_ms={avg_latency_ms}, threshold_ms={fast_verifier_bypass_ms}"
+                    "request_max_tokens={max_tokens}, avg_latency_ms={avg_latency_ms}, threshold_ms={fast_verifier_bypass_ms}, sticky_active={sticky_active}, sticky_bypass_ms={sticky_bypass_ms}"
                 )),
                 None,
             )
