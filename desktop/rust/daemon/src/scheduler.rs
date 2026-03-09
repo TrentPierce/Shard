@@ -1018,7 +1018,7 @@ pub(crate) fn speculative_fast_verifier_avg_bypass_ms() -> u64 {
 }
 
 fn should_bypass_speculative_for_fast_verifier(avg_latency_ms: u64, threshold_ms: u64) -> bool {
-    threshold_ms > 0 && avg_latency_ms > 0 && avg_latency_ms <= threshold_ms
+    threshold_ms > 0 && (avg_latency_ms == 0 || avg_latency_ms <= threshold_ms)
 }
 
 fn parse_speculative_min_request_tokens(raw: Option<&str>) -> usize {
@@ -2907,7 +2907,7 @@ mod tests {
 
     #[test]
     fn fast_verifier_bypass_requires_enabled_threshold_and_recent_latency() {
-        assert!(!should_bypass_speculative_for_fast_verifier(0, 700));
+        assert!(should_bypass_speculative_for_fast_verifier(0, 700));
         assert!(!should_bypass_speculative_for_fast_verifier(450, 0));
         assert!(should_bypass_speculative_for_fast_verifier(450, 700));
         assert!(!should_bypass_speculative_for_fast_verifier(950, 700));
