@@ -670,9 +670,9 @@ async fn choose_mesh_forward_target(
     request_max_tokens: usize,
 ) -> Option<MeshEndpointScore> {
     let candidates = discover_mesh_endpoints(state).await;
-    tracing::debug!(candidate_count = candidates.len(), "mesh forward discovery");
+    tracing::info!(candidate_count = candidates.len(), "mesh forward discovery");
     for candidate in &candidates {
-        tracing::debug!(
+        tracing::info!(
             endpoint = %candidate.endpoint,
             peer_latency_ms = candidate.peer_latency_ms,
             capability_tier = ?candidate.capability_tier,
@@ -681,7 +681,7 @@ async fn choose_mesh_forward_target(
         );
     }
     if candidates.is_empty() {
-        tracing::debug!("mesh forward: no candidates discovered");
+        tracing::info!("mesh forward: no candidates discovered");
         return None;
     }
     let queue_weight_ms = mesh_forward_queue_weight_ms();
@@ -692,7 +692,7 @@ async fn choose_mesh_forward_target(
         match score_mesh_endpoint(client, candidate.endpoint.as_str(), queue_weight_ms).await {
             Some(mut score) => {
                 score.capability_tier = candidate.capability_tier.clone();
-                tracing::debug!(
+                tracing::info!(
                     endpoint = %score.endpoint,
                     latency_ms = score.latency_ms,
                     queue_depth = score.queue_depth,
@@ -702,7 +702,7 @@ async fn choose_mesh_forward_target(
                 scored.push(score);
             }
             None => {
-                tracing::debug!(
+                tracing::info!(
                     endpoint = %candidate.endpoint,
                     "mesh forward probe failed"
                 );
@@ -712,7 +712,7 @@ async fn choose_mesh_forward_target(
     let result = filter_mesh_forward_candidates(scored, request_max_tokens)
         .into_iter()
         .next();
-    tracing::debug!(
+    tracing::info!(
         chosen = ?result.as_ref().map(|candidate| candidate.endpoint.as_str()),
         "mesh forward target selection"
     );
@@ -2345,7 +2345,7 @@ pub(crate) async fn chat_completions_handler(
     );
     let max_tokens = req.max_tokens.or(req.max_new_tokens).unwrap_or(256);
     let mesh_gate = should_attempt_mesh_forward(&headers, route_private, stream_mode, inference_mode);
-    tracing::debug!(
+    tracing::info!(
         mesh_gate,
         route_private,
         stream_mode,
@@ -2365,7 +2365,7 @@ pub(crate) async fn chat_completions_handler(
             1500.0
         };
         let local_score = mesh_forward_score(local_latency_ms, local_queue_depth, queue_weight_ms);
-        tracing::debug!(
+        tracing::info!(
             local_queue_depth,
             raw_local_latency_ms,
             local_latency_ms,
@@ -2383,7 +2383,7 @@ pub(crate) async fn chat_completions_handler(
                 min_improvement,
                 queue_trigger,
             );
-            tracing::debug!(
+            tracing::info!(
                 target_endpoint = %target.endpoint,
                 target_score = target.score,
                 target_latency_ms = target.latency_ms,
