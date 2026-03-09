@@ -315,15 +315,28 @@ fn normalize_endpoint(raw: &str, default_port: u16) -> Option<String> {
     if trimmed.is_empty() {
         return None;
     }
+    let inferred_https = !trimmed.starts_with("http://")
+        && !trimmed.starts_with("https://")
+        && trimmed.contains('.')
+        && !trimmed.starts_with("localhost")
+        && !trimmed.starts_with("127.0.0.1")
+        && !trimmed.starts_with('[');
     let with_scheme = if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
         trimmed.to_string()
+    } else if inferred_https {
+        format!("https://{trimmed}")
     } else {
         format!("http://{trimmed}")
     };
     let mut url = Url::parse(&with_scheme).ok()?;
     url.host_str()?;
     if url.port().is_none() {
-        url.set_port(Some(default_port)).ok()?;
+        let inferred_port = if url.scheme().eq_ignore_ascii_case("https") {
+            443
+        } else {
+            default_port
+        };
+        url.set_port(Some(inferred_port)).ok()?;
     }
     let scheme = if url.scheme().eq_ignore_ascii_case("https") {
         "https"
@@ -3422,7 +3435,7 @@ mod tests {
         );
         assert_eq!(
             normalize_endpoint("https://api.shardnetwork.live", 9091).as_deref(),
-            Some("https://api.shardnetwork.live:9091")
+            Some("https://api.shardnetwork.live:443")
         );
     }
 
@@ -3459,5 +3472,17 @@ mod tests {
 
         assert_eq!(classify_mesh_endpoint_tier(&fast, 180.0, 180.0), "fast");
         assert_eq!(classify_mesh_endpoint_tier(&slow, 180.0, 180.0), "slow");
+    }
+
+    #[test]
+    fn normalize_endpoint_infers_https_for_public_domains() {
+        assert_eq!(
+            normalize_endpoint("api.shardnetwork.live", 9091).as_deref(),
+            Some("https://api.shardnetwork.live:443")
+        );
+        assert_eq!(
+            normalize_endpoint("127.0.0.1", 9091).as_deref(),
+            Some("http://127.0.0.1:9091")
+        );
     }
 }
