@@ -670,7 +670,18 @@ async fn choose_mesh_forward_target(
     request_max_tokens: usize,
 ) -> Option<MeshEndpointScore> {
     let candidates = discover_mesh_endpoints(state).await;
+    tracing::debug!(candidate_count = candidates.len(), "mesh forward discovery");
+    for candidate in &candidates {
+        tracing::debug!(
+            endpoint = %candidate.endpoint,
+            peer_latency_ms = candidate.peer_latency_ms,
+            capability_tier = ?candidate.capability_tier,
+            public_api = ?candidate.public_api,
+            "mesh forward candidate"
+        );
+    }
     if candidates.is_empty() {
+        tracing::debug!("mesh forward: no candidates discovered");
         return None;
     }
     let queue_weight_ms = mesh_forward_queue_weight_ms();
@@ -678,16 +689,34 @@ async fn choose_mesh_forward_target(
     let probe_limit = mesh_forward_probe_limit();
     let mut scored = Vec::new();
     for candidate in candidates.into_iter().take(probe_limit) {
-        if let Some(mut score) =
-            score_mesh_endpoint(client, candidate.endpoint.as_str(), queue_weight_ms).await
-        {
-            score.capability_tier = candidate.capability_tier.clone();
-            scored.push(score);
+        match score_mesh_endpoint(client, candidate.endpoint.as_str(), queue_weight_ms).await {
+            Some(mut score) => {
+                score.capability_tier = candidate.capability_tier.clone();
+                tracing::debug!(
+                    endpoint = %score.endpoint,
+                    latency_ms = score.latency_ms,
+                    queue_depth = score.queue_depth,
+                    score = score.score,
+                    "mesh forward probe success"
+                );
+                scored.push(score);
+            }
+            None => {
+                tracing::debug!(
+                    endpoint = %candidate.endpoint,
+                    "mesh forward probe failed"
+                );
+            }
         }
     }
-    filter_mesh_forward_candidates(scored, request_max_tokens)
+    let result = filter_mesh_forward_candidates(scored, request_max_tokens)
         .into_iter()
-        .next()
+        .next();
+    tracing::debug!(
+        chosen = ?result.as_ref().map(|candidate| candidate.endpoint.as_str()),
+        "mesh forward target selection"
+    );
+    result
 }
 
 fn strip_control_tokens(raw: &str) -> String {
@@ -2315,19 +2344,53 @@ pub(crate) async fn chat_completions_handler(
             .and_then(|v| v.to_str().ok()),
     );
     let max_tokens = req.max_tokens.or(req.max_new_tokens).unwrap_or(256);
-    if should_attempt_mesh_forward(&headers, route_private, stream_mode, inference_mode) {
+    let mesh_gate = should_attempt_mesh_forward(&headers, route_private, stream_mode, inference_mode);
+    tracing::debug!(
+        mesh_gate,
+        route_private,
+        stream_mode,
+        ?inference_mode,
+        mesh_enabled = mesh_forward_enabled(),
+        hop = mesh_forward_current_hop(&headers),
+        max_hops = mesh_forward_max_hops(),
+        "mesh forward gate check"
+    );
+    if mesh_gate {
         let queue_weight_ms = mesh_forward_queue_weight_ms();
         let local_queue_depth = verifier_request_depth(&state) as f64;
         let local_latency_ms = state.avg_latency_ms.load(Ordering::Relaxed) as f64;
         let local_score = mesh_forward_score(local_latency_ms, local_queue_depth, queue_weight_ms);
+        tracing::debug!(
+            local_queue_depth,
+            local_latency_ms,
+            local_score,
+            queue_weight_ms,
+            "mesh forward local scores"
+        );
         if let Some(target) = choose_mesh_forward_target(&state, max_tokens as usize).await {
-            if should_forward_to_mesh(
+            let min_improvement = mesh_forward_min_improvement_ms();
+            let queue_trigger = mesh_forward_local_queue_trigger();
+            let would_forward = should_forward_to_mesh(
                 local_score,
                 target.score,
                 local_queue_depth,
-                mesh_forward_min_improvement_ms(),
-                mesh_forward_local_queue_trigger(),
-            ) {
+                min_improvement,
+                queue_trigger,
+            );
+            tracing::debug!(
+                target_endpoint = %target.endpoint,
+                target_score = target.score,
+                target_latency_ms = target.latency_ms,
+                target_queue_depth = target.queue_depth,
+                target_tier = target.tier,
+                local_score,
+                local_queue_depth,
+                min_improvement,
+                queue_trigger,
+                would_forward,
+                "mesh forward decision"
+            );
+            if would_forward {
                 let next_hop = mesh_forward_current_hop(&headers).saturating_add(1);
                 let mut request_builder = mesh_forward_client()
                     .post(format!("{}/v1/chat/completions", target.endpoint))
