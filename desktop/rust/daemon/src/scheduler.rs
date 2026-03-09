@@ -1009,6 +1009,18 @@ pub(crate) fn scout_timeout_verifier_ceil_ms() -> u64 {
         .unwrap_or(900)
 }
 
+pub(crate) fn speculative_fast_verifier_avg_bypass_ms() -> u64 {
+    std::env::var("SHARD_SPECULATIVE_FAST_VERIFIER_AVG_BYPASS_MS")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .map(|v| v.clamp(0, 5_000))
+        .unwrap_or(0)
+}
+
+fn should_bypass_speculative_for_fast_verifier(avg_latency_ms: u64, threshold_ms: u64) -> bool {
+    threshold_ms > 0 && avg_latency_ms > 0 && avg_latency_ms <= threshold_ms
+}
+
 fn parse_speculative_min_request_tokens(raw: Option<&str>) -> usize {
     raw.and_then(|v| v.trim().parse::<usize>().ok())
         .map(|v| v.clamp(0, 4096))
@@ -2095,6 +2107,32 @@ pub(crate) async fn chat_completions_handler(
             use_speculative = false;
         }
     }
+    if use_speculative {
+        let avg_latency_ms = state.avg_latency_ms.load(Ordering::Relaxed) as u64;
+        let fast_verifier_bypass_ms = speculative_fast_verifier_avg_bypass_ms();
+        if should_bypass_speculative_for_fast_verifier(avg_latency_ms, fast_verifier_bypass_ms) {
+            tracing::info!(
+                request_max_tokens = max_tokens,
+                avg_latency_ms,
+                fast_verifier_bypass_ms,
+                "adaptive bypass: skipping speculative path on fast verifier"
+            );
+            record_speculative_trace(
+                &state,
+                request_id.clone(),
+                "dispatch_skipped_fast_verifier",
+                None,
+                Some(format!(
+                    "request_max_tokens={max_tokens}, avg_latency_ms={avg_latency_ms}, threshold_ms={fast_verifier_bypass_ms}"
+                )),
+                None,
+            )
+            .await;
+            state.system_metrics.inc_speculative_bypass();
+            use_speculative = false;
+        }
+    }
+
 
     // ── Adaptive Speculative Bypass ──
     // If historical acceptance rate is too low, skip speculative decoding entirely
@@ -2664,6 +2702,7 @@ mod tests {
         parse_speculative_min_request_tokens, probe_allowed_for_request,
         remove_work_id_from_scout_queue, request_host_is_local, requested_request_id,
         resolve_inference_mode,
+        should_bypass_speculative_for_fast_verifier,
         should_abort_on_degenerate_output, should_attempt_mesh_forward, should_forward_to_mesh,
         should_refuse_mesh_degraded, strip_control_tokens, InferenceMode, ScoutSupplyEstimate,
         WorkRequest,
@@ -2864,6 +2903,14 @@ mod tests {
         assert_eq!(warm_candidate.remote_active_scouts(), 0);
         assert_eq!(warm_candidate.candidate_remote_scouts(), 1);
         assert_eq!(warm_candidate.effective_active_scouts(), 1);
+    }
+
+    #[test]
+    fn fast_verifier_bypass_requires_enabled_threshold_and_recent_latency() {
+        assert!(!should_bypass_speculative_for_fast_verifier(0, 700));
+        assert!(!should_bypass_speculative_for_fast_verifier(450, 0));
+        assert!(should_bypass_speculative_for_fast_verifier(450, 700));
+        assert!(!should_bypass_speculative_for_fast_verifier(950, 700));
     }
 
     #[test]
