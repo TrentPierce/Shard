@@ -584,6 +584,24 @@ async fn discover_mesh_endpoints(state: &SharedState) -> Vec<MeshEndpointCandida
         }
     }
 
+    // Also discover endpoints from the bootstrap registry directly. Some peers
+    // only exist in the persisted/gossiped bootstrap set, and relay multiaddrs
+    // can resolve to the relay peer id instead of the target verifier id.
+    for entry in bootstrap_registry.values() {
+        if let Some(public_addr) = entry.public_api_addr.as_deref() {
+            if let Some(endpoint) = normalize_endpoint(public_addr, control_port) {
+                discovered
+                    .entry(endpoint.clone())
+                    .or_insert(MeshEndpointCandidate {
+                        endpoint,
+                        peer_latency_ms: 300.0,
+                        capability_tier: entry.capability_tier.clone(),
+                        public_api: entry.public_api,
+                    });
+            }
+        }
+    }
+
     let mut out = discovered
         .into_iter()
         .filter_map(|(_, candidate)| {
