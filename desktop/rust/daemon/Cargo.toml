@@ -1,6 +1,6 @@
 [package]
 name = "shard-daemon"
-version = "0.6.2"
+version = "0.6.5"
 edition = "2021"
 
 [lib]
@@ -48,3 +48,4 @@ shard-metrics.workspace = true
 shard-scheduler.workspace = true
 shard-verifier.workspace = true
 shard-gateway.workspace = true
+

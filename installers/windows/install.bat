@@ -4,7 +4,7 @@ setlocal enabledelayedexpansion
 title Shard Node Installer
 color 0b
 
-set "VERSION=0.6.2"
+set "VERSION=0.6.5"
 set "SERVICE_NAME=ShardNode"
 set "SOURCE_DIR=%~dp0"
 set "SILENT=0"
@@ -147,4 +147,5 @@ for %%D in ("%APPDATA%\Shard" "%LOCALAPPDATA%\shard" "%LOCALAPPDATA%\Shard" "%Pr
 echo Uninstall complete.
 if "%SILENT%"=="0" pause
 exit /b 0
+
 

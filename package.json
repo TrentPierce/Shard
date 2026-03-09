@@ -1,6 +1,6 @@
 {
   "name": "shard-monorepo",
-  "version": "0.6.2",
+  "version": "0.6.5",
   "private": true,
   "scripts": {
     "build": "npm run build --prefix web",
@@ -12,3 +12,4 @@
     "playwright-core": "^1.58.2"
   }
 }
+

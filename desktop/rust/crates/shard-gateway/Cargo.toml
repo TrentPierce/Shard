@@ -1,6 +1,6 @@
 [package]
 name = "shard-gateway"
-version = "0.6.2"
+version = "0.6.5"
 edition = "2021"
 
 [dependencies]
@@ -9,3 +9,4 @@ serde_json.workspace = true
 tracing.workspace = true
 reqwest.workspace = true
 shard-common.workspace = true
+

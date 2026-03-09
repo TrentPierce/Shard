@@ -3,7 +3,7 @@ class Shard < Formula
   homepage "https://shard.network"
   url "https://github.com/TrentPierce/Shard/releases/download/v0.4.0/shard-0.4.0-linux-x86_64.tar.gz"
   sha256 "REPLACE_WITH_ACTUAL_SHA256"
-  version "0.6.2"
+  version "0.6.5"
   license "MIT"
 
   depends_on "openssl@3.0"
@@ -44,3 +44,4 @@ class Shard < Formula
     system "#{bin}/shard-daemon", "--version"
   end
 end
+

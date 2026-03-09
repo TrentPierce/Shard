@@ -4,7 +4,7 @@
 Id: ShardNetwork.Shard
 Publisher: Shard Network
 PackageName: Shard
-Version: 0.6.2
+Version: 0.6.5
 License: MIT
 LicenseUrl: https://github.com/TrentPierce/Shard/blob/main/LICENSE
 ShortDescription: Decentralized P2P inference network daemon
@@ -24,7 +24,7 @@ Tags:
   - machine-learning
 Installers:
   - Arch: x64
-    InstallerUrl: https://github.com/TrentPierce/Shard/releases/download/v0.6.2/shard-0.6.2-windows-x64.exe
+    InstallerUrl: https://github.com/TrentPierce/Shard/releases/download/v0.6.5/shard-0.6.5-windows-x64.exe
     InstallerSha256: REPLACE_WITH_ACTUAL_SHA256
     InstallerType: nsis
     Scope: machine
@@ -36,3 +36,4 @@ ReleaseNotes: |
   - Circuit relay NAT traversal
   - Hybrid speculative decoding
   - Golden Ticket security
+

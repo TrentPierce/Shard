@@ -4,7 +4,7 @@
 # Shard Network — Production Readiness Audit
 
 **Date:** March 5, 2026
-**Version Audited:** 0.6.2
+**Version Audited:** 0.6.5
 **Auditor:** Automated deep-dive analysis across architecture, tests, security, UX, and deployment
 
 ---
@@ -189,7 +189,7 @@ Shard is an ambitious, well-architected distributed inference network at pre-rel
 - [ ] Accessibility audit on web UI: keyboard navigation, screen reader compatibility, color contrast ratios
 - [ ] Add loading skeletons and proper error states for all frontend data-fetching paths
 - [ ] Finalize the "End-to-end encrypted" claim in ChatPanel footer — verify it's actually true or remove
-- [ ] Update all hardcoded version strings (currently "0.6.2" appears in page.tsx, package.json, Cargo.toml, README)
+- [ ] Update all hardcoded version strings (currently "0.6.5" appears in page.tsx, package.json, Cargo.toml, README)
 - [ ] Run the full release checklist from `docs/release-rc-checklist.md`
 - [ ] Execute the RC runbook from `docs/release-rc-runbook.md`
 - [ ] Verify all installer packages (Linux .deb, macOS .dmg, Windows .exe, Homebrew, winget)
@@ -219,3 +219,4 @@ Shard is an ambitious, well-architected distributed inference network at pre-rel
 ---
 
 *This audit was generated from a full codebase analysis on March 5, 2026 against commit on branch `claude/audit-production-readiness-OfLw7`.*
+

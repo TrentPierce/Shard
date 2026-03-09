@@ -32,7 +32,7 @@ curl http://localhost:9091/health
 A healthy response looks like:
 
 ```json
-{ "status": "ok", "rust_version": "0.6.2" }
+{ "status": "ok", "rust_version": "0.6.5" }
 ```
 
 ## Test Inference
@@ -62,3 +62,4 @@ On first launch, ShardGUI auto-downloads the default verifier model from `deploy
 - [Deployment guide](deployment.md) — environment variables, HA setup, monitoring
 - [Verification protocol](verification-protocol.md) — how draft tokens are validated
 - [Mesh benchmark](mesh-benchmark.md) — compare throughput/latency with 1, 2, or more local Docker nodes
+

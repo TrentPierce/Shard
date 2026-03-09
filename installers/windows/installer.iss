@@ -2,7 +2,7 @@
 ; Download Inno Setup: https://jrsoftware.org/isinfo.php
 
 #define MyAppName "Shard Node"
-#define MyAppVersion "0.6.2"
+#define MyAppVersion "0.6.5"
 #define MyAppPublisher "Shard Project"
 #define MyAppURL "https://github.com/TrentPierce/Shard"
 #define MyAppExeName "ShardAI.exe"
@@ -68,3 +68,4 @@ function InitializeSetup(): Boolean;
 begin
   Result := True;
 end;
+

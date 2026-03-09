@@ -4,7 +4,7 @@
   <p><strong>Distributed AI inference — browser Scouts generate speculative drafts, Verifier nodes validate and stream responses.</strong></p>
 
   [![CI/CD](https://github.com/TrentPierce/Shard/actions/workflows/ci.yml/badge.svg)](https://github.com/TrentPierce/Shard/actions/workflows/ci.yml)
-  [![Version](https://img.shields.io/badge/version-0.6.2-blue.svg)](https://github.com/TrentPierce/Shard/releases/tag/v0.6.2)
+  [![Version](https://img.shields.io/badge/version-0.6.5-blue.svg)](https://github.com/TrentPierce/Shard/releases/tag/v0.6.5)
   [![License: BSL 1.1](https://img.shields.io/badge/License-BSL%201.1-blue.svg)](LICENSE)
 
   [Live Network](https://shardnetwork.live) &nbsp;·&nbsp; [Quick Start](#quick-start) &nbsp;·&nbsp; [Docs](docs/) &nbsp;·&nbsp; [Python SDK](#python-sdk)
@@ -230,4 +230,5 @@ docs/               Architecture, deployment, API, and operations documentation
 ## License
 
 Business Source License 1.1 (BSL 1.1). See [LICENSE](LICENSE).
+
 

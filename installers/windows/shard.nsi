@@ -13,7 +13,7 @@ InstallDirRegKey HKLM "Software\Shard" "InstallDir"
 RequestExecutionLevel admin
 
 ; Version
-!define VERSION "0.6.2"
+!define VERSION "0.6.5"
 !define PUBLISHER "Shard Network"
 !define URL "https://shard.network"
 
@@ -101,3 +101,4 @@ Section "Uninstall"
     ; Optionally keep data directory
     ; RMDir /r "$APPDATA\shard"
 SectionEnd
+

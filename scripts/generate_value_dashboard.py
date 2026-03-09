@@ -183,7 +183,7 @@ with PdfPages(pdf_path) as pdf:
     fig = plt.figure(figsize=(8.5, 11))
     fig.patch.set_facecolor("white")
     text = "\n".join([
-        "Shard Value Summary (v0.6.2)",
+        "Shard Value Summary (v0.6.5)",
         "",
         "What Shard Is:",
         "- A distributed inference network combining browser scouts and verifier nodes.",
@@ -228,3 +228,4 @@ for src in [perf_path, cost_path, map_path, pdf_path]:
 print("Generated value dashboard assets:")
 for p in [perf_path, cost_path, map_path, pdf_path, WEB_OUT / perf_path.name]:
     print(p)
+

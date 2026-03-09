@@ -1,6 +1,6 @@
 [package]
 name = "shard-network"
-version = "0.6.2"
+version = "0.6.5"
 edition = "2021"
 
 [dependencies]
@@ -9,3 +9,4 @@ libp2p.workspace = true
 rand.workspace = true
 serde.workspace = true
 sha2.workspace = true
+
