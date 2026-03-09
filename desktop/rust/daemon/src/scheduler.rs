@@ -1029,7 +1029,7 @@ fn should_bypass_speculative_for_fast_verifier(avg_latency_ms: u64, threshold_ms
     threshold_ms > 0 && (avg_latency_ms == 0 || avg_latency_ms <= threshold_ms)
 }
 
-fn fast_verifier_bypass_active(state: &SharedState, now_ms: u64) -> bool {
+pub(crate) fn fast_verifier_bypass_active(state: &SharedState, now_ms: u64) -> bool {
     let until = state.fast_verifier_bypass_until_ms.load(Ordering::Relaxed);
     until > now_ms
 }

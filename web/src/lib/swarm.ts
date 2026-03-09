@@ -67,6 +67,8 @@ export type WorkPollResult = {
     work: WorkRequest | null
     transientError: boolean
     detail?: string
+    retryAfterMs?: number
+    fastBypass?: boolean
 }
 
 function fallbackDraftFromPrompt(_prompt: string, _maxTokens: number): string {
@@ -409,6 +411,8 @@ export async function requestWork(): Promise<WorkPollResult> {
                 work: null,
                 transientError: Boolean(polled.transient_error),
                 detail: polled.detail,
+                retryAfterMs: polled.retry_after_ms,
+                fastBypass: Boolean(polled.fast_bypass),
             }
         }
 
@@ -453,6 +457,7 @@ export async function startScoutWorker(
     let inFlight = false
     let consecutiveFailures = 0
     let lastRuntimeEvent: "runtime_webgpu_ready" | "runtime_wasm_fallback" | null = null
+    let serverBackoffMs = 0
 
     const reportRuntimeMode = async () => {
         const engine = getActiveEngine()
@@ -486,6 +491,7 @@ export async function startScoutWorker(
             const polled = await requestWork()
             const work = polled.work
             if (work) {
+                serverBackoffMs = 0
                 onRequest?.(work)
                 const result = await handleScoutWork(work)
                 onResult?.(result)
@@ -495,7 +501,12 @@ export async function startScoutWorker(
                     consecutiveFailures = 0
                 }
             } else {
-                consecutiveFailures = polled.transientError ? consecutiveFailures + 1 : 0
+                serverBackoffMs = Math.max(0, polled.retryAfterMs ?? 0)
+                consecutiveFailures = polled.fastBypass
+                    ? 0
+                    : polled.transientError
+                        ? consecutiveFailures + 1
+                        : 0
             }
         } finally {
             inFlight = false
@@ -503,7 +514,7 @@ export async function startScoutWorker(
                 ? Math.min(maxBackoffMs, pollIntervalMs * Math.pow(2, consecutiveFailures))
                 : pollIntervalMs
             const jitterMs = Math.floor(Math.random() * 250)
-            schedule(backoff + jitterMs)
+            schedule(Math.max(backoff, serverBackoffMs) + jitterMs)
         }
     }
 

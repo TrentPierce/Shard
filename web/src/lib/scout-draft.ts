@@ -595,6 +595,7 @@ export interface WorkItem {
     preferred_endpoint?: string
   } | null
   transient_error?: boolean
+  fast_bypass?: boolean
   detail?: string
   retry_after_ms?: number
 }

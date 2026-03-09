@@ -2268,11 +2268,30 @@ pub(crate) async fn pop_work_handler(
         Ok(value) => value,
         Err(response) => return Err((axum::http::StatusCode::BAD_REQUEST, response)),
     };
+    let now = now_ms();
+    let now_u64 = now.min(u64::MAX as u128) as u64;
+    let avg_latency_ms = state.avg_latency_ms.load(Ordering::Relaxed);
+    let avg_latency_ms_u64 = u64::from(avg_latency_ms);
+    let fast_bypass_threshold_ms = speculative_fast_verifier_avg_bypass_ms();
+    let direct_fast_bypass = fast_bypass_threshold_ms > 0
+        && (avg_latency_ms == 0 || avg_latency_ms_u64 <= fast_bypass_threshold_ms);
+    if fast_verifier_bypass_active(&state, now_u64) || direct_fast_bypass {
+        state.system_metrics.inc_scout_work_poll();
+        state.system_metrics.inc_scout_work_empty_poll();
+        return Ok(Json(serde_json::json!({
+            "work": null,
+            "ok": true,
+            "fast_bypass": true,
+            "detail": "fast_verifier_bypass_active",
+            "average_latency_ms": avg_latency_ms,
+            "fast_verifier_bypass_avg_ms": fast_bypass_threshold_ms,
+            "retry_after_ms": 30_000,
+        })));
+    }
     if let Err(response) = ensure_pow_verified(&state, scout_id).await {
         return Err((axum::http::StatusCode::FORBIDDEN, response));
     }
     state.system_metrics.inc_scout_work_poll();
-    let now = now_ms();
     prune_stale_speculative_pending(&state, now).await;
     prune_expired_scout_leases_for_state(&state, now).await;
     prune_stale_scout_work_queue_for_state(&state, now).await;
