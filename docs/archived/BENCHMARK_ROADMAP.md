@@ -1,3 +1,6 @@
+> [!WARNING]
+> **DEPRECATED**: This roadmap was a point-in-time document from March 6, 2026. All phases are complete. Retained for historical context only.
+
 # Benchmark Completion Roadmap
 
 Date: March 6, 2026

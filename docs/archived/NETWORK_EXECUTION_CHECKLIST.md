@@ -1,3 +1,6 @@
+> [!WARNING]
+> **DEPRECATED**: This checklist was a point-in-time roadmap from March 5, 2026. Prioritized items have been fixed or rendered obsolete. Retained for historical context only.
+
 # Network Execution Checklist
 
 Date: March 5, 2026

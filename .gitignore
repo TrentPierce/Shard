@@ -96,6 +96,8 @@ Shard Build Roadmap.docx
 
 # Archived and generated historical artifacts
 _archive/
+benchmarks/
+run-browser-scout.cmd
 desktop/rust/benchmarks/
 desktop/rust/clippy_out.txt
 desktop/rust/output.txt

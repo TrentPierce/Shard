@@ -1,3 +1,6 @@
+> [!WARNING]
+> **DEPRECATED**: This audit was a point-in-time document from March 5, 2026. Retained for historical context only.
+
 # Shard GUI Audit
 
 Date: 2026-03-05
