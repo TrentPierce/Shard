@@ -70,44 +70,43 @@ Full guide: [docs/mesh-benchmark.md](docs/mesh-benchmark.md)
 
 ---
 
-## Release-Candidate Snapshot (March 6, 2026)
+## Latest Benchmark Snapshot (March 9, 2026)
 
-Latest refreshed RC matrix:
+Latest validated benchmark results:
 
-- 3 runs per scenario
-- 16 browser scouts configured
-- 2 req/s
-- 10s runs
-- local + EC2 verifier pools
-- strict readiness and queue flush between runs
+- pinned 3-node Fly verifier comparison on `performance-4x` machines
+- pinned browser scouts attached to the same 3 Fly nodes
+- one-node long-generation local comparison for slower hardware
+- all numbers below are from the latest validated harness runs, not from the current live `shardnetwork.live` benchmark page
 
-| Scenario | p95 latency (ms) | Throughput (TPS) | Error rate (%) | Speculative samples |
-|---------|-------------------|------------------|----------------|---------------------|
-| 1 node, no scouts | 284.929 | 2.1000 | 0.0000 | 0 |
-| 1 node, with scouts | 1089.169 | 2.1000 | 0.0000 | 3 |
-| 2 nodes, no scouts | 417.335 | 2.1000 | 0.0000 | 0 |
-| 2 nodes, with scouts | 1134.846 | 2.1000 | 0.0000 | 0 |
+| Scenario | p95 latency (ms) | Throughput (TPS) | Error rate (%) | Interpretation |
+|---------|-------------------|------------------|----------------|----------------|
+| 3 Fly nodes, verifier-only | 986.605 | 0.5500 | 0.0000 | Current fast-node baseline |
+| 3 Fly nodes, browser scouts attached | 965.127 | 0.5500 | 0.0000 | Fast nodes stay neutral because scouts back off when the verifier bypass is active |
+| 1 slower local node, verifier-only | 7958.929 | 0.2167 | 0.0000 | Current slow-node long-generation baseline |
+| 1 slower local node, browser scouts active | 3471.707 | 0.2167 | 0.0000 | Browser scouts reduce tail latency on slower hardware |
 
-Current recommendation: **NO_GO**
+Current recommendation:
+
+- Fast verifier nodes should keep adaptive browser-scout bypass enabled.
+- Browser scouts are currently useful on slower nodes, not on fast Fly-class verifier nodes.
+- Public uplift claims should stay scoped to slower hardware until Fly-class nodes show a repeatable net gain.
 
 What this means:
 
-- The verifier mesh is stable in all four scenarios.
-- The benchmark harness now isolates verifier-only runs by forcing `standard` mode and disabling scout ingress during no-scout scenarios.
-- Scouts no longer break the network, but they still do not beat the verifier-only baseline in this RC profile.
-- At this low 2 req/s load, the fastest p95 is still `1 node, no scouts`.
+- The 3-node Fly mesh is stable and benchmarkable.
+- Fast Fly nodes no longer regress when browser scouts are attached because the daemon now bypasses speculative waits and the browser scout loop backs off instead of polling aggressively.
+- Slower nodes remain the best current target for browser scouts. The latest long-generation local check cut p95 from `7.96s` to `3.47s`.
+- The live `shardnetwork.live/benchmark/scout` page still has a WebLLM asset-route issue (`500` on `/api/webllm/model/.../mlc-chat-config.json`), so the pinned harness remains the source of truth for benchmark publication.
 
 Raw artifacts:
 
-- `reports/release-rc/release-rc-20260306T053407Z-20260306Tclean-zero-scouts-isolated/go-no-go-summary.json`
-- `reports/release-rc/release-rc-20260306T053407Z-20260306Tclean-zero-scouts-isolated/go-no-go-report.md`
-- `reports/release-rc/release-rc-20260306T053407Z-20260306Tclean-zero-scouts-isolated/one-node-no-scouts-run1.json`
-- `reports/release-rc/release-rc-20260306T053407Z-20260306Tclean-zero-scouts-isolated/one-node-with-scouts-run1.json`
-- `reports/release-rc/release-rc-20260306T053407Z-20260306Tclean-zero-scouts-isolated/two-node-no-scouts-run1.json`
-- `reports/release-rc/release-rc-20260306T053407Z-20260306Tclean-zero-scouts-isolated/two-node-with-scouts-run1.json`
+- `benchmarks/fly-three-node-standard-v3.json`
+- `benchmarks/fly-three-node-browser-scouts-v9.json`
+- `benchmarks/local-long-browser-uplift/one-node-no-scouts-clean.json`
+- `benchmarks/local-long-browser-uplift/one-node-browser-scouts.json`
 
 ---
-
 ## Key Features
 
 | Feature | Description |
@@ -231,5 +230,4 @@ docs/               Architecture, deployment, API, and operations documentation
 ## License
 
 Business Source License 1.1 (BSL 1.1). See [LICENSE](LICENSE).
-
 

@@ -65,16 +65,16 @@ const joinPaths: JoinPath[] = [
 ]
 
 const benchmarkRows: BenchmarkRow[] = [
-  { scenario: "1 node, no scouts", p95Ms: 928.962, tps: 1.3, errorPct: 0, verdict: "Stable verifier-only baseline for short requests" },
-  { scenario: "1 node, with browser scouts", p95Ms: 544.563, tps: 1.1, errorPct: 0, verdict: "Short-request run stays stable while scouts remain bypassed" },
-  { scenario: "2 nodes, no scouts", p95Ms: 526.015, tps: 1.9, errorPct: 0, verdict: "Current best short-run mesh baseline across local + EC2" },
-  { scenario: "2 nodes, with browser scouts", p95Ms: 662.13, tps: 1.7, errorPct: 0, verdict: "Stable, but not yet a proof of scout uplift" },
+  { scenario: "3 Fly nodes, verifier-only", p95Ms: 986.605, tps: 0.55, errorPct: 0, verdict: "Current fast-node baseline on pinned Fly hardware" },
+  { scenario: "3 Fly nodes, browser scouts attached", p95Ms: 965.127, tps: 0.55, errorPct: 0, verdict: "Fast nodes stay neutral because scouts back off when bypass is active" },
+  { scenario: "1 slower local node, verifier-only", p95Ms: 7958.929, tps: 0.2167, errorPct: 0, verdict: "Current slow-node long-generation baseline" },
+  { scenario: "1 slower local node, browser scouts active", p95Ms: 3471.707, tps: 0.2167, errorPct: 0, verdict: "Browser scouts cut tail latency on slower hardware" },
 ]
 
 const takeaways = [
-  "The short RC matrix is now a release stability gate, not a scout-speedup benchmark.",
-  "With SHARD_SPECULATIVE_MIN_REQUEST_TOKENS=12 and max_tokens=8, the short benchmark intentionally bypasses speculative routing.",
-  "Scout uplift now needs to be judged in a separate long-generation matrix where accepted speculative samples are expected.",
+  "Fast Fly verifiers now stay neutral with browser scouts attached because the daemon bypasses speculative waits and the scouts back off instead of polling aggressively.",
+  "Slower nodes are where browser scouts currently help. The latest local long-generation check dropped p95 from 7.96s to 3.47s with browser scouts active.",
+  "The production benchmark page on shardnetwork.live still needs a WebLLM asset-route fix, so the pinned benchmark harness remains the source of truth for these numbers.",
 ]
 
 function formatCompact(value: number) {
@@ -252,10 +252,10 @@ export default function HomePage() {
 
       <section className="mt-12 grid gap-6 lg:grid-cols-[0.95fr_1.05fr]">
         <article className="rounded-[1.6rem] border border-ring bg-base-900/90 p-6 shadow-panel">
-          <p className="text-xs uppercase tracking-[0.22em] text-ink-400">Today&apos;s benchmark result</p>
+          <p className="text-xs uppercase tracking-[0.22em] text-ink-400">Latest validated benchmark result</p>
           <h2 className="mt-2 text-3xl font-semibold text-ink-50">What works right now</h2>
           <p className="mt-3 text-sm leading-6 text-ink-300">
-            These medians come from the short RC stability matrix on March 6, 2026. This view answers whether the release candidate is stable on brief requests. It does not answer whether scouts create a speedup on longer generations.
+            These numbers reflect the latest validated tests on March 9, 2026. The Fly rows come from the pinned 3-node production-like comparison, and the local rows come from the long-generation browser-scout check on slower hardware.
           </p>
           <div className="mt-5 overflow-hidden rounded-2xl border border-ring">
             <table className="min-w-full divide-y divide-ring text-left text-sm">
