@@ -455,6 +455,16 @@ struct PersistedBootstrapRegistry {
     entries: Vec<BootstrapRegistryEntry>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct BootstrapAnnouncement {
+    peer_id: String,
+    multiaddr: String,
+    stability_score: u32,
+    uptime_hours: u64,
+    version: String,
+    announced_at_ms: u128,
+}
+
 // ─── Shared State ───────────────────────────────────────────────────────────
 
 #[derive(Clone, Debug, Serialize)]
@@ -1725,6 +1735,22 @@ fn bootstrap_registry_min_score() -> u32 {
         .unwrap_or(30)
 }
 
+fn bootstrap_url_refresh_interval_ms() -> u128 {
+    std::env::var("SHARD_BOOTSTRAP_URL_REFRESH_MS")
+        .ok()
+        .and_then(|value| value.parse::<u128>().ok())
+        .filter(|value| *value >= 60_000)
+        .unwrap_or(15 * 60 * 1000)
+}
+
+fn bootstrap_gossip_interval_ms() -> u128 {
+    std::env::var("SHARD_BOOTSTRAP_GOSSIP_INTERVAL_MS")
+        .ok()
+        .and_then(|value| value.parse::<u128>().ok())
+        .filter(|value| *value >= 60_000)
+        .unwrap_or(10 * 60 * 1000)
+}
+
 fn prune_bootstrap_registry(
     registry: &mut HashMap<String, BootstrapRegistryEntry>,
     now_ms: u128,
@@ -1760,6 +1786,66 @@ fn bootstrap_registry_seed_addrs(
             .then(b.uptime_hours.cmp(&a.uptime_hours))
     });
     unique_addrs(entries.into_iter().map(|entry| entry.multiaddr).collect())
+}
+
+fn preferred_bootstrap_multiaddr(addrs: &[String]) -> Option<String> {
+    let mut fallbacks = Vec::new();
+    for addr in addrs {
+        let Ok(parsed) = addr.parse::<Multiaddr>() else {
+            continue;
+        };
+        let is_local = parsed.to_string().contains("127.0.0.1")
+            || parsed.to_string().contains("::1")
+            || parsed.to_string().contains("/ip4/0.0.0.0/")
+            || parsed.to_string().contains("/ip6/::/");
+        if is_local {
+            continue;
+        }
+        if !is_non_public_bootstrap_addr(&parsed) {
+            return Some(addr.clone());
+        }
+        fallbacks.push(addr.clone());
+    }
+    fallbacks.into_iter().next()
+}
+
+pub(crate) async fn upsert_bootstrap_entry(
+    state: &SharedState,
+    entry: BootstrapRegistryEntry,
+) -> bool {
+    let mut registry_changed = false;
+    {
+        let mut registry = state.bootstrap_registry.lock().await;
+        let replace = registry
+            .get(entry.peer_id.as_str())
+            .map(|existing| {
+                existing.updated_at_ms < entry.updated_at_ms
+                    || existing.multiaddr != entry.multiaddr
+                    || existing.stability_score != entry.stability_score
+                    || existing.uptime_hours != entry.uptime_hours
+                    || existing.version != entry.version
+            })
+            .unwrap_or(true);
+        if replace {
+            registry.insert(entry.peer_id.clone(), entry.clone());
+            save_bootstrap_registry(state.bootstrap_registry_path.as_path(), &registry).await;
+            registry_changed = true;
+        }
+    }
+
+    let mut known_changed = false;
+    {
+        let mut known = state.known_peers.lock().await;
+        let before = known.len();
+        known.push(entry.multiaddr.clone());
+        *known = unique_addrs(known.clone());
+        if known.len() != before {
+            save_persisted_peers(state.known_peers_path.as_path(), &known).await;
+            known_changed = true;
+        }
+    }
+
+    registry_changed || known_changed
 }
 
 fn remove_known_addrs_for_peers(known: &mut Vec<String>, peer_ids: &HashSet<String>) -> usize {
@@ -2977,6 +3063,10 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
     let hardcoded_bootstrap = vec![
         "/ip4/35.175.242.222/tcp/4001/p2p/12D3KooWPQqkkZk7NeWA2b1FeWYuBFRW8X7Q9ugymnzxeKJHFLUV"
             .to_string(),
+        "/dns4/shard-bootstrap-iad-0605.fly.dev/tcp/4001/p2p/12D3KooWLc6Z4NNfWtcm9Pwu8rNhPf8UGT9bATZw2X3eEZdJpbyD"
+            .to_string(),
+        "/dns4/shard-bootstrap-lax-0605.fly.dev/tcp/4001/p2p/12D3KooWH67LRDPMC2oJ8rFtZD2oWd6UG52zhYZVF6fGswkYdcDF"
+            .to_string(),
     ];
     let hardcoded_relay = vec![
         "/ip4/35.175.242.222/tcp/4001/p2p/12D3KooWPQqkkZk7NeWA2b1FeWYuBFRW8X7Q9ugymnzxeKJHFLUV"
@@ -3594,6 +3684,7 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
     let backward_topic = IdentTopic::new("shard-backward-pass");
     let ledger_topic = IdentTopic::new("shard-ledger-tx");
     let layer_announce_topic = IdentTopic::new("shard-layer-announcements");
+    let bootstrap_topic = IdentTopic::new("shard-bootstrap");
     let auction_topic = IdentTopic::new("auction.prompt");
     let ban_topic = IdentTopic::new("shard-ban-list");
     let election_topic = IdentTopic::new("shard/election/v1");
@@ -3611,6 +3702,7 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
         .behaviour_mut()
         .gossipsub
         .subscribe(&layer_announce_topic)?;
+    swarm.behaviour_mut().gossipsub.subscribe(&bootstrap_topic)?;
     swarm.behaviour_mut().gossipsub.subscribe(&auction_topic)?;
     swarm.behaviour_mut().gossipsub.subscribe(&ban_topic)?;
     if cli.ha_mode {
@@ -4008,9 +4100,15 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
     let mut pending_layer_queries: HashMap<libp2p::kad::QueryId, (String, u32)> = HashMap::new();
     let mut pending_ledger_sync: HashMap<OutboundRequestId, (PeerId, u64)> = HashMap::new();
     let layer_ttl_ms: u128 = 60_000;
+    let bootstrap_url = cli.bootstrap_url.clone();
+    let bootstrap_refresh_interval_ms = bootstrap_url_refresh_interval_ms();
+    let bootstrap_gossip_interval_ms = bootstrap_gossip_interval_ms();
+    let stability_threshold_hours = cli.stability_threshold_hours;
     let mut next_layer_announcement_ms = 0u128;
     let mut next_ledger_snapshot_ms = 0u128;
     let mut next_bootstrap_registry_maintenance_ms = 0u128;
+    let mut next_bootstrap_url_refresh_ms = 0u128;
+    let mut next_bootstrap_gossip_ms = 0u128;
 
     // Per-peer exponential backoff for reconnection attempts.
     // Maps peer_id_string -> (consecutive_failures, next_eligible_tick_ms)
@@ -4089,6 +4187,49 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
                 known.sort_by_key(|addr| reconnect_addr_sort_key(addr));
                 let connected: HashSet<String> = state.peers.lock().await.keys().cloned().collect();
                 let now = now_ms();
+                if let Some(url) = bootstrap_url.as_deref() {
+                    if now >= next_bootstrap_url_refresh_ms {
+                        match bootstrap_discovery::fetch_bootstrap_peers(url).await {
+                            Ok(peers) => {
+                                let mut refreshed = 0usize;
+                                for peer in peers {
+                                    if peer.peer_id.trim().is_empty()
+                                        || peer.multiaddr.trim().is_empty()
+                                        || peer.peer_id == local_peer_id.to_string()
+                                    {
+                                        continue;
+                                    }
+                                    let entry = BootstrapRegistryEntry {
+                                        peer_id: peer.peer_id.clone(),
+                                        multiaddr: peer.multiaddr.clone(),
+                                        stability_score: peer
+                                            .stability_score
+                                            .unwrap_or(registry_min_score)
+                                            .min(100),
+                                        uptime_hours: peer.uptime_hours.unwrap_or(0),
+                                        version: peer.version.unwrap_or_else(|| "unknown".to_string()),
+                                        updated_at_ms: now,
+                                    };
+                                    if upsert_bootstrap_entry(&state, entry).await {
+                                        refreshed += 1;
+                                    }
+                                    if let Ok(addr) = peer.multiaddr.parse::<Multiaddr>() {
+                                        let _ = swarm.dial(addr);
+                                    }
+                                }
+                                tracing::info!(
+                                    refreshed,
+                                    url = %url,
+                                    "refreshed bootstrap peers from discovery URL"
+                                );
+                            }
+                            Err(error) => {
+                                tracing::warn!(url = %url, %error, "bootstrap discovery refresh failed");
+                            }
+                        }
+                        next_bootstrap_url_refresh_ms = now + bootstrap_refresh_interval_ms;
+                    }
+                }
                 if now >= next_bootstrap_registry_maintenance_ms {
                     let stale_peer_ids = {
                         let mut registry = state.bootstrap_registry.lock().await;
@@ -4176,6 +4317,33 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
                             }
                         }
                     }
+                }
+
+                if now >= next_bootstrap_gossip_ms {
+                    let uptime_hours = (now.saturating_sub(state.daemon_start)) / (1000 * 60 * 60);
+                    if uptime_hours >= stability_threshold_hours as u128 {
+                        let addrs = {
+                            let topo = state.topology.lock().await;
+                            topo.listen_addrs.clone()
+                        };
+                        if let Some(multiaddr) = preferred_bootstrap_multiaddr(&addrs) {
+                            let announcement = BootstrapAnnouncement {
+                                peer_id: local_peer_id.to_string(),
+                                multiaddr,
+                                stability_score: 100,
+                                uptime_hours: uptime_hours as u64,
+                                version: env!("CARGO_PKG_VERSION").to_string(),
+                                announced_at_ms: now,
+                            };
+                            if let Ok(payload) = serde_json::to_vec(&announcement) {
+                                let _ = swarm
+                                    .behaviour_mut()
+                                    .gossipsub
+                                    .publish(bootstrap_topic.clone(), payload);
+                            }
+                        }
+                    }
+                    next_bootstrap_gossip_ms = now + bootstrap_gossip_interval_ms;
                 }
 
                 // Refresh local layer announcement and query providers for the next layer start.
@@ -4643,6 +4811,36 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
                                     routes.prune_expired(now_ms());
                                 }
                                 Err(e) => tracing::warn!(%e, "invalid layer announcement packet; ignoring"),
+                            }
+                        } else if message.topic == bootstrap_topic.hash() {
+                            match serde_json::from_slice::<BootstrapAnnouncement>(&message.data) {
+                                Ok(ann) => {
+                                    if ann.peer_id == local_peer_id.to_string() {
+                                        continue;
+                                    }
+                                    let entry = BootstrapRegistryEntry {
+                                        peer_id: ann.peer_id.clone(),
+                                        multiaddr: ann.multiaddr.clone(),
+                                        stability_score: ann.stability_score.min(100),
+                                        uptime_hours: ann.uptime_hours,
+                                        version: ann.version.clone(),
+                                        updated_at_ms: ann.announced_at_ms.max(now_ms()),
+                                    };
+                                    let changed = upsert_bootstrap_entry(&state, entry).await;
+                                    if changed {
+                                        tracing::info!(
+                                            peer_id = %ann.peer_id,
+                                            multiaddr = %ann.multiaddr,
+                                            "learned bootstrap peer via gossipsub"
+                                        );
+                                    }
+                                    if let Ok(addr) = ann.multiaddr.parse::<Multiaddr>() {
+                                        if should_attempt_reconnect(&addr, &local_peer_id, &state.peers.lock().await.keys().cloned().collect()) {
+                                            let _ = swarm.dial(addr);
+                                        }
+                                    }
+                                }
+                                Err(e) => tracing::warn!(%e, "invalid bootstrap announcement packet; ignoring"),
                             }
                         } else if message.topic == ban_topic.hash() {
                             #[derive(Deserialize)]

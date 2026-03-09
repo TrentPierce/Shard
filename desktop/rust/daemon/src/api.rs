@@ -4590,17 +4590,7 @@ pub(crate) async fn register_bootstrap_handler(
         version: req.version.clone(),
         updated_at_ms: now_ms(),
     };
-    let mut registry = state.bootstrap_registry.lock().await;
-    registry.insert(req.peer_id.clone(), entry);
-    save_bootstrap_registry(state.bootstrap_registry_path.as_path(), &registry).await;
-    drop(registry);
-
-    {
-        let mut known = state.known_peers.lock().await;
-        known.push(req.multiaddr.clone());
-        *known = unique_addrs(known.clone());
-        save_persisted_peers(state.known_peers_path.as_path(), &known).await;
-    }
+    upsert_bootstrap_entry(&state, entry).await;
     let total_registered = state.bootstrap_registry.lock().await.len();
 
     Json(serde_json::json!({
