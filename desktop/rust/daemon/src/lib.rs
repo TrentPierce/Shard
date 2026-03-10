@@ -3271,6 +3271,11 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
         .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
         .unwrap_or(false);
 
+    let mut startup_seed_sources = default_bootstrap.clone();
+    startup_seed_sources.extend(cli.bootstrap_node.clone());
+    startup_seed_sources.extend(file_bootstrap.clone());
+    startup_seed_sources.extend(url_bootstrap.clone());
+
     let mut bootstrap_sources = default_bootstrap;
     bootstrap_sources.extend(cli.bootstrap_node.clone());
     bootstrap_sources.extend(file_bootstrap);
@@ -3289,9 +3294,12 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
     let include_hardcoded =
         should_include_hardcoded_bootstrap(hardcoded_mode, !bootstrap_sources.is_empty());
     if include_hardcoded && !private_mode_enabled {
+        startup_seed_sources.extend(hardcoded_bootstrap.clone());
         bootstrap_sources.extend(hardcoded_bootstrap);
     }
 
+    let startup_seed_addrs =
+        filter_bootstrap_addrs(startup_seed_sources, allow_private_bootstrap);
     let bootstrap_addrs = filter_bootstrap_addrs(bootstrap_sources, allow_private_bootstrap);
 
     let relay_sources = std::env::var("SHARD_RELAY_BOOTSTRAP")
@@ -3322,6 +3330,7 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
     }
     relay_addrs = filter_relay_addrs(relay_addrs, allow_private_relay);
     tracing::info!(
+        startup_seed_count = startup_seed_addrs.len(),
         bootstrap_count = bootstrap_addrs.len(),
         relay_bootstrap_count = relay_addrs.len(),
         registry_bootstrap_count = registry_seed_bootstrap.len(),
@@ -3906,12 +3915,12 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
     }
 
     // ── bootstrap peers ──
-    for addr_str in &bootstrap_addrs {
+    for addr_str in &startup_seed_addrs {
         if let Ok(addr) = addr_str.parse::<Multiaddr>() {
             if let Some(peer_id) = extract_peer_id_from_multiaddr(&addr) {
-                tracing::info!(%peer_id, "dialing bootstrap peer");
+                tracing::info!(%peer_id, "dialing bootstrap seed");
             } else {
-                tracing::info!("dialing bootstrap peer");
+                tracing::info!("dialing bootstrap seed");
             }
             let _ = swarm.dial(addr.clone());
             if let Some(peer_id) = extract_peer_id_from_multiaddr(&addr) {
@@ -3940,7 +3949,7 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
         }
     }
 
-    if !bootstrap_addrs.is_empty() {
+    if !startup_seed_addrs.is_empty() {
         if let Err(e) = swarm.behaviour_mut().kad.bootstrap() {
             tracing::warn!(%e, "failed to bootstrap Kademlia DHT");
         }
