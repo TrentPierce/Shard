@@ -2038,14 +2038,15 @@ fn build_autonat_config() -> autonat::v1::Config {
 
 fn reconnect_transport_priority(addr: &Multiaddr) -> u8 {
     let text = addr.to_string();
-    // Relay circuit paths remain the highest-priority recovery path.
-    if text.contains("/p2p-circuit") {
+    // Prefer direct transports for server-to-server reconnect.
+    if text.contains("/quic-v1") {
         return 0;
     }
-    if text.contains("/quic-v1") {
+    if text.contains("/tcp/") {
         return 1;
     }
-    if text.contains("/tcp/") {
+    // Relay circuits are a last resort for native daemon reconnect.
+    if text.contains("/p2p-circuit") {
         return 2;
     }
     if text.contains("/webrtc-direct") {
@@ -2059,7 +2060,11 @@ fn reconnect_transport_priority(addr: &Multiaddr) -> u8 {
 
 fn is_reconnect_candidate_addr(addr: &Multiaddr, allow_private: bool) -> bool {
     let text = addr.to_string();
+    // Native daemon only reconnects over direct server transports.
     if text.contains("/wss/") || text.contains("/ws/") {
+        return false;
+    }
+    if text.contains("/webrtc-direct") {
         return false;
     }
     let has_peer = addr
@@ -6366,6 +6371,22 @@ mod tests {
         let quic_addr = quic.parse::<Multiaddr>().unwrap();
 
         assert!(!super::is_reconnect_candidate_addr(&ws_addr, false));
+        assert!(super::is_reconnect_candidate_addr(&quic_addr, false));
+    }
+
+    #[test]
+    fn reconnect_candidates_skip_webrtc_direct_addrs() {
+        let peer = PeerId::random();
+        let webrtc = format!("/ip4/35.175.242.222/udp/9090/webrtc-direct/p2p/{peer}");
+        let tcp = format!("/ip4/35.175.242.222/tcp/4001/p2p/{peer}");
+        let quic = format!("/ip4/35.175.242.222/udp/9092/quic-v1/p2p/{peer}");
+
+        let webrtc_addr = webrtc.parse::<Multiaddr>().unwrap();
+        let tcp_addr = tcp.parse::<Multiaddr>().unwrap();
+        let quic_addr = quic.parse::<Multiaddr>().unwrap();
+
+        assert!(!super::is_reconnect_candidate_addr(&webrtc_addr, false));
+        assert!(super::is_reconnect_candidate_addr(&tcp_addr, false));
         assert!(super::is_reconnect_candidate_addr(&quic_addr, false));
     }
 
