@@ -665,6 +665,26 @@ async fn score_mesh_endpoint(
     })
 }
 
+async fn mesh_probe_candidate_ready(state: &SharedState, endpoint: &str, now: u128) -> bool {
+    let backoff = state.mesh_probe_backoff.lock().await;
+    backoff
+        .get(endpoint)
+        .map(|(_, next_eligible)| now >= *next_eligible)
+        .unwrap_or(true)
+}
+
+async fn record_mesh_probe_success(state: &SharedState, endpoint: &str) {
+    let mut backoff = state.mesh_probe_backoff.lock().await;
+    backoff.remove(endpoint);
+}
+
+async fn record_mesh_probe_failure(state: &SharedState, endpoint: &str, now: u128) {
+    let mut backoff = state.mesh_probe_backoff.lock().await;
+    let entry = backoff.entry(endpoint.to_string()).or_insert((0, 0));
+    entry.0 = entry.0.saturating_add(1);
+    entry.1 = now + mesh_probe_backoff_ms_for_failures(entry.0);
+}
+
 async fn choose_mesh_forward_target(
     state: &SharedState,
     request_max_tokens: usize,
@@ -684,13 +704,26 @@ async fn choose_mesh_forward_target(
         tracing::debug!("mesh forward: no candidates discovered");
         return None;
     }
+    let now = now_ms();
     let queue_weight_ms = mesh_forward_queue_weight_ms();
     let client = mesh_forward_client();
     let probe_limit = mesh_forward_probe_limit();
     let mut scored = Vec::new();
-    for candidate in candidates.into_iter().take(probe_limit) {
+    let mut eligible = Vec::new();
+    for candidate in candidates {
+        if mesh_probe_candidate_ready(state, candidate.endpoint.as_str(), now).await {
+            eligible.push(candidate);
+        } else {
+            tracing::debug!(
+                endpoint = %candidate.endpoint,
+                "mesh forward probe skipped due to endpoint backoff"
+            );
+        }
+    }
+    for candidate in eligible.into_iter().take(probe_limit) {
         match score_mesh_endpoint(client, candidate.endpoint.as_str(), queue_weight_ms).await {
             Some(mut score) => {
+                record_mesh_probe_success(state, candidate.endpoint.as_str()).await;
                 score.capability_tier = candidate.capability_tier.clone();
                 tracing::debug!(
                     endpoint = %score.endpoint,
@@ -702,6 +735,7 @@ async fn choose_mesh_forward_target(
                 scored.push(score);
             }
             None => {
+                record_mesh_probe_failure(state, candidate.endpoint.as_str(), now).await;
                 tracing::debug!(
                     endpoint = %candidate.endpoint,
                     "mesh forward probe failed"

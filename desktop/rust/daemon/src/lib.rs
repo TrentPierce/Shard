@@ -665,6 +665,7 @@ pub(crate) struct SharedState {
     bootstrap_registry: Arc<Mutex<HashMap<String, BootstrapRegistryEntry>>>,
     bootstrap_registry_path: PathBuf,
     scheduler_decisions: Arc<Mutex<VecDeque<SchedulerDecisionLog>>>,
+    mesh_probe_backoff: Arc<Mutex<HashMap<String, (u32, u128)>>>,
     canary_rollout: Arc<Mutex<CanaryRolloutController>>,
     scout_ingress_enabled: Arc<AtomicBool>,
     shutdown: Arc<AtomicBool>,
@@ -2037,26 +2038,30 @@ fn build_autonat_config() -> autonat::v1::Config {
 
 fn reconnect_transport_priority(addr: &Multiaddr) -> u8 {
     let text = addr.to_string();
-    // Relay + websocket paths are generally the most reliable in mixed NAT environments.
+    // Relay circuit paths remain the highest-priority recovery path.
     if text.contains("/p2p-circuit") {
         return 0;
     }
-    if text.contains("/wss/") || text.contains("/ws/") {
+    if text.contains("/quic-v1") {
         return 1;
     }
-    if text.contains("/quic-v1") {
+    if text.contains("/tcp/") {
         return 2;
     }
-    if text.contains("/tcp/") {
+    if text.contains("/webrtc-direct") {
         return 3;
     }
-    if text.contains("/webrtc-direct") {
+    if text.contains("/wss/") || text.contains("/ws/") {
         return 4;
     }
     5
 }
 
 fn is_reconnect_candidate_addr(addr: &Multiaddr, allow_private: bool) -> bool {
+    let text = addr.to_string();
+    if text.contains("/wss/") || text.contains("/ws/") {
+        return false;
+    }
     let has_peer = addr
         .iter()
         .any(|p| matches!(p, libp2p::multiaddr::Protocol::P2p(_)));
@@ -2109,6 +2114,10 @@ fn reconnect_backoff_ms_for_failures(failures: u32) -> u128 {
         return 60 * 60 * 1000;
     }
     ((20_000u128) << failures.min(4)).min(300_000)
+}
+
+pub(crate) fn mesh_probe_backoff_ms_for_failures(failures: u32) -> u128 {
+    ((15_000u128) << failures.min(6)).min(15 * 60 * 1000)
 }
 
 fn peer_reconnect_stats_for_addr(
@@ -3521,6 +3530,7 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
         bootstrap_registry: Arc::new(Mutex::new(loaded_bootstrap_registry)),
         bootstrap_registry_path,
         scheduler_decisions: Arc::new(Mutex::new(VecDeque::new())),
+        mesh_probe_backoff: Arc::new(Mutex::new(HashMap::new())),
         canary_rollout: Arc::new(Mutex::new(CanaryRolloutController::new(
             cli.model_id.clone(),
             canary_rollout_cfg,
@@ -6348,6 +6358,18 @@ mod tests {
     }
 
     #[test]
+    fn reconnect_candidates_skip_websocket_addrs_for_native_daemon() {
+        let peer = PeerId::random();
+        let ws = format!("/ip4/35.175.242.222/tcp/4101/ws/p2p/{peer}");
+        let quic = format!("/ip4/35.175.242.222/udp/9092/quic-v1/p2p/{peer}");
+        let ws_addr = ws.parse::<Multiaddr>().unwrap();
+        let quic_addr = quic.parse::<Multiaddr>().unwrap();
+
+        assert!(!super::is_reconnect_candidate_addr(&ws_addr, false));
+        assert!(super::is_reconnect_candidate_addr(&quic_addr, false));
+    }
+
+    #[test]
     fn reconnect_dial_cap_default_is_eight() {
         assert_eq!(super::max_reconnect_dials_per_tick(), 8);
     }
@@ -6606,6 +6628,14 @@ mod tests {
             reconnect_backoff_ms_for_failures(COLD_BOOTSTRAP_FAILURES + 5),
             60 * 60 * 1000
         );
+    }
+
+    #[test]
+    fn mesh_probe_backoff_caps_and_grows() {
+        assert_eq!(super::mesh_probe_backoff_ms_for_failures(0), 15_000);
+        assert_eq!(super::mesh_probe_backoff_ms_for_failures(1), 30_000);
+        assert_eq!(super::mesh_probe_backoff_ms_for_failures(5), 480_000);
+        assert_eq!(super::mesh_probe_backoff_ms_for_failures(8), 15 * 60 * 1000);
     }
 
     #[test]
