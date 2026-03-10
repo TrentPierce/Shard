@@ -28,6 +28,7 @@ for %%F in ("%ROOT%\deploy\release\rc1.env" "%PROFILE_ENV%") do (
   )
 )
 if /I "%BENCHMARK_PROFILE%"=="long" set "SHARD_SCOUT_BOOTSTRAP_ALLOW_HARD_CIRCUIT=true"
+if /I "%MODEL_ID:~0,5%"=="Qwen/" set "SHARD_SPECULATIVE_STRICT_MODE=true"
 
 echo [%DATE% %TIME%] launching local release daemon > "%LOG_FILE%"
 echo benchmark_profile=%BENCHMARK_PROFILE% >> "%LOG_FILE%"

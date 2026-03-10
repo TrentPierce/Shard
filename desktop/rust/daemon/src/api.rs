@@ -3277,7 +3277,9 @@ pub(crate) async fn generate_local_fallback_tokens(
 
     let mut emitted = 0u32;
     while emitted < max_new_tokens {
-        let Ok(logits) = engine.get_logits(128256) else {
+        let Ok(logits) = engine.get_logits(shard_verifier::inference::model_vocab_size(
+            state.model_id.as_str(),
+        )) else {
             break;
         };
 
@@ -3289,7 +3291,9 @@ pub(crate) async fn generate_local_fallback_tokens(
                 best_idx = idx;
             }
         }
-        if best_idx == 128001 || best_idx == 128009 {
+        if shard_verifier::inference::model_stop_tokens(state.model_id.as_str())
+            .contains(&(best_idx as i32))
+        {
             break;
         }
         if let Ok(piece) = engine.token_to_piece(best_idx as i32) {

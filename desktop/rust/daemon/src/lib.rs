@@ -5061,7 +5061,11 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
                                             let mut draft_text = String::new();
 
                                             for _ in 0..target {
-                                                let logits = match engine.get_logits(128256) {
+                                                let logits = match engine.get_logits(
+                                                    shard_verifier::inference::model_vocab_size(
+                                                        scout_state.model_id.as_str(),
+                                                    ),
+                                                ) {
                                                     Ok(l) => l,
                                                     Err(_) => break,
                                                 };
@@ -5074,7 +5078,11 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
                                                     }
                                                 }
                                                 // Stop on EOS / EOT tokens
-                                                if best_idx == 128001 || best_idx == 128009 {
+                                                if shard_verifier::inference::model_stop_tokens(
+                                                    scout_state.model_id.as_str(),
+                                                )
+                                                .contains(&(best_idx as i32))
+                                                {
                                                     break;
                                                 }
                                                 draft_tokens.push(best_idx as i32);

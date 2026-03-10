@@ -36,6 +36,10 @@ pub struct ModelCompatibilityPair {
 }
 
 pub const CANONICAL_LLAMA_MODEL_ID: &str = "meta-llama/llama-3.2-1b";
+pub const DEFAULT_LLAMA_VOCAB_SIZE: usize = 128_256;
+pub const DEFAULT_QWEN_VOCAB_SIZE: usize = 151_936;
+pub const LLAMA_STOP_TOKENS: &[i32] = &[128001, 128009];
+pub const QWEN_STOP_TOKENS: &[i32] = &[151643, 151645];
 
 fn normalize_model_id(model_id: &str) -> String {
     let normalized = model_id.trim().to_ascii_lowercase();
@@ -48,6 +52,26 @@ fn normalize_model_id(model_id: &str) -> String {
         | "meta-llama/llama-3.2-1b"
         | "meta-llama/llama-3.2-1b-instruct" => CANONICAL_LLAMA_MODEL_ID.to_string(),
         other => other.to_string(),
+    }
+}
+
+pub fn is_qwen_model_id(model_id: &str) -> bool {
+    normalize_model_id(model_id).contains("qwen")
+}
+
+pub fn model_vocab_size(model_id: &str) -> usize {
+    if is_qwen_model_id(model_id) {
+        DEFAULT_QWEN_VOCAB_SIZE
+    } else {
+        DEFAULT_LLAMA_VOCAB_SIZE
+    }
+}
+
+pub fn model_stop_tokens(model_id: &str) -> &'static [i32] {
+    if is_qwen_model_id(model_id) {
+        QWEN_STOP_TOKENS
+    } else {
+        LLAMA_STOP_TOKENS
     }
 }
 
@@ -68,10 +92,40 @@ pub fn compatibility_matrix() -> Vec<ModelCompatibilityPair> {
             verifier_model: "verifier-v2".to_string(),
             supports_speculative: false,
         },
+        ModelCompatibilityPair {
+            draft_model: "qwen/qwen3-0.6b".to_string(),
+            verifier_model: "qwen/qwen3.5-9b".to_string(),
+            supports_speculative: true,
+        },
+        ModelCompatibilityPair {
+            draft_model: "qwen/qwen3-0.8b".to_string(),
+            verifier_model: "qwen/qwen3.5-9b".to_string(),
+            supports_speculative: true,
+        },
     ]
 }
 
 pub fn is_model_pair_compatible(draft_model: &str, verifier_model: &str) -> bool {
+    let draft = normalize_model_id(draft_model);
+    let verifier = normalize_model_id(verifier_model);
+    if draft.is_empty() || verifier.is_empty() {
+        return false;
+    }
+    if draft == verifier {
+        return true;
+    }
+    if is_qwen_model_id(draft.as_str()) && is_qwen_model_id(verifier.as_str()) {
+        return true;
+    }
+
+    compatibility_matrix().into_iter().any(|pair| {
+        pair.supports_speculative
+            && pair.draft_model.eq_ignore_ascii_case(draft.as_str())
+            && pair.verifier_model.eq_ignore_ascii_case(verifier.as_str())
+    })
+}
+
+pub fn is_verified_speculative_pair(draft_model: &str, verifier_model: &str) -> bool {
     let draft = normalize_model_id(draft_model);
     let verifier = normalize_model_id(verifier_model);
     if draft.is_empty() || verifier.is_empty() {
@@ -85,6 +139,7 @@ pub fn is_model_pair_compatible(draft_model: &str, verifier_model: &str) -> bool
         pair.supports_speculative
             && pair.draft_model.eq_ignore_ascii_case(draft.as_str())
             && pair.verifier_model.eq_ignore_ascii_case(verifier.as_str())
+            && !is_qwen_model_id(pair.draft_model.as_str())
     })
 }
 
@@ -296,6 +351,7 @@ impl VerifierModel for ShardEngine {
 mod tests {
     use super::{
         check_model_compatibility, compatibility_matrix, is_model_pair_compatible,
+        is_verified_speculative_pair, model_stop_tokens, model_vocab_size,
         CANONICAL_LLAMA_MODEL_ID,
     };
 
@@ -329,5 +385,26 @@ mod tests {
         ));
         assert!(!is_model_pair_compatible("legacy-draft-v0", "verifier-v2"));
         assert!(is_model_pair_compatible("bitnet-1.58b", "bitnet-1.58b"));
+        assert!(is_model_pair_compatible("Qwen/Qwen3-0.6B", "Qwen/Qwen3.5-9B"));
+    }
+
+    #[test]
+    fn model_vocab_and_stop_tokens_match_known_families() {
+        assert_eq!(model_vocab_size("Qwen/Qwen3.5-9B"), 151_936);
+        assert_eq!(model_stop_tokens("Qwen/Qwen3.5-9B"), &[151643, 151645]);
+        assert_eq!(model_vocab_size("meta-llama/Llama-3.2-1B"), 128_256);
+        assert_eq!(model_stop_tokens("meta-llama/Llama-3.2-1B"), &[128001, 128009]);
+    }
+
+    #[test]
+    fn verified_speculative_pairs_default_qwen_family_to_strict() {
+        assert!(is_verified_speculative_pair(
+            "meta-llama/Llama-3.2-1B",
+            "bitnet-1.58b"
+        ));
+        assert!(!is_verified_speculative_pair(
+            "Qwen/Qwen3-0.6B",
+            "Qwen/Qwen3.5-9B"
+        ));
     }
 }

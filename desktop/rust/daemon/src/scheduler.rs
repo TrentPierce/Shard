@@ -864,6 +864,16 @@ fn speculative_top_k() -> usize {
     })
 }
 
+fn speculative_strict_mode() -> bool {
+    static STRICT: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *STRICT.get_or_init(|| {
+        std::env::var("SHARD_SPECULATIVE_STRICT_MODE")
+            .ok()
+            .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
+            .unwrap_or(false)
+    })
+}
+
 const DEFAULT_SCOUT_WORK_QUEUE_MAX: usize = 1024;
 
 pub(crate) fn scout_work_queue_max() -> usize {
@@ -1056,8 +1066,11 @@ async fn generate_local_daemon_draft(
     let mut draft_tokens = Vec::with_capacity(target);
     let mut draft_text = String::new();
 
+    let vocab_size = shard_verifier::inference::model_vocab_size(state.model_id.as_str());
+    let stop_tokens = shard_verifier::inference::model_stop_tokens(state.model_id.as_str());
+
     for _ in 0..target {
-        let logits = engine.get_logits(128256).ok()?;
+        let logits = engine.get_logits(vocab_size).ok()?;
         let mut best_idx = 0usize;
         let mut best_val = -f32::INFINITY;
         for (i, &val) in logits.iter().enumerate() {
@@ -1066,7 +1079,7 @@ async fn generate_local_daemon_draft(
                 best_idx = i;
             }
         }
-        if best_idx == 128001 || best_idx == 128009 {
+        if stop_tokens.contains(&(best_idx as i32)) {
             break;
         }
         draft_tokens.push(best_idx as i32);
@@ -2120,6 +2133,8 @@ pub(crate) async fn wait_for_scout_draft(
 /// 3. **Logit gap**: draft token's logit is within tolerance of the best logit
 pub(crate) async fn verify_draft_tokens(
     engine: &mut impl shard_verifier::inference::VerifierModel,
+    draft_model_id: &str,
+    model_id: &str,
     prompt_tokens: &[i32],
     draft_tokens: &[i32],
     eval_prompt: bool,
@@ -2138,7 +2153,7 @@ pub(crate) async fn verify_draft_tokens(
     let mut accepted_tokens = Vec::new();
     let mut accepted_text = String::new();
     let mut first_rejection_idx = None;
-    let vocab_size = 128256;
+    let vocab_size = shard_verifier::inference::model_vocab_size(model_id);
 
     // 2. Step through each draft token and verify against model predictions
     let logit_tolerance = speculative_logit_tolerance();
@@ -2177,7 +2192,16 @@ pub(crate) async fn verify_draft_tokens(
                 .any(|(i, _)| *i == draft_token as usize);
             let within_tolerance = logit_gap < logit_tolerance;
 
-            let is_accepted = greedy_match || in_top_k || within_tolerance;
+            let strict_mode = speculative_strict_mode()
+                || !shard_verifier::inference::is_verified_speculative_pair(
+                    draft_model_id,
+                    model_id,
+                );
+            let is_accepted = if strict_mode {
+                greedy_match
+            } else {
+                greedy_match || in_top_k || within_tolerance
+            };
 
             // Rank not computed with partial sort (only used in tracing).
             let draft_rank: Option<usize> = None;
@@ -2203,6 +2227,7 @@ pub(crate) async fn verify_draft_tokens(
                 tolerance = %format!("{:.1}", logit_tolerance),
                 draft_rank = ?draft_rank,
                 top_k,
+                strict_mode,
                 reason = accept_reason,
                 accepted = is_accepted,
                 "speculative token verification"
@@ -2653,7 +2678,15 @@ pub(crate) async fn chat_completions_handler(
                                     Some(format!("draft_tokens={}", draft.draft_tokens.len())),
                                     None,
                                 ).await;
-                                let result = verify_draft_tokens(engine, &prompt_tokens, &draft.draft_tokens, true).await;
+                                let result = verify_draft_tokens(
+                                    engine,
+                                    requested_draft_model.as_str(),
+                                    state.model_id.as_str(),
+                                    &prompt_tokens,
+                                    &draft.draft_tokens,
+                                    true,
+                                )
+                                .await;
                                 let accepted_count = result.accepted_tokens.len() as u64;
                                 update_accepted_tokens_ewma(&state, accepted_count);
                                 let draft_count = draft.draft_tokens.len() as u64;
@@ -2761,7 +2794,11 @@ pub(crate) async fn chat_completions_handler(
                     if prompt_ready {
                         let mut emitted = 0;
                         while emitted < max_tokens {
-                            if let Ok(logits) = engine.get_logits(128256) {
+                            if let Ok(logits) = engine
+                                .get_logits(shard_verifier::inference::model_vocab_size(
+                                    state.model_id.as_str(),
+                                ))
+                            {
                                 let mut best_idx = 0;
                                 let mut best_val = -f32::INFINITY;
                                 for (i, &val) in logits.iter().enumerate() {
@@ -2771,7 +2808,11 @@ pub(crate) async fn chat_completions_handler(
                                     }
                                 }
 
-                                if best_idx == 128001 || best_idx == 128009 {
+                                if shard_verifier::inference::model_stop_tokens(
+                                    state.model_id.as_str(),
+                                )
+                                .contains(&(best_idx as i32))
+                                {
                                     break;
                                 }
 
@@ -2898,7 +2939,14 @@ pub(crate) async fn chat_completions_handler(
                             )
                             .await;
                             let result =
-                                verify_draft_tokens(engine, &prompt_tokens, &draft.draft_tokens, true)
+                                verify_draft_tokens(
+                                    engine,
+                                    requested_draft_model.as_str(),
+                                    state.model_id.as_str(),
+                                    &prompt_tokens,
+                                    &draft.draft_tokens,
+                                    true,
+                                )
                                     .await;
                             let accepted_count = result.accepted_tokens.len() as u64;
                             update_accepted_tokens_ewma(&state, accepted_count);
@@ -3013,7 +3061,11 @@ pub(crate) async fn chat_completions_handler(
                     if prompt_ready {
                         let mut emitted = 0;
                         while emitted < max_tokens {
-                            if let Ok(logits) = engine.get_logits(128256) {
+                            if let Ok(logits) = engine
+                                .get_logits(shard_verifier::inference::model_vocab_size(
+                                    state.model_id.as_str(),
+                                ))
+                            {
                                 let mut best_idx = 0;
                                 let mut best_val = -f32::INFINITY;
                                 for (i, &val) in logits.iter().enumerate() {
@@ -3023,7 +3075,11 @@ pub(crate) async fn chat_completions_handler(
                                     }
                                 }
 
-                                if best_idx == 128001 || best_idx == 128009 {
+                                if shard_verifier::inference::model_stop_tokens(
+                                    state.model_id.as_str(),
+                                )
+                                .contains(&(best_idx as i32))
+                                {
                                     break;
                                 }
 

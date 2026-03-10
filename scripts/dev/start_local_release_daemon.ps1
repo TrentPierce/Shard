@@ -138,6 +138,10 @@ if ($BenchmarkProfile -eq "long") {
     $psi.EnvironmentVariables["SHARD_SCOUT_BOOTSTRAP_ALLOW_HARD_CIRCUIT"] = "true"
 }
 
+if ($resolvedModelId.ToLowerInvariant().Contains("qwen")) {
+    $psi.EnvironmentVariables["SHARD_SPECULATIVE_STRICT_MODE"] = "true"
+}
+
 $psi.EnvironmentVariables["BITNET_LIB"] = $lib
 $psi.EnvironmentVariables["BITNET_MODEL"] = $ModelPath
 $psi.EnvironmentVariables["PATH"] = "{0};{1}" -f (Split-Path $lib), $psi.EnvironmentVariables["PATH"]
