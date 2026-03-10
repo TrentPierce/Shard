@@ -1306,6 +1306,25 @@ async fn recent_active_scouts(state: &SharedState, now: u128) -> std::collection
         .collect()
 }
 
+fn touch_registered_scout_runtime_entry(
+    runtime: &mut HashMap<String, ScoutClientRuntimeStatus>,
+    scout_id: &str,
+    now: u128,
+) {
+    prune_scout_client_runtime(runtime, now);
+    if let Some(entry) = runtime.get_mut(scout_id) {
+        entry.last_event_ms = now;
+        if entry.last_event.is_empty() {
+            entry.last_event = "poll_active".to_string();
+        }
+    }
+}
+
+async fn touch_registered_scout_runtime(state: &SharedState, scout_id: &str, now: u128) {
+    let mut runtime = state.scout_client_runtime.lock().await;
+    touch_registered_scout_runtime_entry(&mut runtime, scout_id, now);
+}
+
 async fn scout_bootstrap_assignment_allowed(
     state: &SharedState,
     scout_id: &str,
@@ -2292,6 +2311,7 @@ pub(crate) async fn pop_work_handler(
         Err(response) => return Err((axum::http::StatusCode::BAD_REQUEST, response)),
     };
     let now = now_ms();
+    touch_registered_scout_runtime(&state, scout_id, now).await;
     let now_u64 = now.min(u64::MAX as u128) as u64;
     let avg_latency_ms = state.avg_latency_ms.load(Ordering::Relaxed);
     let avg_latency_ms_u64 = u64::from(avg_latency_ms);
@@ -4991,6 +5011,29 @@ mod tests {
         assert_eq!(webgpu_total, 1);
         assert_eq!(wasm_total, 1);
         assert_eq!(last_submit_success_ms, Some(now - 500));
+    }
+
+    #[test]
+    fn touch_registered_scout_runtime_entry_refreshes_known_scout() {
+        let now = 10_000u128;
+        let mut statuses = HashMap::new();
+        statuses.insert(
+            "scout-webgpu".to_string(),
+            ScoutClientRuntimeStatus {
+                scout_id: "scout-webgpu".to_string(),
+                runtime_mode: Some("webgpu".to_string()),
+                last_event: "".to_string(),
+                last_event_detail: None,
+                last_event_ms: now - 5_000,
+                last_submit_success_ms: None,
+            },
+        );
+
+        super::touch_registered_scout_runtime_entry(&mut statuses, "scout-webgpu", now);
+
+        let entry = statuses.get("scout-webgpu").expect("runtime entry");
+        assert_eq!(entry.last_event_ms, now);
+        assert_eq!(entry.last_event, "poll_active");
     }
 
     #[test]

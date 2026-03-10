@@ -36,6 +36,7 @@ pub struct ModelCompatibilityPair {
 }
 
 pub const CANONICAL_LLAMA_MODEL_ID: &str = "meta-llama/llama-3.2-1b";
+pub const CANONICAL_LLAMA_8B_MODEL_ID: &str = "meta-llama/llama-3.1-8b";
 pub const DEFAULT_LLAMA_VOCAB_SIZE: usize = 128_256;
 pub const DEFAULT_QWEN_VOCAB_SIZE: usize = 151_936;
 pub const LLAMA_STOP_TOKENS: &[i32] = &[128001, 128009];
@@ -51,6 +52,9 @@ fn normalize_model_id(model_id: &str) -> String {
         | "llama-3.2-1b-draft"
         | "meta-llama/llama-3.2-1b"
         | "meta-llama/llama-3.2-1b-instruct" => CANONICAL_LLAMA_MODEL_ID.to_string(),
+        "meta-llama/llama-3.1-8b" | "meta-llama/llama-3.1-8b-instruct" => {
+            CANONICAL_LLAMA_8B_MODEL_ID.to_string()
+        }
         other => other.to_string(),
     }
 }
@@ -85,6 +89,11 @@ pub fn compatibility_matrix() -> Vec<ModelCompatibilityPair> {
         ModelCompatibilityPair {
             draft_model: CANONICAL_LLAMA_MODEL_ID.to_string(),
             verifier_model: "verifier-v2".to_string(),
+            supports_speculative: true,
+        },
+        ModelCompatibilityPair {
+            draft_model: CANONICAL_LLAMA_MODEL_ID.to_string(),
+            verifier_model: CANONICAL_LLAMA_8B_MODEL_ID.to_string(),
             supports_speculative: true,
         },
         ModelCompatibilityPair {
@@ -352,7 +361,7 @@ mod tests {
     use super::{
         check_model_compatibility, compatibility_matrix, is_model_pair_compatible,
         is_verified_speculative_pair, model_stop_tokens, model_vocab_size,
-        CANONICAL_LLAMA_MODEL_ID,
+        CANONICAL_LLAMA_8B_MODEL_ID, CANONICAL_LLAMA_MODEL_ID,
     };
 
     #[test]
@@ -370,6 +379,11 @@ mod tests {
                 && pair.verifier_model == "bitnet-1.58b"
                 && pair.supports_speculative
         }));
+        assert!(matrix.iter().any(|pair| {
+            pair.draft_model == CANONICAL_LLAMA_MODEL_ID
+                && pair.verifier_model == CANONICAL_LLAMA_8B_MODEL_ID
+                && pair.supports_speculative
+        }));
     }
 
     #[test]
@@ -377,6 +391,10 @@ mod tests {
         assert!(is_model_pair_compatible(
             "meta-llama/Llama-3.2-1B",
             "meta-llama/Llama-3.2-1B"
+        ));
+        assert!(is_model_pair_compatible(
+            "meta-llama/Llama-3.2-1B",
+            "meta-llama/Llama-3.1-8B-Instruct"
         ));
         assert!(is_model_pair_compatible("shard-hybrid", "bitnet-1.58b"));
         assert!(is_model_pair_compatible(
@@ -401,6 +419,10 @@ mod tests {
         assert!(is_verified_speculative_pair(
             "meta-llama/Llama-3.2-1B",
             "bitnet-1.58b"
+        ));
+        assert!(is_verified_speculative_pair(
+            "meta-llama/Llama-3.2-1B",
+            "meta-llama/Llama-3.1-8B-Instruct"
         ));
         assert!(!is_verified_speculative_pair(
             "Qwen/Qwen3-0.6B",

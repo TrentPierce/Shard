@@ -77,6 +77,10 @@ function Resolve-ModelId {
         return "meta-llama/Llama-3.2-1B"
     }
 
+    if ($full.Contains("llama-3.1-8b")) {
+        return "meta-llama/Llama-3.1-8B"
+    }
+
     if ($full.Contains("tinyllama")) {
         return "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
     }
@@ -136,6 +140,13 @@ foreach ($envFile in $EnvFiles) {
 
 if ($BenchmarkProfile -eq "long") {
     $psi.EnvironmentVariables["SHARD_SCOUT_BOOTSTRAP_ALLOW_HARD_CIRCUIT"] = "true"
+}
+
+if ($env:SHARD_SCOUT_TIMEOUT_MS) {
+    $psi.EnvironmentVariables["SHARD_SCOUT_TIMEOUT_MS"] = $env:SHARD_SCOUT_TIMEOUT_MS
+    if (-not $env:SHARD_SCOUT_TIMEOUT_LOW_SUPPLY_MS) {
+        $psi.EnvironmentVariables["SHARD_SCOUT_TIMEOUT_LOW_SUPPLY_MS"] = $env:SHARD_SCOUT_TIMEOUT_MS
+    }
 }
 
 if ($resolvedModelId.ToLowerInvariant().Contains("qwen")) {
