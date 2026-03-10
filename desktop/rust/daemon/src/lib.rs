@@ -3222,9 +3222,9 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
     let hardcoded_bootstrap = vec![
         "/ip4/35.175.242.222/tcp/4001/p2p/12D3KooWPQqkkZk7NeWA2b1FeWYuBFRW8X7Q9ugymnzxeKJHFLUV"
             .to_string(),
-        "/dns4/shard-bootstrap-iad-0605.fly.dev/tcp/4001/p2p/12D3KooWLc6Z4NNfWtcm9Pwu8rNhPf8UGT9bATZw2X3eEZdJpbyD"
+        "/ip4/66.241.125.57/tcp/4001/p2p/12D3KooWLc6Z4NNfWtcm9Pwu8rNhPf8UGT9bATZw2X3eEZdJpbyD"
             .to_string(),
-        "/dns4/shard-bootstrap-lax-0605.fly.dev/tcp/4001/p2p/12D3KooWH67LRDPMC2oJ8rFtZD2oWd6UG52zhYZVF6fGswkYdcDF"
+        "/ip4/66.241.125.125/tcp/4001/p2p/12D3KooWH67LRDPMC2oJ8rFtZD2oWd6UG52zhYZVF6fGswkYdcDF"
             .to_string(),
     ];
     let hardcoded_bootstrap_set: HashSet<String> = hardcoded_bootstrap.iter().cloned().collect();
