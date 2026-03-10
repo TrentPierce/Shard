@@ -553,6 +553,7 @@ pub(crate) struct SharedState {
     topology: Arc<Mutex<TopologyState>>,
     peers: Arc<Mutex<HashMap<String, PeerInfo>>>,
     known_peers: Arc<Mutex<Vec<String>>>,
+    hardcoded_bootstrap_addrs: Arc<HashSet<String>>,
     known_peers_path: PathBuf,
     results: Arc<Mutex<VecDeque<WorkResponse>>>,
     scout_work: Arc<Mutex<VecDeque<WorkRequest>>>,
@@ -3226,6 +3227,7 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
         "/dns4/shard-bootstrap-lax-0605.fly.dev/tcp/4001/p2p/12D3KooWH67LRDPMC2oJ8rFtZD2oWd6UG52zhYZVF6fGswkYdcDF"
             .to_string(),
     ];
+    let hardcoded_bootstrap_set: HashSet<String> = hardcoded_bootstrap.iter().cloned().collect();
     let hardcoded_relay = vec![
         "/ip4/35.175.242.222/tcp/4001/p2p/12D3KooWPQqkkZk7NeWA2b1FeWYuBFRW8X7Q9ugymnzxeKJHFLUV"
             .to_string(),
@@ -3455,6 +3457,7 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
         })),
         peers: Arc::new(Mutex::new(HashMap::new())),
         known_peers: Arc::new(Mutex::new(bootstrap_addrs.clone())),
+        hardcoded_bootstrap_addrs: Arc::new(hardcoded_bootstrap_set),
         known_peers_path: known_peers_path.clone(),
         results: Arc::new(Mutex::new(VecDeque::new())),
         scout_work: Arc::new(Mutex::new(VecDeque::new())),
@@ -4404,6 +4407,7 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
                 let registry_snapshot = state.bootstrap_registry.lock().await.clone();
                 let peers_snapshot = state.peers.lock().await.clone();
                 let bootstrap_failure_snapshot = state.bootstrap_failures.lock().await.clone();
+                let hardcoded_bootstrap_addrs = state.hardcoded_bootstrap_addrs.clone();
                 known.sort_by(|a, b| {
                     let a_stats = peer_reconnect_stats_for_addr(
                         a,
@@ -4417,7 +4421,12 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
                         &peers_snapshot,
                         &bootstrap_failure_snapshot,
                     );
-                    a_stats
+                    let a_is_seed = hardcoded_bootstrap_addrs.contains(a);
+                    let b_is_seed = hardcoded_bootstrap_addrs.contains(b);
+                    b_is_seed
+                        .cmp(&a_is_seed)
+                        .then(
+                            a_stats
                         .is_cold
                         .cmp(&b_stats.is_cold)
                         .then(a_stats.bootstrap_failures.cmp(&b_stats.bootstrap_failures))
@@ -4429,7 +4438,7 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
                                 .avg_latency_ms
                                 .total_cmp(&b_stats.avg_latency_ms)
                         })
-                        .then_with(|| reconnect_addr_sort_key(a).cmp(&reconnect_addr_sort_key(b)))
+                        .then_with(|| reconnect_addr_sort_key(a).cmp(&reconnect_addr_sort_key(b))))
                 });
                 let connected: HashSet<String> = peers_snapshot.keys().cloned().collect();
                 let now = now_ms();
@@ -6026,6 +6035,7 @@ mod tests {
         SpeculativeConfig, WorkRequest, COLD_BOOTSTRAP_FAILURES, MAX_BOOTSTRAP_FAILURES,
         canonical_bootstrap_multiaddr, reconnect_backoff_ms_for_failures,
     };
+    use crate::PeerInfo;
     use crate::network::policy::{NetworkMode, NetworkPolicy, PolicyDecision};
     use libp2p::{Multiaddr, PeerId};
     use std::collections::{HashMap, HashSet};
@@ -6385,6 +6395,48 @@ mod tests {
         assert_eq!(addrs[0], public_quic);
         assert_eq!(addrs[1], public_tcp);
         assert_eq!(addrs[2], private_tcp);
+    }
+
+    #[test]
+    fn reconnect_sort_prioritizes_hardcoded_bootstrap_seeds() {
+        let seed_peer = PeerId::random();
+        let other_quic_peer = PeerId::random();
+        let other_tcp_peer = PeerId::random();
+        let seed = format!("/ip4/35.175.242.222/tcp/4001/p2p/{seed_peer}");
+        let other_quic = format!("/ip4/44.55.66.77/udp/9092/quic-v1/p2p/{other_quic_peer}");
+        let other_tcp = format!("/ip4/52.10.10.10/tcp/4001/p2p/{other_tcp_peer}");
+        let registry: HashMap<String, BootstrapRegistryEntry> = HashMap::new();
+        let peers: HashMap<String, PeerInfo> = HashMap::new();
+        let failures: HashMap<String, u32> = HashMap::new();
+        let hardcoded: HashSet<String> = [seed.clone()].into_iter().collect();
+
+        let mut addrs = [other_quic.clone(), other_tcp.clone(), seed.clone()];
+        addrs.sort_by(|a, b| {
+            let a_stats =
+                super::peer_reconnect_stats_for_addr(a, &registry, &peers, &failures);
+            let b_stats =
+                super::peer_reconnect_stats_for_addr(b, &registry, &peers, &failures);
+            let a_is_seed = hardcoded.contains(a);
+            let b_is_seed = hardcoded.contains(b);
+            b_is_seed
+                .cmp(&a_is_seed)
+                .then(
+                    a_stats
+                        .is_cold
+                        .cmp(&b_stats.is_cold)
+                        .then(a_stats.bootstrap_failures.cmp(&b_stats.bootstrap_failures))
+                        .then(b_stats.stability_score.cmp(&a_stats.stability_score))
+                        .then(b_stats.successful_handshakes.cmp(&a_stats.successful_handshakes))
+                        .then(a_stats.connection_failures.cmp(&b_stats.connection_failures))
+                        .then_with(|| a_stats.avg_latency_ms.total_cmp(&b_stats.avg_latency_ms))
+                        .then_with(|| {
+                            super::reconnect_addr_sort_key(a)
+                                .cmp(&super::reconnect_addr_sort_key(b))
+                        }),
+                )
+        });
+
+        assert_eq!(addrs[0], seed);
     }
 
     #[test]
