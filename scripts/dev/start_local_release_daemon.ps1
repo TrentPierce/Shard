@@ -134,6 +134,10 @@ foreach ($envFile in $EnvFiles) {
     Set-EnvFromFile -ProcessInfo $psi -Path $envFile
 }
 
+if ($BenchmarkProfile -eq "long") {
+    $psi.EnvironmentVariables["SHARD_SCOUT_BOOTSTRAP_ALLOW_HARD_CIRCUIT"] = "true"
+}
+
 $psi.EnvironmentVariables["BITNET_LIB"] = $lib
 $psi.EnvironmentVariables["BITNET_MODEL"] = $ModelPath
 $psi.EnvironmentVariables["PATH"] = "{0};{1}" -f (Split-Path $lib), $psi.EnvironmentVariables["PATH"]

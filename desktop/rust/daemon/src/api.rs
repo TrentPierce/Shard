@@ -966,6 +966,21 @@ fn scout_bootstrap_latency_max_ms() -> u64 {
         .unwrap_or(DEFAULT_SCOUT_BOOTSTRAP_LATENCY_MAX_MS)
 }
 
+fn scout_bootstrap_allow_hard_circuit() -> bool {
+    static ALLOW: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ALLOW.get_or_init(|| {
+        std::env::var("SHARD_SCOUT_BOOTSTRAP_ALLOW_HARD_CIRCUIT")
+            .ok()
+            .map(|v| {
+                matches!(
+                    v.trim().to_ascii_lowercase().as_str(),
+                    "1" | "true" | "yes" | "on"
+                )
+            })
+            .unwrap_or(false)
+    })
+}
+
 fn scout_min_quality_score() -> i32 {
     std::env::var("SHARD_SCOUT_MIN_QUALITY_SCORE")
         .ok()
@@ -1300,8 +1315,10 @@ async fn scout_bootstrap_assignment_allowed(
 ) -> bool {
     const SCOUT_SUBMIT_ACTIVE_WINDOW_MS: u128 = 90 * 1000;
 
-    if queue_depth > scout_bootstrap_queue_depth_max()
-        || p95_latency_ms > scout_bootstrap_latency_max_ms()
+    if queue_depth > scout_bootstrap_queue_depth_max() {
+        return false;
+    }
+    if !scout_bootstrap_allow_hard_circuit() && p95_latency_ms > scout_bootstrap_latency_max_ms()
     {
         return false;
     }
@@ -2154,6 +2171,12 @@ fn scout_config_snapshot_json(state: &SharedState) -> serde_json::Value {
         "lease": {
             "ttl_ms": scout_lease_ttl_ms(),
         },
+        "bootstrap": {
+            "active_cap": scout_bootstrap_active_cap(),
+            "queue_depth_max": scout_bootstrap_queue_depth_max(),
+            "latency_max_ms": scout_bootstrap_latency_max_ms(),
+            "allow_hard_circuit": scout_bootstrap_allow_hard_circuit(),
+        },
         "speculative": {
             "min_request_tokens": speculative_min_request_tokens(),
             "long_request_min_tokens": scout_long_request_min_tokens(),
@@ -2348,7 +2371,7 @@ pub(crate) async fn pop_work_handler(
     let bootstrap_lane =
         scout_bootstrap_assignment_allowed(&state, scout_id, queue_depth, p95_latency_ms, now)
             .await;
-    if blackout_mode == ScoutBlackoutMode::Blackout {
+    if blackout_mode == ScoutBlackoutMode::Blackout && !bootstrap_lane {
         state.system_metrics.inc_scout_work_overload_reject();
         state.system_metrics.inc_scout_work_empty_poll();
         return Err((
@@ -2364,9 +2387,8 @@ pub(crate) async fn pop_work_handler(
         ));
     }
     let admission = scout_admission_decision(queue_depth, avg_latency_ms, p95_latency_ms);
-    let bootstrap_soft_backpressure =
-        bootstrap_lane && admission.mode == ScoutAdmissionMode::SoftBackpressure;
-    if admission.mode != ScoutAdmissionMode::Allow && !bootstrap_soft_backpressure {
+    let bootstrap_load_override = bootstrap_lane && admission.mode != ScoutAdmissionMode::Allow;
+    if admission.mode != ScoutAdmissionMode::Allow && !bootstrap_load_override {
         state.system_metrics.inc_scout_work_overload_reject();
         state.system_metrics.inc_scout_work_empty_poll();
         let detail = if admission.mode == ScoutAdmissionMode::HardCircuit {
@@ -2396,20 +2418,28 @@ pub(crate) async fn pop_work_handler(
             })),
         ));
     }
-    if bootstrap_soft_backpressure {
+    if bootstrap_load_override {
         tracing::debug!(
             scout_id = %scout_id,
             queue_depth,
             avg_latency_ms,
             p95_latency_ms,
-            "allowing scout bootstrap poll despite soft backpressure"
+            mode = match admission.mode {
+                ScoutAdmissionMode::Allow => "allow",
+                ScoutAdmissionMode::SoftBackpressure => "soft_backpressure",
+                ScoutAdmissionMode::HardCircuit => "hard_circuit",
+            },
+            "allowing scout bootstrap poll despite scout admission gate"
         );
     }
     let active_scouts = recent_active_scouts(&state, now).await;
-    let active_cap = scout_active_cap_for_blackout(
+    let mut active_cap = scout_active_cap_for_blackout(
         blackout_mode,
         scout_active_cap_for_mode(&state, admission.mode),
     );
+    if bootstrap_lane {
+        active_cap = active_cap.max(1);
+    }
     if active_cap == 0 {
         state.system_metrics.inc_scout_work_overload_reject();
         return Err((

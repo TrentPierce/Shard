@@ -27,6 +27,7 @@ for %%F in ("%ROOT%\deploy\release\rc1.env" "%PROFILE_ENV%") do (
     if not "%%~A"=="" set "%%~A=%%~B"
   )
 )
+if /I "%BENCHMARK_PROFILE%"=="long" set "SHARD_SCOUT_BOOTSTRAP_ALLOW_HARD_CIRCUIT=true"
 
 echo [%DATE% %TIME%] launching local release daemon > "%LOG_FILE%"
 echo benchmark_profile=%BENCHMARK_PROFILE% >> "%LOG_FILE%"

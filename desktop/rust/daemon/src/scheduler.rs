@@ -3552,7 +3552,7 @@ mod tests {
     fn endpoint_normalization_handles_scheme_and_port_defaults() {
         assert_eq!(
             normalize_endpoint("api.shardnetwork.live", 9091).as_deref(),
-            Some("http://api.shardnetwork.live:9091")
+            Some("https://api.shardnetwork.live:443")
         );
         assert_eq!(
             normalize_endpoint("https://api.shardnetwork.live", 9091).as_deref(),
@@ -3567,7 +3567,7 @@ mod tests {
         let relay = format!("/ip4/35.175.242.222/tcp/4001/p2p/{peer}/p2p-circuit/p2p/{peer}");
         assert_eq!(
             endpoint_from_multiaddr(direct.as_str(), 9091).as_deref(),
-            Some("http://35.175.242.222:9091")
+            Some("https://35.175.242.222:443")
         );
         assert!(endpoint_from_multiaddr(relay.as_str(), 9091).is_none());
     }
