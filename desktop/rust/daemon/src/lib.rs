@@ -3226,6 +3226,8 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
             .to_string(),
         "/ip4/66.241.125.125/tcp/4001/p2p/12D3KooWH67LRDPMC2oJ8rFtZD2oWd6UG52zhYZVF6fGswkYdcDF"
             .to_string(),
+        "/ip4/149.248.195.223/tcp/4001/p2p/12D3KooWBf4gBkjmmta8q4TnY4BwrVrcfiA2jnErvr4aCuAoqrwT"
+            .to_string(),
     ];
     let hardcoded_bootstrap_set: HashSet<String> = hardcoded_bootstrap.iter().cloned().collect();
     let hardcoded_relay = vec![
