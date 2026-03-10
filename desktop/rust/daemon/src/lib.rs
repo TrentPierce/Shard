@@ -2852,6 +2852,8 @@ fn build_cors_origins(control_port: u16, public_host: Option<&str>) -> Vec<Heade
         format!("http://127.0.0.1:3000"),
         format!("http://localhost:{control_port}"),
         format!("http://127.0.0.1:{control_port}"),
+        "https://shardnetwork.live".to_string(),
+        "https://www.shardnetwork.live".to_string(),
     ];
     if let Some(host) = public_host {
         defaults.push(format!("http://{host}:{control_port}"));

@@ -2,6 +2,7 @@ param(
     [int]$ControlPort = 9191,
     [int]$TelemetryWsPort = 9193,
     [string]$ModelPath = "",
+    [string]$ModelId = "",
     [ValidateSet("short","long","custom")]
     [string]$BenchmarkProfile = "short",
     [string[]]$EnvFiles = @(
@@ -46,6 +47,43 @@ if (-not (Test-Path $ModelPath)) {
     throw "Missing model file: $ModelPath"
 }
 
+function Resolve-ModelId {
+    param(
+        [string]$Path,
+        [string]$ExplicitModelId
+    )
+
+    if ($ExplicitModelId) {
+        return $ExplicitModelId
+    }
+
+    $leaf = [System.IO.Path]::GetFileNameWithoutExtension($Path).ToLowerInvariant()
+    $full = $Path.ToLowerInvariant()
+
+    if ($full.Contains("qwen")) {
+        if ($full.Contains("9b")) {
+            return "Qwen/Qwen3.5-9B"
+        }
+        if ($full.Contains("0.8b")) {
+            return "Qwen/Qwen3.5-0.8B"
+        }
+        if ($full.Contains("0.6b")) {
+            return "Qwen/Qwen3-0.6B"
+        }
+        return "Qwen/Qwen"
+    }
+
+    if ($full.Contains("llama-3.2-1b")) {
+        return "meta-llama/Llama-3.2-1B"
+    }
+
+    if ($full.Contains("tinyllama")) {
+        return "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+    }
+
+    return $leaf
+}
+
 function Set-EnvFromFile {
     param(
         [System.Diagnostics.ProcessStartInfo]$ProcessInfo,
@@ -82,9 +120,11 @@ $psi.FileName = $exe
 $psi.WorkingDirectory = (Split-Path $exe)
 $psi.UseShellExecute = $false
 $psi.CreateNoWindow = $true
+$resolvedModelId = Resolve-ModelId -Path $ModelPath -ExplicitModelId $ModelId
 $psi.Arguments = @(
     "--control-port", $ControlPort,
     "--telemetry-ws-port", $TelemetryWsPort,
+    "--model-id", $resolvedModelId,
     "--bootstrap-node", "/ip4/35.175.242.222/tcp/4001/p2p/12D3KooWPQqkkZk7NeWA2b1FeWYuBFRW8X7Q9ugymnzxeKJHFLUV",
     "--bootstrap-node", "/ip4/35.175.242.222/udp/9092/quic-v1/p2p/12D3KooWPQqkkZk7NeWA2b1FeWYuBFRW8X7Q9ugymnzxeKJHFLUV",
     "--contribute"

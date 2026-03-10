@@ -4,6 +4,8 @@ const ALLOWED_REPOS = new Set([
   "Llama-3.2-1B-Instruct-q4f16_1-MLC",
   "TinyLlama-1.1B-Chat-v1.0-q4f32_1-MLC",
   "TinyLlama-1.1B-Chat-v1.0-q4f16_1-MLC",
+  "Qwen3-0.6B-q4f16_1-MLC",
+  "Qwen2.5-0.5B-Instruct-q4f16_1-MLC",
 ])
 
 export const runtime = "edge"

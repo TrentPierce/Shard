@@ -11,7 +11,7 @@ import { generateDrafts, initScoutEngine } from "@/lib/scout-engine"
 import { setContributionStatus } from "@/lib/contribution-status"
 import { startScoutWorker } from "@/lib/swarm"
 import { getScoutId, reportScoutClientEvent } from "@/lib/scout-draft"
-import type { ModelProgress } from "@/lib/webllm"
+import { resolveDraftModelPreset, type ModelProgress } from "@/lib/webllm"
 
 type BenchmarkState =
   | "booting"
@@ -29,15 +29,43 @@ function normalizeError(error: unknown): string {
   return String(error)
 }
 
+function isDirectBrowserBackend(backendUrl: string): boolean {
+  if (!backendUrl) return false
+  try {
+    const parsed = new URL(backendUrl)
+    return parsed.hostname === "127.0.0.1" || parsed.hostname === "localhost"
+  } catch {
+    return false
+  }
+}
+
+async function inferDraftModelPreset(backendUrl: string): Promise<string> {
+  if (!backendUrl) return ""
+  try {
+    const response = await fetch(`${backendUrl.replace(/\/$/, "")}/health`, { cache: "no-store" })
+    if (!response.ok) return ""
+    const health = await response.json()
+    const haystack = `${String(health?.bitnet_model ?? "")} ${String(health?.model_id ?? "")}`.toLowerCase()
+    if (haystack.includes("qwen")) {
+      return "qwen"
+    }
+  } catch {
+    // Best-effort inference only.
+  }
+  return ""
+}
+
 export default function BenchmarkScoutPage() {
   const [query, setQuery] = useState(() => ({
     backend: "",
     slot: "0",
     label: "Scout 0",
+    draftModel: "",
   }))
   const backend = query.backend
   const slot = query.slot
   const label = query.label
+  const draftModel = query.draftModel
   const parsedBackend = useMemo(() => parseRuntimeApiEndpointSpec(backend), [backend])
   const [state, setState] = useState<BenchmarkState>("booting")
   const [detail, setDetail] = useState("Preparing browser scout benchmark")
@@ -66,6 +94,7 @@ export default function BenchmarkScoutPage() {
       backend: (searchParams.get("backend") || "").trim(),
       slot: nextSlot,
       label: (searchParams.get("label") || `Scout ${nextSlot}`).trim(),
+      draftModel: (searchParams.get("draft_model") || searchParams.get("draftModel") || "").trim(),
     })
   }, [])
 
@@ -94,13 +123,14 @@ export default function BenchmarkScoutPage() {
 
     const boot = async () => {
       try {
-        const runtimeHeaders = parsedBackend.backendUrl
+        const directBrowserBackend = isDirectBrowserBackend(parsedBackend.backendUrl)
+        const runtimeHeaders = parsedBackend.backendUrl && !directBrowserBackend
           ? {
               "x-shard-backend-url": parsedBackend.backendUrl,
               ...parsedBackend.headers,
             }
           : {}
-        setRuntimeApiBaseOverride(null)
+        setRuntimeApiBaseOverride(directBrowserBackend ? parsedBackend.backendUrl : null)
         setRuntimeApiHeaderOverrides(runtimeHeaders)
         setRuntimeRegistered(false)
         setState("checking_capability")
@@ -118,7 +148,17 @@ export default function BenchmarkScoutPage() {
         }
 
         setState("loading_model")
-        setDetail("Loading WebLLM draft model")
+        const inferredPreset =
+          draftModel ||
+          (directBrowserBackend ? await inferDraftModelPreset(parsedBackend.backendUrl) : "")
+        const resolvedDraftModel = inferredPreset
+          ? resolveDraftModelPreset(inferredPreset)
+          : undefined
+        setDetail(
+          resolvedDraftModel
+            ? `Loading WebLLM draft model (${resolvedDraftModel})`
+            : "Loading WebLLM draft model",
+        )
         await initScoutEngine((progress, text) => {
           if (cancelled) return
           setProgress({
@@ -128,6 +168,7 @@ export default function BenchmarkScoutPage() {
           })
         }, {
           allowModelFallback: false,
+          modelId: resolvedDraftModel,
         })
         if (cancelled) return
 
@@ -192,7 +233,7 @@ export default function BenchmarkScoutPage() {
       setRuntimeApiBaseOverride(null)
       setRuntimeApiHeaderOverrides(null)
     }
-  }, [parsedBackend.backendUrl, parsedBackend.headers])
+  }, [draftModel, parsedBackend.backendUrl, parsedBackend.headers])
 
   useEffect(() => {
     if (typeof window === "undefined") return
@@ -201,6 +242,7 @@ export default function BenchmarkScoutPage() {
       resolvedBackend: parsedBackend.backendUrl,
       slot,
       label,
+      draftModel,
       state,
       detail,
       capability: capability?.capability || null,
@@ -208,7 +250,7 @@ export default function BenchmarkScoutPage() {
       lastSuccessAtMs,
       runtimeRegistered,
     }
-  }, [backend, capability?.capability, detail, label, lastSuccessAtMs, parsedBackend.backendUrl, progress?.progress, runtimeRegistered, slot, state])
+  }, [backend, capability?.capability, detail, draftModel, label, lastSuccessAtMs, parsedBackend.backendUrl, progress?.progress, runtimeRegistered, slot, state])
 
   useEffect(() => {
     const suffix = progress ? ` progress=${Math.round(progress.progress * 100)}%` : ""
