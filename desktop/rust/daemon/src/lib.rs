@@ -2095,6 +2095,40 @@ fn reconnect_addr_sort_key(addr_str: &str) -> (u8, String) {
     (u8::MAX, addr_str.to_string())
 }
 
+fn addr_port(addr_str: &str) -> u16 {
+    for segment in addr_str.split('/') {
+        if let Ok(port) = segment.parse::<u16>() {
+            return port;
+        }
+    }
+    u16::MAX
+}
+
+fn best_addr_per_peer(addrs: Vec<String>, seed_set: &HashSet<String>) -> Vec<String> {
+    let mut best: HashMap<String, String> = HashMap::new();
+    for addr_str in addrs {
+        let peer_key = peer_id_from_addr_str(&addr_str).unwrap_or_else(|| addr_str.clone());
+        let is_seed = seed_set.contains(&addr_str);
+        let should_replace = match best.get(&peer_key) {
+            None => true,
+            Some(prev) => {
+                let prev_is_seed = seed_set.contains(prev.as_str());
+                if is_seed && !prev_is_seed {
+                    true
+                } else if !is_seed && prev_is_seed {
+                    false
+                } else {
+                    addr_port(&addr_str) < addr_port(prev)
+                }
+            }
+        };
+        if should_replace {
+            best.insert(peer_key, addr_str);
+        }
+    }
+    best.into_values().collect()
+}
+
 fn node_capability_tier(role: &str, max_gpu_usage: f32, relay_mode: bool, public_api: bool) -> String {
     if role.eq_ignore_ascii_case("scout") {
         return "scout_only".to_string();
@@ -4451,6 +4485,7 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
                         })
                         .then_with(|| reconnect_addr_sort_key(a).cmp(&reconnect_addr_sort_key(b))))
                 });
+                known = best_addr_per_peer(known, &hardcoded_bootstrap_addrs);
                 let connected: HashSet<String> = peers_snapshot.keys().cloned().collect();
                 let now = now_ms();
                 if let Some(url) = bootstrap_url.as_deref() {
@@ -6448,6 +6483,21 @@ mod tests {
         });
 
         assert_eq!(addrs[0], seed);
+    }
+
+    #[test]
+    fn best_addr_per_peer_prefers_seed_over_stale_high_port_addr() {
+        let peer = PeerId::random();
+        let seed = format!("/ip4/149.248.195.223/tcp/4001/p2p/{peer}");
+        let stale = format!("/ip4/204.93.227.71/tcp/32908/p2p/{peer}");
+        let other = format!("/ip4/8.8.8.8/tcp/4001/p2p/{}", PeerId::random());
+        let seeds: HashSet<String> = [seed.clone()].into_iter().collect();
+
+        let selected = super::best_addr_per_peer(vec![stale, other.clone(), seed.clone()], &seeds);
+
+        assert!(selected.contains(&seed));
+        assert!(!selected.iter().any(|addr| addr.contains("204.93.227.71")));
+        assert!(selected.contains(&other));
     }
 
     #[test]
