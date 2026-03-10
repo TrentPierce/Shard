@@ -1898,8 +1898,12 @@ pub(crate) async fn upsert_bootstrap_entry(
     {
         let mut known = state.known_peers.lock().await;
         let before = known.len();
-        known.push(entry.multiaddr.clone());
-        *known = unique_addrs(known.clone());
+        if let Ok(addr) = entry.multiaddr.parse::<Multiaddr>() {
+            if is_reconnect_candidate_addr(&addr, true) {
+                known.push(entry.multiaddr.clone());
+                *known = unique_addrs(known.clone());
+            }
+        }
         if known.len() != before {
             save_persisted_peers(state.known_peers_path.as_path(), &known).await;
             known_changed = true;
@@ -2651,6 +2655,19 @@ async fn load_persisted_peers(path: &Path) -> Vec<String> {
     unique_addrs(parsed.peers)
 }
 
+fn filter_native_dialable_peers(peers: Vec<String>, allow_private: bool) -> Vec<String> {
+    unique_addrs(peers)
+        .into_iter()
+        .filter(|addr_str| {
+            addr_str
+                .parse::<Multiaddr>()
+                .ok()
+                .map(|addr| is_reconnect_candidate_addr(&addr, allow_private))
+                .unwrap_or(false)
+        })
+        .collect()
+}
+
 async fn save_persisted_peers(path: &Path, peers: &[String]) {
     let payload = PersistedPeers {
         peers: unique_addrs(peers.to_vec()),
@@ -3155,7 +3172,7 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
     } else {
         Vec::new()
     };
-    let persisted = load_persisted_peers(&known_peers_path).await;
+    let persisted_raw = load_persisted_peers(&known_peers_path).await;
     let mut loaded_bootstrap_registry = load_bootstrap_registry(&bootstrap_registry_path).await;
     let now_bootstrap_init = now_ms();
     let registry_ttl_ms = bootstrap_registry_ttl_ms();
@@ -3237,6 +3254,14 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
         .ok()
         .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
         .unwrap_or(false);
+    let persisted = filter_native_dialable_peers(persisted_raw.clone(), allow_private_bootstrap);
+    if persisted.len() != persisted_raw.len() {
+        tracing::info!(
+            removed = persisted_raw.len().saturating_sub(persisted.len()),
+            "scrubbed non-dialable persisted peers during startup"
+        );
+        save_persisted_peers(&known_peers_path, &persisted).await;
+    }
     let allow_private_relay = std::env::var("SHARD_ALLOW_PRIVATE_RELAY")
         .ok()
         .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
@@ -6388,6 +6413,17 @@ mod tests {
         assert!(!super::is_reconnect_candidate_addr(&webrtc_addr, false));
         assert!(super::is_reconnect_candidate_addr(&tcp_addr, false));
         assert!(super::is_reconnect_candidate_addr(&quic_addr, false));
+    }
+
+    #[test]
+    fn filter_native_dialable_peers_drops_browser_transports() {
+        let peer = PeerId::random();
+        let tcp = format!("/ip4/35.175.242.222/tcp/4001/p2p/{peer}");
+        let ws = format!("/ip4/35.175.242.222/tcp/4101/ws/p2p/{peer}");
+        let webrtc = format!("/ip4/35.175.242.222/udp/9090/webrtc-direct/p2p/{peer}");
+
+        let filtered = super::filter_native_dialable_peers(vec![tcp.clone(), ws, webrtc], false);
+        assert_eq!(filtered, vec![tcp]);
     }
 
     #[test]
