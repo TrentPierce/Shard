@@ -299,27 +299,40 @@ export async function initSwarmWorker(
 /**
  * Handle incoming work request from the swarm.
  */
-export async function handleScoutWork(work: WorkRequest): Promise<ScoutSubmissionResult> {
+export async function handleScoutWork(
+    work: WorkRequest,
+    options: { apiBase?: string } = {}
+): Promise<ScoutSubmissionResult> {
     try {
         const engine = getActiveEngine()
         const scoutMode: "webgpu" | "wasm" = engine?.mode === "webgpu" ? "webgpu" : "wasm"
         let draftText = ""
         if (!engine) {
             draftText = fallbackDraftFromPrompt(work.prompt_context, work.min_tokens)
-            void reportScoutClientEvent("fallback_draft_used", "engine_uninitialized")
+            void reportScoutClientEvent("fallback_draft_used", "engine_uninitialized", undefined, undefined, {
+                apiBase: options.apiBase,
+            })
         } else {
             try {
                 const draftResult = await generateDraftsWithTimeout(work.prompt_context, work.min_tokens, 2500)
                 draftText = draftResult.text
                 if (!draftResult.success || !draftText?.trim()) {
                     draftText = fallbackDraftFromPrompt(work.prompt_context, work.min_tokens)
-                    void reportScoutClientEvent("generate_failure", draftResult.error || "empty_draft_result")
-                    void reportScoutClientEvent("fallback_draft_used", "empty_or_failed_generation")
+                    void reportScoutClientEvent("generate_failure", draftResult.error || "empty_draft_result", undefined, undefined, {
+                        apiBase: options.apiBase,
+                    })
+                    void reportScoutClientEvent("fallback_draft_used", "empty_or_failed_generation", undefined, undefined, {
+                        apiBase: options.apiBase,
+                    })
                 }
             } catch {
                 draftText = fallbackDraftFromPrompt(work.prompt_context, work.min_tokens)
-                void reportScoutClientEvent("generate_failure", "generateDrafts_threw")
-                void reportScoutClientEvent("fallback_draft_used", "exception_in_generation")
+                void reportScoutClientEvent("generate_failure", "generateDrafts_threw", undefined, undefined, {
+                    apiBase: options.apiBase,
+                })
+                void reportScoutClientEvent("fallback_draft_used", "exception_in_generation", undefined, undefined, {
+                    apiBase: options.apiBase,
+                })
             }
         }
 
@@ -341,16 +354,23 @@ export async function handleScoutWork(work: WorkRequest): Promise<ScoutSubmissio
             scout_mode: scoutMode,
         }
 
-        void reportScoutClientEvent("submit_attempt", "handleScoutWork_before_submitDraftResult")
-        const submissionResult = await submitDraftResult(result)
+        void reportScoutClientEvent("submit_attempt", "handleScoutWork_before_submitDraftResult", undefined, undefined, {
+            apiBase: options.apiBase,
+        })
+        const submissionResult = await submitDraftResult(result, { apiBase: options.apiBase })
         void reportScoutClientEvent(
             submissionResult.success ? "submit_success" : "submit_network_error",
-            `handleScoutWork_after_submitDraftResult:${submissionResult.detail || "no_detail"}`
+            `handleScoutWork_after_submitDraftResult:${submissionResult.detail || "no_detail"}`,
+            undefined,
+            undefined,
+            { apiBase: options.apiBase }
         )
 
         return submissionResult
     } catch (error: any) {
-        void reportScoutClientEvent("generate_failure", `handleScoutWork_failed:${error?.message ?? error}`)
+        void reportScoutClientEvent("generate_failure", `handleScoutWork_failed:${error?.message ?? error}`, undefined, undefined, {
+            apiBase: options.apiBase,
+        })
         return {
             success: false,
             detail: `Scout work handling failed: ${error?.message ?? error}`,
@@ -361,12 +381,18 @@ export async function handleScoutWork(work: WorkRequest): Promise<ScoutSubmissio
 /**
  * Submit a draft result.
  */
-async function submitDraftResult(result: WorkResult): Promise<ScoutSubmissionResult> {
+async function submitDraftResult(
+    result: WorkResult,
+    options: { apiBase?: string } = {}
+): Promise<ScoutSubmissionResult> {
     try {
-        void reportScoutClientEvent("submit_attempt", "handleScoutWork_pre_submit")
+        void reportScoutClientEvent("submit_attempt", "handleScoutWork_pre_submit", undefined, undefined, {
+            apiBase: options.apiBase,
+        })
         const response = await submitDraft(result.work_id, result.draft_text, {
             promptContext: result.prompt_context,
             leaseId: result.lease_id,
+            apiBase: options.apiBase,
             // Browser scouts can need several seconds for PoW + HTTP + tokenization.
             timeoutMs: 45000,
             maxRetries: 0,
@@ -374,16 +400,22 @@ async function submitDraftResult(result: WorkResult): Promise<ScoutSubmissionRes
             maxQueueDepth: 16,
         })
         if (response.ok) {
-            void reportScoutClientEvent("submit_success", "handleScoutWork_submit_ok")
+            void reportScoutClientEvent("submit_success", "handleScoutWork_submit_ok", undefined, undefined, {
+                apiBase: options.apiBase,
+            })
         } else {
-            void reportScoutClientEvent("submit_network_error", response.detail || "handleScoutWork_submit_failed")
+            void reportScoutClientEvent("submit_network_error", response.detail || "handleScoutWork_submit_failed", undefined, undefined, {
+                apiBase: options.apiBase,
+            })
         }
         return {
             success: response.ok,
             detail: response.detail || (response.ok ? "Draft submitted successfully" : "Draft submission failed"),
         }
     } catch (error: any) {
-        void reportScoutClientEvent("submit_network_error", `handleScoutWork_submit_exception:${error?.message ?? error}`)
+        void reportScoutClientEvent("submit_network_error", `handleScoutWork_submit_exception:${error?.message ?? error}`, undefined, undefined, {
+            apiBase: options.apiBase,
+        })
         return {
             success: false,
             detail: `Failed to submit draft: ${error?.message ?? error}`,
@@ -394,9 +426,10 @@ async function submitDraftResult(result: WorkResult): Promise<ScoutSubmissionRes
 /**
  * Request work from the API.
  */
-export async function requestWork(): Promise<WorkPollResult> {
+export async function requestWork(options: { apiBase?: string } = {}): Promise<WorkPollResult> {
     try {
         const polled = await pollForWork(getScoutId(), {
+            apiBase: options.apiBase,
             // Poll less aggressively so WAN scouts do not self-DOS the control plane.
             pollTimeoutMs: 4500,
             pollRetries: 2,
@@ -443,7 +476,8 @@ export async function requestWork(): Promise<WorkPollResult> {
  */
 export async function startScoutWorker(
     onRequest?: (work: WorkRequest) => void,
-    onResult?: (result: ScoutSubmissionResult) => void
+    onResult?: (result: ScoutSubmissionResult) => void,
+    options: { apiBase?: string } = {}
 ): Promise<() => void> {
     // Default 200ms keeps average work-pickup latency under 100ms.
     // Daemon enforces a per-scout minimum of 75ms (SHARD_SCOUT_POLL_MIN_INTERVAL_MS).
@@ -469,6 +503,7 @@ export async function startScoutWorker(
         const detail = engine?.mode === "webgpu" ? "engine_mode_webgpu" : "engine_mode_wasm_or_unavailable"
         const reported = await reportScoutClientEvent(runtimeEvent, detail, undefined, undefined, {
             bypassMute: true,
+            apiBase: options.apiBase,
         })
         if (reported) {
             lastRuntimeEvent = runtimeEvent
@@ -488,12 +523,12 @@ export async function startScoutWorker(
         inFlight = true
         try {
             await reportRuntimeMode()
-            const polled = await requestWork()
+            const polled = await requestWork({ apiBase: options.apiBase })
             const work = polled.work
             if (work) {
                 serverBackoffMs = 0
                 onRequest?.(work)
-                const result = await handleScoutWork(work)
+                const result = await handleScoutWork(work, { apiBase: options.apiBase })
                 onResult?.(result)
                 if (!result.success) {
                     consecutiveFailures += 1

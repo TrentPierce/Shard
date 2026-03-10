@@ -42,6 +42,7 @@ export interface ScoutConfig {
 export interface SubmitDraftOptions extends Partial<ScoutConfig> {
   promptContext?: string
   leaseId?: string
+  apiBase?: string
 }
 
 const DEFAULT_CONFIG: ScoutConfig = {
@@ -79,6 +80,7 @@ let clientEventMutedUntilMs = 0
 type QueueItem = {
   submission: DraftSubmission
   cfg: ScoutConfig
+  apiBase?: string
   enqueuedAtMs: number
   resolve: (value: DraftResponse) => void
 }
@@ -98,6 +100,15 @@ type ScoutClientEventName =
   | "fallback_draft_used"
   | "runtime_webgpu_ready"
   | "runtime_wasm_fallback"
+
+function resolveApiUrl(path: string, apiBase?: string): string {
+  const cleanBase = String(apiBase || "").trim().replace(/\/$/, "")
+  const cleanPath = path.startsWith("/") ? path : `/${path}`
+  if (!cleanBase) {
+    return apiUrl(cleanPath)
+  }
+  return `${cleanBase}${cleanPath}`
+}
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
@@ -147,14 +158,14 @@ export async function reportScoutClientEvent(
   detail?: string,
   status?: number,
   scoutIdValue?: string,
-  options: { bypassMute?: boolean } = {},
+  options: { bypassMute?: boolean; apiBase?: string } = {},
 ): Promise<boolean> {
   if (!options.bypassMute && Date.now() < clientEventMutedUntilMs) {
     return false
   }
   try {
     const response = await fetchWithTimeout(
-      apiUrl("/v1/scout/client-event"),
+      resolveApiUrl("/v1/scout/client-event", options.apiBase),
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -252,7 +263,11 @@ function solvePow(challengeHex: string, difficulty: number): Promise<{ nonce: nu
   })
 }
 
-async function ensurePowVerifiedForScout(scoutIdValue: string, cfg: ScoutConfig): Promise<boolean> {
+async function ensurePowVerifiedForScout(
+  scoutIdValue: string,
+  cfg: ScoutConfig,
+  apiBase?: string,
+): Promise<boolean> {
   const now = Date.now()
   if (powVerifiedUntilMs > now) {
     return true
@@ -268,8 +283,9 @@ async function ensurePowVerifiedForScout(scoutIdValue: string, cfg: ScoutConfig)
   powVerificationInFlight = (async () => {
     for (let attempt = 0; attempt <= cfg.powRetries; attempt += 1) {
       try {
-        const challengeUrl = apiUrl(
+        const challengeUrl = resolveApiUrl(
           `/v1/pow/challenge?peer_id=${encodeURIComponent(scoutIdValue)}&hardware_concurrency=${getPowConcurrencyHint()}&is_mobile=${isMobileDevice()}`,
+          apiBase,
         )
         const challengeRes = await fetchWithTimeout(
           challengeUrl,
@@ -297,7 +313,7 @@ async function ensurePowVerifiedForScout(scoutIdValue: string, cfg: ScoutConfig)
 
         const solved = await solvePow(challenge.challenge_bytes_hex, challenge.difficulty)
         const verifyRes = await fetchWithTimeout(
-          apiUrl("/v1/pow/verify"),
+          resolveApiUrl("/v1/pow/verify", apiBase),
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -377,15 +393,16 @@ function shouldRetrySubmission(result: DraftResponse): boolean {
 
 async function submitDraftOnce(
   submission: DraftSubmission,
-  cfg: ScoutConfig
+  cfg: ScoutConfig,
+  apiBase?: string,
 ): Promise<DraftResponse> {
   const controller = new AbortController()
   activeSubmissionAbort = controller
   const timeoutId = setTimeout(() => controller.abort(), cfg.timeoutMs)
   try {
-    void reportScoutClientEvent("submit_attempt", undefined, undefined, submission.scout_id)
-    await ensurePowVerifiedForScout(submission.scout_id, cfg)
-    const response = await fetch(apiUrl("/v1/scout/draft"), {
+    void reportScoutClientEvent("submit_attempt", undefined, undefined, submission.scout_id, { apiBase })
+    await ensurePowVerifiedForScout(submission.scout_id, cfg, apiBase)
+    const response = await fetch(resolveApiUrl("/v1/scout/draft", apiBase), {
       method: "POST",
       headers: mergeRuntimeApiHeaders({
         "Content-Type": "application/json",
@@ -410,6 +427,7 @@ async function submitDraftOnce(
         detail,
         response.status,
         submission.scout_id,
+        { apiBase },
       )
       return {
         ok: false,
@@ -423,10 +441,10 @@ async function submitDraftOnce(
     const result = (await response.json().catch(() => ({ ok: false, detail: "Invalid backend response" }))) as DraftResponse
     const transientError = Boolean(result.transient_error) || (!result.ok && isTransientDetail(result.detail ?? ""))
     if (result.ok) {
-      void reportScoutClientEvent("submit_success", undefined, response.status, submission.scout_id)
+      void reportScoutClientEvent("submit_success", undefined, response.status, submission.scout_id, { apiBase })
     } else {
       const detail = result.detail || "Draft rejected by verifier/backend"
-      void reportScoutClientEvent("submit_http_error", detail, response.status, submission.scout_id)
+      void reportScoutClientEvent("submit_http_error", detail, response.status, submission.scout_id, { apiBase })
     }
     return {
       ...result,
@@ -436,7 +454,7 @@ async function submitDraftOnce(
   } catch (error) {
     clearTimeout(timeoutId)
     if (error instanceof Error && error.name === "AbortError") {
-      void reportScoutClientEvent("submit_timeout", `timeout ${cfg.timeoutMs}ms`, undefined, submission.scout_id)
+      void reportScoutClientEvent("submit_timeout", `timeout ${cfg.timeoutMs}ms`, undefined, submission.scout_id, { apiBase })
       return {
         ok: false,
         detail: `Timeout: verifier did not respond within ${cfg.timeoutMs}ms`,
@@ -445,9 +463,9 @@ async function submitDraftOnce(
     }
     const detail = error instanceof Error ? error.message : "Unknown error submitting draft"
     if (detail.toLowerCase().includes("pow")) {
-      void reportScoutClientEvent("submit_pow_failure", detail, undefined, submission.scout_id)
+      void reportScoutClientEvent("submit_pow_failure", detail, undefined, submission.scout_id, { apiBase })
     } else {
-      void reportScoutClientEvent("submit_network_error", detail, undefined, submission.scout_id)
+      void reportScoutClientEvent("submit_network_error", detail, undefined, submission.scout_id, { apiBase })
     }
     return {
       ok: false,
@@ -461,11 +479,12 @@ async function submitDraftOnce(
 
 async function submitWithRetry(
   submission: DraftSubmission,
-  cfg: ScoutConfig
+  cfg: ScoutConfig,
+  apiBase?: string,
 ): Promise<DraftResponse> {
   let attempt = 0
   while (attempt <= cfg.maxRetries) {
-    const result = await submitDraftOnce(submission, cfg)
+    const result = await submitDraftOnce(submission, cfg, apiBase)
     if (result.ok) {
       return {
         ...result,
@@ -507,7 +526,7 @@ async function processSubmissionQueue(): Promise<void> {
 
       isSubmitting = true
       try {
-        const response = await submitWithRetry(next.submission, next.cfg)
+        const response = await submitWithRetry(next.submission, next.cfg, next.apiBase)
         queuedWorkIds.delete(next.submission.work_id)
         next.resolve(response)
       } catch (error) {
@@ -528,23 +547,23 @@ export async function submitDraft(
   draftText: string,
   options: SubmitDraftOptions = {}
 ): Promise<DraftResponse> {
-  const { promptContext, leaseId, ...config } = options
+  const { promptContext, leaseId, apiBase, ...config } = options
   const cfg = { ...DEFAULT_CONFIG, ...config }
   if (!workId.trim()) {
-    void reportScoutClientEvent("submit_network_error", "work_id_missing")
+    void reportScoutClientEvent("submit_network_error", "work_id_missing", undefined, undefined, { apiBase })
     return { ok: false, detail: "work_id is required" }
   }
   if (!draftText.trim()) {
-    void reportScoutClientEvent("submit_network_error", "draft_text_missing")
+    void reportScoutClientEvent("submit_network_error", "draft_text_missing", undefined, undefined, { apiBase })
     return { ok: false, detail: "draft_text is required" }
   }
   if (queuedWorkIds.has(workId)) {
-    void reportScoutClientEvent("submit_network_error", "duplicate_work_id")
+    void reportScoutClientEvent("submit_network_error", "duplicate_work_id", undefined, undefined, { apiBase })
     return { ok: false, detail: "Duplicate work_id already queued" }
   }
   const queueDepth = submissionQueue.length + (isSubmitting ? 1 : 0)
   if (queueDepth >= cfg.maxQueueDepth) {
-    void reportScoutClientEvent("submit_network_error", "queue_full")
+    void reportScoutClientEvent("submit_network_error", "queue_full", undefined, undefined, { apiBase })
     return { ok: false, detail: "Draft submission queue is full", transient_error: true }
   }
 
@@ -560,7 +579,7 @@ export async function submitDraft(
   queuedWorkIds.add(workId)
 
   return new Promise<DraftResponse>((resolve) => {
-    submissionQueue.push({ submission, cfg, enqueuedAtMs: Date.now(), resolve })
+    submissionQueue.push({ submission, cfg, apiBase, enqueuedAtMs: Date.now(), resolve })
     void processSubmissionQueue()
   })
 }
@@ -602,11 +621,12 @@ export interface WorkItem {
 
 export async function pollForWork(
   scoutIdValue: string,
-  config: Partial<ScoutConfig> = {}
+  config: Partial<ScoutConfig> & { apiBase?: string } = {}
 ): Promise<WorkItem> {
-  const cfg = { ...DEFAULT_CONFIG, ...config }
+  const { apiBase, ...configOverrides } = config
+  const cfg = { ...DEFAULT_CONFIG, ...configOverrides }
   try {
-    await ensurePowVerifiedForScout(scoutIdValue, cfg)
+    await ensurePowVerifiedForScout(scoutIdValue, cfg, apiBase)
   } catch (error) {
     return {
       work: null,
@@ -620,7 +640,7 @@ export async function pollForWork(
     const timeoutId = setTimeout(() => controller.abort(), cfg.pollTimeoutMs)
     try {
       const response = await fetch(
-        apiUrl(`/v1/scout/work?scout_id=${encodeURIComponent(scoutIdValue)}`),
+        resolveApiUrl(`/v1/scout/work?scout_id=${encodeURIComponent(scoutIdValue)}`, apiBase),
         {
           method: "GET",
           headers: mergeRuntimeApiHeaders({

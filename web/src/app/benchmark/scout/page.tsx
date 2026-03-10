@@ -103,13 +103,16 @@ export default function BenchmarkScoutPage() {
 
     const registerRuntimeMode = async (attempts: number, delayMs: number): Promise<boolean> => {
       const scoutId = getScoutId()
+      const directApiBase = isDirectBrowserBackend(parsedBackend.backendUrl)
+        ? parsedBackend.backendUrl
+        : undefined
       for (let attempt = 0; attempt < attempts; attempt += 1) {
         const ok = await reportScoutClientEvent(
           "runtime_webgpu_ready",
           "benchmark_runtime_registration",
           undefined,
           scoutId,
-          { bypassMute: true },
+          { bypassMute: true, apiBase: directApiBase },
         )
         if (ok) {
           return true
@@ -210,6 +213,9 @@ export default function BenchmarkScoutPage() {
               return
             }
             setDetail(result.detail || "Scout worker reported a transient failure")
+          },
+          {
+            apiBase: directBrowserBackend ? parsedBackend.backendUrl : undefined,
           },
         )
 
