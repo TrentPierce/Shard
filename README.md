@@ -1,7 +1,7 @@
-<div align="center">
+﻿<div align="center">
   <img src="docs/assets/logo.png" alt="Shard Network" width="160" />
   <h1>Shard Network</h1>
-  <p><strong>Distributed AI inference — browser Scouts generate speculative drafts, Verifier nodes validate and stream responses.</strong></p>
+  <p><strong>Distributed AI inference where browser scouts draft and verifier nodes validate.</strong></p>
 
   [![CI/CD](https://github.com/TrentPierce/Shard/actions/workflows/ci.yml/badge.svg)](https://github.com/TrentPierce/Shard/actions/workflows/ci.yml)
   [![Version](https://img.shields.io/badge/version-0.6.5-blue.svg)](https://github.com/TrentPierce/Shard/releases/tag/v0.6.5)
@@ -12,38 +12,38 @@
 
 ---
 
-## What is Shard?
+## What Is Shard?
 
-Shard is an **OpenAI-compatible distributed inference network** that combines two types of participants:
+Shard is an OpenAI-compatible distributed inference network with two participant types:
 
-- **Browser Scouts** — any WebGPU-capable browser that generates fast speculative draft tokens at no server cost
-- **Verifier Nodes** — server daemons that validate drafts via KL-divergence scoring, complete generation, and stream final responses
+- Browser scouts: WebGPU-capable browsers that generate speculative draft tokens.
+- Verifier nodes: Rust daemons that validate drafts, finish generation, and serve the final response.
 
-Clients interact through a standard `/v1/chat/completions` API — no changes to your existing code.
+Clients use the standard `/v1/chat/completions` API.
 
-```
-Browser Scouts  →  speculative drafts  →  Verifier Nodes  →  validated stream  →  API clients
+```text
+Browser scouts -> speculative drafts -> verifier nodes -> validated responses -> API clients
 ```
 
 ---
 
 ## Quick Start
 
-### Browser Scout � easiest path
+### Browser Scout
 
-1. Open [shardnetwork.live](https://shardnetwork.live)
-2. Click **Join**
-3. Wait for the browser model download to finish
-4. Keep the tab open while the page shows **contributing**
+1. Open [shardnetwork.live](https://shardnetwork.live).
+2. Click **Join**.
+3. Let the browser model finish downloading.
+4. Keep the tab open while the page shows **contributing** or **ready**.
 
-### Desktop Verifier � easiest full node path
+### Desktop Verifier
 
-1. Download the latest **Shard GUI** from [GitHub Releases](https://github.com/TrentPierce/Shard/releases/latest)
-2. Let the app download the verifier model on first run
-3. Save settings, restart the node once, then click **Start**
-4. Confirm `http://127.0.0.1:9091/health` returns `status: ok`
+1. Download the latest **Shard GUI** from [GitHub Releases](https://github.com/TrentPierce/Shard/releases/latest).
+2. Let the app download the verifier model on first run.
+3. Save settings, restart once, then click **Start**.
+4. Confirm `http://127.0.0.1:9091/health` returns `status: ok`.
 
-### Verifier Node � Docker
+### Docker Verifier
 
 ```bash
 git clone https://github.com/TrentPierce/Shard.git
@@ -54,117 +54,96 @@ curl http://localhost:9091/health
 
 Required open ports: `4001/tcp`, `9091/tcp`, `9090/udp`, `9092/udp`
 
-See [docs/run-a-node.md](docs/run-a-node.md) for the full quickstart, including binary install and health checks.
-
-### Local Mesh Scale Test (Docker)
-
-Use the local mesh profile to compare `1` vs `2` vs `N` verifier nodes:
-
-```powershell
-.\deploy\demo\mesh-up.ps1 -Nodes 1
-.\deploy\demo\mesh-up.ps1 -Nodes 2
-.\deploy\demo\mesh-up.ps1 -Nodes 5
-```
-
-Full guide: [docs/mesh-benchmark.md](docs/mesh-benchmark.md)
+Full node setup: [docs/run-a-node.md](docs/run-a-node.md)
 
 ---
 
-## Latest Benchmark Snapshot (March 9, 2026)
+## Current Benchmark Position (March 10, 2026)
 
-Latest validated benchmark results:
+These are the most defensible benchmark statements today:
 
-- pinned 3-node Fly verifier comparison on `performance-4x` machines
-- pinned browser scouts attached to the same 3 Fly nodes
-- one-node long-generation local comparison for slower hardware
-- all numbers below are from the latest validated harness runs, not from the current live `shardnetwork.live` benchmark page
+| Scenario | p95 latency | Throughput | Error rate | What it means |
+| --- | ---: | ---: | ---: | --- |
+| 3 Fly verifier nodes, verifier-only | 986.605 ms | 0.55 TPS | 0.00% | Current fast-node baseline |
+| 3 Fly verifier nodes, browser scouts attached | 965.127 ms | 0.55 TPS | 0.00% | Fast nodes stay neutral because browser scouts back off when fast-verifier bypass is active |
+| Local Llama 8B verifier with live browser scout on same machine | Correctness proven | Not a fair speed benchmark | N/A | Lease issuance, mailbox hit, and accepted speculative tokens now work end to end, but same-machine GPU contention makes latency results non-representative |
+| Browser Qwen draft against local Qwen 9B verifier | Rejected in strict mode | N/A | N/A | This pair is not currently a safe speculative match |
 
-| Scenario | p95 latency (ms) | Throughput (TPS) | Error rate (%) | Interpretation |
-|---------|-------------------|------------------|----------------|----------------|
-| 3 Fly nodes, verifier-only | 986.605 | 0.5500 | 0.0000 | Current fast-node baseline |
-| 3 Fly nodes, browser scouts attached | 965.127 | 0.5500 | 0.0000 | Fast nodes stay neutral because scouts back off when the verifier bypass is active |
-| 1 slower local node, verifier-only | 7958.929 | 0.2167 | 0.0000 | Current slow-node long-generation baseline |
-| 1 slower local node, browser scouts active | 3471.707 | 0.2167 | 0.0000 | Browser scouts reduce tail latency on slower hardware |
-
-Current recommendation:
+### What we can claim today
 
 - Fast verifier nodes should keep adaptive browser-scout bypass enabled.
-- Browser scouts are currently useful on slower nodes, not on fast Fly-class verifier nodes.
-- Public uplift claims should stay scoped to slower hardware until Fly-class nodes show a repeatable net gain.
+- Browser scouts are proven neutral on fast Fly-class verifier nodes when bypass is active.
+- The Llama browser-draft path is now working correctly end to end against a larger local verifier.
+- A clean remote no-contention Llama scout benchmark is still pending.
+- Qwen browser-draft pairing should remain strict or disabled until a verified compatible browser draft model exists.
 
-What this means:
+### What we are not claiming yet
 
-- The 3-node Fly mesh is stable and benchmarkable.
-- Fast Fly nodes no longer regress when browser scouts are attached because the daemon now bypasses speculative waits and the browser scout loop backs off instead of polling aggressively.
-- Slower nodes remain the best current target for browser scouts. The latest long-generation local check cut p95 from `7.96s` to `3.47s`.
-- The live `shardnetwork.live/benchmark/scout` page now completes the full browser scout bootstrap path. The pinned harness remains the source of truth because it is the repeatable benchmark path.
+- Universal browser-scout speedups on fast nodes.
+- Universal browser-scout speedups on all slower nodes.
+- Production uplift for unverified draft/verifier model pairs.
 
-Raw artifacts:
+### Representative artifacts
 
 - `benchmarks/fly-three-node-standard-v3.json`
 - `benchmarks/fly-three-node-browser-scouts-v9.json`
-- `benchmarks/local-long-browser-uplift/one-node-no-scouts-clean.json`
-- `benchmarks/local-long-browser-uplift/one-node-browser-scouts.json`
+- `baseline_qwen9b_no_scout.json`
+- `baseline_qwen9b_live_scout.json`
 
 ---
+
 ## Key Features
 
 | Feature | Description |
-|---------|-------------|
-| OpenAI-compatible API | Drop-in `/v1/chat/completions` — no client changes needed |
-| Browser-powered drafting | WebGPU Scouts reduce verifier compute load via speculative decoding |
-| KL-divergence validation | Drafts are statistically scored before tokens are finalized |
-| libp2p mesh networking | Peer-to-peer bootstrap ring with canary rollout support |
-| Overflow routing | Circuit breaker + SLA enforcement for burst traffic |
-| Observability built-in | Prometheus metrics, Grafana dashboards, structured logs |
-| Python SDK | Typed httpx + pydantic client, fully OpenAI-compatible |
+| --- | --- |
+| OpenAI-compatible API | Drop-in `/v1/chat/completions` interface |
+| Browser-powered drafting | WebGPU scouts can draft speculative tokens when the verifier pair is compatible |
+| Verification gatekeeping | Drafts are scored and either accepted or rejected before response tokens are finalized |
+| libp2p mesh networking | Multi-seed bootstrap, gossip-based discovery, and mesh forwarding |
+| Adaptive scout bypass | Fast verifiers stay neutral by refusing speculative waits that are not profitable |
+| Observability | Metrics, structured logs, speculative traces, and benchmark harnesses |
+| Python SDK | Typed client for OpenAI-compatible integrations |
 
 ---
 
 ## Architecture
 
-```
-┌──────────────────────────────────────────────────────────┐
-│                      Shard Network                       │
-│                                                          │
-│  ┌─────────────┐    draft tokens    ┌─────────────────┐ │
-│  │   Browser   │ ────────────────►  │    Verifier     │ │
-│  │   Scouts    │                    │  Daemon (Rust)  │ │
-│  │  (WebGPU)   │ ◄────────────────  │  libp2p mesh    │ │
-│  └─────────────┘   validated ACK    └────────┬────────┘ │
-│                                              │          │
-│                                    OpenAI-compatible API │
-│                                              │          │
-│                                    ┌─────────▼────────┐ │
-│                                    │   Your Clients   │ │
-│                                    └──────────────────┘ │
-└──────────────────────────────────────────────────────────┘
+```text
+Browser scouts
+  -> draft tokens
+  -> verifier daemon (Rust)
+  -> validated tokens / final response
+  -> API client
+
+Verifier nodes also participate in a libp2p mesh for bootstrap, health sharing, and request forwarding.
 ```
 
-**Request flow:**
-1. Client submits a prompt to a Verifier's `/v1/chat/completions` endpoint
-2. Active Scouts draft candidate tokens locally in the browser using WebGPU
-3. Verifier scores drafts with KL-divergence, accepts or rejects, and streams validated tokens back
+### Request flow
+
+1. A client sends a prompt to a verifier node.
+2. If a compatible browser scout is available and the verifier decides the wait is profitable, the verifier issues speculative work.
+3. The verifier validates any returned draft tokens and continues generation.
+4. The final response is returned through the same OpenAI-compatible API.
 
 ---
 
 ## Development
 
 ```bash
-make setup      # install all dependencies (Rust + web)
-make dev        # start daemon + web UI locally
-make test       # run all test suites (Rust + web + Python)
-make lint       # run all linters
-make docker     # start full stack via Docker Compose
+make setup
+make dev
+make test
+make lint
+make docker
 ```
 
-Individual targets:
+Useful targets:
 
 ```bash
-make dev-daemon   # Rust daemon only (port 9091)
-make dev-web      # Next.js UI only (port 3000)
-make test-rust    # cargo test
-make test-web     # jest
+make dev-daemon
+make dev-web
+make test-rust
+make test-web
 ```
 
 ---
@@ -190,20 +169,16 @@ print(response.choices[0].message.content)
 
 ## Repo Structure
 
-```
-desktop/rust/       Verifier daemon — libp2p mesh, API, bootstrap ring, canary rollout
-  crates/           Modular crates: common, crypto, gateway, ledger, metrics, network, scheduler, verifier
-  daemon/           Binary entrypoint
-web/                Next.js Scout UI + OpenAI-compatible proxy API routes
-sdk/python/         Typed Python client (OpenAI-compatible, httpx + pydantic)
-cpp/                llama.cpp inference library + C bridge
-integrations/       Overflow router with circuit breaker and SLA enforcement
-benchmarks/         Distributed benchmark harness and scenario runner
-deploy/             Docker Compose, Terraform, Kubernetes, Prometheus + Grafana configs
-installers/         Platform packages: Linux, macOS, Windows, Homebrew, winget
-scripts/            Build, release, version sync, and signing automation
-tests/              Root-level Python tests (verification engine, credit system)
-docs/               Architecture, deployment, API, and operations documentation
+```text
+desktop/rust/       Verifier daemon, mesh, scheduler, verifier crates
+web/                Next.js website, scout UI, OpenAI-compatible proxy routes
+sdk/python/         Typed Python client
+cpp/                llama.cpp bridge and native inference helpers
+benchmarks/         Benchmark harnesses and scenario runners
+deploy/             Docker, Fly, release, monitoring, and infra assets
+installers/         Desktop packaging and installer assets
+scripts/            Build, release, deploy, and developer helpers
+docs/               Architecture, runbooks, and operational guidance
 ```
 
 ---
@@ -211,24 +186,20 @@ docs/               Architecture, deployment, API, and operations documentation
 ## Documentation
 
 | Guide | Description |
-|-------|-------------|
-| [run-a-node.md](docs/run-a-node.md) | Quickstart for new node operators |
-| [mesh-benchmark.md](docs/mesh-benchmark.md) | Local Docker mesh scaling and performance comparison |
-| [release-rc-checklist.md](docs/release-rc-checklist.md) | Public release go/no-go checklist and RC matrix command |
-| [release-rc-runbook.md](docs/release-rc-runbook.md) | Step-by-step RC execution, parity checks, and rollback commands |
-| [gui-audit.md](docs/gui-audit.md) | GUI readiness audit and remediation summary |
-| [architecture.md](docs/architecture.md) | System design and request flow |
-| [deployment.md](docs/deployment.md) | Environment variables and HA setup |
-| [api.md](docs/api.md) | API reference |
-| [verification-protocol.md](docs/verification-protocol.md) | Draft token validation protocol |
-| [contributing.md](docs/contributing.md) | Contribution guidelines |
-| [sla.md](docs/sla.md) | SLA definition and thresholds |
-| [enterprise-vpc-deployment.md](docs/enterprise-vpc-deployment.md) | Private VPC deployment |
+| --- | --- |
+| [docs/run-a-node.md](docs/run-a-node.md) | Node operator quickstart |
+| [docs/mesh-benchmark.md](docs/mesh-benchmark.md) | Local Docker mesh scaling guide |
+| [docs/REMOTE_LLAMA_SCOUT_TEST_RUNBOOK.md](docs/REMOTE_LLAMA_SCOUT_TEST_RUNBOOK.md) | Remote Llama browser-scout test procedure |
+| [docs/release-rc-checklist.md](docs/release-rc-checklist.md) | Release checklist |
+| [docs/release-rc-runbook.md](docs/release-rc-runbook.md) | RC execution and rollback guide |
+| [docs/architecture.md](docs/architecture.md) | System design and request flow |
+| [docs/deployment.md](docs/deployment.md) | Environment variables and deployment setup |
+| [docs/api.md](docs/api.md) | API reference |
+| [docs/verification-protocol.md](docs/verification-protocol.md) | Draft validation protocol |
+| [docs/contributing.md](docs/contributing.md) | Contribution guide |
 
 ---
 
 ## License
 
 Business Source License 1.1 (BSL 1.1). See [LICENSE](LICENSE).
-
-

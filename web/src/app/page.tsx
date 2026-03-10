@@ -67,16 +67,14 @@ const joinPaths: JoinPath[] = [
 const benchmarkRows: BenchmarkRow[] = [
   { scenario: "3 Fly nodes, verifier-only", p95Ms: 986.605, tps: 0.55, errorPct: 0, verdict: "Current fast-node baseline on pinned Fly hardware" },
   { scenario: "3 Fly nodes, browser scouts attached", p95Ms: 965.127, tps: 0.55, errorPct: 0, verdict: "Fast nodes stay neutral because scouts back off when bypass is active" },
-  { scenario: "1 slower local node, verifier-only", p95Ms: 7958.929, tps: 0.2167, errorPct: 0, verdict: "Local slow-node long-generation baseline" },
-  { scenario: "1 slower local node, browser scouts active", p95Ms: 3471.707, tps: 0.2167, errorPct: 0, verdict: "Browser scouts cut tail latency on this local slow node" },
-  { scenario: "EC2 public path, verifier-only", p95Ms: 1054.272, tps: 0.2333, errorPct: 0, verdict: "Live production slow-node baseline" },
-  { scenario: "EC2 public path, live browser scouts", p95Ms: 1419.182, tps: 0.2333, errorPct: 0, verdict: "Scouts engage (100% acceptance, 5 draft tokens) but add overhead on this path" },
+  { scenario: "Local Llama 8B verifier, same-machine browser scout", p95Ms: 0, tps: 0, errorPct: 0, verdict: "Correctness path is proven: live scout can lease, return drafts, and verify accepted tokens, but same-machine GPU contention makes latency numbers non-representative" },
+  { scenario: "Qwen browser draft against local Qwen 9B verifier", p95Ms: 0, tps: 0, errorPct: 0, verdict: "Strict mode rejects the pair; it is not a safe speculative match today" },
 ]
 
 const takeaways = [
   "Fast Fly verifiers stay neutral with browser scouts attached because the daemon bypasses speculative waits and scouts back off instead of polling aggressively.",
-  "Browser scouts can engage successfully on slower nodes with real accepted speculative work. On one local slow node, scouts cut p95 from 7.96s to 3.47s. On the live EC2 public path, scouts engaged (100% acceptance, 5 draft tokens per request) but did not beat verifier-only latency.",
-  "Slower-node uplift is node- and path-dependent, not yet a universal production claim. The live shardnetwork.live benchmark page now completes the full browser scout bootstrap path. The pinned harness remains the source of truth.",
+  "The Llama browser-draft path now works end to end against a larger local verifier: lease issued, mailbox hit, and accepted speculative tokens are all proven.",
+  "A clean remote no-contention Llama benchmark is still pending. Qwen browser drafts remain strict or disabled until we have a verified compatible browser-side draft model.",
 ]
 
 function formatCompact(value: number) {
@@ -183,12 +181,12 @@ export default function HomePage() {
               <div className="rounded-2xl border border-white/10 bg-base-900 p-4">
                 <p className="text-xs uppercase tracking-[0.18em] text-ink-400">Release status</p>
                 <p className="mt-2 text-lg font-semibold text-amber-200">NO_GO</p>
-                <p className="mt-1 text-sm text-ink-300">Short-request release stability is the current gate. Scout uplift is tracked separately.</p>
+                <p className="mt-1 text-sm text-ink-300">Short-request release stability is the current release gate. Scout uplift is tracked separately and still being validated.</p>
               </div>
               <div className="rounded-2xl border border-white/10 bg-base-900 p-4">
                 <p className="text-xs uppercase tracking-[0.18em] text-ink-400">Best current path</p>
                 <p className="mt-2 text-lg font-semibold text-ink-50">1 verifier, no scouts</p>
-                <p className="mt-1 text-sm text-ink-300">Best current short-run baseline is 2 verifiers without scout dependence.</p>
+                <p className="mt-1 text-sm text-ink-300">Best current short-run baseline is verifier-first routing without depending on browser scouts.</p>
               </div>
               <div className="rounded-2xl border border-white/10 bg-base-900 p-4">
                 <p className="text-xs uppercase tracking-[0.18em] text-ink-400">Browser status</p>
@@ -257,7 +255,7 @@ export default function HomePage() {
           <p className="text-xs uppercase tracking-[0.22em] text-ink-400">Latest validated benchmark result</p>
           <h2 className="mt-2 text-3xl font-semibold text-ink-50">What works right now</h2>
           <p className="mt-3 text-sm leading-6 text-ink-300">
-            These numbers reflect the latest validated tests on March 9, 2026. The Fly rows are from the pinned 3-node production-like comparison. The local rows are from the long-generation browser-scout check on slower hardware. The EC2 rows are from a live production-path comparison using shardnetwork.live.
+            These rows reflect the latest validated benchmark and compatibility evidence. The Fly rows are the current fast-node baseline. The local Llama row is a correctness milestone, not a fair speed benchmark, because the verifier and scout share one machine. The Qwen row is included because it established an incompatibility we now guard against.
           </p>
           <div className="mt-5 overflow-hidden rounded-2xl border border-ring">
             <table className="min-w-full divide-y divide-ring text-left text-sm">
@@ -274,9 +272,9 @@ export default function HomePage() {
                 {benchmarkRows.map((row) => (
                   <tr key={row.scenario}>
                     <td className="px-4 py-3 font-medium text-ink-50">{row.scenario}</td>
-                    <td className="px-4 py-3">{row.p95Ms.toLocaleString(undefined, { maximumFractionDigits: 3 })}</td>
-                    <td className="px-4 py-3">{row.tps.toLocaleString(undefined, { maximumFractionDigits: 2 })}</td>
-                    <td className="px-4 py-3">{row.errorPct.toFixed(2)}%</td>
+                    <td className="px-4 py-3">{row.p95Ms > 0 ? row.p95Ms.toLocaleString(undefined, { maximumFractionDigits: 3 }) : "n/a"}</td>
+                    <td className="px-4 py-3">{row.tps > 0 ? row.tps.toLocaleString(undefined, { maximumFractionDigits: 2 }) : "n/a"}</td>
+                    <td className="px-4 py-3">{row.p95Ms > 0 || row.errorPct > 0 ? `${row.errorPct.toFixed(2)}%` : "n/a"}</td>
                     <td className="px-4 py-3 text-ink-300">{row.verdict}</td>
                   </tr>
                 ))}

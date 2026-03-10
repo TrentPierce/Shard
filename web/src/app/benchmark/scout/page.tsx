@@ -55,6 +55,31 @@ async function inferDraftModelPreset(backendUrl: string): Promise<string> {
   return ""
 }
 
+function stateGuidance(state: BenchmarkState, detail: string) {
+  if (state === "failed") {
+    if (/Invalid ShaderModule/i.test(detail)) {
+      return "WebGPU initialized but your browser or GPU driver rejected the model shader. Try the latest Edge or Chrome, turn on hardware acceleration, and prefer the discrete GPU if the machine has one."
+    }
+    if (/WebGPU/i.test(detail)) {
+      return "This browser can view the page, but it cannot run the real benchmark scout path. Chrome or Edge with WebGPU and current GPU drivers work best."
+    }
+    if (/register/i.test(detail)) {
+      return "The draft model loaded, but the scout could not register with the verifier. Recheck the backend URL and make sure the daemon allows this origin."
+    }
+    return "The scout did not finish initialization. The status line above is the direct failure reason."
+  }
+  if (state === "ready") {
+    return "The scout is registered and waiting for profitable work. On fast verifiers this can stay idle on purpose because the daemon bypasses speculative waits."
+  }
+  if (state === "contributing") {
+    return "The browser scout is active. A live verifier may still temporarily back off or return empty work when it decides the draft path is not profitable."
+  }
+  if (state === "starting_worker" || state === "registering_runtime") {
+    return "Initialization is almost complete. Once registration succeeds, the page will stay open and poll for work automatically."
+  }
+  return "This page is for controlled benchmark sessions. For normal contribution, the public Join flow is still the easier path."
+}
+
 export default function BenchmarkScoutPage() {
   const [query, setQuery] = useState(() => ({
     backend: "",
@@ -85,6 +110,8 @@ export default function BenchmarkScoutPage() {
     }
     return detail
   }, [detail, lastSuccessAtMs, progress, state])
+  const directBrowserBackend = useMemo(() => isDirectBrowserBackend(parsedBackend.backendUrl), [parsedBackend.backendUrl])
+  const guidance = useMemo(() => stateGuidance(state, detail), [detail, state])
 
   useEffect(() => {
     if (typeof window === "undefined") return
@@ -126,7 +153,6 @@ export default function BenchmarkScoutPage() {
 
     const boot = async () => {
       try {
-        const directBrowserBackend = isDirectBrowserBackend(parsedBackend.backendUrl)
         const runtimeHeaders = parsedBackend.backendUrl && !directBrowserBackend
           ? {
               "x-shard-backend-url": parsedBackend.backendUrl,
@@ -291,6 +317,7 @@ export default function BenchmarkScoutPage() {
         <div className="mt-5 rounded-2xl border border-ring bg-base-950/40 p-4">
           <p className="text-xs uppercase tracking-[0.16em] text-ink-400">Status</p>
           <p className="mt-2 text-sm text-ink-100">{statusLine}</p>
+          <p className="mt-3 text-sm leading-6 text-ink-300">{guidance}</p>
           {progress ? (
             <div className="mt-4">
               <div className="h-3 overflow-hidden rounded-full bg-white/6">
@@ -301,6 +328,23 @@ export default function BenchmarkScoutPage() {
               </div>
             </div>
           ) : null}
+        </div>
+
+        <div className="mt-5 grid gap-3 sm:grid-cols-2">
+          <div className="rounded-2xl border border-ring bg-base-950/40 p-4">
+            <p className="text-xs uppercase tracking-[0.16em] text-ink-400">Compatibility note</p>
+            <p className="mt-2 text-sm leading-6 text-ink-200">
+              Use matching model families for speculative tests. Llama browser drafts are currently the safest benchmark path. Qwen browser drafts stay strict unless the verifier pair is explicitly proven compatible.
+            </p>
+          </div>
+          <div className="rounded-2xl border border-ring bg-base-950/40 p-4">
+            <p className="text-xs uppercase tracking-[0.16em] text-ink-400">Backend mode</p>
+            <p className="mt-2 text-sm leading-6 text-ink-200">
+              {directBrowserBackend
+                ? "Direct local mode: scout API calls go straight to the verifier instead of the site proxy."
+                : "Proxy mode: the page talks through shardnetwork.live, which is best for public benchmark and pinned-backend tests."}
+            </p>
+          </div>
         </div>
       </div>
     </main>
