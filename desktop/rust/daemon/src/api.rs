@@ -2277,6 +2277,7 @@ fn scout_config_snapshot_json(state: &SharedState) -> serde_json::Value {
             "min_request_tokens": speculative_min_request_tokens(),
             "long_request_min_tokens": scout_long_request_min_tokens(),
             "long_request_draft_token_count": scout_long_request_draft_token_count(),
+            "prompt_context_max_chars": scout_prompt_context_max_chars(),
             "fast_verifier_bypass_avg_ms": speculative_fast_verifier_avg_bypass_ms(),
             "fast_verifier_bypass_sticky_ms": speculative_fast_verifier_sticky_ms(),
             "timeout": {

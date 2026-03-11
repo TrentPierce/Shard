@@ -1357,6 +1357,29 @@ pub(crate) fn scout_long_request_draft_token_count() -> usize {
         .unwrap_or(0)
 }
 
+pub(crate) fn scout_prompt_context_max_chars() -> usize {
+    std::env::var("SHARD_SCOUT_PROMPT_CONTEXT_MAX_CHARS")
+        .ok()
+        .and_then(|v| v.trim().parse::<usize>().ok())
+        .map(|v| v.clamp(0, 64 * 1024))
+        .unwrap_or(0)
+}
+
+fn truncate_prompt_context_for_scout(prompt: &str) -> String {
+    let max_chars = scout_prompt_context_max_chars();
+    if max_chars == 0 {
+        return prompt.to_string();
+    }
+    let total_chars = prompt.chars().count();
+    if total_chars <= max_chars {
+        return prompt.to_string();
+    }
+    prompt
+        .chars()
+        .skip(total_chars.saturating_sub(max_chars))
+        .collect()
+}
+
 fn effective_draft_token_count_with(
     default_count: usize,
     request_max_tokens: usize,
@@ -1820,9 +1843,12 @@ async fn fetch_speculative_draft(
 
     let draft_token_count =
         effective_draft_token_count(config.draft_token_count, request_max_tokens);
+    let prompt_context = truncate_prompt_context_for_scout(prompt);
+    let original_prompt_chars = prompt.chars().count();
+    let prompt_context_chars = prompt_context.chars().count();
     let work = WorkRequest {
         request_id: request_id.to_string(),
-        prompt_context: prompt.to_string(),
+        prompt_context,
         min_tokens: draft_token_count as i32,
         created_at_ms: Some(now_ms()),
         lease_id: None,
@@ -1847,6 +1873,8 @@ async fn fetch_speculative_draft(
         effective_timeout_ms = scout_timeout_ms,
         request_max_tokens,
         draft_token_count,
+        original_prompt_chars,
+        prompt_context_chars,
         "speculative timeout inputs"
     );
     if scout_timeout_ms == 0 {
@@ -1884,7 +1912,7 @@ async fn fetch_speculative_draft(
         "dispatch_started",
         None,
         Some(format!(
-            "draft_token_count={draft_token_count}, timeout_ms={scout_timeout_ms}, configured_timeout_ms={}, live_timeout_ms={}, avg_latency_ms={}, avg_draft_arrival_ms={}, avg_accepted_tokens_x100={}, request_max_tokens={request_max_tokens}",
+            "draft_token_count={draft_token_count}, timeout_ms={scout_timeout_ms}, configured_timeout_ms={}, live_timeout_ms={}, avg_latency_ms={}, avg_draft_arrival_ms={}, avg_accepted_tokens_x100={}, request_max_tokens={request_max_tokens}, original_prompt_chars={original_prompt_chars}, prompt_context_chars={prompt_context_chars}",
             config.scout_timeout_ms,
             state.scout_timeout_ms.load(Ordering::Relaxed),
             state.avg_latency_ms.load(Ordering::Relaxed),
@@ -3228,7 +3256,7 @@ mod tests {
         mesh_forward_score, model_pair_acceptance_rates, normalize_endpoint,
         parse_speculative_min_request_tokens, probe_allowed_for_request,
         remove_work_id_from_scout_queue, request_host_is_local, requested_request_id,
-        resolve_inference_mode,
+        resolve_inference_mode, truncate_prompt_context_for_scout,
         should_bypass_speculative_for_fast_verifier,
         should_abort_on_degenerate_output, should_attempt_mesh_forward, should_forward_to_mesh,
         should_refuse_mesh_degraded, strip_control_tokens, InferenceMode, MeshEndpointScore,
@@ -3397,6 +3425,14 @@ mod tests {
         assert_eq!(effective_draft_token_count_with(3, 8, 24, 6), 3);
         assert_eq!(effective_draft_token_count_with(3, 32, 24, 6), 6);
         assert_eq!(effective_draft_token_count_with(3, 4, 24, 6), 3);
+    }
+
+    #[test]
+    fn truncate_prompt_context_for_scout_respects_tail_limit() {
+        std::env::set_var("SHARD_SCOUT_PROMPT_CONTEXT_MAX_CHARS", "5");
+        assert_eq!(truncate_prompt_context_for_scout("hello"), "hello");
+        assert_eq!(truncate_prompt_context_for_scout("abcdefgh"), "defgh");
+        std::env::remove_var("SHARD_SCOUT_PROMPT_CONTEXT_MAX_CHARS");
     }
 
     #[test]
