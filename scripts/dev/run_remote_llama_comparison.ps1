@@ -5,6 +5,9 @@ param(
     [int]$BaselineRuns = 10,
     [int]$DistributedRuns = 10,
     [string]$Prompt = "Write one short paragraph explaining why peer-to-peer AI networks matter.",
+    [double]$Temperature = 0.0,
+    [double]$TopP = 1.0,
+    [Nullable[int]]$Seed = $null,
     [string]$OutputPath = "runtime\\remote_llama_comparison_10v10.json"
 )
 
@@ -28,20 +31,31 @@ function New-RequestBodyFile {
         [string]$Path,
         [string]$ModelName,
         [int]$TokenCount,
-        [string]$UserPrompt
+        [string]$UserPrompt,
+        [double]$RequestTemperature,
+        [double]$RequestTopP,
+        [Nullable[int]]$RequestSeed
     )
 
-    $json = @{
+    $json = [ordered]@{
         model = $ModelName
         stream = $false
         max_tokens = $TokenCount
+        temperature = $RequestTemperature
+        top_p = $RequestTopP
         messages = @(
             @{
                 role = "user"
                 content = $UserPrompt
             }
         )
-    } | ConvertTo-Json -Depth 6 -Compress
+    }
+
+    if ($null -ne $RequestSeed) {
+        $json.seed = [int]$RequestSeed
+    }
+
+    $json = $json | ConvertTo-Json -Depth 6 -Compress
 
     $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
     [System.IO.File]::WriteAllText((Join-Path (Get-Location) $Path), $json, $utf8NoBom)
@@ -107,6 +121,7 @@ function Invoke-OneRun {
         quick = [pscustomobject]@{
             response_model = $response.model
             completion_tokens = $response.usage.completion_tokens
+            output_chars = if ($response.choices[0].message.content) { $response.choices[0].message.content.Length } else { 0 }
             wait_hit = ($null -ne $waitHit)
             wait_timeout = ($null -ne $waitTimeout)
             wait_hit_ms = if ($waitHit) { $waitHit.pending_age_ms } else { $null }
@@ -117,7 +132,7 @@ function Invoke-OneRun {
 }
 
 $bodyPath = "runtime\\tmp_remote_llama_req.json"
-New-RequestBodyFile -Path $bodyPath -ModelName $Model -TokenCount $MaxTokens -UserPrompt $Prompt
+New-RequestBodyFile -Path $bodyPath -ModelName $Model -TokenCount $MaxTokens -UserPrompt $Prompt -RequestTemperature $Temperature -RequestTopP $TopP -RequestSeed $Seed
 
 $results = [System.Collections.Generic.List[object]]::new()
 
@@ -138,7 +153,7 @@ if ($dir) {
 
 $results | ConvertTo-Json -Depth 20 | Set-Content -Path $OutputPath -Encoding UTF8
 
-$summaryView = $results | Select-Object mode, run, latency_ms, @{n="response_model";e={$_.quick.response_model}}, @{n="completion_tokens";e={$_.quick.completion_tokens}}, @{n="wait_hit";e={$_.quick.wait_hit}}, @{n="wait_timeout";e={$_.quick.wait_timeout}}, @{n="wait_hit_ms";e={$_.quick.wait_hit_ms}}, @{n="verify_detail";e={$_.quick.verify_detail}}, @{n="response_detail";e={$_.quick.response_detail}}
+$summaryView = $results | Select-Object mode, run, latency_ms, @{n="response_model";e={$_.quick.response_model}}, @{n="completion_tokens";e={$_.quick.completion_tokens}}, @{n="output_chars";e={$_.quick.output_chars}}, @{n="wait_hit";e={$_.quick.wait_hit}}, @{n="wait_timeout";e={$_.quick.wait_timeout}}, @{n="wait_hit_ms";e={$_.quick.wait_hit_ms}}, @{n="verify_detail";e={$_.quick.verify_detail}}, @{n="response_detail";e={$_.quick.response_detail}}
 
 Write-Host ""
 Write-Host "Saved results to $OutputPath"
