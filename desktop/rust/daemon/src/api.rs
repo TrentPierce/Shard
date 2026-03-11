@@ -117,10 +117,10 @@ pub(crate) async fn health_handler(
 
 async fn recent_scout_submitters_count(state: &SharedState, now: u128) -> usize {
     let mut submits = state.scout_draft_last_submit.lock().await;
-    prune_recent_activity_map(&mut submits, now, SCOUT_CLIENT_RUNTIME_TTL_MS);
+    prune_recent_activity_map(&mut submits, now, scout_client_runtime_ttl_ms());
     submits
         .values()
-        .filter(|ts| now.saturating_sub(**ts) <= SCOUT_CLIENT_ACTIVE_WINDOW_MS)
+        .filter(|ts| now.saturating_sub(**ts) <= scout_client_active_window_ms())
         .count()
 }
 
@@ -711,6 +711,83 @@ const DEFAULT_SCOUT_BOOTSTRAP_LATENCY_MAX_MS: u64 = 4_500;
 const DEFAULT_SCOUT_MIN_QUALITY_SCORE: i32 = 35;
 const DEFAULT_SCOUT_MIN_QUALITY_SAMPLES: usize = 6;
 
+fn scout_client_runtime_ttl_ms() -> u128 {
+    static TTL_MS: std::sync::OnceLock<u128> = std::sync::OnceLock::new();
+    *TTL_MS.get_or_init(|| {
+        std::env::var("SHARD_SCOUT_CLIENT_RUNTIME_TTL_MS")
+            .ok()
+            .and_then(|v| v.trim().parse::<u128>().ok())
+            .filter(|v| *v >= 1_000)
+            .unwrap_or(SCOUT_CLIENT_RUNTIME_TTL_MS)
+    })
+}
+
+fn scout_client_active_window_ms() -> u128 {
+    static WINDOW_MS: std::sync::OnceLock<u128> = std::sync::OnceLock::new();
+    *WINDOW_MS.get_or_init(|| {
+        std::env::var("SHARD_SCOUT_CLIENT_ACTIVE_WINDOW_MS")
+            .ok()
+            .and_then(|v| v.trim().parse::<u128>().ok())
+            .filter(|v| *v >= 1_000)
+            .unwrap_or(SCOUT_CLIENT_ACTIVE_WINDOW_MS)
+    })
+}
+
+fn scout_backpressure_medium_queue_depth() -> usize {
+    static VALUE: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *VALUE.get_or_init(|| {
+        std::env::var("SHARD_SCOUT_BACKPRESSURE_MEDIUM_QUEUE_DEPTH")
+            .ok()
+            .and_then(|v| v.trim().parse::<usize>().ok())
+            .filter(|v| *v > 0)
+            .unwrap_or(DEFAULT_SCOUT_BACKPRESSURE_MEDIUM_QUEUE_DEPTH)
+    })
+}
+
+fn scout_backpressure_high_queue_depth() -> usize {
+    static VALUE: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *VALUE.get_or_init(|| {
+        std::env::var("SHARD_SCOUT_BACKPRESSURE_HIGH_QUEUE_DEPTH")
+            .ok()
+            .and_then(|v| v.trim().parse::<usize>().ok())
+            .filter(|v| *v > 0)
+            .unwrap_or(DEFAULT_SCOUT_BACKPRESSURE_HIGH_QUEUE_DEPTH)
+    })
+}
+
+fn scout_admission_retry_min_ms() -> u64 {
+    static VALUE: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+    *VALUE.get_or_init(|| {
+        std::env::var("SHARD_SCOUT_ADMISSION_RETRY_MIN_MS")
+            .ok()
+            .and_then(|v| v.trim().parse::<u64>().ok())
+            .filter(|v| *v > 0)
+            .unwrap_or(DEFAULT_SCOUT_ADMISSION_RETRY_MIN_MS)
+    })
+}
+
+fn scout_admission_retry_max_ms() -> u64 {
+    static VALUE: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+    *VALUE.get_or_init(|| {
+        std::env::var("SHARD_SCOUT_ADMISSION_RETRY_MAX_MS")
+            .ok()
+            .and_then(|v| v.trim().parse::<u64>().ok())
+            .filter(|v| *v > 0)
+            .unwrap_or(DEFAULT_SCOUT_ADMISSION_RETRY_MAX_MS)
+    })
+}
+
+fn scout_rate_limit_retention_ms() -> u128 {
+    static VALUE: std::sync::OnceLock<u128> = std::sync::OnceLock::new();
+    *VALUE.get_or_init(|| {
+        std::env::var("SHARD_SCOUT_RATE_LIMIT_RETENTION_MS")
+            .ok()
+            .and_then(|v| v.trim().parse::<u128>().ok())
+            .filter(|v| *v >= 1_000)
+            .unwrap_or(DEFAULT_SCOUT_RATE_LIMIT_RETENTION_MS)
+    })
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ScoutAdmissionMode {
     Allow,
@@ -766,7 +843,7 @@ pub(crate) fn prune_scout_client_runtime(
     now: u128,
 ) {
     statuses.retain(|_, status| {
-        now.saturating_sub(status.last_event_ms) <= SCOUT_CLIENT_RUNTIME_TTL_MS
+        now.saturating_sub(status.last_event_ms) <= scout_client_runtime_ttl_ms()
     });
 }
 
@@ -789,7 +866,7 @@ fn summarize_scout_client_runtime(
     let mut last_submit_success_ms: Option<u128> = None;
 
     for status in statuses.values() {
-        let active = now.saturating_sub(status.last_event_ms) <= SCOUT_CLIENT_ACTIVE_WINDOW_MS;
+        let active = now.saturating_sub(status.last_event_ms) <= scout_client_active_window_ms();
         if active {
             active_runtime_total += 1;
         }
@@ -1082,8 +1159,8 @@ fn scout_admission_retry_after_ms(
     avg_latency_ms: u64,
     p95_latency_ms: u64,
 ) -> u64 {
-    let min_retry = DEFAULT_SCOUT_ADMISSION_RETRY_MIN_MS;
-    let max_retry = DEFAULT_SCOUT_ADMISSION_RETRY_MAX_MS;
+    let min_retry = scout_admission_retry_min_ms();
+    let max_retry = scout_admission_retry_max_ms().max(min_retry);
     let queue_penalty = queue_depth.saturating_mul(120) as u64;
     let lat_penalty = ((avg_latency_ms.max(p95_latency_ms)) / 8).min(3_000);
     min_retry
@@ -1274,7 +1351,7 @@ fn apply_scout_rate_limit(
     now: u128,
     min_interval_ms: u128,
 ) -> Option<u64> {
-    table.retain(|_, ts| now.saturating_sub(*ts) <= DEFAULT_SCOUT_RATE_LIMIT_RETENTION_MS);
+    table.retain(|_, ts| now.saturating_sub(*ts) <= scout_rate_limit_retention_ms());
     if min_interval_ms == 0 {
         table.insert(scout_id.to_string(), now);
         return None;
@@ -1291,7 +1368,7 @@ fn apply_scout_rate_limit(
 }
 
 async fn recent_active_scouts(state: &SharedState, now: u128) -> std::collections::HashSet<String> {
-    let cutoff = now.saturating_sub(SCOUT_CLIENT_ACTIVE_WINDOW_MS);
+    let cutoff = now.saturating_sub(scout_client_active_window_ms());
     let results = state.results.lock().await;
     results
         .iter()
@@ -1346,12 +1423,12 @@ async fn scout_bootstrap_assignment_allowed(
         let mut runtime = state.scout_client_runtime.lock().await;
         prune_scout_client_runtime(&mut runtime, now);
         let has_active_runtime = runtime.get(scout_id).is_some_and(|status| {
-            status
-                .runtime_mode
-                .as_deref()
-                .map(|mode| mode.eq_ignore_ascii_case("webgpu"))
-                .unwrap_or(false)
-                && now.saturating_sub(status.last_event_ms) <= SCOUT_CLIENT_ACTIVE_WINDOW_MS
+                status
+                    .runtime_mode
+                    .as_deref()
+                    .map(|mode| mode.eq_ignore_ascii_case("webgpu"))
+                    .unwrap_or(false)
+                && now.saturating_sub(status.last_event_ms) <= scout_client_active_window_ms()
         });
         let browser_draft_capable = runtime
             .values()
@@ -1361,7 +1438,7 @@ async fn scout_bootstrap_assignment_allowed(
                     .as_deref()
                     .map(|mode| mode.eq_ignore_ascii_case("webgpu"))
                     .unwrap_or(false)
-                    && now.saturating_sub(status.last_event_ms) <= SCOUT_CLIENT_ACTIVE_WINDOW_MS
+                    && now.saturating_sub(status.last_event_ms) <= scout_client_active_window_ms()
             })
             .count();
         (has_active_runtime, browser_draft_capable)
@@ -1372,7 +1449,7 @@ async fn scout_bootstrap_assignment_allowed(
 
     let recent_submitters = {
         let mut submits = state.scout_draft_last_submit.lock().await;
-        prune_recent_activity_map(&mut submits, now, SCOUT_CLIENT_RUNTIME_TTL_MS);
+        prune_recent_activity_map(&mut submits, now, scout_client_runtime_ttl_ms());
         submits
             .values()
             .filter(|ts| now.saturating_sub(**ts) <= SCOUT_SUBMIT_ACTIVE_WINDOW_MS)
@@ -1399,11 +1476,11 @@ fn scout_assignment_backpressured(
         return false;
     }
 
-    let modulus = if queue_depth >= DEFAULT_SCOUT_BACKPRESSURE_HIGH_QUEUE_DEPTH
+    let modulus = if queue_depth >= scout_backpressure_high_queue_depth()
         || avg_latency_ms >= latency_severe_ms
     {
         8
-    } else if queue_depth >= DEFAULT_SCOUT_BACKPRESSURE_MEDIUM_QUEUE_DEPTH
+    } else if queue_depth >= scout_backpressure_medium_queue_depth()
         || avg_latency_ms >= latency_warn_ms
     {
         6
@@ -2160,12 +2237,12 @@ fn scout_config_snapshot_json(state: &SharedState) -> serde_json::Value {
     serde_json::json!({
         "profile": std::env::var("SHARD_RELEASE_PROFILE").unwrap_or_else(|_| "default".to_string()),
         "scout_work_max_age_ms": scout_work_max_age_ms(),
-        "scout_client_runtime_ttl_ms": SCOUT_CLIENT_RUNTIME_TTL_MS,
-        "scout_client_active_window_ms": SCOUT_CLIENT_ACTIVE_WINDOW_MS,
+        "scout_client_runtime_ttl_ms": scout_client_runtime_ttl_ms(),
+        "scout_client_active_window_ms": scout_client_active_window_ms(),
         "backpressure": {
             "start_queue_depth": scout_backpressure_start_queue_depth(),
-            "medium_queue_depth": DEFAULT_SCOUT_BACKPRESSURE_MEDIUM_QUEUE_DEPTH,
-            "high_queue_depth": DEFAULT_SCOUT_BACKPRESSURE_HIGH_QUEUE_DEPTH,
+            "medium_queue_depth": scout_backpressure_medium_queue_depth(),
+            "high_queue_depth": scout_backpressure_high_queue_depth(),
             "latency_warn_ms": scout_backpressure_latency_warn_ms(),
             "latency_severe_ms": scout_backpressure_latency_severe_ms(),
         },
@@ -2174,13 +2251,13 @@ fn scout_config_snapshot_json(state: &SharedState) -> serde_json::Value {
             "queue_depth_hard": scout_admission_queue_hard_depth(),
             "latency_soft_ms": scout_admission_latency_soft_ms(),
             "latency_hard_ms": scout_admission_latency_hard_ms(),
-            "retry_min_ms": DEFAULT_SCOUT_ADMISSION_RETRY_MIN_MS,
-            "retry_max_ms": DEFAULT_SCOUT_ADMISSION_RETRY_MAX_MS,
+            "retry_min_ms": scout_admission_retry_min_ms(),
+            "retry_max_ms": scout_admission_retry_max_ms(),
         },
         "rate_limit": {
             "poll_min_interval_ms": scout_poll_min_interval_ms(),
             "draft_min_interval_ms": scout_draft_min_interval_ms(),
-            "retention_ms": DEFAULT_SCOUT_RATE_LIMIT_RETENTION_MS,
+            "retention_ms": scout_rate_limit_retention_ms(),
         },
         "active_cap": {
             "base": scout_active_cap(state),

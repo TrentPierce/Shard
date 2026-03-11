@@ -5,6 +5,7 @@ param(
     [string]$ModelId = "",
     [ValidateSet("short","long","custom")]
     [string]$BenchmarkProfile = "short",
+    [string[]]$OverrideEnvFiles = @(),
     [string[]]$EnvFiles = @(
         "deploy/release/rc1.env",
         "deploy/release/benchmark.env"
@@ -91,7 +92,8 @@ function Resolve-ModelId {
 function Set-EnvFromFile {
     param(
         [System.Diagnostics.ProcessStartInfo]$ProcessInfo,
-        [string]$Path
+        [string]$Path,
+        [switch]$OverwriteExisting
     )
 
     $fullPath = if ([System.IO.Path]::IsPathRooted($Path)) {
@@ -113,8 +115,50 @@ function Set-EnvFromFile {
         if ($parts.Count -ne 2) {
             continue
         }
+        if (-not $OverwriteExisting -and $ProcessInfo.EnvironmentVariables.ContainsKey($parts[0])) {
+            continue
+        }
         $ProcessInfo.EnvironmentVariables[$parts[0]] = $parts[1]
     }
+}
+
+function Apply-CurrentProcessOverrides {
+    param(
+        [System.Diagnostics.ProcessStartInfo]$ProcessInfo
+    )
+
+    $names = [System.Environment]::GetEnvironmentVariables().Keys | ForEach-Object { $_.ToString() }
+    foreach ($name in $names) {
+        if (
+            $name.StartsWith("SHARD_", [System.StringComparison]::OrdinalIgnoreCase) -or
+            $name.StartsWith("BITNET_", [System.StringComparison]::OrdinalIgnoreCase) -or
+            $name -in @("RUST_LOG", "RUST_BACKTRACE")
+        ) {
+            $value = [System.Environment]::GetEnvironmentVariable($name)
+            if ($null -ne $value -and $value -ne "") {
+                $ProcessInfo.EnvironmentVariables[$name] = $value
+            }
+        }
+    }
+}
+
+function Get-EffectiveConfigSnapshot {
+    param(
+        [System.Diagnostics.ProcessStartInfo]$ProcessInfo
+    )
+
+    $interesting = $ProcessInfo.EnvironmentVariables.Keys |
+        Where-Object {
+            $_.StartsWith("SHARD_", [System.StringComparison]::OrdinalIgnoreCase) -or
+            $_ -in @("BITNET_MODEL", "BITNET_LIB", "RUST_LOG", "RUST_BACKTRACE")
+        } |
+        Sort-Object -Unique
+
+    $snapshot = [ordered]@{}
+    foreach ($key in $interesting) {
+        $snapshot[$key] = $ProcessInfo.EnvironmentVariables[$key]
+    }
+    return $snapshot
 }
 
 Get-Process -Name "shard-daemon","shard-daemon.locked" -ErrorAction SilentlyContinue | Stop-Process -Force
@@ -138,15 +182,14 @@ foreach ($envFile in $EnvFiles) {
     Set-EnvFromFile -ProcessInfo $psi -Path $envFile
 }
 
-if ($BenchmarkProfile -eq "long") {
-    $psi.EnvironmentVariables["SHARD_SCOUT_BOOTSTRAP_ALLOW_HARD_CIRCUIT"] = "true"
+Apply-CurrentProcessOverrides -ProcessInfo $psi
+
+foreach ($envFile in $OverrideEnvFiles) {
+    Set-EnvFromFile -ProcessInfo $psi -Path $envFile -OverwriteExisting
 }
 
-if ($env:SHARD_SCOUT_TIMEOUT_MS) {
-    $psi.EnvironmentVariables["SHARD_SCOUT_TIMEOUT_MS"] = $env:SHARD_SCOUT_TIMEOUT_MS
-    if (-not $env:SHARD_SCOUT_TIMEOUT_LOW_SUPPLY_MS) {
-        $psi.EnvironmentVariables["SHARD_SCOUT_TIMEOUT_LOW_SUPPLY_MS"] = $env:SHARD_SCOUT_TIMEOUT_MS
-    }
+if ($BenchmarkProfile -eq "long") {
+    $psi.EnvironmentVariables["SHARD_SCOUT_BOOTSTRAP_ALLOW_HARD_CIRCUIT"] = "true"
 }
 
 if ($resolvedModelId.ToLowerInvariant().Contains("qwen")) {
@@ -157,9 +200,34 @@ $psi.EnvironmentVariables["BITNET_LIB"] = $lib
 $psi.EnvironmentVariables["BITNET_MODEL"] = $ModelPath
 $psi.EnvironmentVariables["PATH"] = "{0};{1}" -f (Split-Path $lib), $psi.EnvironmentVariables["PATH"]
 
-[void][System.Diagnostics.Process]::Start($psi)
+if (
+    $psi.EnvironmentVariables.ContainsKey("SHARD_SCOUT_TIMEOUT_MS") -and
+    -not $psi.EnvironmentVariables.ContainsKey("SHARD_SCOUT_TIMEOUT_LOW_SUPPLY_MS")
+) {
+    $psi.EnvironmentVariables["SHARD_SCOUT_TIMEOUT_LOW_SUPPLY_MS"] = $psi.EnvironmentVariables["SHARD_SCOUT_TIMEOUT_MS"]
+}
+
+$process = [System.Diagnostics.Process]::Start($psi)
 
 Start-Sleep -Seconds 6
 
 $healthUrl = "http://127.0.0.1:{0}/health" -f $ControlPort
-Invoke-RestMethod -Uri $healthUrl -Method Get | ConvertTo-Json -Depth 6
+$health = $null
+$healthError = $null
+try {
+    $health = Invoke-RestMethod -Uri $healthUrl -Method Get -TimeoutSec 15
+} catch {
+    $healthError = $_.Exception.Message
+}
+
+[ordered]@{
+    benchmark_profile = $BenchmarkProfile
+    model_id = $resolvedModelId
+    model_path = $ModelPath
+    control_port = $ControlPort
+    telemetry_ws_port = $TelemetryWsPort
+    pid = $process.Id
+    effective_env = Get-EffectiveConfigSnapshot -ProcessInfo $psi
+    health = $health
+    health_error = $healthError
+} | ConvertTo-Json -Depth 8
