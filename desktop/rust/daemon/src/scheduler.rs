@@ -10,12 +10,35 @@ use std::time::Duration;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum InferenceMode {
     Standard,
-    Speculative,
+    LocalSpeculative,
+    ExperimentalWanSpeculative,
+}
+
+impl InferenceMode {
+    fn is_speculative(self) -> bool {
+        matches!(
+            self,
+            InferenceMode::LocalSpeculative | InferenceMode::ExperimentalWanSpeculative
+        )
+    }
+
+    fn uses_experimental_wan(self) -> bool {
+        matches!(self, InferenceMode::ExperimentalWanSpeculative)
+    }
 }
 
 pub(crate) fn resolve_inference_mode(raw: Option<&str>) -> InferenceMode {
     match raw.map(|value| value.trim().to_ascii_lowercase()) {
-        Some(mode) if mode == "distributed" || mode == "speculative" => InferenceMode::Speculative,
+        Some(mode)
+            if mode == "distributed"
+                || mode == "speculative"
+                || mode == "experimental_wan" =>
+        {
+            InferenceMode::ExperimentalWanSpeculative
+        }
+        Some(mode) if mode == "auto" || mode == "local_speculative" => {
+            InferenceMode::LocalSpeculative
+        }
         _ => InferenceMode::Standard,
     }
 }
@@ -292,7 +315,7 @@ fn should_attempt_mesh_forward(
 ) -> bool {
     if route_private
         || stream_mode
-        || inference_mode == InferenceMode::Speculative
+        || inference_mode.is_speculative()
         || !mesh_forward_enabled()
     {
         return false;
@@ -1012,13 +1035,6 @@ fn local_scout_fallback_allowed(
 }
 
 async fn local_daemon_draft_capable(state: &SharedState) -> bool {
-    let contribute_enabled = {
-        let topo = state.topology.lock().await;
-        topo.contribute_enabled
-    };
-    if !contribute_enabled {
-        return false;
-    }
     let engine_guard = state.engine.lock().await;
     engine_guard.is_some()
 }
@@ -1816,6 +1832,78 @@ async fn effective_speculative_timeout_ms(
     timeout_ms
 }
 
+async fn fetch_local_speculative_draft(
+    state: &SharedState,
+    request_id: &str,
+    prompt: &str,
+    config: &SpeculativeConfig,
+    request_max_tokens: usize,
+) -> Option<ScoutDraft> {
+    let draft_token_count =
+        effective_draft_token_count(config.draft_token_count, request_max_tokens);
+    let prompt_context = truncate_prompt_context_for_scout(prompt);
+    let prompt_context_chars = prompt_context.chars().count();
+    let work = WorkRequest {
+        request_id: request_id.to_string(),
+        prompt_context,
+        min_tokens: draft_token_count as i32,
+        created_at_ms: Some(now_ms()),
+        lease_id: None,
+        lease_expires_at_ms: None,
+        assigned_scout_id: None,
+        preferred_endpoint: None,
+    };
+
+    record_speculative_trace(
+        state,
+        request_id.to_string(),
+        "local_dispatch_started",
+        None,
+        Some(format!(
+            "draft_token_count={draft_token_count}, request_max_tokens={request_max_tokens}, prompt_context_chars={prompt_context_chars}"
+        )),
+        None,
+    )
+    .await;
+
+    {
+        let mut pending = state.speculative_pending.lock().await;
+        pending.entry(request_id.to_string()).or_insert_with(now_ms);
+    }
+
+    let response = generate_local_daemon_draft(state, &work).await;
+    clear_speculative_work_state(state, request_id).await;
+
+    match response {
+        Some(response) => {
+            let draft = scout_draft_from_work_response(&response);
+            update_draft_arrival_ewma(state, draft.latency_ms);
+            record_speculative_trace(
+                state,
+                request_id.to_string(),
+                "local_dispatch_completed_with_draft",
+                Some(draft.scout_id.clone()),
+                Some(format!("draft_tokens={}", draft.draft_tokens.len())),
+                Some(draft.latency_ms),
+            )
+            .await;
+            Some(draft)
+        }
+        None => {
+            record_speculative_trace(
+                state,
+                request_id.to_string(),
+                "local_dispatch_skipped",
+                None,
+                Some("local daemon draft engine unavailable or busy".to_string()),
+                None,
+            )
+            .await;
+            None
+        }
+    }
+}
+
 async fn fetch_speculative_draft(
     state: &SharedState,
     request_id: &str,
@@ -2571,7 +2659,7 @@ pub(crate) async fn chat_completions_handler(
         }
     }
 
-    let use_speculative = inference_mode == InferenceMode::Speculative;
+    let use_speculative = inference_mode.is_speculative();
 
     let speculative_config = if use_speculative {
         let mut config = SpeculativeConfig::default();
@@ -2594,29 +2682,34 @@ pub(crate) async fn chat_completions_handler(
     let request_id =
         requested_request_id(&headers).unwrap_or_else(|| format!("req-{}", uuid::Uuid::new_v4()));
     let request_started_ms = now_ms();
-    let requested_draft_model = req
+    let requested_remote_draft_model = req
         .model
         .clone()
         .unwrap_or_else(|| "meta-llama/Llama-3.2-1B".to_string());
+    let effective_draft_model = if inference_mode == InferenceMode::LocalSpeculative {
+        state.model_id.clone()
+    } else {
+        requested_remote_draft_model.clone()
+    };
     let rollout_decision = {
         let rollout = state.canary_rollout.lock().await;
         let canary_eligible = shard_verifier::inference::is_model_pair_compatible(
-            requested_draft_model.as_str(),
+            effective_draft_model.as_str(),
             rollout.canary_model_id(),
         );
         rollout.decide(request_id.as_str(), canary_eligible)
     };
     let selected_verifier_model = rollout_decision.selected_model_id.clone();
     let model_pair_compatible = shard_verifier::inference::is_model_pair_compatible(
-        requested_draft_model.as_str(),
+        effective_draft_model.as_str(),
         selected_verifier_model.as_str(),
     );
-    let mut use_speculative = inference_mode == InferenceMode::Speculative && model_pair_compatible;
-    let mut speculative_skip_reason = if inference_mode != InferenceMode::Speculative {
+    let mut use_speculative = inference_mode.is_speculative() && model_pair_compatible;
+    let mut speculative_skip_reason = if !inference_mode.is_speculative() {
         Some(format!("inference_mode={inference_mode:?}"))
     } else if !model_pair_compatible {
         Some(format!(
-            "model_pair_incompatible:draft_model={requested_draft_model},verifier_model={selected_verifier_model}"
+            "model_pair_incompatible:draft_model={effective_draft_model},verifier_model={selected_verifier_model}"
         ))
     } else {
         None
@@ -2641,7 +2734,7 @@ pub(crate) async fn chat_completions_handler(
     // ── Adaptive Speculative Bypass ──
     // If historical acceptance rate is too low, skip speculative decoding entirely
     // to avoid the costly TTFT penalty (waiting for scouts that produce rejected drafts).
-    if use_speculative {
+    if use_speculative && inference_mode.uses_experimental_wan() {
         let bypass_threshold =
             acceptance_threshold_from_bps(state.acceptance_threshold_bps.load(Ordering::Relaxed));
         let min_samples: u64 = std::env::var("SHARD_SPECULATIVE_BYPASS_MIN_SAMPLES")
@@ -2671,7 +2764,7 @@ pub(crate) async fn chat_completions_handler(
         }
     }
 
-    if !use_speculative && inference_mode == InferenceMode::Speculative {
+    if !use_speculative && inference_mode.is_speculative() {
         record_speculative_trace(
             &state,
             request_id.clone(),
@@ -2685,7 +2778,19 @@ pub(crate) async fn chat_completions_handler(
 
     let speculative_draft = if use_speculative {
         if let Some(ref config) = speculative_config {
-            fetch_speculative_draft(&state, &request_id, &prompt, config, max_tokens as usize).await
+            if inference_mode.uses_experimental_wan() {
+                fetch_speculative_draft(&state, &request_id, &prompt, config, max_tokens as usize)
+                    .await
+            } else {
+                fetch_local_speculative_draft(
+                    &state,
+                    &request_id,
+                    &prompt,
+                    config,
+                    max_tokens as usize,
+                )
+                .await
+            }
         } else {
             None
         }
@@ -2755,7 +2860,7 @@ pub(crate) async fn chat_completions_handler(
                                 ).await;
                                 let result = verify_draft_tokens(
                                     engine,
-                                    requested_draft_model.as_str(),
+                                    effective_draft_model.as_str(),
                                     state.model_id.as_str(),
                                     &prompt_tokens,
                                     &draft.draft_tokens,
@@ -3036,7 +3141,7 @@ pub(crate) async fn chat_completions_handler(
                             let result =
                                 verify_draft_tokens(
                                     engine,
-                                    requested_draft_model.as_str(),
+                                    effective_draft_model.as_str(),
                                     state.model_id.as_str(),
                                     &prompt_tokens,
                                     &draft.draft_tokens,
@@ -3309,14 +3414,30 @@ mod tests {
     use std::collections::VecDeque;
 
     #[test]
-    fn distributed_mode_maps_to_speculative() {
+    fn experimental_wan_aliases_map_to_experimental_mode() {
         assert_eq!(
             resolve_inference_mode(Some("distributed")),
-            InferenceMode::Speculative
+            InferenceMode::ExperimentalWanSpeculative
         );
         assert_eq!(
             resolve_inference_mode(Some("speculative")),
-            InferenceMode::Speculative
+            InferenceMode::ExperimentalWanSpeculative
+        );
+        assert_eq!(
+            resolve_inference_mode(Some("experimental_wan")),
+            InferenceMode::ExperimentalWanSpeculative
+        );
+    }
+
+    #[test]
+    fn local_speculative_aliases_map_to_local_mode() {
+        assert_eq!(
+            resolve_inference_mode(Some("auto")),
+            InferenceMode::LocalSpeculative
+        );
+        assert_eq!(
+            resolve_inference_mode(Some("local_speculative")),
+            InferenceMode::LocalSpeculative
         );
     }
 
@@ -3620,7 +3741,7 @@ mod tests {
             &headers,
             false,
             false,
-            InferenceMode::Speculative
+            InferenceMode::LocalSpeculative
         ));
 
         let mut disabled = HeaderMap::new();
