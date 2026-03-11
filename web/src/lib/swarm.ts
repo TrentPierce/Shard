@@ -71,6 +71,35 @@ export type WorkPollResult = {
     fastBypass?: boolean
 }
 
+type ScoutTimingLog = {
+    workId: string
+    promptLen: number
+    minTokens: number
+    leaseAgeMs?: number
+    generateMs?: number
+    submitMs?: number
+    totalMs?: number
+    draftChars?: number
+    success?: boolean
+    detail: string
+}
+
+function logScoutTiming(fields: ScoutTimingLog): void {
+    const parts = [
+        `work_id=${fields.workId}`,
+        `prompt_len=${fields.promptLen}`,
+        `min_tokens=${fields.minTokens}`,
+    ]
+    if (typeof fields.leaseAgeMs === "number") parts.push(`lease_age_ms=${fields.leaseAgeMs}`)
+    if (typeof fields.generateMs === "number") parts.push(`generate_ms=${fields.generateMs}`)
+    if (typeof fields.submitMs === "number") parts.push(`submit_ms=${fields.submitMs}`)
+    if (typeof fields.totalMs === "number") parts.push(`total_ms=${fields.totalMs}`)
+    if (typeof fields.draftChars === "number") parts.push(`draft_chars=${fields.draftChars}`)
+    if (typeof fields.success === "boolean") parts.push(`success=${fields.success}`)
+    parts.push(`detail=${fields.detail}`)
+    console.info(`[scout-timing] ${parts.join(" ")}`)
+}
+
 function fallbackDraftFromPrompt(_prompt: string, _maxTokens: number): string {
     // No real inference available — return empty to skip draft submission.
     // The previous echo-back approach (returning tail words of the prompt)
@@ -303,21 +332,34 @@ export async function handleScoutWork(
     work: WorkRequest,
     options: { apiBase?: string } = {}
 ): Promise<ScoutSubmissionResult> {
+    const workStartedAt = performance.now()
+    const leaseAgeMs =
+        typeof work.created_at_ms === "number" && Number.isFinite(work.created_at_ms)
+            ? Math.max(0, Math.round(Date.now() - work.created_at_ms))
+            : undefined
     try {
         const engine = getActiveEngine()
         const scoutMode: "webgpu" | "wasm" = engine?.mode === "webgpu" ? "webgpu" : "wasm"
         let draftText = ""
+        let generateMs: number | undefined
+        let usedFallback = false
         if (!engine) {
+            const fallbackStartedAt = performance.now()
             draftText = fallbackDraftFromPrompt(work.prompt_context, work.min_tokens)
+            generateMs = Math.round(performance.now() - fallbackStartedAt)
+            usedFallback = true
             void reportScoutClientEvent("fallback_draft_used", "engine_uninitialized", undefined, undefined, {
                 apiBase: options.apiBase,
             })
         } else {
             try {
+                const generateStartedAt = performance.now()
                 const draftResult = await generateDraftsWithTimeout(work.prompt_context, work.min_tokens, 2500)
+                generateMs = Math.round(performance.now() - generateStartedAt)
                 draftText = draftResult.text
                 if (!draftResult.success || !draftText?.trim()) {
                     draftText = fallbackDraftFromPrompt(work.prompt_context, work.min_tokens)
+                    usedFallback = true
                     void reportScoutClientEvent("generate_failure", draftResult.error || "empty_draft_result", undefined, undefined, {
                         apiBase: options.apiBase,
                     })
@@ -326,7 +368,10 @@ export async function handleScoutWork(
                     })
                 }
             } catch {
+                const generateStartedAt = performance.now()
                 draftText = fallbackDraftFromPrompt(work.prompt_context, work.min_tokens)
+                generateMs = Math.round(performance.now() - generateStartedAt)
+                usedFallback = true
                 void reportScoutClientEvent("generate_failure", "generateDrafts_threw", undefined, undefined, {
                     apiBase: options.apiBase,
                 })
@@ -338,6 +383,17 @@ export async function handleScoutWork(
 
         const scoutId = getScoutId()
         if (!draftText.trim()) {
+            logScoutTiming({
+                workId: work.request_id,
+                promptLen: work.prompt_context.length,
+                minTokens: work.min_tokens,
+                leaseAgeMs,
+                generateMs,
+                totalMs: Math.round(performance.now() - workStartedAt),
+                draftChars: 0,
+                success: false,
+                detail: usedFallback ? "fallback_empty_draft" : "empty_draft",
+            })
             return {
                 success: false,
                 detail: "No usable draft produced; submission skipped",
@@ -357,7 +413,9 @@ export async function handleScoutWork(
         void reportScoutClientEvent("submit_attempt", "handleScoutWork_before_submitDraftResult", undefined, undefined, {
             apiBase: options.apiBase,
         })
+        const submitStartedAt = performance.now()
         const submissionResult = await submitDraftResult(result, { apiBase: options.apiBase })
+        const submitMs = Math.round(performance.now() - submitStartedAt)
         void reportScoutClientEvent(
             submissionResult.success ? "submit_success" : "submit_network_error",
             `handleScoutWork_after_submitDraftResult:${submissionResult.detail || "no_detail"}`,
@@ -365,9 +423,32 @@ export async function handleScoutWork(
             undefined,
             { apiBase: options.apiBase }
         )
+        logScoutTiming({
+            workId: work.request_id,
+            promptLen: work.prompt_context.length,
+            minTokens: work.min_tokens,
+            leaseAgeMs,
+            generateMs,
+            submitMs,
+            totalMs: Math.round(performance.now() - workStartedAt),
+            draftChars: draftText.length,
+            success: submissionResult.success,
+            detail: usedFallback
+                ? `fallback_submit:${submissionResult.detail || "no_detail"}`
+                : submissionResult.detail || "submit_complete",
+        })
 
         return submissionResult
     } catch (error: any) {
+        logScoutTiming({
+            workId: work.request_id,
+            promptLen: work.prompt_context.length,
+            minTokens: work.min_tokens,
+            leaseAgeMs,
+            totalMs: Math.round(performance.now() - workStartedAt),
+            success: false,
+            detail: `exception:${error?.message ?? error}`,
+        })
         void reportScoutClientEvent("generate_failure", `handleScoutWork_failed:${error?.message ?? error}`, undefined, undefined, {
             apiBase: options.apiBase,
         })
