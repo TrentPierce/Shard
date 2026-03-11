@@ -1,4 +1,4 @@
-﻿<div align="center">
+<div align="center">
   <img src="docs/assets/logo.png" alt="Shard Network" width="160" />
   <h1>Shard Network</h1>
   <p><strong>Distributed AI inference where browser scouts draft and verifier nodes validate.</strong></p>
@@ -66,15 +66,14 @@ These are the most defensible benchmark statements today:
 | --- | ---: | ---: | ---: | --- |
 | 3 Fly verifier nodes, verifier-only | 986.605 ms | 0.55 TPS | 0.00% | Current fast-node baseline |
 | 3 Fly verifier nodes, browser scouts attached | 965.127 ms | 0.55 TPS | 0.00% | Fast nodes stay neutral because browser scouts back off when fast-verifier bypass is active |
-| Local Llama 8B verifier with live browser scout on same machine | Correctness proven | Not a fair speed benchmark | N/A | Lease issuance, mailbox hit, and accepted speculative tokens now work end to end, but same-machine GPU contention makes latency results non-representative |
+| Local Llama 8B verifier with remote browser scout (`10 vs 10`) | 9936.093 ms median | 9890.574 ms average | 0.00% | Compatible Llama browser scouts delivered accepted speculative tokens on all 10 runs and produced a small but measurable latency win over local-only baseline |
 | Browser Qwen draft against local Qwen 9B verifier | Rejected in strict mode | N/A | N/A | This pair is not currently a safe speculative match |
 
 ### What we can claim today
 
 - Fast verifier nodes should keep adaptive browser-scout bypass enabled.
 - Browser scouts are proven neutral on fast Fly-class verifier nodes when bypass is active.
-- The Llama browser-draft path is now working correctly end to end against a larger local verifier.
-- A clean remote no-contention Llama scout benchmark is still pending.
+- The Llama browser-draft path now works end to end against a larger local verifier and has a repeated remote benchmark showing a small but measurable latency improvement on a compatible pair.
 - Qwen browser-draft pairing should remain strict or disabled until a verified compatible browser draft model exists.
 
 ### What we are not claiming yet
@@ -203,3 +202,4 @@ docs/               Architecture, runbooks, and operational guidance
 ## License
 
 Business Source License 1.1 (BSL 1.1). See [LICENSE](LICENSE).
+

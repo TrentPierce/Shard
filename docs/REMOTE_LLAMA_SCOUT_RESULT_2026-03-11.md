@@ -1,6 +1,6 @@
-## Remote Llama Scout Result — March 11, 2026
+## Remote Llama Scout Result - March 11, 2026
 
-This note records the first clean remote browser-scout result on a compatible
+This note records the first clean repeated remote browser-scout result on a compatible
 Llama draft/verifier pair.
 
 ### Setup
@@ -25,46 +25,40 @@ Llama draft/verifier pair.
 
 ### Baseline Results
 
-Three local-only verifier runs:
+Ten local-only verifier runs:
 
-- `9712 ms`
-- `9735 ms`
-- `9475 ms`
+- average: `10039.765 ms`
+- median: `10006.350 ms`
+- min: `9787.725 ms`
+- max: `10413.472 ms`
 
 Verifier trace summary:
 
+- completion tokens:
+  - mostly `59-61`
 - generation time:
-  - `8893 ms`
-  - `8901 ms`
-  - `8627 ms`
+  - about `8627-8901 ms`
 - accepted speculative tokens: `0`
 
 ### Distributed Results
 
-Three remote browser-scout runs:
+Ten remote browser-scout runs:
 
-- `9469 ms`
-- `8883 ms`
-- `8512 ms`
+- average: `9890.574 ms`
+- median: `9936.093 ms`
+- min: `9555.004 ms`
+- max: `10217.994 ms`
 
 Verifier trace summary:
 
 - mailbox hit:
-  - `647 ms`
-  - `633 ms`
-  - `638 ms`
+  - about `723-939 ms`
 - accepted speculative tokens:
-  - `8/8`
-  - `8/8`
-  - `8/8`
+  - `8/8` on all `10/10` runs
 - verify time:
-  - `1935 ms`
-  - `1985 ms`
-  - `2008 ms`
+  - about `2296-2531 ms`
 - generation time after accepted draft:
-  - `6865 ms`
-  - `6251 ms`
-  - `5851 ms`
+  - about `6452-6806 ms`
 
 ### What This Proves
 
@@ -74,24 +68,22 @@ The remote browser scout path is working correctly on a compatible Llama pair:
 - verifier issues leases
 - draft arrives in time
 - verifier accepts the full draft window
-- the distributed path beat the local-only baseline on all three runs
+- the distributed path produced accepted speculative tokens on all ten runs
+- the distributed path beat the local-only median on the repeated set
 
-On this sample, the distributed path improved wall-clock latency by roughly:
+On this repeated `10 vs 10` sample, the distributed path improved wall-clock
+latency by about:
 
-- `243 ms`
-- `852 ms`
-- `963 ms`
-
-Average improvement was about `686 ms` across the three runs.
+- `149.191 ms` on average
+- `70.257 ms` at the median
 
 ### Caveats
 
 This is a promising result, but it is not yet the final public benchmark claim.
 
-- The distributed responses were somewhat shorter than baseline:
-  - baseline completion tokens: `64`, `64`, `62`
-  - distributed completion tokens: `57`, `52`, `49`
-- The sample size is still small (`3 vs 3`)
+- The distributed responses were still somewhat shorter than baseline:
+  - baseline completion tokens: mostly `59-61`
+  - distributed completion tokens: mostly `49`
 - The setup used a temporary tunnel and a manually prepared remote scout host
 
 ### Safe Current Claim
@@ -99,12 +91,12 @@ This is a promising result, but it is not yet the final public benchmark claim.
 The safe project claim after this run is:
 
 > On a compatible Llama draft/verifier pair, a remote browser scout can
-> repeatedly produce accepted speculative tokens and improve wall-clock latency
-> on a slower local verifier.
+> repeatedly produce accepted speculative tokens and deliver a small but
+> measurable wall-clock latency improvement on a slower local verifier.
 
 ### Recommended Follow-up
 
-- Run a larger repeated set (`10 vs 10`)
+- Run a larger repeated set than `10 vs 10`
 - Keep mesh forwarding disabled for the local-vs-local verifier comparison
 - Use the same prompt and compare completion-token counts closely
 - Only update public benchmark numbers after the larger repeated set confirms

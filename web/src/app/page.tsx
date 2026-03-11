@@ -67,14 +67,14 @@ const joinPaths: JoinPath[] = [
 const benchmarkRows: BenchmarkRow[] = [
   { scenario: "3 Fly nodes, verifier-only", p95Ms: 986.605, tps: 0.55, errorPct: 0, verdict: "Current fast-node baseline on pinned Fly hardware" },
   { scenario: "3 Fly nodes, browser scouts attached", p95Ms: 965.127, tps: 0.55, errorPct: 0, verdict: "Fast nodes stay neutral because scouts back off when bypass is active" },
-  { scenario: "Local Llama 8B verifier, same-machine browser scout", p95Ms: 0, tps: 0, errorPct: 0, verdict: "Correctness path is proven: live scout can lease, return drafts, and verify accepted tokens, but same-machine GPU contention makes latency numbers non-representative" },
+  { scenario: "Local Llama 8B verifier, remote browser scout (10 vs 10)", p95Ms: 9936.093, tps: 0, errorPct: 0, verdict: "Compatible Llama browser scouts returned accepted drafts on all 10 runs and produced a small but measurable latency improvement over local-only baseline" },
   { scenario: "Qwen browser draft against local Qwen 9B verifier", p95Ms: 0, tps: 0, errorPct: 0, verdict: "Strict mode rejects the pair; it is not a safe speculative match today" },
 ]
 
 const takeaways = [
   "Fast Fly verifiers stay neutral with browser scouts attached because the daemon bypasses speculative waits and scouts back off instead of polling aggressively.",
-  "The Llama browser-draft path now works end to end against a larger local verifier: lease issued, mailbox hit, and accepted speculative tokens are all proven.",
-  "A clean remote no-contention Llama benchmark is still pending. Qwen browser drafts remain strict or disabled until we have a verified compatible browser-side draft model.",
+  "The Llama browser-draft path now works end to end against a larger local verifier, and a repeated remote 10 vs 10 run showed accepted drafts on every request with a small but measurable latency improvement.",
+  "Qwen browser drafts remain strict or disabled until we have a verified compatible browser-side draft model.",
 ]
 
 function formatCompact(value: number) {
@@ -377,3 +377,4 @@ function StatCard({ label, value, detail }: { label: string; value: string; deta
     </div>
   )
 }
+
