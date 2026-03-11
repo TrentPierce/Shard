@@ -2593,7 +2593,7 @@ pub(crate) async fn chat_completions_handler(
 
     let request_id =
         requested_request_id(&headers).unwrap_or_else(|| format!("req-{}", uuid::Uuid::new_v4()));
-    let _request_started_ms = now_ms();
+    let request_started_ms = now_ms();
     let requested_draft_model = req
         .model
         .clone()
@@ -2738,9 +2738,11 @@ pub(crate) async fn chat_completions_handler(
                     let mut emitted_text_for_guard = String::new();
                     let prompt_tokens = tokens.clone();
                     let mut prompt_already_evaluated = false;
+                    let mut accepted_tokens_from_draft: u64 = 0;
 
                     if use_speculative {
                         if let Some(draft) = speculative_draft.take() {
+                                let verify_started_ms = now_ms();
                                 // Verify the draft against our model
                                 state.system_metrics.inc_speculative_verify_attempt();
                                 record_speculative_trace(
@@ -2761,9 +2763,11 @@ pub(crate) async fn chat_completions_handler(
                                 )
                                 .await;
                                 let accepted_count = result.accepted_tokens.len() as u64;
+                                let verify_elapsed_ms = now_ms().saturating_sub(verify_started_ms) as u64;
                                 update_accepted_tokens_ewma(&state, accepted_count);
                                 let draft_count = draft.draft_tokens.len() as u64;
                                 let rejected_count = draft_count.saturating_sub(accepted_count);
+                                accepted_tokens_from_draft = accepted_count;
                                 if draft_count > 0 && accepted_count == 0 {
                                     state.system_metrics.inc_speculative_verify_zero_accept();
                                     record_speculative_trace(
@@ -2781,8 +2785,8 @@ pub(crate) async fn chat_completions_handler(
                                     "verify_completed",
                                     Some(draft.scout_id.clone()),
                                     Some(format!(
-                                        "accepted_tokens={},draft_tokens={},rejected_tokens={}",
-                                        accepted_count, draft_count, rejected_count
+                                        "accepted_tokens={},draft_tokens={},rejected_tokens={},verify_ms={}",
+                                        accepted_count, draft_count, rejected_count, verify_elapsed_ms
                                     )),
                                     None,
                                 ).await;
@@ -2865,6 +2869,7 @@ pub(crate) async fn chat_completions_handler(
                         engine.eval(&tokens).is_ok()
                     };
                     if prompt_ready {
+                        let generation_started_ms = now_ms();
                         let mut emitted = 0;
                         while emitted < max_tokens {
                             if let Ok(logits) = engine
@@ -2929,6 +2934,21 @@ pub(crate) async fn chat_completions_handler(
                                 break;
                             }
                         }
+                        let generation_elapsed_ms = now_ms().saturating_sub(generation_started_ms) as u64;
+                        record_speculative_trace(
+                            &state,
+                            request_id.clone(),
+                            "response_completed",
+                            None,
+                            Some(format!(
+                                "request_total_ms={},generation_ms={},accepted_tokens={},completion_tokens_generated={}",
+                                now_ms().saturating_sub(request_started_ms),
+                                generation_elapsed_ms,
+                                accepted_tokens_from_draft,
+                                completion_tokens_generated
+                            )),
+                            None,
+                        ).await;
                     }
                 }
             } else {
@@ -2997,9 +3017,11 @@ pub(crate) async fn chat_completions_handler(
                     // Speculative decoding: try to get scout draft
                     let prompt_tokens = tokens.clone();
                     let mut prompt_already_evaluated = false;
+                    let mut accepted_tokens_from_draft: u64 = 0;
 
                     if use_speculative {
                         if let Some(draft) = speculative_draft.take() {
+                            let verify_started_ms = now_ms();
                             // Verify the draft against our model
                             state.system_metrics.inc_speculative_verify_attempt();
                             record_speculative_trace(
@@ -3022,9 +3044,12 @@ pub(crate) async fn chat_completions_handler(
                                 )
                                     .await;
                             let accepted_count = result.accepted_tokens.len() as u64;
+                            let verify_elapsed_ms =
+                                now_ms().saturating_sub(verify_started_ms) as u64;
                             update_accepted_tokens_ewma(&state, accepted_count);
                             let draft_count = draft.draft_tokens.len() as u64;
                             let rejected_count = draft_count.saturating_sub(accepted_count);
+                            accepted_tokens_from_draft = accepted_count;
                             if draft_count > 0 && accepted_count == 0 {
                                 state.system_metrics.inc_speculative_verify_zero_accept();
                                 record_speculative_trace(
@@ -3045,8 +3070,8 @@ pub(crate) async fn chat_completions_handler(
                                 "verify_completed",
                                 Some(draft.scout_id.clone()),
                                 Some(format!(
-                                    "accepted_tokens={},draft_tokens={},rejected_tokens={}",
-                                    accepted_count, draft_count, rejected_count
+                                    "accepted_tokens={},draft_tokens={},rejected_tokens={},verify_ms={}",
+                                    accepted_count, draft_count, rejected_count, verify_elapsed_ms
                                 )),
                                 None,
                             )
@@ -3132,6 +3157,7 @@ pub(crate) async fn chat_completions_handler(
                         engine.eval(&tokens).is_ok()
                     };
                     if prompt_ready {
+                        let generation_started_ms = now_ms();
                         let mut emitted = 0;
                         while emitted < max_tokens {
                             if let Ok(logits) = engine
@@ -3190,6 +3216,23 @@ pub(crate) async fn chat_completions_handler(
                                 break;
                             }
                         }
+                        let generation_elapsed_ms =
+                            now_ms().saturating_sub(generation_started_ms) as u64;
+                        record_speculative_trace(
+                            &state,
+                            request_id.clone(),
+                            "response_completed",
+                            None,
+                            Some(format!(
+                                "request_total_ms={},generation_ms={},accepted_tokens={},completion_tokens_generated={}",
+                                now_ms().saturating_sub(request_started_ms),
+                                generation_elapsed_ms,
+                                accepted_tokens_from_draft,
+                                completion_tokens_generated
+                            )),
+                            None,
+                        )
+                        .await;
                     }
                 }
             } else {
