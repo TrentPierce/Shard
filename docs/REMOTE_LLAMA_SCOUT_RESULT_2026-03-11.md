@@ -1,27 +1,33 @@
-## Remote Llama Scout Result - March 11, 2026
+## Experimental WAN Llama Results - March 11, 2026
 
-This note records the first clean repeated remote browser-scout result on a compatible
-Llama draft/verifier pair.
+This note records the March 11, 2026 benchmark position for the compatible Llama browser-draft and local verifier pair after the local-first product pivot.
+
+## Summary
+
+Two things are true at the same time:
+
+1. The compatible Llama experimental WAN path is correct and repeatable.
+2. It is still not the product fast path, because the latest measured same-machine comparison was slower overall than verifier-only baseline.
+
+## Compatible Pair
+
+- Browser draft: `meta-llama/Llama-3.2-1B`
+- Local verifier: `meta-llama/Llama-3.1-8B`
+- Local GGUF:
+  `E:\lmstudio-models\lmstudio-community\Meta-Llama-3.1-8B-Instruct-GGUF\Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf`
+
+## Result A: Remote No-Contention Compatibility Pass
+
+This was the first clean repeated remote browser-scout result on the compatible Llama pair.
 
 ### Setup
 
-- Verifier host: local Windows PC
-- Verifier model: `meta-llama/Llama-3.1-8B`
-- Verifier GGUF:
-  `E:\lmstudio-models\lmstudio-community\Meta-Llama-3.1-8B-Instruct-GGUF\Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf`
-- Scout host: remote laptop browser
-- Scout page:
-  `https://shardnetwork.live/benchmark/scout?backend=https://remind-complete-jul-remainder.trycloudflare.com`
-- Draft model: browser-default Llama WebLLM draft model
-- Tunnel: temporary Cloudflare tunnel to the local verifier
-- Measurement mode: non-streaming chat completions
-- Important control: `x-shard-mesh-forward: false`
-  was used for both baseline and distributed requests so the comparison stayed
-  on the same local verifier instead of accidentally forwarding into the mesh.
-
-### Prompt
-
-`Write one short paragraph explaining why peer-to-peer AI networks matter.`
+- verifier host: local Windows PC
+- scout host: remote laptop browser
+- scout page: benchmark scout page on `shardnetwork.live`
+- tunnel: temporary Cloudflare tunnel to the local verifier
+- measurement mode: non-streaming chat completions
+- important control: `x-shard-mesh-forward: false`
 
 ### Baseline Results
 
@@ -32,17 +38,9 @@ Ten local-only verifier runs:
 - min: `9787.725 ms`
 - max: `10413.472 ms`
 
-Verifier trace summary:
+### Experimental WAN Results
 
-- completion tokens:
-  - mostly `59-61`
-- generation time:
-  - about `8627-8901 ms`
-- accepted speculative tokens: `0`
-
-### Distributed Results
-
-Ten remote browser-scout runs:
+Ten remote scout runs:
 
 - average: `9890.574 ms`
 - median: `9936.093 ms`
@@ -51,53 +49,102 @@ Ten remote browser-scout runs:
 
 Verifier trace summary:
 
-- mailbox hit:
-  - about `723-939 ms`
-- accepted speculative tokens:
-  - `8/8` on all `10/10` runs
-- verify time:
-  - about `2296-2531 ms`
-- generation time after accepted draft:
-  - about `6452-6806 ms`
+- mailbox hit: about `723-939 ms`
+- accepted speculative tokens: `8/8` on all `10/10` runs
+- verify time: about `2296-2531 ms`
 
-### What This Proves
+### Interpretation
 
-The remote browser scout path is working correctly on a compatible Llama pair:
+This pass proved the compatible remote browser scout path works end to end:
 
 - scout attaches successfully
 - verifier issues leases
 - draft arrives in time
 - verifier accepts the full draft window
-- the distributed path produced accepted speculative tokens on all ten runs
-- the distributed path beat the local-only median on the repeated set
+- no garbled output was observed
 
-On this repeated `10 vs 10` sample, the distributed path improved wall-clock
-latency by about:
+This was an important correctness milestone, but it was not strong enough to become the long-term product architecture by itself.
 
-- `149.191 ms` on average
-- `70.257 ms` at the median
+## Result B: Same-Machine Live-Site Validation After Timing Split
 
-### Caveats
+This was the more important architecture result, because it used the live scout page with the new timing split and prompt-state reuse instrumentation.
 
-This is a promising result, but it is not yet the final public benchmark claim.
+### Setup
 
-- The distributed responses were still somewhat shorter than baseline:
-  - baseline completion tokens: mostly `59-61`
-  - distributed completion tokens: mostly `49`
-- The setup used a temporary tunnel and a manually prepared remote scout host
+- verifier host: local Windows PC
+- scout page: `https://shardnetwork.live/benchmark/scout?backend=http://127.0.0.1:9191&draft_model=llama`
+- measurement mode: deterministic `10 vs 10`
+- seed: `42`
+- mesh forwarding: disabled
+- browser session state: ready and registered
 
-### Safe Current Claim
+### Baseline Results
 
-The safe project claim after this run is:
+Ten verifier-only runs:
 
-> On a compatible Llama draft/verifier pair, a remote browser scout can
-> repeatedly produce accepted speculative tokens and deliver a small but
-> measurable wall-clock latency improvement on a slower local verifier.
+- average: `11295.1 ms`
+- median: `11297 ms`
+- min: `10495 ms`
+- max: `13598 ms`
 
-### Recommended Follow-up
+### Experimental WAN Results
 
-- Run a larger repeated set than `10 vs 10`
-- Keep mesh forwarding disabled for the local-vs-local verifier comparison
-- Use the same prompt and compare completion-token counts closely
-- Only update public benchmark numbers after the larger repeated set confirms
-  the same trend
+Ten distributed runs:
+
+- average: `12004.4 ms`
+- median: `11888 ms`
+- min: `11485 ms`
+- max: `12978 ms`
+
+Verifier trace summary:
+
+- `10/10` wait hits
+- `10/10` verification attempts
+- `4/4` accepted draft tokens on every distributed run
+- no garbled output
+
+Wall-clock delta versus baseline:
+
+- `+709.3 ms` slower on average
+- `+591 ms` slower at the median
+
+### Browser Timing Split
+
+First distributed request:
+
+```text
+[scout-timing] ... lease_age_ms=228 generate_ms=377 prefill_ms=258 decode_ms=119 submit_ms=9 total_ms=389 draft_chars=15 success=true reuse=none detail=draft queued
+```
+
+Repeated identical prompt requests:
+
+```text
+[scout-timing] ... generate_ms=0 prefill_ms=0 decode_ms=0 submit_ms=5-9 total_ms=6-10 ... reuse=exact_prompt_cache
+```
+
+### Interpretation
+
+This pass showed four important things:
+
+- the compatible Llama scout path remains correct
+- the same-machine experimental WAN path is still slower overall than verifier-only baseline
+- browser-side prompt reuse is working
+- once the prompt is identical, browser draft generation can collapse close to zero
+
+That timing result supports the architecture pivot: keep WAN scouts experimental and move the shipping product toward local-first browser answers plus desktop heavy inference.
+
+## Safe Current Claim
+
+The safe public claim after the March 11, 2026 benchmark set is:
+
+> On a compatible Llama draft and verifier pair, the experimental WAN scout path is correct and repeatable, but the shipping product path should remain local-first because the latest controlled same-machine run was still slower overall than verifier-only baseline.
+
+## Next Useful Follow-Up
+
+- repeat the remote no-contention benchmark with the new timing split
+- compare completion lengths closely between baseline and experimental WAN runs
+- benchmark verifier-local speculative mode against `standard`
+- keep public performance claims separate for:
+  - local browser answers
+  - verifier-local speculative execution
+  - experimental WAN scouts
