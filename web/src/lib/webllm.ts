@@ -39,6 +39,11 @@ export type DraftTokenResult = {
     text: string
     success: boolean
     error?: string
+    generateMs?: number
+    prefillMs?: number
+    decodeMs?: number
+    reuseStrategy?: "none" | "exact_prompt_cache" | "prompt_extension_cache"
+    promptRelation?: "none" | "exact" | "prompt_extends_previous" | "previous_extends_prompt" | "shared_prefix"
 }
 
 export type DraftGenerationOptions = {
@@ -88,6 +93,14 @@ let engine: MLCEngineInterface | null = null
 let isLoading = false
 let currentModel: string = DRAFT_MODEL
 let scoutAppConfig: AppConfig | null = null
+let lastDraftCache:
+    | {
+        prompt: string
+        draftText: string
+        optionsKey: string
+        modelId: string
+    }
+    | null = null
 
 function isQwenModel(modelId: string): boolean {
     return modelId.trim().toLowerCase().includes("qwen")
@@ -165,6 +178,112 @@ function sanitizeDraftText(raw: string): string {
     const markerIdx = raw.indexOf("<|")
     const text = markerIdx >= 0 ? raw.slice(0, markerIdx) : raw
     return text.replace(/\u0000/g, "")
+}
+
+function classifyPromptRelation(previousPrompt: string, nextPrompt: string): DraftTokenResult["promptRelation"] {
+    if (!previousPrompt || !nextPrompt) {
+        return "none"
+    }
+    if (previousPrompt === nextPrompt) {
+        return "exact"
+    }
+    if (nextPrompt.startsWith(previousPrompt)) {
+        return "prompt_extends_previous"
+    }
+    if (previousPrompt.startsWith(nextPrompt)) {
+        return "previous_extends_prompt"
+    }
+    const sharedPrefixLen = Math.min(previousPrompt.length, nextPrompt.length)
+    for (let idx = 0; idx < sharedPrefixLen; idx += 1) {
+        if (previousPrompt[idx] !== nextPrompt[idx]) {
+            return idx > 0 ? "shared_prefix" : "none"
+        }
+    }
+    return "shared_prefix"
+}
+
+function buildDraftOptionsKey(options: DraftGenerationOptions): string {
+    return JSON.stringify({
+        maxTokens: options.maxTokens ?? DEFAULT_DRAFT_OPTIONS.maxTokens,
+        temperature: options.temperature ?? DEFAULT_DRAFT_OPTIONS.temperature,
+        topP: options.topP ?? DEFAULT_DRAFT_OPTIONS.topP,
+    })
+}
+
+function isDeterministicDraftOptions(options: DraftGenerationOptions): boolean {
+    return (options.temperature ?? DEFAULT_DRAFT_OPTIONS.temperature) === 0 &&
+        (options.topP ?? DEFAULT_DRAFT_OPTIONS.topP) === 1
+}
+
+function toRoundedMs(seconds?: number | null): number | undefined {
+    if (typeof seconds !== "number" || !Number.isFinite(seconds) || seconds < 0) {
+        return undefined
+    }
+    return Math.round(seconds * 1000)
+}
+
+function extractGenerateTimings(response: any, wallClockMs: number): Pick<DraftTokenResult, "generateMs" | "prefillMs" | "decodeMs"> {
+    const extra = response?.usage?.extra
+    const completionTokens = response?.usage?.completion_tokens ?? 0
+    const prefillMs = toRoundedMs(extra?.time_to_first_token_s)
+    const decodeMs =
+        typeof extra?.time_per_output_token_s === "number" && Number.isFinite(extra.time_per_output_token_s) && completionTokens > 0
+            ? Math.round(extra.time_per_output_token_s * completionTokens * 1000)
+            : undefined
+    const generateMs =
+        typeof prefillMs === "number" || typeof decodeMs === "number"
+            ? (prefillMs ?? 0) + (decodeMs ?? 0)
+            : Math.round(wallClockMs)
+
+    return {
+        generateMs,
+        prefillMs,
+        decodeMs,
+    }
+}
+
+function tryReuseCachedDraft(
+    prompt: string,
+    optionsKey: string,
+): Pick<DraftTokenResult, "text" | "generateMs" | "prefillMs" | "decodeMs" | "reuseStrategy" | "promptRelation"> | null {
+    if (!lastDraftCache || lastDraftCache.modelId !== currentModel || lastDraftCache.optionsKey !== optionsKey) {
+        return null
+    }
+
+    const promptRelation = classifyPromptRelation(lastDraftCache.prompt, prompt)
+    if (promptRelation === "exact") {
+        return {
+            text: lastDraftCache.draftText,
+            generateMs: 0,
+            prefillMs: 0,
+            decodeMs: 0,
+            reuseStrategy: "exact_prompt_cache",
+            promptRelation,
+        }
+    }
+
+    if (promptRelation !== "prompt_extends_previous") {
+        return null
+    }
+
+    const acceptedPrefix = prompt.slice(lastDraftCache.prompt.length)
+    if (!acceptedPrefix || !lastDraftCache.draftText.startsWith(acceptedPrefix)) {
+        return null
+    }
+
+    const remainingDraft = lastDraftCache.draftText.slice(acceptedPrefix.length)
+    if (!remainingDraft) {
+        return null
+    }
+
+    return {
+        text: remainingDraft,
+        generateMs: 0,
+        prefillMs: 0,
+        decodeMs: 0,
+        reuseStrategy: "prompt_extension_cache",
+        promptRelation,
+    }
 }
 
 function isWorkerInitBug(error: unknown): boolean {
@@ -440,6 +559,8 @@ export async function initWebLLM(
             currentModel = fallbackModel
         }
 
+        lastDraftCache = null
+
         isLoading = false
     } catch (error: any) {
         isLoading = false
@@ -477,8 +598,33 @@ export async function generateDraftTokens(
     }
 
     const opts = { ...DEFAULT_DRAFT_OPTIONS, ...options }
+    const optionsKey = buildDraftOptionsKey(opts)
+
+    if (isDeterministicDraftOptions(opts)) {
+        const reusedDraft = tryReuseCachedDraft(prompt, optionsKey)
+        if (reusedDraft) {
+            lastDraftCache = {
+                prompt,
+                draftText: reusedDraft.text,
+                optionsKey,
+                modelId: currentModel,
+            }
+            return {
+                tokens: [],
+                text: reusedDraft.text,
+                success: true,
+                generateMs: reusedDraft.generateMs,
+                prefillMs: reusedDraft.prefillMs,
+                decodeMs: reusedDraft.decodeMs,
+                reuseStrategy: reusedDraft.reuseStrategy,
+                promptRelation: reusedDraft.promptRelation,
+            }
+        }
+    }
 
     try {
+        const startedAt = performance.now()
+        const promptRelation = classifyPromptRelation(lastDraftCache?.prompt ?? "", prompt)
         // Use completion API to treat prompt as raw context to continue (speculative decoding)
         // This avoids applying chat templates to an already-formatted prompt prefix
         const response = await engine.completions.create({
@@ -487,9 +633,23 @@ export async function generateDraftTokens(
             temperature: opts.temperature,
             top_p: opts.topP,
             stop: ["<|eot_id|>", "<|start_header_id|>", "<|end_header_id|>"],
+            extra_body: {
+                enable_latency_breakdown: true,
+            },
         })
+        const timings = extractGenerateTimings(response, performance.now() - startedAt)
 
         const text = sanitizeDraftText(response.choices[0]?.text || "")
+        if (isDeterministicDraftOptions(opts) && text) {
+            lastDraftCache = {
+                prompt,
+                draftText: text,
+                optionsKey,
+                modelId: currentModel,
+            }
+        } else {
+            lastDraftCache = null
+        }
 
         // Get the generated text - token extraction happens at the API layer
         // We return the text which will be tokenized by the Shard
@@ -497,13 +657,19 @@ export async function generateDraftTokens(
             tokens: [], // Token IDs are handled by the Shard
             text,
             success: true,
+            ...timings,
+            reuseStrategy: "none",
+            promptRelation,
         }
     } catch (error: any) {
+        lastDraftCache = null
         return {
             tokens: [],
             text: "",
             success: false,
             error: `Draft generation failed: ${error?.message ?? error}`,
+            reuseStrategy: "none",
+            promptRelation: "none",
         }
     }
 }
@@ -532,6 +698,7 @@ export async function resetWebLLMChat(): Promise<void> {
 
     try {
         await engine.resetChat(true) // keepStats = true
+        lastDraftCache = null
     } catch (error: any) {
         console.error("Failed to reset WebLLM chat:", error)
     }

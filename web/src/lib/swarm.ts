@@ -77,10 +77,13 @@ type ScoutTimingLog = {
     minTokens: number
     leaseAgeMs?: number
     generateMs?: number
+    prefillMs?: number
+    decodeMs?: number
     submitMs?: number
     totalMs?: number
     draftChars?: number
     success?: boolean
+    reuseStrategy?: string
     detail: string
 }
 
@@ -92,10 +95,13 @@ function logScoutTiming(fields: ScoutTimingLog): void {
     ]
     if (typeof fields.leaseAgeMs === "number") parts.push(`lease_age_ms=${fields.leaseAgeMs}`)
     if (typeof fields.generateMs === "number") parts.push(`generate_ms=${fields.generateMs}`)
+    if (typeof fields.prefillMs === "number") parts.push(`prefill_ms=${fields.prefillMs}`)
+    if (typeof fields.decodeMs === "number") parts.push(`decode_ms=${fields.decodeMs}`)
     if (typeof fields.submitMs === "number") parts.push(`submit_ms=${fields.submitMs}`)
     if (typeof fields.totalMs === "number") parts.push(`total_ms=${fields.totalMs}`)
     if (typeof fields.draftChars === "number") parts.push(`draft_chars=${fields.draftChars}`)
     if (typeof fields.success === "boolean") parts.push(`success=${fields.success}`)
+    if (fields.reuseStrategy) parts.push(`reuse=${fields.reuseStrategy}`)
     parts.push(`detail=${fields.detail}`)
     console.info(`[scout-timing] ${parts.join(" ")}`)
 }
@@ -111,7 +117,15 @@ async function generateDraftsWithTimeout(
     prompt: string,
     maxTokens: number,
     timeoutMs: number
-): Promise<{ success: boolean; text: string; error?: string }> {
+): Promise<{
+    success: boolean
+    text: string
+    error?: string
+    generateMs?: number
+    prefillMs?: number
+    decodeMs?: number
+    reuseStrategy?: string
+}> {
     try {
         return await Promise.race([
             generateDrafts(prompt, { maxTokens }),
@@ -342,6 +356,9 @@ export async function handleScoutWork(
         const scoutMode: "webgpu" | "wasm" = engine?.mode === "webgpu" ? "webgpu" : "wasm"
         let draftText = ""
         let generateMs: number | undefined
+        let prefillMs: number | undefined
+        let decodeMs: number | undefined
+        let reuseStrategy: string | undefined
         let usedFallback = false
         if (!engine) {
             const fallbackStartedAt = performance.now()
@@ -355,7 +372,10 @@ export async function handleScoutWork(
             try {
                 const generateStartedAt = performance.now()
                 const draftResult = await generateDraftsWithTimeout(work.prompt_context, work.min_tokens, 2500)
-                generateMs = Math.round(performance.now() - generateStartedAt)
+                generateMs = draftResult.generateMs ?? Math.round(performance.now() - generateStartedAt)
+                prefillMs = draftResult.prefillMs
+                decodeMs = draftResult.decodeMs
+                reuseStrategy = draftResult.reuseStrategy
                 draftText = draftResult.text
                 if (!draftResult.success || !draftText?.trim()) {
                     draftText = fallbackDraftFromPrompt(work.prompt_context, work.min_tokens)
@@ -389,9 +409,12 @@ export async function handleScoutWork(
                 minTokens: work.min_tokens,
                 leaseAgeMs,
                 generateMs,
+                prefillMs,
+                decodeMs,
                 totalMs: Math.round(performance.now() - workStartedAt),
                 draftChars: 0,
                 success: false,
+                reuseStrategy,
                 detail: usedFallback ? "fallback_empty_draft" : "empty_draft",
             })
             return {
@@ -429,10 +452,13 @@ export async function handleScoutWork(
             minTokens: work.min_tokens,
             leaseAgeMs,
             generateMs,
+            prefillMs,
+            decodeMs,
             submitMs,
             totalMs: Math.round(performance.now() - workStartedAt),
             draftChars: draftText.length,
             success: submissionResult.success,
+            reuseStrategy,
             detail: usedFallback
                 ? `fallback_submit:${submissionResult.detail || "no_detail"}`
                 : submissionResult.detail || "submit_complete",

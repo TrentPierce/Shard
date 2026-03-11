@@ -1,5 +1,6 @@
 import { detectScoutCapability, type ScoutCapabilityResult } from "./scout-capability"
 import * as WebLLM from "./webllm"
+import type { DraftTokenResult } from "./webllm"
 
 export interface ScoutEngineInitOptions {
     allowModelFallback?: boolean
@@ -12,7 +13,7 @@ export interface ScoutEngine {
         progressCallback?: (progress: number, text: string) => void,
         options?: ScoutEngineInitOptions,
     ): Promise<void>
-    generate(prompt: string, options?: any): Promise<{ tokens: number[], text: string, success: boolean, error?: string }>
+    generate(prompt: string, options?: any): Promise<DraftTokenResult>
     reset(): Promise<void>
     mode: "webgpu" | "wasm"
 }
@@ -72,6 +73,8 @@ class WasmScoutEngine implements ScoutEngine {
             text: "",
             success: false,
             error: "WASM fallback does not support real inference; draft skipped",
+            reuseStrategy: "none" as const,
+            promptRelation: "none" as const,
         }
     }
 
