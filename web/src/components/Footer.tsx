@@ -48,7 +48,7 @@ export default function Footer() {
                             <span>Shard</span>
                         </Link>
                         <p>
-                            Browser-powered distributed inference. Free, unlimited LLM access through a decentralized P2P mesh.
+                            Local-first browser AI with desktop verifier routing. Experimental WAN scout paths stay available for benchmark work, not the default product flow.
                         </p>
                     </div>
 

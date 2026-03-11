@@ -17,18 +17,18 @@ type PathCard = {
 const paths: PathCard[] = [
   {
     id: "browser",
-    title: "Browser Scout",
-    summary: "The easiest way to help. No install required.",
+    title: "Browser Client",
+    summary: "The easiest way to use Shard. Simple prompts can finish locally in-browser with no install required.",
     action: "Open shardnetwork.live",
     href: "https://www.shardnetwork.live/",
     steps: [
       "Open the site in Chrome or Edge.",
-      "Click Join and wait for the model download to finish.",
-      "Leave the tab open while the page shows contributing.",
+      "Use Auto mode to let the browser answer lighter prompts locally.",
+      "Escalate harder prompts to the desktop verifier path only when needed.",
     ],
     notes: [
-      "If WebGPU is unavailable, the page can still show telemetry but will not contribute compute.",
-      "The browser path is best for trying the network quickly.",
+      "WAN browser scouts are now experimental and are only needed for benchmark or research sessions.",
+      "If WebGPU is unavailable, the page can still route requests to the network path.",
     ],
   },
   {
@@ -80,7 +80,7 @@ export default function StartPage() {
         <p className="text-xs uppercase tracking-[0.22em] text-ink-400">Quick Start</p>
         <h1 className="mt-2 text-balance text-4xl font-semibold text-ink-50">Choose the easiest way for you to join the network.</h1>
         <p className="mt-4 max-w-3xl text-sm leading-6 text-ink-300 sm:text-base">
-          You do not need to understand distributed systems to help. Pick the browser path if you want the fastest setup, or the desktop path if you want your computer to act as a stronger verifier node.
+          You do not need to understand distributed systems to use Shard. Pick the browser path for local-first responses, or the desktop path if you want your computer to act as a stronger verifier node.
         </p>
         {contributionStatus ? (
           <div className="mt-5 rounded-2xl border border-ring bg-base-950/40 p-4">
@@ -134,7 +134,7 @@ export default function StartPage() {
         <div className="mt-3 grid gap-4 md:grid-cols-3">
           <div>
             <h3 className="text-lg font-semibold text-ink-50">Just want to help?</h3>
-            <p className="mt-2 text-sm text-ink-300">Use the browser scout. It is the least technical path.</p>
+            <p className="mt-2 text-sm text-ink-300">Use the browser client. It is the least technical path and now answers lighter prompts locally first.</p>
           </div>
           <div>
             <h3 className="text-lg font-semibold text-ink-50">Want more impact?</h3>

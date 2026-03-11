@@ -23,7 +23,7 @@ export const metadata: Metadata = {
     default: "Shard | Live Telemetry Dashboard",
     template: "%s | Shard",
   },
-  description: "Browser-powered distributed inference with live telemetry and OpenAI-compatible APIs.",
+  description: "Local-first browser AI with desktop verifier routing, live telemetry, and OpenAI-compatible APIs.",
   icons: {
     icon: [{ url: "/brand-mark.png", type: "image/png" }],
     shortcut: [{ url: "/brand-mark.png", type: "image/png" }],

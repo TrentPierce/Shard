@@ -29,13 +29,13 @@ const joinPaths: JoinPath[] = [
   {
     title: "Join from your browser",
     eyebrow: "Fastest path",
-    description: "Best for non-technical users. Open the site in Chrome or Edge, click Join, and let the page do the rest.",
+    description: "Best for non-technical users. Open the site in Chrome or Edge and let the browser answer simpler prompts locally before it ever needs the network.",
     href: "/start#browser",
-    cta: "Use browser scout",
+    cta: "Use browser client",
     checklist: [
       "Open the site in Chrome or Edge",
-      "Click Join and keep the tab open",
-      "Watch the status badge change from download to contributing",
+      "Use Auto mode for local-first routing",
+      "Let harder prompts escalate to the desktop verifier path only when needed",
     ],
   },
   {
@@ -66,15 +66,15 @@ const joinPaths: JoinPath[] = [
 
 const benchmarkRows: BenchmarkRow[] = [
   { scenario: "3 Fly nodes, verifier-only", p95Ms: 986.605, tps: 0.55, errorPct: 0, verdict: "Current fast-node baseline on pinned Fly hardware" },
-  { scenario: "3 Fly nodes, browser scouts attached", p95Ms: 965.127, tps: 0.55, errorPct: 0, verdict: "Fast nodes stay neutral because scouts back off when bypass is active" },
-  { scenario: "Local Llama 8B verifier, remote browser scout (10 vs 10)", p95Ms: 9936.093, tps: 0, errorPct: 0, verdict: "Compatible Llama browser scouts returned accepted drafts on all 10 runs and produced a small but measurable latency improvement over local-only baseline" },
+  { scenario: "3 Fly nodes, browser scouts attached", p95Ms: 965.127, tps: 0.55, errorPct: 0, verdict: "Experimental WAN scouts stay neutral on fast verifiers because the daemon bypasses waits when they are not profitable" },
+  { scenario: "Local Llama 8B verifier, remote browser scout (10 vs 10)", p95Ms: 9936.093, tps: 0, errorPct: 0, verdict: "Compatible Llama WAN scouts work end to end, but they remain a benchmark path rather than the primary product architecture" },
   { scenario: "Qwen browser draft against local Qwen 9B verifier", p95Ms: 0, tps: 0, errorPct: 0, verdict: "Strict mode rejects the pair; it is not a safe speculative match today" },
 ]
 
 const takeaways = [
-  "Fast Fly verifiers stay neutral with browser scouts attached because the daemon bypasses speculative waits and scouts back off instead of polling aggressively.",
-  "The Llama browser-draft path now works end to end against a larger local verifier, and a repeated remote 10 vs 10 run showed accepted drafts on every request with a small but measurable latency improvement.",
-  "Qwen browser drafts remain strict or disabled until we have a verified compatible browser-side draft model.",
+  "The product path is now local-first: let the browser handle simple prompts and reserve desktop verifiers for heavier work.",
+  "Desktop-local speculative decoding is the right place to keep draft-and-verify acceleration because it avoids WAN coordination costs.",
+  "WAN browser scouts remain useful for benchmark and research work, but they are no longer the default fast path.",
 ]
 
 function formatCompact(value: number) {
@@ -159,15 +159,15 @@ export default function HomePage() {
             <div className="mt-5 flex items-center gap-4">
               <Image src="/brand-mark.png" alt="Shard Network" width={92} height={92} className="h-20 w-20 rounded-[1.7rem] border border-white/12 bg-white/6 p-2.5 shadow-[0_18px_45px_rgba(9,21,64,0.38)]" priority />
               <div>
-                <p className="text-sm uppercase tracking-[0.18em] text-ink-200">Simple distributed AI</p>
-                <p className="text-sm text-ink-300">Browser scouts draft. Verifier nodes check. Apps use one standard API.</p>
+                <p className="text-sm uppercase tracking-[0.18em] text-ink-200">Local-first open AI</p>
+                <p className="text-sm text-ink-300">Browsers answer simpler prompts locally. Desktop verifiers handle heavier inference. Apps still use one standard API.</p>
               </div>
             </div>
             <h1 className="mt-6 max-w-3xl text-balance text-4xl font-semibold tracking-tight text-ink-50 sm:text-6xl">
               Join the network in minutes, even if you are not technical.
             </h1>
             <p className="mt-5 max-w-2xl text-base leading-7 text-ink-200 sm:text-lg">
-              Shard lets everyday users lend browser or desktop compute to a shared inference mesh. The network is stable today on verifier nodes, and scouts now stay out of the way until there is enough real scout supply to help.
+              Shard lets everyday users get instant browser-side answers for lighter prompts while routing harder requests to stronger desktop verifier nodes. Experimental WAN scout paths still exist, but they no longer define the core product flow.
             </p>
             <div className="mt-8 flex flex-col gap-3 sm:flex-row">
               <Link href="/start#browser" className="inline-flex min-h-11 items-center justify-center rounded-xl bg-accent-500 px-5 py-3 text-sm font-semibold text-base-950 transition hover:bg-accent-400">
@@ -185,18 +185,18 @@ export default function HomePage() {
               </div>
               <div className="rounded-2xl border border-white/10 bg-base-900 p-4">
                 <p className="text-xs uppercase tracking-[0.18em] text-ink-400">Best current path</p>
-                <p className="mt-2 text-lg font-semibold text-ink-50">1 verifier, no scouts</p>
-                <p className="mt-1 text-sm text-ink-300">Best current short-run baseline is verifier-first routing without depending on browser scouts.</p>
+                <p className="mt-2 text-lg font-semibold text-ink-50">Browser local-first + desktop verifier</p>
+                <p className="mt-1 text-sm text-ink-300">Use local browser answers for simple requests and let the network handle the heavier ones.</p>
               </div>
               <div className="rounded-2xl border border-white/10 bg-base-900 p-4">
                 <p className="text-xs uppercase tracking-[0.18em] text-ink-400">Browser status</p>
                 <p className="mt-2 text-lg font-semibold text-ink-50">
-                  {probeResult?.eligible ? "Ready to contribute" : "Viewer mode"}
+                  {probeResult?.eligible ? "Ready for local-first answers" : "Network-only mode"}
                 </p>
                 <p className="mt-1 text-sm text-ink-300">
                   {probeResult?.eligible
                     ? `${probeResult.browser} with ${probeResult.estimated_vram_mb}MB estimated VRAM`
-                    : "Chrome or Edge with WebGPU gives the best contribution path."}
+                    : "Chrome or Edge with WebGPU gives the best local browser runtime."}
                 </p>
               </div>
             </div>
@@ -377,4 +377,3 @@ function StatCard({ label, value, detail }: { label: string; value: string; deta
     </div>
   )
 }
-
