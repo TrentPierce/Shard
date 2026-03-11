@@ -83,9 +83,17 @@ async function fetchWithLocalFallback(path: string, init: RequestInit): Promise<
     throw new Error(`Local daemon fallback failed for ${path}`)
 }
 
+export type NetworkInferenceMode =
+    | "standard"
+    | "local_speculative"
+    | "experimental_wan"
+    | "distributed"
+    | "speculative"
+
 async function sendMessageNonStreaming(
     history: ChatMessage[],
-    onToken: (token: string) => void
+    onToken: (token: string) => void,
+    inferenceMode: NetworkInferenceMode,
 ): Promise<void> {
     const body: ChatCompletionRequest = {
         model: DEFAULT_MODEL_ID,
@@ -98,6 +106,7 @@ async function sendMessageNonStreaming(
         method: "POST",
         headers: {
             "Content-Type": "application/json",
+            "X-Shard-Inference-Mode": inferenceMode,
             ...authHeaders(),
         },
         body: JSON.stringify(body),
@@ -126,7 +135,7 @@ export async function sendMessage(
     history: ChatMessage[],
     onToken: (token: string) => void,
     onDone: () => void,
-    inferenceMode: "standard" | "distributed" = "distributed"
+    inferenceMode: NetworkInferenceMode = "local_speculative",
 ): Promise<void> {
     const startedAt = performance.now()
 
@@ -153,7 +162,7 @@ export async function sendMessage(
 
     const reader = res.body?.getReader()
     if (!reader) {
-        await sendMessageNonStreaming(history, onToken)
+        await sendMessageNonStreaming(history, onToken, inferenceMode)
         if (typeof window !== "undefined") {
             window.dispatchEvent(
                 new CustomEvent("shard:chat-success", {

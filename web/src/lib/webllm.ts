@@ -52,6 +52,27 @@ export type DraftGenerationOptions = {
     topP?: number
 }
 
+export type BrowserChatMessage = {
+    role: "system" | "user" | "assistant"
+    content: string
+}
+
+export type BrowserChatCompletionOptions = {
+    maxTokens?: number
+    temperature?: number
+    topP?: number
+    onToken?: (token: string) => void
+}
+
+export type BrowserChatCompletionResult = {
+    text: string
+    success: boolean
+    error?: string
+    generateMs?: number
+    prefillMs?: number
+    decodeMs?: number
+}
+
 export type InitWebLLMOptions = {
     allowFallback?: boolean
     modelId?: string
@@ -85,6 +106,12 @@ const DEFAULT_DRAFT_OPTIONS: DraftGenerationOptions = {
     maxTokens: 10,
     temperature: 0,
     topP: 1,
+}
+
+const DEFAULT_BROWSER_CHAT_OPTIONS: BrowserChatCompletionOptions = {
+    maxTokens: 192,
+    temperature: 0.2,
+    topP: 0.9,
 }
 
 // ─── State ─────────────────────────────────────────────────────────────────
@@ -305,6 +332,16 @@ function isRecoverableModelLoadError(error: unknown): boolean {
         msg.includes("load wasm binary") ||
         msg.includes("fetch:")
     )
+}
+
+async function ensureWebLLMReady(options?: InitWebLLMOptions): Promise<void> {
+    if (engine) {
+        return
+    }
+    if (isLoading) {
+        throw new Error("WebLLM engine is still loading")
+    }
+    await initWebLLM(undefined, options)
 }
 
 // ─── Mobile Detection ─────────────────────────────────────────────────────────
@@ -587,15 +624,7 @@ export async function generateDraftTokens(
     prompt: string,
     options?: DraftGenerationOptions
 ): Promise<DraftTokenResult> {
-    if (!engine) {
-        throw new Error(
-            "WebLLM engine not initialized. Call initWebLLM() first."
-        )
-    }
-
-    if (isLoading) {
-        throw new Error("WebLLM engine is still loading")
-    }
+    await ensureWebLLMReady()
 
     const opts = { ...DEFAULT_DRAFT_OPTIONS, ...options }
     const optionsKey = buildDraftOptionsKey(opts)
@@ -670,6 +699,58 @@ export async function generateDraftTokens(
             error: `Draft generation failed: ${error?.message ?? error}`,
             reuseStrategy: "none",
             promptRelation: "none",
+        }
+    }
+}
+
+export async function generateBrowserChatCompletion(
+    messages: BrowserChatMessage[],
+    options?: BrowserChatCompletionOptions,
+): Promise<BrowserChatCompletionResult> {
+    await ensureWebLLMReady()
+
+    const opts = { ...DEFAULT_BROWSER_CHAT_OPTIONS, ...options }
+
+    try {
+        const startedAt = performance.now()
+        const stream = await (engine as any).chat.completions.create({
+            messages,
+            max_tokens: opts.maxTokens,
+            temperature: opts.temperature,
+            top_p: opts.topP,
+            stream: true,
+            stream_options: { include_usage: true },
+            extra_body: {
+                enable_latency_breakdown: true,
+            },
+        })
+
+        let fullText = ""
+        let finalUsage: any = null
+        for await (const chunk of stream as AsyncIterable<any>) {
+            const delta = chunk?.choices?.[0]?.delta?.content ?? ""
+            if (delta) {
+                fullText += delta
+                opts.onToken?.(delta)
+            }
+            if (chunk?.usage) {
+                finalUsage = chunk.usage
+            }
+        }
+
+        return {
+            text: sanitizeDraftText(fullText),
+            success: true,
+            ...extractGenerateTimings(
+                { usage: finalUsage },
+                performance.now() - startedAt,
+            ),
+        }
+    } catch (error: any) {
+        return {
+            text: "",
+            success: false,
+            error: `Browser chat generation failed: ${error?.message ?? error}`,
         }
     }
 }

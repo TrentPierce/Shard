@@ -1,37 +1,72 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import React, { useEffect, useMemo, useRef, useState } from "react"
 import { useAppContext, type NodeMode } from "@/lib/context"
-import { sendMessage, type ChatMessage } from "@/lib/api"
+import { sendMessage as sendNetworkMessage } from "@/lib/api"
+import { sendBrowserChatMessage, canUseBrowserChatRuntime } from "@/lib/browser-chat"
+import {
+    decideChatRoute,
+    type ChatRouteDecision,
+    type ChatRouteMode,
+} from "@/lib/browser-router"
+import { useConversationState } from "@/lib/conversation-state"
 import { useProductSignals } from "@/hooks/useProductSignals"
+import { Activity, Cpu, Send, Sparkles, Bot } from "lucide-react"
+import { apiUrl } from "@/lib/config"
 
 interface ChatPanelProps {
     mode: NodeMode
 }
 
-import { Activity, Cpu, Send, MessageSquare, Sparkles, User, Bot } from "lucide-react"
+function statusLabel(routeMode: ChatRouteMode, decision: ChatRouteDecision | null, streaming: boolean) {
+    if (!streaming) {
+        switch (routeMode) {
+            case "browser":
+                return "Browser-only answers"
+            case "network":
+                return "Network-only routing"
+            case "experimental-wan":
+                return "Experimental WAN routing"
+            default:
+                return "Auto routing"
+        }
+    }
 
-import { apiUrl } from "@/lib/config"
+    if (!decision) {
+        return "Routing request"
+    }
+    if (decision.kind === "local_answer") {
+        return "Generating locally in browser"
+    }
+    if (decision.kind === "network_route_with_compaction") {
+        return `Routing compacted context via ${decision.networkMode.replace("_", " ")}`
+    }
+    return `Routing via ${decision.networkMode.replace("_", " ")}`
+}
 
 export default function ChatPanel({ mode }: ChatPanelProps) {
     const { topology } = useAppContext()
-    const [messages, setMessages] = useState<ChatMessage[]>([])
+    const {
+        messages,
+        appendUserMessage,
+        beginAssistantMessage,
+        appendAssistantToken,
+        replaceAssistantMessage,
+        snapshot,
+    } = useConversationState()
     const [input, setInput] = useState("")
     const [streaming, setStreaming] = useState(false)
+    const [routeMode, setRouteMode] = useState<ChatRouteMode>("auto")
+    const [lastDecision, setLastDecision] = useState<ChatRouteDecision | null>(null)
     const messagesEndRef = useRef<HTMLDivElement>(null)
     const textareaRef = useRef<HTMLTextAreaElement>(null)
-    const { health, successRate } = useProductSignals()
-    const [inferenceMode, setInferenceMode] = useState<"standard" | "distributed">("distributed")
+    const { successRate } = useProductSignals()
     const [opsSummary, setOpsSummary] = useState<{ active_nodes?: number }>({})
 
-    const modelLabel = topology?.model_id ?? "meta-llama/Llama-3.2-1B"
-
-    const scrollToBottom = () => {
-        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
-    }
+    const modelLabel = topology?.model_id ?? "meta-llama/Llama-3.1-8B"
 
     useEffect(() => {
-        scrollToBottom()
+        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
     }, [messages])
 
     useEffect(() => {
@@ -66,57 +101,68 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
         const text = input.trim()
         if (!text || streaming) return
 
-        const userMsg: ChatMessage = {
-            role: "user",
-            content: text,
-            timestamp: Date.now(),
-        }
-
-        setMessages((prev) => [...prev, userMsg])
+        const userMessage = appendUserMessage(text)
+        const convo = snapshot(userMessage)
         setInput("")
         setStreaming(true)
 
-        const assistantMsg: ChatMessage = {
-            role: "assistant",
-            content: "",
-            timestamp: Date.now(),
-        }
-        setMessages((prev) => [...prev, assistantMsg])
+        const browserRuntimeAvailable = await canUseBrowserChatRuntime()
+        const decision = decideChatRoute({
+            history: convo.rawMessages,
+            prompt: text,
+            mode: routeMode,
+            browserRuntimeAvailable,
+        })
+        setLastDecision(decision)
+        beginAssistantMessage()
 
         try {
-            await sendMessage(
-                [...messages, userMsg],
-                (token) => {
-                    setMessages((prev) => {
-                        const updated = [...prev]
-                        const last = updated[updated.length - 1]
-                        if (last.role === "assistant") {
-                            updated[updated.length - 1] = {
-                                ...last,
-                                content: last.content + token,
-                            }
-                        }
-                        return updated
-                    })
-                },
-                () => {
-                    setStreaming(false)
-                },
-                inferenceMode,
-            )
+            if (decision.kind === "local_answer") {
+                try {
+                    await sendBrowserChatMessage(
+                        convo.rawMessages,
+                        appendAssistantToken,
+                        () => undefined,
+                    )
+                } catch (error) {
+                    if (routeMode !== "auto") {
+                        throw error
+                    }
+                    const fallbackUsesCompaction = convo.compaction.wasCompacted
+                    const fallbackDecision: ChatRouteDecision = {
+                        kind: fallbackUsesCompaction
+                            ? "network_route_with_compaction"
+                            : "network_route",
+                        reason: "auto_local_failed_network_fallback",
+                        complexityScore: decision.complexityScore,
+                        networkMode: "local_speculative",
+                        shouldCompact: fallbackUsesCompaction,
+                    }
+                    setLastDecision(fallbackDecision)
+                    replaceAssistantMessage("")
+                    await sendNetworkMessage(
+                        fallbackUsesCompaction ? convo.compactedMessages : convo.rawMessages,
+                        appendAssistantToken,
+                        () => undefined,
+                        fallbackDecision.networkMode,
+                    )
+                }
+            } else {
+                await sendNetworkMessage(
+                    decision.kind === "network_route_with_compaction"
+                        ? convo.compactedMessages
+                        : convo.rawMessages,
+                    appendAssistantToken,
+                    () => undefined,
+                    decision.networkMode,
+                )
+            }
         } catch (err: any) {
             console.error("Chat Error:", err)
-            setMessages((prev) => {
-                const updated = [...prev]
-                const last = updated[updated.length - 1]
-                if (last.role === "assistant") {
-                    updated[updated.length - 1] = {
-                        ...last,
-                        content: "Network error: Failed to connect to the Shard verifier node. Please ensure the daemon is running or check your connection.",
-                    }
-                }
-                return updated
-            })
+            replaceAssistantMessage(
+                "Unable to complete the request. Check the local verifier or browser runtime, and only use Experimental WAN when the benchmark scout path is explicitly prepared.",
+            )
+        } finally {
             setStreaming(false)
         }
     }
@@ -129,16 +175,18 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
     }
 
     const ready = mode !== "loading"
-
     const quickPrompts = [
-        "How does distributed inference work?",
-        "What is the current network health?",
-        "Explain Shard architecture.",
+        "Summarize how Shard routes simple and complex prompts.",
+        "Explain the local-first browser router.",
+        "When should Shard use the desktop verifier path?",
     ]
+    const footerStatus = useMemo(
+        () => statusLabel(routeMode, lastDecision, streaming),
+        [lastDecision, routeMode, streaming],
+    )
 
     return (
         <main className="chat-panel">
-            {/* Panel Header */}
             <header className="chat-panel__header">
                 <div className="flex items-center gap-md">
                     <div className="avatar-orb avatar-orb--bot">
@@ -153,29 +201,33 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
                             <span className="text-xs text-muted font-medium flex items-center gap-1">
                                 <Activity size={10} /> {successRate}% Reliability
                             </span>
+                            <span className="text-xs text-muted font-medium">
+                                {opsSummary.active_nodes ?? 0} active nodes
+                            </span>
                         </div>
                     </div>
                 </div>
-                
+
                 <div className="flex flex-col items-end">
                     <select
-                        value={inferenceMode}
-                        onChange={(e) => setInferenceMode(e.target.value as any)}
+                        value={routeMode}
+                        onChange={(e) => setRouteMode(e.target.value as ChatRouteMode)}
                         className="mode-selector"
                     >
-                        <option value="distributed">Distributed Mesh</option>
-                        <option value="standard">Local Direct</option>
+                        <option value="auto">Auto</option>
+                        <option value="browser">Browser Only</option>
+                        <option value="network">Network Only</option>
+                        <option value="experimental-wan">Experimental WAN</option>
                     </select>
                     <div className="flex items-center gap-1.5 mt-1.5">
-                        <div className={`w-2 h-2 rounded-full ${ready ? 'bg-primary animate-pulse' : 'bg-error'}`} />
+                        <div className={`w-2 h-2 rounded-full ${ready ? "bg-primary animate-pulse" : "bg-error"}`} />
                         <span className="text-[10px] uppercase font-bold tracking-widest text-muted">
-                            {ready ? 'Connected' : 'Syncing'}
+                            {ready ? "Ready" : "Syncing"}
                         </span>
                     </div>
                 </div>
             </header>
 
-            {/* Messages Area */}
             <div className="chat-panel__messages">
                 {messages.length === 0 ? (
                     <div className="empty-state">
@@ -184,13 +236,12 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
                         </div>
                         <h3 className="text-xl font-bold mt-4">How can I help you build?</h3>
                         <p className="text-muted mt-2 max-w-sm">
-                            Experience decentralized inference powered by the Shard Network. 
-                            Your compute, your network, your AI.
+                            Local browser answers handle lighter prompts immediately. Harder prompts escalate to the desktop verifier path.
                         </p>
-                        
+
                         {!ready && (
                             <div className="mt-4 p-4 card card-glass flex flex-col items-center">
-                                <p className="text-xs text-muted mb-2">Node connection required for distributed inference.</p>
+                                <p className="text-xs text-muted mb-2">A local verifier improves network-only and experimental WAN routes.</p>
                                 <a href="https://github.com/TrentPierce/Shard/releases" target="_blank" className="btn btn-secondary btn-sm">
                                     Download Verifier App
                                 </a>
@@ -198,7 +249,7 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
                         )}
 
                         <div className="quick-prompts-grid mt-8">
-                            {quickPrompts.map(p => (
+                            {quickPrompts.map((p) => (
                                 <button key={p} onClick={() => setInput(p)} className="quick-prompt-card">
                                     {p}
                                 </button>
@@ -207,11 +258,11 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
                     </div>
                 ) : (
                     messages.map((msg, i) => (
-                        <div key={i} className={`message-row ${msg.role === 'user' ? 'message-row--user' : 'message-row--bot'}`}>
+                        <div key={i} className={`message-row ${msg.role === "user" ? "message-row--user" : "message-row--bot"}`}>
                             <div className="message-bubble">
                                 <div className="message-header">
-                                    <span className="role-label">{msg.role === 'user' ? 'You' : 'Shard AI'}</span>
-                                    <span className="time-label">{new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                                    <span className="role-label">{msg.role === "user" ? "You" : "Shard AI"}</span>
+                                    <span className="time-label">{new Date(msg.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
                                 </div>
                                 <div className="message-content">
                                     {msg.content || <span className="typing-dots"><span>.</span><span>.</span><span>.</span></span>}
@@ -223,32 +274,27 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
                 <div ref={messagesEndRef} />
             </div>
 
-            {/* Input Area */}
             <footer className="chat-panel__input-area">
                 <div className="input-wrapper">
                     <textarea
                         ref={textareaRef}
-                        placeholder={ready ? "Message Neural Assistant..." : "Establishing network connection..."}
+                        placeholder="Message Neural Assistant..."
                         value={input}
                         onChange={(e) => setInput(e.target.value)}
                         onKeyDown={handleKeyDown}
                         disabled={streaming}
                         rows={1}
                     />
-                    <button 
+                    <button
                         onClick={handleSend}
                         disabled={!input.trim() || streaming}
                         className="send-button"
                     >
-                        {streaming ? (
-                            <div className="spinner" />
-                        ) : (
-                            <Send size={18} />
-                        )}
+                        {streaming ? <div className="spinner" /> : <Send size={18} />}
                     </button>
                 </div>
                 <div className="input-footer">
-                    <span>{streaming ? 'Generating verified tokens via Shard Mesh...' : 'End-to-end encrypted • Decentralized compute'}</span>
+                    <span>{footerStatus}</span>
                 </div>
             </footer>
 
@@ -344,7 +390,6 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
                 }
                 .message-row--user { justify-content: flex-end; }
                 .message-row--bot { justify-content: flex-start; }
-                
                 .message-bubble {
                     max-width: 80%;
                     padding: var(--space-md) var(--space-lg);

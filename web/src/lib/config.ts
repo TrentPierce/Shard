@@ -14,9 +14,17 @@ const RUNTIME_API_HEADER_OVERRIDE_KEY = "shard_runtime_api_header_override"
 
 /**
  * Whether the browser should prefer local shard mode when a localhost daemon is detected.
- * Default is false so normal visitors contribute as Scout nodes by default.
+ * Default is false so the browser can still act as a local-first client without forcing
+ * a localhost verifier dependency.
  */
 export const PREFER_LOCAL_SHARD = process.env.NEXT_PUBLIC_PREFER_LOCAL_SHARD === "true"
+
+/**
+ * WAN browser scouts are experimental and disabled by default for normal product sessions.
+ * Benchmark routes can still boot the scout path explicitly.
+ */
+export const ENABLE_EXPERIMENTAL_WAN_SCOUT =
+  process.env.NEXT_PUBLIC_ENABLE_EXPERIMENTAL_WAN_SCOUT === "true"
 
 /**
  * Browser layer hosting is an experimental path and should only be enabled when

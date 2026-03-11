@@ -8,7 +8,13 @@ import {
     startScoutWorker,
     type Topology,
 } from "@/lib/swarm"
-import { ENABLE_BROWSER_LAYER_HOST, ENABLE_BROWSER_P2P, PREFER_LOCAL_SHARD, apiUrl } from "@/lib/config"
+import {
+    ENABLE_BROWSER_LAYER_HOST,
+    ENABLE_BROWSER_P2P,
+    ENABLE_EXPERIMENTAL_WAN_SCOUT,
+    PREFER_LOCAL_SHARD,
+    apiUrl,
+} from "@/lib/config"
 import {
     initWebLLM,
     type ModelProgress,
@@ -180,6 +186,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                         )
                         return
                     }
+                }
+
+                if (!ENABLE_EXPERIMENTAL_WAN_SCOUT) {
+                    setMode("leech")
+                    setContributionStatusState(
+                        setContributionStatus(
+                            "not_contributing",
+                            "Background browser scouts are experimental and disabled by default. Use chat Auto mode for local browser answers or /benchmark/scout for WAN scout testing."
+                        )
+                    )
+                    return
                 }
 
                 setMode("scout-initializing")
