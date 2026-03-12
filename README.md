@@ -168,7 +168,7 @@ make test-web
 ## Python SDK
 
 ```bash
-pip install -e sdk/python
+pip install shardnetwork-client
 ```
 
 ```python

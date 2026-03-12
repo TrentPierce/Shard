@@ -1,6 +1,12 @@
-# shard-client
+# shardnetwork-client
 
 Python SDK for the Shard distributed inference network.
+
+## Install
+
+```bash
+pip install shardnetwork-client
+```
 
 ## Quickstart
 
