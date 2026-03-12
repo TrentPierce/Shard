@@ -2129,7 +2129,12 @@ fn best_addr_per_peer(addrs: Vec<String>, seed_set: &HashSet<String>) -> Vec<Str
     best.into_values().collect()
 }
 
-fn node_capability_tier(role: &str, max_gpu_usage: f32, relay_mode: bool, public_api: bool) -> String {
+fn node_capability_tier(
+    role: &str,
+    max_gpu_usage: f32,
+    relay_mode: bool,
+    public_api: bool,
+) -> String {
     if role.eq_ignore_ascii_case("scout") {
         return "scout_only".to_string();
     }
@@ -2171,19 +2176,17 @@ fn peer_reconnect_stats_for_addr(
     bootstrap_failures: &HashMap<String, u32>,
 ) -> PeerReconnectStats {
     let peer_id = peer_id_from_addr_str(addr_str);
-    let peer_snapshot = peer_id
-        .as_ref()
-        .and_then(|id| peers.get(id));
-    let registry_entry = peer_id
-        .as_ref()
-        .and_then(|id| registry.get(id));
+    let peer_snapshot = peer_id.as_ref().and_then(|id| peers.get(id));
+    let registry_entry = peer_id.as_ref().and_then(|id| registry.get(id));
     let bootstrap_failure_count = peer_id
         .as_ref()
         .and_then(|id| bootstrap_failures.get(id))
         .copied()
         .unwrap_or(0);
     PeerReconnectStats {
-        stability_score: registry_entry.map(|entry| entry.stability_score).unwrap_or(0),
+        stability_score: registry_entry
+            .map(|entry| entry.stability_score)
+            .unwrap_or(0),
         successful_handshakes: peer_snapshot
             .map(|peer| peer.successful_handshakes)
             .unwrap_or(0),
@@ -3334,8 +3337,7 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
         bootstrap_sources.extend(hardcoded_bootstrap);
     }
 
-    let startup_seed_addrs =
-        filter_bootstrap_addrs(startup_seed_sources, allow_private_bootstrap);
+    let startup_seed_addrs = filter_bootstrap_addrs(startup_seed_sources, allow_private_bootstrap);
     let bootstrap_addrs = filter_bootstrap_addrs(bootstrap_sources, allow_private_bootstrap);
 
     let relay_sources = std::env::var("SHARD_RELAY_BOOTSTRAP")
@@ -3564,9 +3566,7 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
         )),
         scout_timeout_ms: Arc::new(AtomicU64::new(env_live_scout_timeout_ms())),
         max_scouts: Arc::new(AtomicUsize::new(env_live_max_scouts())),
-        acceptance_threshold_bps: Arc::new(AtomicU64::new(
-            env_live_acceptance_threshold_bps(),
-        )),
+        acceptance_threshold_bps: Arc::new(AtomicU64::new(env_live_acceptance_threshold_bps())),
         public_host: cli
             .public_host
             .clone()
@@ -3919,7 +3919,10 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
         .behaviour_mut()
         .gossipsub
         .subscribe(&layer_announce_topic)?;
-    swarm.behaviour_mut().gossipsub.subscribe(&bootstrap_topic)?;
+    swarm
+        .behaviour_mut()
+        .gossipsub
+        .subscribe(&bootstrap_topic)?;
     swarm.behaviour_mut().gossipsub.subscribe(&auction_topic)?;
     swarm.behaviour_mut().gossipsub.subscribe(&ban_topic)?;
     if cli.ha_mode {
@@ -4069,7 +4072,9 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
                         gpu_available: Some(node_gpu_available_for_tier(capability_tier.as_str())),
                         accepts_scout_work: Some(node_accepts_scout_work(
                             advertise_state.node_role.as_str(),
-                            advertise_state.participation_enabled.load(Ordering::Relaxed),
+                            advertise_state
+                                .participation_enabled
+                                .load(Ordering::Relaxed),
                             cli.relay_mode,
                         )),
                         public_api: Some(cli.public_api),
@@ -4104,6 +4109,18 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
         .local_addr()
         .map(|addr| addr.port())
         .unwrap_or(cli.control_port);
+    let private_ipv6_control_listener = if cli.public_api {
+        fly_private_ipv6().and_then(|ipv6| {
+            ipv6.parse::<std::net::Ipv6Addr>().ok().map(|addr| {
+                tokio::net::TcpListener::bind(SocketAddr::new(
+                    std::net::IpAddr::V6(addr),
+                    control_port,
+                ))
+            })
+        })
+    } else {
+        None
+    };
     let public_host = cli.public_host.as_deref().and_then(normalize_public_host);
     let cors_origins = build_cors_origins(control_port, public_host.as_deref());
     let allowed_origin_set = cors_origins
@@ -4117,14 +4134,38 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
     };
     println!("control_port={control_port}");
 
+    let control_cors = cors_origins.clone();
+    let control_policy = policy.clone();
     tokio::spawn(async move {
-        let app = create_router(http_state, cors_origins, policy);
+        let app = create_router(http_state, control_cors, control_policy);
         let addr = SocketAddr::from((control_bind_ip, control_port));
         tracing::info!(%addr, "control-plane HTTP server starting");
         axum::serve(listener, app)
             .await
             .expect("control-plane server crashed");
     });
+
+    if let Some(listener_future) = private_ipv6_control_listener {
+        let http_state = state.clone();
+        let cors_origins = cors_origins.clone();
+        let policy = policy.clone();
+        tokio::spawn(async move {
+            match listener_future.await {
+                Ok(listener) => {
+                    if let Ok(addr) = listener.local_addr() {
+                        tracing::info!(%addr, "control-plane HTTP server starting on Fly private IPv6");
+                    }
+                    let app = create_router(http_state, cors_origins, policy);
+                    if let Err(error) = axum::serve(listener, app).await {
+                        tracing::error!(%error, "control-plane IPv6 server crashed");
+                    }
+                }
+                Err(error) => {
+                    tracing::warn!(%error, "failed to bind control-plane Fly private IPv6 listener");
+                }
+            }
+        });
+    }
 
     // Signed self-registration and heartbeat loop for controlled clusters.
     let heartbeat_state = state.clone();
@@ -4205,7 +4246,9 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
                     gpu_available: Some(node_gpu_available_for_tier(capability_tier.as_str())),
                     accepts_scout_work: Some(node_accepts_scout_work(
                         heartbeat_state.node_role.as_str(),
-                        heartbeat_state.participation_enabled.load(Ordering::Relaxed),
+                        heartbeat_state
+                            .participation_enabled
+                            .load(Ordering::Relaxed),
                         cli.relay_mode,
                     )),
                     public_api: Some(cli.public_api),
@@ -6079,20 +6122,20 @@ pub async fn run_until_stopped(
 #[allow(clippy::items_after_test_module)]
 mod tests {
     use super::{
-        accept_replay_nonce, bootstrap_registry_seed_addrs, filter_bootstrap_addrs,
-        is_newer_version, is_non_public_bootstrap_addr, load_bootstrap_registry, model_local_path,
-        node_is_healthy, parse_hardcoded_bootstrap_mode, peer_id_from_addr_str,
-        prune_bootstrap_registry, record_bootstrap_failure, remove_known_addrs_for_peers,
-        save_bootstrap_registry, should_attempt_reconnect, should_include_hardcoded_bootstrap,
+        accept_replay_nonce, bootstrap_registry_seed_addrs, canonical_bootstrap_multiaddr,
+        filter_bootstrap_addrs, is_newer_version, is_non_public_bootstrap_addr,
+        load_bootstrap_registry, model_local_path, node_is_healthy, parse_hardcoded_bootstrap_mode,
+        peer_id_from_addr_str, prune_bootstrap_registry, reconnect_backoff_ms_for_failures,
+        record_bootstrap_failure, remove_known_addrs_for_peers, save_bootstrap_registry,
+        should_attempt_reconnect, should_include_hardcoded_bootstrap,
         should_reject_peer_connection, should_track_in_flight_path, track_in_flight_path,
         unique_addrs, validate_work_request, BootstrapRegistryEntry, CanaryRolloutConfig,
         CanaryRolloutController, HardcodedBootstrapMode, InFlightRequestGuard, LatencyHistogram,
         ModelManifestEntry, ScoutPenaltyBook, ScoutPenaltyUpdate, ScoutTimeoutTracker,
         SpeculativeConfig, WorkRequest, COLD_BOOTSTRAP_FAILURES, MAX_BOOTSTRAP_FAILURES,
-        canonical_bootstrap_multiaddr, reconnect_backoff_ms_for_failures,
     };
-    use crate::PeerInfo;
     use crate::network::policy::{NetworkMode, NetworkPolicy, PolicyDecision};
+    use crate::PeerInfo;
     use libp2p::{Multiaddr, PeerId};
     use std::collections::{HashMap, HashSet};
     use std::path::Path;
@@ -6468,28 +6511,31 @@ mod tests {
 
         let mut addrs = [other_quic.clone(), other_tcp.clone(), seed.clone()];
         addrs.sort_by(|a, b| {
-            let a_stats =
-                super::peer_reconnect_stats_for_addr(a, &registry, &peers, &failures);
-            let b_stats =
-                super::peer_reconnect_stats_for_addr(b, &registry, &peers, &failures);
+            let a_stats = super::peer_reconnect_stats_for_addr(a, &registry, &peers, &failures);
+            let b_stats = super::peer_reconnect_stats_for_addr(b, &registry, &peers, &failures);
             let a_is_seed = hardcoded.contains(a);
             let b_is_seed = hardcoded.contains(b);
-            b_is_seed
-                .cmp(&a_is_seed)
-                .then(
-                    a_stats
-                        .is_cold
-                        .cmp(&b_stats.is_cold)
-                        .then(a_stats.bootstrap_failures.cmp(&b_stats.bootstrap_failures))
-                        .then(b_stats.stability_score.cmp(&a_stats.stability_score))
-                        .then(b_stats.successful_handshakes.cmp(&a_stats.successful_handshakes))
-                        .then(a_stats.connection_failures.cmp(&b_stats.connection_failures))
-                        .then_with(|| a_stats.avg_latency_ms.total_cmp(&b_stats.avg_latency_ms))
-                        .then_with(|| {
-                            super::reconnect_addr_sort_key(a)
-                                .cmp(&super::reconnect_addr_sort_key(b))
-                        }),
-                )
+            b_is_seed.cmp(&a_is_seed).then(
+                a_stats
+                    .is_cold
+                    .cmp(&b_stats.is_cold)
+                    .then(a_stats.bootstrap_failures.cmp(&b_stats.bootstrap_failures))
+                    .then(b_stats.stability_score.cmp(&a_stats.stability_score))
+                    .then(
+                        b_stats
+                            .successful_handshakes
+                            .cmp(&a_stats.successful_handshakes),
+                    )
+                    .then(
+                        a_stats
+                            .connection_failures
+                            .cmp(&b_stats.connection_failures),
+                    )
+                    .then_with(|| a_stats.avg_latency_ms.total_cmp(&b_stats.avg_latency_ms))
+                    .then_with(|| {
+                        super::reconnect_addr_sort_key(a).cmp(&super::reconnect_addr_sort_key(b))
+                    }),
+            )
         });
 
         assert_eq!(addrs[0], seed);

@@ -2,7 +2,7 @@ use super::*;
 use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode};
 use libp2p::multiaddr::Protocol;
 use reqwest::Url;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::sync::atomic::Ordering;
 use std::time::Duration;
@@ -30,9 +30,7 @@ impl InferenceMode {
 pub(crate) fn resolve_inference_mode(raw: Option<&str>) -> InferenceMode {
     match raw.map(|value| value.trim().to_ascii_lowercase()) {
         Some(mode)
-            if mode == "distributed"
-                || mode == "speculative"
-                || mode == "experimental_wan" =>
+            if mode == "distributed" || mode == "speculative" || mode == "experimental_wan" =>
         {
             InferenceMode::ExperimentalWanSpeculative
         }
@@ -72,9 +70,10 @@ fn should_refuse_mesh_degraded(
 }
 
 fn host_is_local(host: &str) -> bool {
-    let raw = host.trim().trim_start_matches('[').trim_end_matches(']');
-    let host_only = raw.split(':').next().unwrap_or(raw);
-    matches!(host_only, "localhost" | "127.0.0.1" | "::1")
+    matches!(
+        normalized_host_label(host).as_str(),
+        "localhost" | "127.0.0.1" | "::1"
+    )
 }
 
 fn request_host_is_local(headers: &HeaderMap) -> bool {
@@ -176,6 +175,17 @@ fn mesh_forward_request_timeout_ms() -> u64 {
             .and_then(|v| v.parse::<u64>().ok())
             .map(|v| v.clamp(250, 120_000))
             .unwrap_or(20_000)
+    })
+}
+
+fn mesh_forward_target_attempts() -> usize {
+    static ATTEMPTS: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *ATTEMPTS.get_or_init(|| {
+        std::env::var("SHARD_MESH_FORWARD_TARGET_ATTEMPTS")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .filter(|v| *v > 0)
+            .unwrap_or(2)
     })
 }
 
@@ -311,11 +321,7 @@ fn should_attempt_mesh_forward(
     stream_mode: bool,
     inference_mode: InferenceMode,
 ) -> bool {
-    if route_private
-        || stream_mode
-        || inference_mode.is_speculative()
-        || !mesh_forward_enabled()
-    {
+    if route_private || stream_mode || inference_mode.is_speculative() || !mesh_forward_enabled() {
         return false;
     }
     if matches!(
@@ -336,6 +342,10 @@ fn normalize_endpoint(raw: &str, default_port: u16) -> Option<String> {
     if trimmed.is_empty() {
         return None;
     }
+    let raw_ipv6_host = !trimmed.starts_with("http://")
+        && !trimmed.starts_with("https://")
+        && !trimmed.starts_with('[')
+        && trimmed.matches(':').count() > 1;
     let inferred_https = !trimmed.starts_with("http://")
         && !trimmed.starts_with("https://")
         && trimmed.contains('.')
@@ -347,7 +357,12 @@ fn normalize_endpoint(raw: &str, default_port: u16) -> Option<String> {
     } else if inferred_https {
         format!("https://{trimmed}")
     } else {
-        format!("http://{trimmed}")
+        let host = if raw_ipv6_host {
+            format!("[{trimmed}]")
+        } else {
+            trimmed.to_string()
+        };
+        format!("http://{host}")
     };
     let mut url = Url::parse(&with_scheme).ok()?;
     url.host_str()?;
@@ -364,7 +379,11 @@ fn normalize_endpoint(raw: &str, default_port: u16) -> Option<String> {
     } else {
         "http"
     };
-    let host = url.host_str()?.to_string();
+    let host = url
+        .host_str()?
+        .trim_start_matches('[')
+        .trim_end_matches(']')
+        .to_string();
     let host_fmt = if host.contains(':') {
         format!("[{host}]")
     } else {
@@ -405,6 +424,10 @@ fn mesh_forward_score(latency_ms: f64, queue_depth: f64, queue_weight_ms: f64) -
     latency_ms.max(0.0) + queue_depth.max(0.0) * queue_weight_ms.max(0.0)
 }
 
+fn projected_mesh_local_queue_depth(state: &SharedState) -> f64 {
+    verifier_request_depth(state).saturating_add(1) as f64
+}
+
 fn should_forward_to_mesh(
     local_score: f64,
     best_remote_score: f64,
@@ -424,12 +447,31 @@ fn mesh_forward_client() -> &'static reqwest::Client {
     CLIENT.get_or_init(reqwest::Client::new)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum MeshEndpointSource {
+    DirectPeer,
+    ExplicitEnv,
+    PublicApi,
+}
+
+impl MeshEndpointSource {
+    fn priority(self) -> u8 {
+        match self {
+            MeshEndpointSource::DirectPeer => 0,
+            MeshEndpointSource::ExplicitEnv => 1,
+            MeshEndpointSource::PublicApi => 2,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 struct MeshEndpointCandidate {
     endpoint: String,
+    peer_id: Option<String>,
     peer_latency_ms: f64,
     capability_tier: Option<String>,
     public_api: Option<bool>,
+    source: MeshEndpointSource,
 }
 
 #[derive(Debug, Clone)]
@@ -437,9 +479,172 @@ struct MeshEndpointScore {
     endpoint: String,
     queue_depth: f64,
     latency_ms: f64,
+    reported_latency_ms: f64,
+    probe_rtt_ms: f64,
+    peer_latency_ms: f64,
     score: f64,
     tier: &'static str,
     capability_tier: Option<String>,
+    source: MeshEndpointSource,
+}
+
+#[derive(Debug, Clone, Default)]
+struct MeshTargetSelection {
+    target: Option<MeshEndpointScore>,
+    discovered_count: usize,
+    eligible_count: usize,
+    probed_count: usize,
+    scored_count: usize,
+    filtered_count: usize,
+    candidate_endpoints: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct MeshForwardAttemptDebug {
+    decision: String,
+    detail: Option<String>,
+    target_endpoint: Option<String>,
+    target_tier: Option<String>,
+    discovered_count: usize,
+    eligible_count: usize,
+    probed_count: usize,
+    scored_count: usize,
+    filtered_count: usize,
+}
+
+struct MeshForwardAttempt {
+    response: Option<axum::response::Response>,
+    debug: MeshForwardAttemptDebug,
+}
+
+fn normalized_host_label(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    if let Some(stripped) = trimmed.strip_prefix('[') {
+        return stripped
+            .split(']')
+            .next()
+            .unwrap_or(stripped)
+            .trim()
+            .to_ascii_lowercase();
+    }
+    if trimmed.matches(':').count() > 1 {
+        return trimmed.to_ascii_lowercase();
+    }
+    trimmed
+        .split(':')
+        .next()
+        .unwrap_or(trimmed)
+        .trim()
+        .to_ascii_lowercase()
+}
+
+fn endpoint_host_label(raw: &str) -> Option<String> {
+    Url::parse(raw)
+        .ok()
+        .and_then(|url| url.host_str().map(normalized_host_label))
+}
+
+fn mesh_forward_effective_latency_ms(
+    reported_latency_ms: f64,
+    peer_latency_ms: f64,
+    probe_rtt_ms: f64,
+) -> f64 {
+    reported_latency_ms.max(0.0) + peer_latency_ms.max(probe_rtt_ms).max(0.0)
+}
+
+fn mesh_forward_effective_request_timeout_ms(
+    target: &MeshEndpointScore,
+    local_latency_ms: f64,
+) -> u64 {
+    let base = mesh_forward_request_timeout_ms();
+    let latency_budget_ms = target
+        .reported_latency_ms
+        .max(target.latency_ms)
+        .max(local_latency_ms)
+        .max(0.0);
+    let derived = (latency_budget_ms * 1.5).ceil() as u64 + 5_000;
+    derived.clamp(base, 90_000)
+}
+
+fn upsert_mesh_endpoint_candidate(
+    discovered: &mut HashMap<String, MeshEndpointCandidate>,
+    endpoint: String,
+    peer_id: Option<String>,
+    peer_latency_ms: f64,
+    capability_tier: Option<String>,
+    public_api: Option<bool>,
+    source: MeshEndpointSource,
+) {
+    let entry = discovered
+        .entry(endpoint.clone())
+        .or_insert(MeshEndpointCandidate {
+            endpoint,
+            peer_id: peer_id.clone(),
+            peer_latency_ms,
+            capability_tier: capability_tier.clone(),
+            public_api,
+            source,
+        });
+    if peer_latency_ms < entry.peer_latency_ms {
+        entry.peer_latency_ms = peer_latency_ms;
+    }
+    if entry.peer_id.is_none() {
+        entry.peer_id = peer_id;
+    }
+    if entry.capability_tier.is_none() {
+        entry.capability_tier = capability_tier;
+    }
+    if entry.public_api.is_none() {
+        entry.public_api = public_api;
+    }
+    if source.priority() < entry.source.priority() {
+        entry.source = source;
+    }
+}
+
+fn local_mesh_endpoint_hosts(state: &SharedState, control_port: u16) -> HashSet<String> {
+    let mut hosts = HashSet::from(["127.0.0.1".to_string(), "::1".to_string()]);
+    if let Some(fly_private_ip) = std::env::var("FLY_PRIVATE_IP")
+        .ok()
+        .map(|value| normalized_host_label(value.as_str()))
+        .filter(|value| !value.is_empty())
+    {
+        hosts.insert(fly_private_ip);
+    }
+    if let Ok(topo) = state.topology.try_lock() {
+        for addr in &topo.listen_addrs {
+            if let Some(endpoint) = endpoint_from_multiaddr(addr, control_port) {
+                if let Some(host_label) = endpoint_host_label(endpoint.as_str()) {
+                    hosts.insert(host_label);
+                }
+            }
+        }
+    }
+    hosts
+}
+
+fn is_self_mesh_candidate(
+    candidate: &MeshEndpointCandidate,
+    local_peer_id: &str,
+    local_public_host: Option<&str>,
+    local_endpoint_hosts: &HashSet<String>,
+) -> bool {
+    if candidate.peer_id.as_deref() == Some(local_peer_id) {
+        return true;
+    }
+    let host_label = endpoint_host_label(candidate.endpoint.as_str()).unwrap_or_default();
+    if host_label.is_empty() || host_is_local(host_label.as_str()) {
+        return true;
+    }
+    if candidate.source == MeshEndpointSource::PublicApi
+        && local_public_host == Some(host_label.as_str())
+    {
+        return true;
+    }
+    local_endpoint_hosts.contains(host_label.as_str())
 }
 
 fn mesh_forward_fast_tier_only(request_max_tokens: usize) -> bool {
@@ -543,18 +748,34 @@ fn filter_mesh_forward_candidates(
 async fn discover_mesh_endpoints(state: &SharedState) -> Vec<MeshEndpointCandidate> {
     let control_port = mesh_forward_port();
     let mut discovered: HashMap<String, MeshEndpointCandidate> = HashMap::new();
+    let (local_peer_id, local_public_host) = {
+        let topo = state.topology.lock().await;
+        (
+            topo.local_peer_id.clone(),
+            state
+                .public_host
+                .clone()
+                .or_else(|| topo.public_api_addr.clone()),
+        )
+    };
+    let local_public_host = local_public_host
+        .as_deref()
+        .map(normalized_host_label)
+        .filter(|host| !host.is_empty());
+    let local_endpoint_hosts = local_mesh_endpoint_hosts(state, control_port);
 
     if let Ok(raw) = std::env::var("SHARD_MESH_FORWARD_ENDPOINTS") {
         for endpoint in raw.split(',') {
             if let Some(normalized) = normalize_endpoint(endpoint, control_port) {
-                discovered
-                    .entry(normalized.clone())
-                    .or_insert(MeshEndpointCandidate {
-                        endpoint: normalized,
-                        peer_latency_ms: 300.0,
-                        capability_tier: None,
-                        public_api: None,
-                    });
+                upsert_mesh_endpoint_candidate(
+                    &mut discovered,
+                    normalized,
+                    None,
+                    300.0,
+                    None,
+                    None,
+                    MeshEndpointSource::ExplicitEnv,
+                );
             }
         }
     }
@@ -568,39 +789,44 @@ async fn discover_mesh_endpoints(state: &SharedState) -> Vec<MeshEndpointCandida
             300.0
         };
         for addr in &peer.addrs {
-            let registry_entry = peer_id_from_addr_str(addr)
-                .and_then(|peer_id| bootstrap_registry.get(&peer_id).cloned());
-            let endpoint = registry_entry
+            let peer_id = peer_id_from_addr_str(addr);
+            let registry_entry = peer_id
                 .as_ref()
-                .and_then(|candidate| {
-                    candidate
-                        .public_api_addr
-                        .as_deref()
-                        .and_then(|endpoint| normalize_endpoint(endpoint, control_port))
-                })
-                .or_else(|| endpoint_from_multiaddr(addr, control_port));
-            if let Some(endpoint) = endpoint {
-                let entry = discovered
-                    .entry(endpoint.clone())
-                    .or_insert(MeshEndpointCandidate {
-                        endpoint,
-                        peer_latency_ms: peer_latency,
-                        capability_tier: registry_entry
-                            .as_ref()
-                            .and_then(|candidate| candidate.capability_tier.clone()),
-                        public_api: registry_entry.as_ref().and_then(|candidate| candidate.public_api),
-                    });
-                if peer_latency < entry.peer_latency_ms {
-                    entry.peer_latency_ms = peer_latency;
-                }
-                if entry.capability_tier.is_none() {
-                    entry.capability_tier = registry_entry
+                .and_then(|peer_id| bootstrap_registry.get(peer_id).cloned());
+            if let Some(endpoint) = endpoint_from_multiaddr(addr, control_port) {
+                upsert_mesh_endpoint_candidate(
+                    &mut discovered,
+                    endpoint,
+                    peer_id.clone(),
+                    peer_latency,
+                    registry_entry
                         .as_ref()
-                        .and_then(|candidate| candidate.capability_tier.clone());
-                }
-                if entry.public_api.is_none() {
-                    entry.public_api = registry_entry.as_ref().and_then(|candidate| candidate.public_api);
-                }
+                        .and_then(|candidate| candidate.capability_tier.clone()),
+                    registry_entry
+                        .as_ref()
+                        .and_then(|candidate| candidate.public_api),
+                    MeshEndpointSource::DirectPeer,
+                );
+            }
+            if let Some(endpoint) = registry_entry.as_ref().and_then(|candidate| {
+                candidate
+                    .public_api_addr
+                    .as_deref()
+                    .and_then(|endpoint| normalize_endpoint(endpoint, control_port))
+            }) {
+                upsert_mesh_endpoint_candidate(
+                    &mut discovered,
+                    endpoint,
+                    peer_id,
+                    peer_latency,
+                    registry_entry
+                        .as_ref()
+                        .and_then(|candidate| candidate.capability_tier.clone()),
+                    registry_entry
+                        .as_ref()
+                        .and_then(|candidate| candidate.public_api),
+                    MeshEndpointSource::PublicApi,
+                );
             }
         }
     }
@@ -611,14 +837,15 @@ async fn discover_mesh_endpoints(state: &SharedState) -> Vec<MeshEndpointCandida
     for entry in bootstrap_registry.values() {
         if let Some(public_addr) = entry.public_api_addr.as_deref() {
             if let Some(endpoint) = normalize_endpoint(public_addr, control_port) {
-                discovered
-                    .entry(endpoint.clone())
-                    .or_insert(MeshEndpointCandidate {
-                        endpoint,
-                        peer_latency_ms: 300.0,
-                        capability_tier: entry.capability_tier.clone(),
-                        public_api: entry.public_api,
-                    });
+                upsert_mesh_endpoint_candidate(
+                    &mut discovered,
+                    endpoint,
+                    Some(entry.peer_id.clone()),
+                    300.0,
+                    entry.capability_tier.clone(),
+                    entry.public_api,
+                    MeshEndpointSource::PublicApi,
+                );
             }
         }
     }
@@ -626,15 +853,12 @@ async fn discover_mesh_endpoints(state: &SharedState) -> Vec<MeshEndpointCandida
     let mut out = discovered
         .into_iter()
         .filter_map(|(_, candidate)| {
-            let host = Url::parse(candidate.endpoint.as_str())
-                .ok()
-                .and_then(|url| url.host_str().map(|h| h.to_string()))
-                .unwrap_or_default();
-            if host.eq_ignore_ascii_case("localhost")
-                || host == "127.0.0.1"
-                || host == "::1"
-                || host.is_empty()
-            {
+            if is_self_mesh_candidate(
+                &candidate,
+                local_peer_id.as_str(),
+                local_public_host.as_deref(),
+                &local_endpoint_hosts,
+            ) {
                 return None;
             }
             if matches!(candidate.public_api, Some(false)) {
@@ -645,8 +869,10 @@ async fn discover_mesh_endpoints(state: &SharedState) -> Vec<MeshEndpointCandida
         .collect::<Vec<_>>();
 
     out.sort_by(|a, b| {
-        a.peer_latency_ms
-            .total_cmp(&b.peer_latency_ms)
+        a.source
+            .priority()
+            .cmp(&b.source.priority())
+            .then_with(|| a.peer_latency_ms.total_cmp(&b.peer_latency_ms))
             .then_with(|| a.endpoint.cmp(&b.endpoint))
     });
     out
@@ -654,13 +880,16 @@ async fn discover_mesh_endpoints(state: &SharedState) -> Vec<MeshEndpointCandida
 
 async fn score_mesh_endpoint(
     client: &reqwest::Client,
-    endpoint: &str,
+    candidate: &MeshEndpointCandidate,
     queue_weight_ms: f64,
 ) -> Option<MeshEndpointScore> {
     let timeout = Duration::from_millis(mesh_forward_probe_timeout_ms());
+    let probe_started = std::time::Instant::now();
     let response = tokio::time::timeout(
         timeout,
-        client.get(format!("{endpoint}/metrics/summary")).send(),
+        client
+            .get(format!("{}/metrics/summary", candidate.endpoint))
+            .send(),
     )
     .await
     .ok()?
@@ -668,21 +897,31 @@ async fn score_mesh_endpoint(
     if !response.status().is_success() {
         return None;
     }
+    let probe_rtt_ms = probe_started.elapsed().as_secs_f64() * 1000.0;
     let payload = response.json::<serde_json::Value>().await.ok()?;
     let queue_depth = json_number(payload.get("queue_depth"))
         .or_else(|| json_number(payload.get("active_leases")))
         .unwrap_or(0.0);
-    let latency_ms = json_number(payload.get("p95_latency_ms"))
+    let reported_latency_ms = json_number(payload.get("p95_latency_ms"))
         .or_else(|| json_number(payload.get("average_latency_ms")))
         .or_else(|| json_number(payload.get("node_latency_ms")))
         .unwrap_or(0.0);
+    let latency_ms = mesh_forward_effective_latency_ms(
+        reported_latency_ms,
+        candidate.peer_latency_ms,
+        probe_rtt_ms,
+    );
     Some(MeshEndpointScore {
-        endpoint: endpoint.to_string(),
+        endpoint: candidate.endpoint.clone(),
         queue_depth,
         latency_ms,
+        reported_latency_ms,
+        probe_rtt_ms,
+        peer_latency_ms: candidate.peer_latency_ms,
         score: mesh_forward_score(latency_ms, queue_depth, queue_weight_ms),
         tier: "unknown",
-        capability_tier: None,
+        capability_tier: candidate.capability_tier.clone(),
+        source: candidate.source,
     })
 }
 
@@ -709,7 +948,7 @@ async fn record_mesh_probe_failure(state: &SharedState, endpoint: &str, now: u12
 async fn choose_mesh_forward_target(
     state: &SharedState,
     request_max_tokens: usize,
-) -> Option<MeshEndpointScore> {
+) -> MeshTargetSelection {
     let candidates = discover_mesh_endpoints(state).await;
     tracing::debug!(candidate_count = candidates.len(), "mesh forward discovery");
     for candidate in &candidates {
@@ -723,12 +962,21 @@ async fn choose_mesh_forward_target(
     }
     if candidates.is_empty() {
         tracing::debug!("mesh forward: no candidates discovered");
-        return None;
+        return MeshTargetSelection {
+            discovered_count: 0,
+            ..MeshTargetSelection::default()
+        };
     }
     let now = now_ms();
     let queue_weight_ms = mesh_forward_queue_weight_ms();
     let client = mesh_forward_client();
     let probe_limit = mesh_forward_probe_limit();
+    let discovered_count = candidates.len();
+    let candidate_endpoints = candidates
+        .iter()
+        .take(4)
+        .map(|candidate| candidate.endpoint.clone())
+        .collect::<Vec<_>>();
     let mut scored = Vec::new();
     let mut eligible = Vec::new();
     for candidate in candidates {
@@ -741,14 +989,20 @@ async fn choose_mesh_forward_target(
             );
         }
     }
-    for candidate in eligible.into_iter().take(probe_limit) {
-        match score_mesh_endpoint(client, candidate.endpoint.as_str(), queue_weight_ms).await {
-            Some(mut score) => {
+    let eligible_count = eligible.len();
+    let probed_candidates = eligible.into_iter().take(probe_limit).collect::<Vec<_>>();
+    let probed_count = probed_candidates.len();
+    for candidate in probed_candidates {
+        match score_mesh_endpoint(client, &candidate, queue_weight_ms).await {
+            Some(score) => {
                 record_mesh_probe_success(state, candidate.endpoint.as_str()).await;
-                score.capability_tier = candidate.capability_tier.clone();
                 tracing::debug!(
                     endpoint = %score.endpoint,
+                    source = ?score.source,
                     latency_ms = score.latency_ms,
+                    reported_latency_ms = score.reported_latency_ms,
+                    probe_rtt_ms = score.probe_rtt_ms,
+                    peer_latency_ms = score.peer_latency_ms,
                     queue_depth = score.queue_depth,
                     score = score.score,
                     "mesh forward probe success"
@@ -764,14 +1018,298 @@ async fn choose_mesh_forward_target(
             }
         }
     }
-    let result = filter_mesh_forward_candidates(scored, request_max_tokens)
-        .into_iter()
-        .next();
+    let scored_count = scored.len();
+    let filtered = filter_mesh_forward_candidates(scored, request_max_tokens);
+    let filtered_count = filtered.len();
+    let result = filtered.into_iter().next();
     tracing::debug!(
         chosen = ?result.as_ref().map(|candidate| candidate.endpoint.as_str()),
         "mesh forward target selection"
     );
-    result
+    MeshTargetSelection {
+        target: result,
+        discovered_count,
+        eligible_count,
+        probed_count,
+        scored_count,
+        filtered_count,
+        candidate_endpoints,
+    }
+}
+
+fn insert_text_header(headers: &mut HeaderMap, name: &'static str, value: &str) {
+    if let Ok(parsed) = HeaderValue::from_str(value) {
+        headers.insert(HeaderName::from_static(name), parsed);
+    }
+}
+
+fn apply_mesh_debug_headers(headers: &mut HeaderMap, debug: &MeshForwardAttemptDebug) {
+    if !debug.decision.is_empty() {
+        insert_text_header(headers, "x-shard-mesh-decision", debug.decision.as_str());
+    }
+    if let Some(detail) = debug.detail.as_deref() {
+        insert_text_header(headers, "x-shard-mesh-detail", detail);
+    }
+    insert_text_header(
+        headers,
+        "x-shard-mesh-candidates",
+        debug.discovered_count.to_string().as_str(),
+    );
+    insert_text_header(
+        headers,
+        "x-shard-mesh-eligible",
+        debug.eligible_count.to_string().as_str(),
+    );
+    insert_text_header(
+        headers,
+        "x-shard-mesh-probed",
+        debug.probed_count.to_string().as_str(),
+    );
+    insert_text_header(
+        headers,
+        "x-shard-mesh-scored",
+        debug.scored_count.to_string().as_str(),
+    );
+    insert_text_header(
+        headers,
+        "x-shard-mesh-filtered",
+        debug.filtered_count.to_string().as_str(),
+    );
+    if let Some(target_endpoint) = debug.target_endpoint.as_deref() {
+        insert_text_header(headers, "x-shard-mesh-forward-target", target_endpoint);
+    }
+    if let Some(target_tier) = debug.target_tier.as_deref() {
+        insert_text_header(headers, "x-shard-mesh-target-tier", target_tier);
+    }
+}
+
+async fn try_forward_chat_to_mesh(
+    state: &SharedState,
+    headers: &HeaderMap,
+    req: &ChatRequest,
+    max_tokens: usize,
+    local_queue_depth: f64,
+    local_latency_ms: f64,
+    force_forward: bool,
+) -> MeshForwardAttempt {
+    let queue_weight_ms = mesh_forward_queue_weight_ms();
+    let local_score = mesh_forward_score(local_latency_ms, local_queue_depth, queue_weight_ms);
+    let min_improvement = mesh_forward_min_improvement_ms();
+    let queue_trigger = mesh_forward_local_queue_trigger();
+    let next_hop = mesh_forward_current_hop(headers).saturating_add(1);
+    let max_target_attempts = mesh_forward_target_attempts();
+    let mut attempted_targets = Vec::new();
+    let mut debug = MeshForwardAttemptDebug::default();
+
+    loop {
+        let selection = choose_mesh_forward_target(state, max_tokens).await;
+        debug.discovered_count = selection.discovered_count;
+        debug.eligible_count = selection.eligible_count;
+        debug.probed_count = selection.probed_count;
+        debug.scored_count = selection.scored_count;
+        debug.filtered_count = selection.filtered_count;
+
+        let Some(target) = selection.target.filter(|candidate| {
+            !attempted_targets
+                .iter()
+                .any(|endpoint| endpoint == &candidate.endpoint)
+        }) else {
+            debug.decision = if selection.discovered_count == 0 {
+                "no_candidates".to_string()
+            } else if selection.eligible_count == 0 {
+                "all_candidates_in_backoff".to_string()
+            } else if selection.scored_count == 0 {
+                "probe_failed".to_string()
+            } else {
+                "no_target".to_string()
+            };
+            let mut detail_parts = Vec::new();
+            if !attempted_targets.is_empty() {
+                detail_parts.push(format!("attempted={}", attempted_targets.join("|")));
+            }
+            if !selection.candidate_endpoints.is_empty() {
+                detail_parts.push(format!(
+                    "candidates={}",
+                    selection.candidate_endpoints.join("|")
+                ));
+            }
+            if !detail_parts.is_empty() {
+                debug.detail = Some(detail_parts.join(";"));
+            }
+            return MeshForwardAttempt {
+                response: None,
+                debug,
+            };
+        };
+
+        debug.target_endpoint = Some(target.endpoint.clone());
+        debug.target_tier = Some(target.tier.to_string());
+
+        let would_forward = force_forward
+            || should_forward_to_mesh(
+                local_score,
+                target.score,
+                local_queue_depth,
+                min_improvement,
+                queue_trigger,
+            );
+        tracing::debug!(
+            target_endpoint = %target.endpoint,
+            target_score = target.score,
+            target_latency_ms = target.latency_ms,
+            target_queue_depth = target.queue_depth,
+            target_tier = target.tier,
+            local_score,
+            local_queue_depth,
+            local_queue_cap = verifier_queue_cap(state),
+            min_improvement,
+            queue_trigger,
+            force_forward,
+            would_forward,
+            "mesh forward decision"
+        );
+        if !would_forward {
+            debug.decision = "not_beneficial".to_string();
+            debug.detail = Some(format!(
+                "local_score={:.1},target_score={:.1},local_queue={:.1}",
+                local_score, target.score, local_queue_depth
+            ));
+            return MeshForwardAttempt {
+                response: None,
+                debug,
+            };
+        }
+
+        let request_timeout_ms =
+            mesh_forward_effective_request_timeout_ms(&target, local_latency_ms);
+        let mut request_builder = mesh_forward_client()
+            .post(format!("{}/v1/chat/completions", target.endpoint))
+            .timeout(Duration::from_millis(request_timeout_ms))
+            .json(req)
+            .header("x-shard-forward-hop", next_hop.to_string())
+            .header("x-shard-forwarded-by", state.node_public_key.clone());
+        if let Some(value) = headers.get("authorization") {
+            request_builder = request_builder.header("authorization", value);
+        }
+        if let Some(value) = headers.get("x-shard-inference-mode") {
+            request_builder = request_builder.header("x-shard-inference-mode", value);
+        }
+        if let Some(value) = headers.get("x-shard-request-id") {
+            request_builder = request_builder.header("x-shard-request-id", value);
+        }
+        if let Some(value) = headers.get("x-shard-route") {
+            request_builder = request_builder.header("x-shard-route", value);
+        }
+
+        match request_builder.send().await {
+            Ok(resp) => {
+                let status = resp.status();
+                let content_type = resp.headers().get(reqwest::header::CONTENT_TYPE).cloned();
+                let served_by = resp.headers().get("x-shard-served-by").cloned();
+                let body = resp.bytes().await.unwrap_or_default();
+                if status.is_success()
+                    || (status.is_client_error()
+                        && status != reqwest::StatusCode::TOO_MANY_REQUESTS)
+                {
+                    let mut out_headers = HeaderMap::new();
+                    if let Some(content_type) = content_type {
+                        if let Ok(parsed) = HeaderValue::from_bytes(content_type.as_bytes()) {
+                            out_headers.insert(axum::http::header::CONTENT_TYPE, parsed);
+                        }
+                    }
+                    out_headers.insert(
+                        HeaderName::from_static("x-shard-mesh-forwarded"),
+                        HeaderValue::from_static("true"),
+                    );
+                    insert_text_header(
+                        &mut out_headers,
+                        "x-shard-mesh-forward-target",
+                        target.endpoint.as_str(),
+                    );
+                    insert_text_header(&mut out_headers, "x-shard-mesh-target-tier", target.tier);
+                    insert_text_header(
+                        &mut out_headers,
+                        "x-shard-mesh-forwarded-by",
+                        state.node_public_key.as_str(),
+                    );
+                    if let Some(served_by) = served_by {
+                        out_headers.insert(HeaderName::from_static("x-shard-served-by"), served_by);
+                    }
+                    debug.decision = "forwarded".to_string();
+                    debug.detail = Some(format!(
+                        "timeout_ms={request_timeout_ms};attempted={}",
+                        attempted_targets
+                            .iter()
+                            .chain(std::iter::once(&target.endpoint))
+                            .cloned()
+                            .collect::<Vec<_>>()
+                            .join("|")
+                    ));
+                    apply_mesh_debug_headers(&mut out_headers, &debug);
+                    tracing::info!(
+                        target = %target.endpoint,
+                        target_tier = target.tier,
+                        queue_depth = target.queue_depth,
+                        target_latency_ms = target.latency_ms,
+                        local_queue_depth,
+                        local_latency_ms,
+                        request_timeout_ms,
+                        force_forward,
+                        "forwarded chat request to mesh peer"
+                    );
+                    return MeshForwardAttempt {
+                        response: Some(
+                            (
+                                StatusCode::from_u16(status.as_u16())
+                                    .unwrap_or(StatusCode::BAD_GATEWAY),
+                                out_headers,
+                                body,
+                            )
+                                .into_response(),
+                        ),
+                        debug,
+                    };
+                }
+                attempted_targets.push(target.endpoint.clone());
+                record_mesh_probe_failure(state, target.endpoint.as_str(), now_ms()).await;
+                debug.decision = "forward_retryable".to_string();
+                debug.detail = Some(format!(
+                    "status={status};timeout_ms={request_timeout_ms};attempted={}",
+                    attempted_targets.join("|")
+                ));
+                tracing::warn!(
+                    target = %target.endpoint,
+                    status = %status,
+                    request_timeout_ms,
+                    force_forward,
+                    "mesh forward returned retryable status"
+                );
+            }
+            Err(error) => {
+                attempted_targets.push(target.endpoint.clone());
+                record_mesh_probe_failure(state, target.endpoint.as_str(), now_ms()).await;
+                debug.decision = "forward_error".to_string();
+                debug.detail = Some(format!(
+                    "error={error:?};timeout_ms={request_timeout_ms};attempted={}",
+                    attempted_targets.join("|")
+                ));
+                tracing::warn!(
+                    target = %target.endpoint,
+                    request_timeout_ms,
+                    error = ?error,
+                    force_forward,
+                    "mesh forward attempt failed"
+                );
+            }
+        }
+
+        if attempted_targets.len() >= max_target_attempts {
+            return MeshForwardAttempt {
+                response: None,
+                debug,
+            };
+        }
+    }
 }
 
 fn strip_control_tokens(raw: &str) -> String {
@@ -1486,7 +2024,9 @@ fn update_accepted_tokens_ewma(state: &SharedState, accepted: u64) {
     } else {
         ((((previous as u64) * 7) + ((sample_x100 as u64) * 3)) / 10) as u32
     };
-    state.avg_accepted_tokens_x100.store(next, Ordering::Relaxed);
+    state
+        .avg_accepted_tokens_x100
+        .store(next, Ordering::Relaxed);
 }
 
 fn speculative_prior_draft_arrival_ms() -> u64 {
@@ -2310,11 +2850,16 @@ pub(crate) async fn verify_draft_tokens(
             });
 
             // Find best token via linear scan of the small top partition.
-            let (best_idx, best_val) = indexed[..=top_k]
-                .iter()
-                .fold((0usize, f32::NEG_INFINITY), |(bi, bv), &(i, v)| {
-                    if v > bv { (i, v) } else { (bi, bv) }
-                });
+            let (best_idx, best_val) =
+                indexed[..=top_k]
+                    .iter()
+                    .fold((0usize, f32::NEG_INFINITY), |(bi, bv), &(i, v)| {
+                        if v > bv {
+                            (i, v)
+                        } else {
+                            (bi, bv)
+                        }
+                    });
 
             let logit_gap = best_val - draft_logit;
 
@@ -2465,6 +3010,7 @@ pub(crate) async fn chat_completions_handler(
         .and_then(|v| v.to_str().ok())
         .map(|v| v.eq_ignore_ascii_case("private"))
         .unwrap_or(false);
+    let mesh_forwarded_request = mesh_forward_current_hop(&headers) > 0;
 
     // 1. Authenticate API Key
     let api_key = headers
@@ -2504,8 +3050,9 @@ pub(crate) async fn chat_completions_handler(
         state
             .rate_limiter
             .check(Some(subject), None, contribution_balance)
-    } else if request_host_is_local(&headers) {
-        // Local CLI/benchmark calls should not be throttled by shared anonymous key state.
+    } else if request_host_is_local(&headers) || mesh_forwarded_request {
+        // Local CLI/benchmark calls and trusted mesh-forwarded requests should
+        // not be throttled by shared anonymous key state.
         state.rate_limiter.check(None, None, contribution_balance)
     } else {
         let client_ip = infer_client_ip(&headers).unwrap_or_else(|| "unknown".to_string());
@@ -2536,7 +3083,9 @@ pub(crate) async fn chat_completions_handler(
             .and_then(|v| v.to_str().ok()),
     );
     let max_tokens = req.max_tokens.or(req.max_new_tokens).unwrap_or(256);
-    let mesh_gate = should_attempt_mesh_forward(&headers, route_private, stream_mode, inference_mode);
+    let mesh_gate =
+        should_attempt_mesh_forward(&headers, route_private, stream_mode, inference_mode);
+    let mut mesh_attempt_debug: Option<MeshForwardAttemptDebug> = None;
     tracing::debug!(
         mesh_gate,
         route_private,
@@ -2548,115 +3097,38 @@ pub(crate) async fn chat_completions_handler(
         "mesh forward gate check"
     );
     if mesh_gate {
-        let queue_weight_ms = mesh_forward_queue_weight_ms();
-        let local_queue_depth = verifier_request_depth(&state) as f64;
+        let local_queue_depth = projected_mesh_local_queue_depth(&state);
         let raw_local_latency_ms = state.avg_latency_ms.load(Ordering::Relaxed) as f64;
         let local_latency_ms = if raw_local_latency_ms > 0.0 {
             raw_local_latency_ms
         } else {
             1500.0
         };
-        let local_score = mesh_forward_score(local_latency_ms, local_queue_depth, queue_weight_ms);
         tracing::debug!(
             local_queue_depth,
             raw_local_latency_ms,
             local_latency_ms,
-            local_score,
-            queue_weight_ms,
+            local_score = mesh_forward_score(
+                local_latency_ms,
+                local_queue_depth,
+                mesh_forward_queue_weight_ms()
+            ),
+            queue_weight_ms = mesh_forward_queue_weight_ms(),
             "mesh forward local scores"
         );
-        if let Some(target) = choose_mesh_forward_target(&state, max_tokens as usize).await {
-            let min_improvement = mesh_forward_min_improvement_ms();
-            let queue_trigger = mesh_forward_local_queue_trigger();
-            let would_forward = should_forward_to_mesh(
-                local_score,
-                target.score,
-                local_queue_depth,
-                min_improvement,
-                queue_trigger,
-            );
-            tracing::debug!(
-                target_endpoint = %target.endpoint,
-                target_score = target.score,
-                target_latency_ms = target.latency_ms,
-                target_queue_depth = target.queue_depth,
-                target_tier = target.tier,
-                local_score,
-                local_queue_depth,
-                min_improvement,
-                queue_trigger,
-                would_forward,
-                "mesh forward decision"
-            );
-            if would_forward {
-                let next_hop = mesh_forward_current_hop(&headers).saturating_add(1);
-                let mut request_builder = mesh_forward_client()
-                    .post(format!("{}/v1/chat/completions", target.endpoint))
-                    .timeout(Duration::from_millis(mesh_forward_request_timeout_ms()))
-                    .json(&req)
-                    .header("x-shard-forward-hop", next_hop.to_string())
-                    .header("x-shard-forwarded-by", state.node_public_key.clone());
-                if let Some(value) = headers.get("authorization") {
-                    request_builder = request_builder.header("authorization", value);
-                }
-                if let Some(value) = headers.get("x-shard-inference-mode") {
-                    request_builder = request_builder.header("x-shard-inference-mode", value);
-                }
-                if let Some(value) = headers.get("x-shard-request-id") {
-                    request_builder = request_builder.header("x-shard-request-id", value);
-                }
-                if let Some(value) = headers.get("x-shard-route") {
-                    request_builder = request_builder.header("x-shard-route", value);
-                }
-                match request_builder.send().await {
-                    Ok(resp) => {
-                        let status = resp.status();
-                        let content_type =
-                            resp.headers().get(reqwest::header::CONTENT_TYPE).cloned();
-                        let body = resp.bytes().await.unwrap_or_default();
-                        if status.is_success()
-                            || (status.is_client_error()
-                                && status != reqwest::StatusCode::TOO_MANY_REQUESTS)
-                        {
-                            let mut out_headers = HeaderMap::new();
-                            if let Some(content_type) = content_type {
-                                if let Ok(parsed) = HeaderValue::from_bytes(content_type.as_bytes())
-                                {
-                                    out_headers.insert(axum::http::header::CONTENT_TYPE, parsed);
-                                }
-                            }
-                            tracing::info!(
-                                target = %target.endpoint,
-                                target_tier = target.tier,
-                                queue_depth = target.queue_depth,
-                                target_latency_ms = target.latency_ms,
-                                local_queue_depth,
-                                local_latency_ms,
-                                "forwarded chat request to mesh peer"
-                            );
-                            return (
-                                StatusCode::from_u16(status.as_u16())
-                                    .unwrap_or(StatusCode::BAD_GATEWAY),
-                                out_headers,
-                                body,
-                            )
-                                .into_response();
-                        }
-                        tracing::warn!(
-                            target = %target.endpoint,
-                            status = %status,
-                            "mesh forward returned retryable status; falling back local"
-                        );
-                    }
-                    Err(error) => {
-                        tracing::warn!(
-                            target = %target.endpoint,
-                            %error,
-                            "mesh forward attempt failed; falling back local"
-                        );
-                    }
-                }
-            }
+        let attempt = try_forward_chat_to_mesh(
+            &state,
+            &headers,
+            &req,
+            max_tokens as usize,
+            local_queue_depth,
+            local_latency_ms,
+            false,
+        )
+        .await;
+        mesh_attempt_debug = Some(attempt.debug.clone());
+        if let Some(response) = attempt.response {
+            return response;
         }
     }
 
@@ -2664,7 +3136,10 @@ pub(crate) async fn chat_completions_handler(
 
     let speculative_config = if use_speculative {
         Some(SpeculativeConfig {
-            scout_timeout_ms: state.scout_timeout_ms.load(Ordering::Relaxed).clamp(100, 60_000),
+            scout_timeout_ms: state
+                .scout_timeout_ms
+                .load(Ordering::Relaxed)
+                .clamp(100, 60_000),
             ..SpeculativeConfig::default()
         })
     } else {
@@ -2805,13 +3280,48 @@ pub(crate) async fn chat_completions_handler(
         None => {
             let depth = verifier_request_depth(&state);
             let cap = verifier_queue_cap(&state);
+            if mesh_gate {
+                let raw_local_latency_ms = state.avg_latency_ms.load(Ordering::Relaxed) as f64;
+                let local_latency_ms = if raw_local_latency_ms > 0.0 {
+                    raw_local_latency_ms
+                } else {
+                    1500.0
+                };
+                let attempt = try_forward_chat_to_mesh(
+                    &state,
+                    &headers,
+                    &req,
+                    max_tokens as usize,
+                    depth.saturating_add(1) as f64,
+                    local_latency_ms,
+                    true,
+                )
+                .await;
+                mesh_attempt_debug = Some(attempt.debug.clone());
+                if let Some(response) = attempt.response {
+                    return response;
+                }
+            }
+            let mut headers = HeaderMap::from_iter([(
+                HeaderName::from_static("retry-after"),
+                HeaderValue::from_str(&overload_retry_after_seconds(depth, cap).to_string())
+                    .unwrap(),
+            )]);
+            insert_text_header(
+                &mut headers,
+                "x-shard-served-by",
+                state.node_public_key.as_str(),
+            );
+            headers.insert(
+                HeaderName::from_static("x-shard-mesh-forwarded"),
+                HeaderValue::from_static("false"),
+            );
+            if let Some(debug) = mesh_attempt_debug.as_ref() {
+                apply_mesh_debug_headers(&mut headers, debug);
+            }
             return (
                 StatusCode::SERVICE_UNAVAILABLE,
-                HeaderMap::from_iter([(
-                    HeaderName::from_static("retry-after"),
-                    HeaderValue::from_str(&overload_retry_after_seconds(depth, cap).to_string())
-                        .unwrap(),
-                )]),
+                headers,
                 Json(serde_json::json!({
                     "error": "verifier_overloaded",
                     "detail": "local verifier queue is saturated",
@@ -2827,6 +3337,7 @@ pub(crate) async fn chat_completions_handler(
     let inference_started_ms = now_ms();
 
     if stream_mode {
+        let local_node_public_key = state.node_public_key.clone();
         let stream = async_stream::stream! {
             let _verifier_load_guard = verifier_load_guard;
             let mut request_acceptance: Option<(f64, f64)> = None;
@@ -3100,9 +3611,22 @@ pub(crate) async fn chat_completions_handler(
             );
         };
 
-        Sse::new(stream)
+        let mut response = Sse::new(stream)
             .keep_alive(KeepAlive::default())
-            .into_response()
+            .into_response();
+        insert_text_header(
+            response.headers_mut(),
+            "x-shard-served-by",
+            local_node_public_key.as_str(),
+        );
+        response.headers_mut().insert(
+            HeaderName::from_static("x-shard-mesh-forwarded"),
+            HeaderValue::from_static("false"),
+        );
+        if let Some(debug) = mesh_attempt_debug.as_ref() {
+            apply_mesh_debug_headers(response.headers_mut(), debug);
+        }
+        response
     } else {
         // Run synchronously but hold the lock
         let _verifier_load_guard = verifier_load_guard;
@@ -3140,16 +3664,15 @@ pub(crate) async fn chat_completions_handler(
                                 None,
                             )
                             .await;
-                            let result =
-                                verify_draft_tokens(
-                                    engine,
-                                    effective_draft_model.as_str(),
-                                    state.model_id.as_str(),
-                                    &prompt_tokens,
-                                    &draft.draft_tokens,
-                                    true,
-                                )
-                                    .await;
+                            let result = verify_draft_tokens(
+                                engine,
+                                effective_draft_model.as_str(),
+                                state.model_id.as_str(),
+                                &prompt_tokens,
+                                &draft.draft_tokens,
+                                true,
+                            )
+                            .await;
                             let accepted_count = result.accepted_tokens.len() as u64;
                             let verify_elapsed_ms =
                                 now_ms().saturating_sub(verify_started_ms) as u64;
@@ -3267,8 +3790,8 @@ pub(crate) async fn chat_completions_handler(
                         let generation_started_ms = now_ms();
                         let mut emitted = 0;
                         while emitted < max_tokens {
-                            if let Ok(logits) = engine
-                                .get_logits(shard_verifier::inference::model_vocab_size(
+                            if let Ok(logits) =
+                                engine.get_logits(shard_verifier::inference::model_vocab_size(
                                     state.model_id.as_str(),
                                 ))
                             {
@@ -3377,7 +3900,7 @@ pub(crate) async fn chat_completions_handler(
 
         let full_text = strip_control_tokens(full_text.as_str());
         let total_tokens = prompt_token_count.saturating_add(completion_tokens_generated);
-        Json(serde_json::json!({
+        let mut response = Json(serde_json::json!({
             "id": request_id,
             "object": "chat.completion",
             "created": now_ms() / 1000,
@@ -3393,27 +3916,41 @@ pub(crate) async fn chat_completions_handler(
                 "completion_tokens": completion_tokens_generated,
                 "total_tokens": total_tokens
             }
-        })).into_response()
+        })).into_response();
+        insert_text_header(
+            response.headers_mut(),
+            "x-shard-served-by",
+            state.node_public_key.as_str(),
+        );
+        response.headers_mut().insert(
+            HeaderName::from_static("x-shard-mesh-forwarded"),
+            HeaderValue::from_static("false"),
+        );
+        if let Some(debug) = mesh_attempt_debug.as_ref() {
+            apply_mesh_debug_headers(response.headers_mut(), debug);
+        }
+        response
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        adaptive_speculative_budget_ms_with, auth_required, compute_effective_scout_timeout_ms,
-        classify_mesh_endpoint_tier, effective_draft_token_count_with, endpoint_from_multiaddr, enqueue_scout_work,
-        filter_mesh_forward_candidates, infer_client_ip, local_scout_fallback_allowed,
-        mesh_forward_score, model_pair_acceptance_rates, normalize_endpoint,
-        parse_speculative_min_request_tokens, probe_allowed_for_request,
+        adaptive_speculative_budget_ms_with, auth_required, classify_mesh_endpoint_tier,
+        compute_effective_scout_timeout_ms, effective_draft_token_count_with,
+        endpoint_from_multiaddr, enqueue_scout_work, filter_mesh_forward_candidates,
+        infer_client_ip, is_self_mesh_candidate, local_scout_fallback_allowed,
+        mesh_forward_effective_latency_ms, mesh_forward_score, model_pair_acceptance_rates,
+        normalize_endpoint, parse_speculative_min_request_tokens, probe_allowed_for_request,
         remove_work_id_from_scout_queue, request_host_is_local, requested_request_id,
-        resolve_inference_mode, truncate_prompt_context_for_scout,
-        should_bypass_speculative_for_fast_verifier,
-        should_abort_on_degenerate_output, should_attempt_mesh_forward, should_forward_to_mesh,
-        should_refuse_mesh_degraded, strip_control_tokens, InferenceMode, MeshEndpointScore,
+        resolve_inference_mode, should_abort_on_degenerate_output, should_attempt_mesh_forward,
+        should_bypass_speculative_for_fast_verifier, should_forward_to_mesh,
+        should_refuse_mesh_degraded, strip_control_tokens, truncate_prompt_context_for_scout,
+        InferenceMode, MeshEndpointCandidate, MeshEndpointScore, MeshEndpointSource,
         ScoutSupplyEstimate, WorkRequest,
     };
     use axum::http::{HeaderMap, HeaderValue};
-    use std::collections::VecDeque;
+    use std::collections::{HashSet, VecDeque};
 
     #[test]
     fn experimental_wan_aliases_map_to_experimental_mode() {
@@ -3441,7 +3978,10 @@ mod tests {
 
     #[test]
     fn auto_alias_maps_to_standard_mode() {
-        assert_eq!(resolve_inference_mode(Some("auto")), InferenceMode::Standard);
+        assert_eq!(
+            resolve_inference_mode(Some("auto")),
+            InferenceMode::Standard
+        );
     }
 
     #[test]
@@ -3675,6 +4215,10 @@ mod tests {
         local.insert("host", HeaderValue::from_static("127.0.0.1:9191"));
         assert!(request_host_is_local(&local));
 
+        let mut local_ipv6 = HeaderMap::new();
+        local_ipv6.insert("host", HeaderValue::from_static("[::1]:9191"));
+        assert!(request_host_is_local(&local_ipv6));
+
         let mut remote = HeaderMap::new();
         remote.insert("host", HeaderValue::from_static("api.shardnetwork.live"));
         assert!(!request_host_is_local(&remote));
@@ -3775,31 +4319,49 @@ mod tests {
     }
 
     #[test]
+    fn mesh_effective_latency_includes_network_cost() {
+        assert_eq!(mesh_forward_effective_latency_ms(400.0, 75.0, 40.0), 475.0);
+        assert_eq!(mesh_forward_effective_latency_ms(400.0, 20.0, 55.0), 455.0);
+    }
+
+    #[test]
     fn short_requests_trim_mesh_targets_to_fast_tier() {
         let scored = vec![
             MeshEndpointScore {
                 endpoint: "http://fast-a:9091".to_string(),
                 queue_depth: 0.0,
                 latency_ms: 120.0,
+                reported_latency_ms: 90.0,
+                probe_rtt_ms: 30.0,
+                peer_latency_ms: 20.0,
                 score: 120.0,
                 tier: "unknown",
                 capability_tier: None,
+                source: MeshEndpointSource::DirectPeer,
             },
             MeshEndpointScore {
                 endpoint: "http://fast-b:9091".to_string(),
                 queue_depth: 1.0,
                 latency_ms: 220.0,
+                reported_latency_ms: 170.0,
+                probe_rtt_ms: 50.0,
+                peer_latency_ms: 40.0,
                 score: 320.0,
                 tier: "unknown",
                 capability_tier: None,
+                source: MeshEndpointSource::DirectPeer,
             },
             MeshEndpointScore {
                 endpoint: "http://slow:9091".to_string(),
                 queue_depth: 2.0,
                 latency_ms: 680.0,
+                reported_latency_ms: 620.0,
+                probe_rtt_ms: 60.0,
+                peer_latency_ms: 55.0,
                 score: 920.0,
                 tier: "unknown",
                 capability_tier: None,
+                source: MeshEndpointSource::PublicApi,
             },
         ];
 
@@ -3819,25 +4381,37 @@ mod tests {
                 endpoint: "http://fast-a:9091".to_string(),
                 queue_depth: 0.0,
                 latency_ms: 120.0,
+                reported_latency_ms: 90.0,
+                probe_rtt_ms: 30.0,
+                peer_latency_ms: 20.0,
                 score: 120.0,
                 tier: "unknown",
                 capability_tier: None,
+                source: MeshEndpointSource::DirectPeer,
             },
             MeshEndpointScore {
                 endpoint: "http://standard:9091".to_string(),
                 queue_depth: 2.0,
                 latency_ms: 320.0,
+                reported_latency_ms: 250.0,
+                probe_rtt_ms: 70.0,
+                peer_latency_ms: 50.0,
                 score: 560.0,
                 tier: "unknown",
                 capability_tier: None,
+                source: MeshEndpointSource::DirectPeer,
             },
             MeshEndpointScore {
                 endpoint: "http://slow:9091".to_string(),
                 queue_depth: 4.0,
                 latency_ms: 880.0,
+                reported_latency_ms: 780.0,
+                probe_rtt_ms: 100.0,
+                peer_latency_ms: 95.0,
                 score: 1360.0,
                 tier: "unknown",
                 capability_tier: None,
+                source: MeshEndpointSource::PublicApi,
             },
         ];
 
@@ -3848,9 +4422,16 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(
             endpoints,
-            vec!["http://fast-a:9091", "http://standard:9091", "http://slow:9091"]
+            vec![
+                "http://fast-a:9091",
+                "http://standard:9091",
+                "http://slow:9091"
+            ]
         );
-        assert_eq!(filtered.last().map(|candidate| candidate.tier), Some("slow"));
+        assert_eq!(
+            filtered.last().map(|candidate| candidate.tier),
+            Some("slow")
+        );
     }
 
     #[test]
@@ -3874,7 +4455,43 @@ mod tests {
             endpoint_from_multiaddr(direct.as_str(), 9091).as_deref(),
             Some("https://35.175.242.222:443")
         );
+        assert_eq!(
+            endpoint_from_multiaddr("/ip6/fdaa:9:2bde:a7b:49d:b828:dde9:2/tcp/4001", 9091)
+                .as_deref(),
+            Some("http://[fdaa:9:2bde:a7b:49d:b828:dde9:2]:9091")
+        );
         assert!(endpoint_from_multiaddr(relay.as_str(), 9091).is_none());
+    }
+
+    #[test]
+    fn self_mesh_candidate_filter_drops_private_env_endpoint_for_local_fly_ip() {
+        let candidate = MeshEndpointCandidate {
+            endpoint: "http://[fdaa:9:2bde:a7b:52e:5f:8357:2]:9091".to_string(),
+            peer_id: None,
+            peer_latency_ms: 10.0,
+            capability_tier: Some("cpu_standard".to_string()),
+            public_api: Some(true),
+            source: MeshEndpointSource::ExplicitEnv,
+        };
+        let local_hosts = HashSet::from(["fdaa:9:2bde:a7b:52e:5f:8357:2".to_string()]);
+
+        assert!(is_self_mesh_candidate(
+            &candidate,
+            "12D3KooWLocal",
+            Some("shard-fly-bench-0308c.fly.dev"),
+            &local_hosts,
+        ));
+
+        let remote_candidate = MeshEndpointCandidate {
+            endpoint: "http://[fdaa:9:2bde:a7b:49d:b828:dde9:2]:9091".to_string(),
+            ..candidate
+        };
+        assert!(!is_self_mesh_candidate(
+            &remote_candidate,
+            "12D3KooWLocal",
+            Some("shard-fly-bench-0308c.fly.dev"),
+            &local_hosts,
+        ));
     }
 
     #[test]
@@ -3883,17 +4500,25 @@ mod tests {
             endpoint: "http://gpu-fast:9091".to_string(),
             queue_depth: 0.0,
             latency_ms: 480.0,
+            reported_latency_ms: 430.0,
+            probe_rtt_ms: 50.0,
+            peer_latency_ms: 45.0,
             score: 980.0,
             tier: "unknown",
             capability_tier: Some("gpu_fast".to_string()),
+            source: MeshEndpointSource::DirectPeer,
         };
         let slow = MeshEndpointScore {
             endpoint: "http://cpu-slow:9091".to_string(),
             queue_depth: 0.0,
             latency_ms: 180.0,
+            reported_latency_ms: 150.0,
+            probe_rtt_ms: 30.0,
+            peer_latency_ms: 25.0,
             score: 180.0,
             tier: "unknown",
             capability_tier: Some("cpu_slow".to_string()),
+            source: MeshEndpointSource::PublicApi,
         };
 
         assert_eq!(classify_mesh_endpoint_tier(&fast, 180.0, 180.0), "fast");

@@ -35,6 +35,25 @@ function Get-FlyMachineControlHealth {
     }
 }
 
+function Get-FlyMachineLiveHealth {
+    param(
+        [string]$App,
+        [string]$MachineId,
+        [int]$TimeoutSeconds = 15
+    )
+
+    $uri = "https://$App.fly.dev/health"
+    try {
+        return Invoke-RestMethod `
+            -Uri $uri `
+            -Headers @{ "fly-force-instance-id" = $MachineId } `
+            -TimeoutSec $TimeoutSeconds `
+            -Method Get
+    } catch {
+        return $null
+    }
+}
+
 function Wait-FlyMachinesReady {
     param(
         [string]$App,
@@ -51,7 +70,10 @@ function Wait-FlyMachinesReady {
         $peerStates = @()
         $allReady = $true
         foreach ($machine in $machines) {
-            $health = Get-FlyMachineControlHealth -Machine $machine
+            $health = Get-FlyMachineLiveHealth -App $App -MachineId $machine.id
+            if (-not $health) {
+                $health = Get-FlyMachineControlHealth -Machine $machine
+            }
             if (-not $health -or -not $health.ready_for_inference -or [string]::IsNullOrWhiteSpace($health.peer_id)) {
                 $allReady = $false
                 break
