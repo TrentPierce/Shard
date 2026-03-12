@@ -1,6 +1,6 @@
 "use client"
 
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react"
+import { FormEvent, KeyboardEvent, useEffect, useMemo, useRef, useState } from "react"
 import {
   emitChatFailure,
   sendMessage as sendNetworkMessage,
@@ -100,6 +100,7 @@ export default function ChatPage() {
   const [lastDecision, setLastDecision] = useState<ChatRouteDecision | null>(null)
   const [routeTraces, setRouteTraces] = useState<RouteTrace[]>([])
   const endRef = useRef<HTMLDivElement>(null)
+  const formRef = useRef<HTMLFormElement>(null)
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" })
@@ -111,6 +112,14 @@ export default function ChatPage() {
     }
     return describeIdleMode(routeMode)
   }, [lastDecision, routeMode, streaming])
+
+  const handleComposerKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key !== "Enter" || event.shiftKey || streaming) {
+      return
+    }
+    event.preventDefault()
+    formRef.current?.requestSubmit()
+  }
 
   const submit = async (event: FormEvent) => {
     event.preventDefault()
@@ -299,8 +308,11 @@ export default function ChatPage() {
   }
 
   return (
-    <main id="main-content" className="h-[calc(100dvh-4rem)] py-4 sm:py-6">
-      <section className="relative flex h-full flex-col overflow-hidden rounded-2xl border border-ring bg-base-900 shadow-panel">
+    <main
+      id="main-content"
+      className="box-border h-[calc(100dvh-4rem)] supports-[height:100svh]:h-[calc(100svh-4rem)] py-4 sm:py-6"
+    >
+      <section className="relative flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-ring bg-base-900 shadow-panel">
         <div className="absolute right-4 top-4 flex flex-col items-end gap-2">
           <div className="flex items-center gap-2 rounded-full border border-ring bg-base-800/90 px-3 py-1 text-xs text-ink-100">
             <span className="h-2.5 w-2.5 rounded-full bg-accent-400 animate-pulseSoft" />
@@ -318,8 +330,8 @@ export default function ChatPage() {
           </select>
         </div>
 
-        <div className="grid flex-1 gap-4 overflow-hidden px-4 pb-4 pt-20 sm:px-6 lg:grid-cols-[minmax(0,1fr)_320px]">
-          <div className="space-y-4 overflow-y-auto pr-1">
+        <div className="grid min-h-0 flex-1 gap-4 overflow-hidden px-4 pb-4 pt-20 sm:px-6 lg:grid-cols-[minmax(0,1fr)_320px]">
+          <div className="min-h-0 space-y-4 overflow-y-auto pr-1">
           {messages.length === 0 ? (
             <div className="mx-auto mt-12 max-w-xl rounded-xl border border-ring bg-base-800 p-4 text-center sm:mt-16">
               <p className="text-sm text-ink-100">
@@ -343,7 +355,7 @@ export default function ChatPage() {
           <div ref={endRef} />
           </div>
 
-          <aside className="overflow-y-auto rounded-xl border border-ring bg-base-800/70 p-3">
+          <aside className="min-h-0 overflow-y-auto rounded-xl border border-ring bg-base-800/70 p-3">
             <div className="mb-3 flex items-center justify-between">
               <h2 className="text-sm font-semibold text-ink-50">Route Trace</h2>
               <span className="text-[11px] uppercase tracking-[0.18em] text-ink-400">
@@ -415,11 +427,12 @@ export default function ChatPage() {
           </aside>
         </div>
 
-        <form onSubmit={submit} className="border-t border-ring bg-base-900 p-3 sm:p-4">
+        <form ref={formRef} onSubmit={submit} className="border-t border-ring bg-base-900 p-3 sm:p-4">
           <div className="flex items-end gap-2">
             <textarea
               value={input}
               onChange={(event) => setInput(event.target.value)}
+              onKeyDown={handleComposerKeyDown}
               placeholder="Type your prompt"
               rows={1}
               className="min-h-11 max-h-36 flex-1 resize-none rounded-xl border border-ring bg-base-800 px-3 py-2 text-sm text-ink-50 outline-none focus:border-accent-500"

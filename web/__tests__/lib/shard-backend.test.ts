@@ -39,6 +39,7 @@ describe("server shard backend selection", () => {
       "http://127.0.0.1:9191/",
       "http://localhost:9091/",
       "http://localhost:9191/",
+      "https://shard-fly-bench-0308c.fly.dev/",
       "https://api.shardnetwork.live/",
     ])
   })
@@ -54,6 +55,7 @@ describe("server shard backend selection", () => {
       "http://127.0.0.1:9191/health",
       "http://localhost:9091/health",
       "http://localhost:9191/health",
+      "https://shard-fly-bench-0308c.fly.dev/health",
       "https://api.shardnetwork.live/health",
     ])
   })
@@ -67,6 +69,7 @@ describe("server shard backend selection", () => {
       "http://127.0.0.1:9191/health",
       "http://localhost:9091/health",
       "http://localhost:9191/health",
+      "https://shard-fly-bench-0308c.fly.dev/health",
       "https://api.shardnetwork.live/health",
       "http://10.0.0.5:9091/health",
     ])
@@ -80,6 +83,7 @@ describe("server shard backend selection", () => {
       "http://127.0.0.1:9191/",
       "http://localhost:9091/",
       "http://localhost:9191/",
+      "https://shard-fly-bench-0308c.fly.dev/",
       "https://api.shardnetwork.live/",
     ])
   })

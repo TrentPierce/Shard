@@ -1,8 +1,12 @@
 import { headers } from "next/headers"
 
-// Primary: Cloudflare Tunnel (https, no raw IP issues, browser-friendly)
-const DEFAULT_BACKEND = "https://api.shardnetwork.live"
-// Fallback: read from env so no IP is hardcoded in source
+// Primary public verifier pool.
+const DEFAULT_BACKENDS = [
+  process.env.SHARD_PUBLIC_BACKEND_URL || "https://shard-fly-bench-0308c.fly.dev",
+  // Legacy hostname retained as a fallback until the custom domain is repaired.
+  "https://api.shardnetwork.live",
+]
+// Additional fallback: read from env so no IP is hardcoded in source
 const DEFAULT_FALLBACK = process.env.SHARD_FALLBACK_URL || ""
 const DEFAULT_LOCAL_BACKENDS =
   process.env.NODE_ENV === "production"
@@ -238,7 +242,7 @@ export function shardBackendUrls(path: string = ""): string[] {
   const single = parseUrlList(
     process.env.SHARD_BACKEND_URL || process.env.NEXT_PUBLIC_SHARD_BACKEND_URL,
   )
-  const defaults = [...DEFAULT_LOCAL_BACKENDS, DEFAULT_BACKEND, DEFAULT_FALLBACK]
+  const defaults = [...DEFAULT_LOCAL_BACKENDS, ...DEFAULT_BACKENDS, DEFAULT_FALLBACK]
     .map(normalizeUrl)
     .filter((u) => u.length > 0)
   return dedupe([...multi, ...single, ...defaults]).map((base) => `${base}${cleanPath}`)

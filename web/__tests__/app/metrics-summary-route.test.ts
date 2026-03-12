@@ -48,6 +48,13 @@ describe("metrics summary node estimation", () => {
           json: async () => ({}),
         } as unknown as Response
       }
+      if (url === "https://shard-fly-bench-0308c.fly.dev/health") {
+        return {
+          ok: false,
+          status: 503,
+          json: async () => ({}),
+        } as unknown as Response
+      }
       if (url.endsWith("/v1/system/peers")) {
         return {
           ok: true,
