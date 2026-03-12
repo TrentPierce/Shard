@@ -666,7 +666,7 @@ pub(crate) struct SharedState {
     bootstrap_registry: Arc<Mutex<HashMap<String, BootstrapRegistryEntry>>>,
     bootstrap_registry_path: PathBuf,
     scheduler_decisions: Arc<Mutex<VecDeque<SchedulerDecisionLog>>>,
-    mesh_probe_backoff: Arc<Mutex<HashMap<String, (u32, u128)>>>,
+    mesh_endpoint_telemetry: Arc<Mutex<HashMap<String, MeshEndpointTelemetry>>>,
     canary_rollout: Arc<Mutex<CanaryRolloutController>>,
     scout_ingress_enabled: Arc<AtomicBool>,
     shutdown: Arc<AtomicBool>,
@@ -1262,6 +1262,18 @@ pub(crate) struct ScoutClientRuntimeStatus {
     pub last_event_detail: Option<String>,
     pub last_event_ms: u128,
     pub last_submit_success_ms: Option<u128>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct MeshEndpointTelemetry {
+    pub failures: u32,
+    pub next_eligible_at_ms: u128,
+    pub last_probe_success_at_ms: Option<u128>,
+    pub last_probe_latency_ms: Option<f64>,
+    pub last_reported_latency_ms: Option<f64>,
+    pub last_queue_depth: Option<f64>,
+    pub last_forward_success_at_ms: Option<u128>,
+    pub last_forward_latency_ms: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -3610,7 +3622,7 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
         bootstrap_registry: Arc::new(Mutex::new(loaded_bootstrap_registry)),
         bootstrap_registry_path,
         scheduler_decisions: Arc::new(Mutex::new(VecDeque::new())),
-        mesh_probe_backoff: Arc::new(Mutex::new(HashMap::new())),
+        mesh_endpoint_telemetry: Arc::new(Mutex::new(HashMap::new())),
         canary_rollout: Arc::new(Mutex::new(CanaryRolloutController::new(
             cli.model_id.clone(),
             canary_rollout_cfg,

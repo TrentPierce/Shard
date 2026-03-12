@@ -62,6 +62,16 @@ function normalizeScoutInitError(error: unknown): string {
     return `Failed to initialize Scout runtime: ${raw}`
 }
 
+function capabilityStatusMetadata(capability: Awaited<ReturnType<typeof detectScoutCapability>> | null | undefined) {
+    if (!capability) return undefined
+    return {
+        backgroundAcceleration: capability.backgroundAcceleration,
+        lowPowerEligible: capability.lowPowerEligible,
+        webnnProbeMs: capability.webnnProbeMs,
+        webnnWarmState: capability.webnnWarmState,
+    }
+}
+
 export function AppProvider({ children }: { children: React.ReactNode }) {
     const [mode, setMode] = useState<NodeMode>("loading")
     const [webLLMProgress, setWebLLMProgress] = useState<ModelProgress | null>(null)
@@ -209,7 +219,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                     setWebLLMError(reason)
                     setMode("leech")
                     setContributionStatusState(
-                        setContributionStatus("not_contributing", reason, capability.capability)
+                        setContributionStatus(
+                            "not_contributing",
+                            reason,
+                            capability.capability,
+                            capabilityStatusMetadata(capability)
+                        )
                     )
                     return
                 }
@@ -221,7 +236,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                     setWebLLMError(reason)
                     setMode("leech")
                     setContributionStatusState(
-                        setContributionStatus("not_contributing", reason, capability.capability)
+                        setContributionStatus(
+                            "not_contributing",
+                            reason,
+                            capability.capability,
+                            capabilityStatusMetadata(capability)
+                        )
                     )
                     return
                 }
@@ -229,7 +249,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                 setWebLLMError(null)
                 setMode("scout")
                 setContributionStatusState(
-                    setContributionStatus("contributing", "WebGPU scout active and contribution loop started", capability.capability)
+                    setContributionStatus(
+                        "contributing",
+                        "WebGPU scout active and contribution loop started",
+                        capability.capability,
+                        capabilityStatusMetadata(capability)
+                    )
                 )
 
                 try {
@@ -240,7 +265,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                         setContributionStatus(
                             "degraded",
                             "WebGPU is ready but scout work loop failed to start. Retry required.",
-                            capability.capability
+                            capability.capability,
+                            capabilityStatusMetadata(capability)
                         )
                     )
                 }

@@ -178,6 +178,28 @@ fn mesh_forward_request_timeout_ms() -> u64 {
     })
 }
 
+fn mesh_forward_history_fresh_ms() -> u128 {
+    static FRESH_MS: std::sync::OnceLock<u128> = std::sync::OnceLock::new();
+    *FRESH_MS.get_or_init(|| {
+        std::env::var("SHARD_MESH_FORWARD_HISTORY_FRESH_MS")
+            .ok()
+            .and_then(|v| v.parse::<u128>().ok())
+            .filter(|v| *v >= 1_000)
+            .unwrap_or(45_000)
+    })
+}
+
+fn mesh_forward_history_expiry_ms() -> u128 {
+    static EXPIRY_MS: std::sync::OnceLock<u128> = std::sync::OnceLock::new();
+    *EXPIRY_MS.get_or_init(|| {
+        std::env::var("SHARD_MESH_FORWARD_HISTORY_EXPIRY_MS")
+            .ok()
+            .and_then(|v| v.parse::<u128>().ok())
+            .filter(|v| *v >= 5_000)
+            .unwrap_or(5 * 60 * 1000)
+    })
+}
+
 fn mesh_forward_retryable_cooldown_ms() -> u128 {
     static COOLDOWN: std::sync::OnceLock<u128> = std::sync::OnceLock::new();
     *COOLDOWN.get_or_init(|| {
@@ -208,6 +230,39 @@ fn mesh_forward_registry_fallback_ttl_ms() -> u128 {
             .and_then(|v| v.parse::<u128>().ok())
             .filter(|v| *v >= 60_000)
             .unwrap_or(15 * 60 * 1000)
+    })
+}
+
+fn mesh_forward_failure_penalty_ms() -> f64 {
+    static PENALTY: std::sync::OnceLock<f64> = std::sync::OnceLock::new();
+    *PENALTY.get_or_init(|| {
+        std::env::var("SHARD_MESH_FORWARD_FAILURE_PENALTY_MS")
+            .ok()
+            .and_then(|v| v.parse::<f64>().ok())
+            .filter(|v| v.is_finite() && *v >= 0.0)
+            .unwrap_or(90.0)
+    })
+}
+
+fn mesh_forward_stale_penalty_ms() -> f64 {
+    static PENALTY: std::sync::OnceLock<f64> = std::sync::OnceLock::new();
+    *PENALTY.get_or_init(|| {
+        std::env::var("SHARD_MESH_FORWARD_STALE_PENALTY_MS")
+            .ok()
+            .and_then(|v| v.parse::<f64>().ok())
+            .filter(|v| v.is_finite() && *v >= 0.0)
+            .unwrap_or(180.0)
+    })
+}
+
+fn mesh_forward_history_weight() -> f64 {
+    static WEIGHT: std::sync::OnceLock<f64> = std::sync::OnceLock::new();
+    *WEIGHT.get_or_init(|| {
+        std::env::var("SHARD_MESH_FORWARD_HISTORY_WEIGHT")
+            .ok()
+            .and_then(|v| v.parse::<f64>().ok())
+            .filter(|v| v.is_finite() && *v >= 0.0)
+            .unwrap_or(0.65)
     })
 }
 
@@ -505,6 +560,8 @@ struct MeshEndpointScore {
     probe_rtt_ms: f64,
     peer_latency_ms: f64,
     score: f64,
+    telemetry_penalty_ms: f64,
+    historical_latency_ms: Option<f64>,
     tier: &'static str,
     capability_tier: Option<String>,
     source: MeshEndpointSource,
@@ -585,10 +642,76 @@ fn mesh_forward_effective_request_timeout_ms(
     let latency_budget_ms = target
         .reported_latency_ms
         .max(target.latency_ms)
+        .max(target.historical_latency_ms.unwrap_or(0.0))
         .max(local_latency_ms)
         .max(0.0);
     let derived = (latency_budget_ms * 1.5).ceil() as u64 + 5_000;
     derived.clamp(base, 90_000)
+}
+
+fn blend_f64_ewma(previous: Option<f64>, sample: f64, alpha: f64) -> f64 {
+    let alpha = alpha.clamp(0.0, 1.0);
+    match previous {
+        Some(value) if value.is_finite() => (value * (1.0 - alpha)) + (sample * alpha),
+        _ => sample,
+    }
+}
+
+fn mesh_forward_history_freshness(age_ms: u128) -> f64 {
+    let fresh_ms = mesh_forward_history_fresh_ms();
+    let expiry_ms = mesh_forward_history_expiry_ms().max(fresh_ms.saturating_add(1));
+    if age_ms <= fresh_ms {
+        return 1.0;
+    }
+    if age_ms >= expiry_ms {
+        return 0.0;
+    }
+    let span = (expiry_ms - fresh_ms) as f64;
+    1.0 - ((age_ms - fresh_ms) as f64 / span)
+}
+
+fn mesh_forward_telemetry_penalty_ms(
+    telemetry: &MeshEndpointTelemetry,
+    live_latency_ms: f64,
+    now: u128,
+) -> (f64, Option<f64>) {
+    let mut penalty = (telemetry.failures.min(4) as f64) * mesh_forward_failure_penalty_ms();
+    let mut historical_latency_ms = None;
+    let history_weight = mesh_forward_history_weight();
+    let stale_penalty_ms = mesh_forward_stale_penalty_ms();
+
+    if let (Some(forward_latency_ms), Some(last_success_at_ms)) = (
+        telemetry.last_forward_latency_ms,
+        telemetry.last_forward_success_at_ms,
+    ) {
+        let freshness = mesh_forward_history_freshness(now.saturating_sub(last_success_at_ms));
+        if freshness > 0.0 {
+            penalty += (forward_latency_ms - live_latency_ms).max(0.0) * history_weight * freshness;
+            historical_latency_ms = Some(forward_latency_ms);
+        } else {
+            penalty += stale_penalty_ms;
+        }
+    } else if let (Some(probe_latency_ms), Some(last_probe_at_ms)) = (
+        telemetry.last_probe_latency_ms,
+        telemetry.last_probe_success_at_ms,
+    ) {
+        let freshness = mesh_forward_history_freshness(now.saturating_sub(last_probe_at_ms));
+        if freshness > 0.0 {
+            penalty +=
+                (probe_latency_ms - live_latency_ms).max(0.0) * history_weight * 0.35 * freshness;
+            historical_latency_ms = Some(probe_latency_ms);
+        }
+    }
+
+    if let Some(last_observed_at_ms) = telemetry
+        .last_forward_success_at_ms
+        .or(telemetry.last_probe_success_at_ms)
+    {
+        let freshness = mesh_forward_history_freshness(now.saturating_sub(last_observed_at_ms));
+        penalty += stale_penalty_ms * (1.0 - freshness);
+    }
+
+    (penalty, historical_latency_ms)
 }
 
 fn should_include_bootstrap_registry_mesh_candidates(
@@ -915,10 +1038,20 @@ async fn discover_mesh_endpoints(state: &SharedState) -> Vec<MeshEndpointCandida
     out
 }
 
+async fn mesh_endpoint_telemetry_snapshot(
+    state: &SharedState,
+    endpoint: &str,
+) -> MeshEndpointTelemetry {
+    let telemetry = state.mesh_endpoint_telemetry.lock().await;
+    telemetry.get(endpoint).cloned().unwrap_or_default()
+}
+
 async fn score_mesh_endpoint(
+    state: &SharedState,
     client: &reqwest::Client,
     candidate: &MeshEndpointCandidate,
     queue_weight_ms: f64,
+    now: u128,
 ) -> Option<MeshEndpointScore> {
     let timeout = Duration::from_millis(mesh_forward_probe_timeout_ms());
     let probe_started = std::time::Instant::now();
@@ -948,6 +1081,10 @@ async fn score_mesh_endpoint(
         candidate.peer_latency_ms,
         probe_rtt_ms,
     );
+    let telemetry =
+        mesh_endpoint_telemetry_snapshot(state, candidate.endpoint.as_str()).await;
+    let (telemetry_penalty_ms, historical_latency_ms) =
+        mesh_forward_telemetry_penalty_ms(&telemetry, latency_ms, now);
     Some(MeshEndpointScore {
         endpoint: candidate.endpoint.clone(),
         queue_depth,
@@ -955,7 +1092,9 @@ async fn score_mesh_endpoint(
         reported_latency_ms,
         probe_rtt_ms,
         peer_latency_ms: candidate.peer_latency_ms,
-        score: mesh_forward_score(latency_ms, queue_depth, queue_weight_ms),
+        score: mesh_forward_score(latency_ms, queue_depth, queue_weight_ms) + telemetry_penalty_ms,
+        telemetry_penalty_ms,
+        historical_latency_ms,
         tier: "unknown",
         capability_tier: candidate.capability_tier.clone(),
         source: candidate.source,
@@ -963,23 +1102,42 @@ async fn score_mesh_endpoint(
 }
 
 async fn mesh_probe_candidate_ready(state: &SharedState, endpoint: &str, now: u128) -> bool {
-    let backoff = state.mesh_probe_backoff.lock().await;
-    backoff
+    let telemetry = state.mesh_endpoint_telemetry.lock().await;
+    telemetry
         .get(endpoint)
-        .map(|(_, next_eligible)| now >= *next_eligible)
+        .map(|entry| now >= entry.next_eligible_at_ms)
         .unwrap_or(true)
 }
 
-async fn record_mesh_probe_success(state: &SharedState, endpoint: &str) {
-    let mut backoff = state.mesh_probe_backoff.lock().await;
-    backoff.remove(endpoint);
+async fn record_mesh_probe_success(
+    state: &SharedState,
+    endpoint: &str,
+    score: &MeshEndpointScore,
+    now: u128,
+) {
+    let mut telemetry = state.mesh_endpoint_telemetry.lock().await;
+    let entry = telemetry.entry(endpoint.to_string()).or_default();
+    entry.failures = 0;
+    entry.next_eligible_at_ms = 0;
+    entry.last_probe_success_at_ms = Some(now);
+    entry.last_probe_latency_ms = Some(blend_f64_ewma(
+        entry.last_probe_latency_ms,
+        score.latency_ms,
+        0.35,
+    ));
+    entry.last_reported_latency_ms = Some(blend_f64_ewma(
+        entry.last_reported_latency_ms,
+        score.reported_latency_ms,
+        0.35,
+    ));
+    entry.last_queue_depth = Some(blend_f64_ewma(entry.last_queue_depth, score.queue_depth, 0.35));
 }
 
 async fn record_mesh_probe_failure(state: &SharedState, endpoint: &str, now: u128) {
-    let mut backoff = state.mesh_probe_backoff.lock().await;
-    let entry = backoff.entry(endpoint.to_string()).or_insert((0, 0));
-    entry.0 = entry.0.saturating_add(1);
-    entry.1 = now + mesh_probe_backoff_ms_for_failures(entry.0);
+    let mut telemetry = state.mesh_endpoint_telemetry.lock().await;
+    let entry = telemetry.entry(endpoint.to_string()).or_default();
+    entry.failures = entry.failures.saturating_add(1);
+    entry.next_eligible_at_ms = now + mesh_probe_backoff_ms_for_failures(entry.failures);
 }
 
 async fn record_mesh_probe_retryable_cooldown(
@@ -988,9 +1146,43 @@ async fn record_mesh_probe_retryable_cooldown(
     now: u128,
     cooldown_ms: u128,
 ) {
-    let mut backoff = state.mesh_probe_backoff.lock().await;
-    let entry = backoff.entry(endpoint.to_string()).or_insert((0, 0));
-    entry.1 = entry.1.max(now.saturating_add(cooldown_ms));
+    let mut telemetry = state.mesh_endpoint_telemetry.lock().await;
+    let entry = telemetry.entry(endpoint.to_string()).or_default();
+    entry.next_eligible_at_ms = entry.next_eligible_at_ms.max(now.saturating_add(cooldown_ms));
+}
+
+async fn record_mesh_forward_success(
+    state: &SharedState,
+    target: &MeshEndpointScore,
+    forward_latency_ms: f64,
+    now: u128,
+) {
+    let mut telemetry = state.mesh_endpoint_telemetry.lock().await;
+    let entry = telemetry.entry(target.endpoint.clone()).or_default();
+    entry.failures = 0;
+    entry.next_eligible_at_ms = 0;
+    entry.last_forward_success_at_ms = Some(now);
+    entry.last_forward_latency_ms = Some(blend_f64_ewma(
+        entry.last_forward_latency_ms,
+        forward_latency_ms,
+        0.35,
+    ));
+    entry.last_probe_success_at_ms = Some(now);
+    entry.last_probe_latency_ms = Some(blend_f64_ewma(
+        entry.last_probe_latency_ms,
+        target.latency_ms,
+        0.25,
+    ));
+    entry.last_reported_latency_ms = Some(blend_f64_ewma(
+        entry.last_reported_latency_ms,
+        target.reported_latency_ms,
+        0.25,
+    ));
+    entry.last_queue_depth = Some(blend_f64_ewma(
+        entry.last_queue_depth,
+        target.queue_depth,
+        0.25,
+    ));
 }
 
 async fn choose_mesh_forward_target(
@@ -1041,9 +1233,9 @@ async fn choose_mesh_forward_target(
     let probed_candidates = eligible.into_iter().take(probe_limit).collect::<Vec<_>>();
     let probed_count = probed_candidates.len();
     for candidate in probed_candidates {
-        match score_mesh_endpoint(client, &candidate, queue_weight_ms).await {
+        match score_mesh_endpoint(state, client, &candidate, queue_weight_ms, now).await {
             Some(score) => {
-                record_mesh_probe_success(state, candidate.endpoint.as_str()).await;
+                record_mesh_probe_success(state, candidate.endpoint.as_str(), &score, now).await;
                 tracing::debug!(
                     endpoint = %score.endpoint,
                     source = ?score.source,
@@ -1053,6 +1245,8 @@ async fn choose_mesh_forward_target(
                     peer_latency_ms = score.peer_latency_ms,
                     queue_depth = score.queue_depth,
                     score = score.score,
+                    telemetry_penalty_ms = score.telemetry_penalty_ms,
+                    historical_latency_ms = ?score.historical_latency_ms,
                     "mesh forward probe success"
                 );
                 scored.push(score);
@@ -1249,6 +1443,7 @@ async fn try_forward_chat_to_mesh(
             request_builder = request_builder.header("x-shard-route", value);
         }
 
+        let forward_started = std::time::Instant::now();
         match request_builder.send().await {
             Ok(resp) => {
                 let status = resp.status();
@@ -1259,6 +1454,14 @@ async fn try_forward_chat_to_mesh(
                     || (status.is_client_error()
                         && status != reqwest::StatusCode::TOO_MANY_REQUESTS)
                 {
+                    let forward_latency_ms = forward_started.elapsed().as_secs_f64() * 1000.0;
+                    record_mesh_forward_success(
+                        state,
+                        &target,
+                        forward_latency_ms,
+                        now_ms(),
+                    )
+                    .await;
                     let mut out_headers = HeaderMap::new();
                     if let Some(content_type) = content_type {
                         if let Ok(parsed) = HeaderValue::from_bytes(content_type.as_bytes()) {
@@ -1299,6 +1502,9 @@ async fn try_forward_chat_to_mesh(
                         target_tier = target.tier,
                         queue_depth = target.queue_depth,
                         target_latency_ms = target.latency_ms,
+                        telemetry_penalty_ms = target.telemetry_penalty_ms,
+                        historical_latency_ms = ?target.historical_latency_ms,
+                        forward_latency_ms,
                         local_queue_depth,
                         local_latency_ms,
                         request_timeout_ms,
@@ -3994,7 +4200,8 @@ mod tests {
         compute_effective_scout_timeout_ms, effective_draft_token_count_with,
         endpoint_from_multiaddr, enqueue_scout_work, filter_mesh_forward_candidates,
         infer_client_ip, is_self_mesh_candidate, local_scout_fallback_allowed,
-        mesh_forward_effective_latency_ms, mesh_forward_score, model_pair_acceptance_rates,
+        mesh_forward_effective_latency_ms, mesh_forward_history_freshness,
+        mesh_forward_telemetry_penalty_ms, mesh_forward_score, model_pair_acceptance_rates,
         normalize_endpoint, parse_speculative_min_request_tokens, probe_allowed_for_request,
         remove_work_id_from_scout_queue, request_host_is_local, requested_request_id,
         resolve_inference_mode, should_abort_on_degenerate_output, should_attempt_mesh_forward,
@@ -4004,6 +4211,7 @@ mod tests {
         MeshEndpointCandidate, MeshEndpointScore, MeshEndpointSource, ScoutSupplyEstimate,
         WorkRequest,
     };
+    use crate::MeshEndpointTelemetry;
     use axum::http::{HeaderMap, HeaderValue};
     use std::collections::{HashSet, VecDeque};
 
@@ -4388,6 +4596,31 @@ mod tests {
     }
 
     #[test]
+    fn mesh_history_freshness_decays_over_time() {
+        assert_eq!(mesh_forward_history_freshness(0), 1.0);
+        assert!(mesh_forward_history_freshness(90_000) < 1.0);
+        assert_eq!(mesh_forward_history_freshness(10 * 60 * 1000), 0.0);
+    }
+
+    #[test]
+    fn recent_slow_forward_history_adds_mesh_penalty() {
+        let telemetry = MeshEndpointTelemetry {
+            failures: 0,
+            next_eligible_at_ms: 0,
+            last_probe_success_at_ms: Some(50_000),
+            last_probe_latency_ms: Some(260.0),
+            last_reported_latency_ms: Some(200.0),
+            last_queue_depth: Some(1.0),
+            last_forward_success_at_ms: Some(50_000),
+            last_forward_latency_ms: Some(520.0),
+        };
+        let (penalty, historical) =
+            mesh_forward_telemetry_penalty_ms(&telemetry, 220.0, 60_000);
+        assert!(penalty > 150.0);
+        assert_eq!(historical, Some(520.0));
+    }
+
+    #[test]
     fn short_requests_trim_mesh_targets_to_fast_tier() {
         let scored = vec![
             MeshEndpointScore {
@@ -4398,6 +4631,8 @@ mod tests {
                 probe_rtt_ms: 30.0,
                 peer_latency_ms: 20.0,
                 score: 120.0,
+                telemetry_penalty_ms: 0.0,
+                historical_latency_ms: None,
                 tier: "unknown",
                 capability_tier: None,
                 source: MeshEndpointSource::DirectPeer,
@@ -4410,6 +4645,8 @@ mod tests {
                 probe_rtt_ms: 50.0,
                 peer_latency_ms: 40.0,
                 score: 320.0,
+                telemetry_penalty_ms: 0.0,
+                historical_latency_ms: None,
                 tier: "unknown",
                 capability_tier: None,
                 source: MeshEndpointSource::DirectPeer,
@@ -4422,6 +4659,8 @@ mod tests {
                 probe_rtt_ms: 60.0,
                 peer_latency_ms: 55.0,
                 score: 920.0,
+                telemetry_penalty_ms: 0.0,
+                historical_latency_ms: None,
                 tier: "unknown",
                 capability_tier: None,
                 source: MeshEndpointSource::PublicApi,
@@ -4448,6 +4687,8 @@ mod tests {
                 probe_rtt_ms: 30.0,
                 peer_latency_ms: 20.0,
                 score: 120.0,
+                telemetry_penalty_ms: 0.0,
+                historical_latency_ms: None,
                 tier: "unknown",
                 capability_tier: None,
                 source: MeshEndpointSource::DirectPeer,
@@ -4460,6 +4701,8 @@ mod tests {
                 probe_rtt_ms: 70.0,
                 peer_latency_ms: 50.0,
                 score: 560.0,
+                telemetry_penalty_ms: 0.0,
+                historical_latency_ms: None,
                 tier: "unknown",
                 capability_tier: None,
                 source: MeshEndpointSource::DirectPeer,
@@ -4472,6 +4715,8 @@ mod tests {
                 probe_rtt_ms: 100.0,
                 peer_latency_ms: 95.0,
                 score: 1360.0,
+                telemetry_penalty_ms: 0.0,
+                historical_latency_ms: None,
                 tier: "unknown",
                 capability_tier: None,
                 source: MeshEndpointSource::PublicApi,
@@ -4567,6 +4812,8 @@ mod tests {
             probe_rtt_ms: 50.0,
             peer_latency_ms: 45.0,
             score: 980.0,
+            telemetry_penalty_ms: 0.0,
+            historical_latency_ms: None,
             tier: "unknown",
             capability_tier: Some("gpu_fast".to_string()),
             source: MeshEndpointSource::DirectPeer,
@@ -4579,6 +4826,8 @@ mod tests {
             probe_rtt_ms: 30.0,
             peer_latency_ms: 25.0,
             score: 180.0,
+            telemetry_penalty_ms: 0.0,
+            historical_latency_ms: None,
             tier: "unknown",
             capability_tier: Some("cpu_slow".to_string()),
             source: MeshEndpointSource::PublicApi,

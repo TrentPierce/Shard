@@ -39,6 +39,16 @@ function isDirectBrowserBackend(backendUrl: string): boolean {
   }
 }
 
+function capabilityStatusMetadata(capability: ScoutCapabilityResult | null | undefined) {
+  if (!capability) return undefined
+  return {
+    backgroundAcceleration: capability.backgroundAcceleration,
+    lowPowerEligible: capability.lowPowerEligible,
+    webnnProbeMs: capability.webnnProbeMs,
+    webnnWarmState: capability.webnnWarmState,
+  }
+}
+
 async function inferDraftModelPreset(backendUrl: string): Promise<string> {
   if (!backendUrl) return ""
   try {
@@ -172,7 +182,12 @@ export default function BenchmarkScoutPage() {
           const reason = nextCapability.reason || "WebGPU is required for benchmark scout mode"
           setState("failed")
           setDetail(reason)
-          setContributionStatus("not_contributing", reason, nextCapability.capability)
+          setContributionStatus(
+            "not_contributing",
+            reason,
+            nextCapability.capability,
+            capabilityStatusMetadata(nextCapability)
+          )
           return
         }
 
@@ -221,14 +236,24 @@ export default function BenchmarkScoutPage() {
 
         setState("starting_worker")
         setDetail("Starting real browser scout worker")
-        setContributionStatus("initializing", "Starting benchmark scout worker", "webgpu")
+        setContributionStatus(
+          "initializing",
+          "Starting benchmark scout worker",
+          "webgpu",
+          capabilityStatusMetadata(nextCapability)
+        )
 
         stopWorkerRef.current = await startScoutWorker(
           () => {
             if (cancelled) return
             setState("contributing")
             setDetail("Real browser scout active")
-            setContributionStatus("contributing", "Benchmark scout worker active", "webgpu")
+            setContributionStatus(
+              "contributing",
+              "Benchmark scout worker active",
+              "webgpu",
+              capabilityStatusMetadata(nextCapability)
+            )
           },
           (result) => {
             if (cancelled) return
@@ -253,7 +278,12 @@ export default function BenchmarkScoutPage() {
         const reason = normalizeError(error)
         setState("failed")
         setDetail(reason)
-        setContributionStatus("degraded", reason, capabilityRef.current?.capability)
+        setContributionStatus(
+          "degraded",
+          reason,
+          capabilityRef.current?.capability,
+          capabilityStatusMetadata(capabilityRef.current)
+        )
       }
     }
 

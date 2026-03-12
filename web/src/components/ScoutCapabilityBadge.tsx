@@ -59,9 +59,9 @@ export default function ScoutCapabilityBadge({
                         <span className="capability-reason">
                             {getCapabilityReason(capability)}
                         </span>
-                        {getCapabilityRecommendation(capability.capability) && (
+                        {getCapabilityRecommendation(capability) && (
                             <span className="capability-recommendation">
-                                {getCapabilityRecommendation(capability.capability)}
+                                {getCapabilityRecommendation(capability)}
                             </span>
                         )}
                     </>

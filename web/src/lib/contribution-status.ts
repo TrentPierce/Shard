@@ -1,3 +1,5 @@
+import type { BackgroundAcceleration, WebNNWarmState } from "./scout-capability"
+
 export type ContributionState =
   | "initializing"
   | "contributing"
@@ -8,6 +10,10 @@ export interface ContributionStatus {
   state: ContributionState
   reason: string
   capability?: "webgpu" | "wasm" | "unsupported"
+  backgroundAcceleration?: BackgroundAcceleration
+  lowPowerEligible?: boolean
+  webnnProbeMs?: number
+  webnnWarmState?: WebNNWarmState
   updated_at_ms: number
 }
 
@@ -42,12 +48,22 @@ export function writeContributionStatus(status: ContributionStatus): void {
 export function setContributionStatus(
   state: ContributionState,
   reason: string,
-  capability?: "webgpu" | "wasm" | "unsupported"
+  capability?: "webgpu" | "wasm" | "unsupported",
+  metadata?: {
+    backgroundAcceleration?: BackgroundAcceleration
+    lowPowerEligible?: boolean
+    webnnProbeMs?: number
+    webnnWarmState?: WebNNWarmState
+  }
 ): ContributionStatus {
   const status: ContributionStatus = {
     state,
     reason,
     capability,
+    backgroundAcceleration: metadata?.backgroundAcceleration,
+    lowPowerEligible: metadata?.lowPowerEligible,
+    webnnProbeMs: metadata?.webnnProbeMs,
+    webnnWarmState: metadata?.webnnWarmState,
     updated_at_ms: nowMs(),
   }
   writeContributionStatus(status)
