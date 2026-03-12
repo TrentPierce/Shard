@@ -178,6 +178,17 @@ fn mesh_forward_request_timeout_ms() -> u64 {
     })
 }
 
+fn mesh_forward_retryable_cooldown_ms() -> u128 {
+    static COOLDOWN: std::sync::OnceLock<u128> = std::sync::OnceLock::new();
+    *COOLDOWN.get_or_init(|| {
+        std::env::var("SHARD_MESH_FORWARD_RETRYABLE_COOLDOWN_MS")
+            .ok()
+            .and_then(|v| v.parse::<u128>().ok())
+            .filter(|v| *v > 0)
+            .unwrap_or(3_000)
+    })
+}
+
 fn mesh_forward_target_attempts() -> usize {
     static ATTEMPTS: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
     *ATTEMPTS.get_or_init(|| {
@@ -186,6 +197,17 @@ fn mesh_forward_target_attempts() -> usize {
             .and_then(|v| v.parse::<usize>().ok())
             .filter(|v| *v > 0)
             .unwrap_or(2)
+    })
+}
+
+fn mesh_forward_registry_fallback_ttl_ms() -> u128 {
+    static TTL: std::sync::OnceLock<u128> = std::sync::OnceLock::new();
+    *TTL.get_or_init(|| {
+        std::env::var("SHARD_MESH_FORWARD_REGISTRY_TTL_MS")
+            .ok()
+            .and_then(|v| v.parse::<u128>().ok())
+            .filter(|v| *v >= 60_000)
+            .unwrap_or(15 * 60 * 1000)
     })
 }
 
@@ -569,6 +591,13 @@ fn mesh_forward_effective_request_timeout_ms(
     derived.clamp(base, 90_000)
 }
 
+fn should_include_bootstrap_registry_mesh_candidates(
+    connected_peer_count: usize,
+    discovered_count: usize,
+) -> bool {
+    connected_peer_count == 0 || discovered_count == 0
+}
+
 fn upsert_mesh_endpoint_candidate(
     discovered: &mut HashMap<String, MeshEndpointCandidate>,
     endpoint: String,
@@ -748,6 +777,8 @@ fn filter_mesh_forward_candidates(
 async fn discover_mesh_endpoints(state: &SharedState) -> Vec<MeshEndpointCandidate> {
     let control_port = mesh_forward_port();
     let mut discovered: HashMap<String, MeshEndpointCandidate> = HashMap::new();
+    let now = now_ms();
+    let registry_ttl_ms = mesh_forward_registry_fallback_ttl_ms();
     let (local_peer_id, local_public_host) = {
         let topo = state.topology.lock().await;
         (
@@ -782,6 +813,7 @@ async fn discover_mesh_endpoints(state: &SharedState) -> Vec<MeshEndpointCandida
 
     let peers = state.peers.lock().await.clone();
     let bootstrap_registry = state.bootstrap_registry.lock().await.clone();
+    let connected_peer_count = peers.len();
     for peer in peers.values() {
         let peer_latency = if peer.avg_latency_ms > 0.0 {
             peer.avg_latency_ms as f64
@@ -831,21 +863,26 @@ async fn discover_mesh_endpoints(state: &SharedState) -> Vec<MeshEndpointCandida
         }
     }
 
-    // Also discover endpoints from the bootstrap registry directly. Some peers
-    // only exist in the persisted/gossiped bootstrap set, and relay multiaddrs
-    // can resolve to the relay peer id instead of the target verifier id.
-    for entry in bootstrap_registry.values() {
-        if let Some(public_addr) = entry.public_api_addr.as_deref() {
-            if let Some(endpoint) = normalize_endpoint(public_addr, control_port) {
-                upsert_mesh_endpoint_candidate(
-                    &mut discovered,
-                    endpoint,
-                    Some(entry.peer_id.clone()),
-                    300.0,
-                    entry.capability_tier.clone(),
-                    entry.public_api,
-                    MeshEndpointSource::PublicApi,
-                );
+    // Only fall back to the broader bootstrap registry when there are no live
+    // connected peers contributing usable HTTP targets. This avoids probing
+    // stale historical nodes when the mesh is already connected.
+    if should_include_bootstrap_registry_mesh_candidates(connected_peer_count, discovered.len()) {
+        for entry in bootstrap_registry.values() {
+            if now.saturating_sub(entry.updated_at_ms) > registry_ttl_ms {
+                continue;
+            }
+            if let Some(public_addr) = entry.public_api_addr.as_deref() {
+                if let Some(endpoint) = normalize_endpoint(public_addr, control_port) {
+                    upsert_mesh_endpoint_candidate(
+                        &mut discovered,
+                        endpoint,
+                        Some(entry.peer_id.clone()),
+                        300.0,
+                        entry.capability_tier.clone(),
+                        entry.public_api,
+                        MeshEndpointSource::PublicApi,
+                    );
+                }
             }
         }
     }
@@ -943,6 +980,17 @@ async fn record_mesh_probe_failure(state: &SharedState, endpoint: &str, now: u12
     let entry = backoff.entry(endpoint.to_string()).or_insert((0, 0));
     entry.0 = entry.0.saturating_add(1);
     entry.1 = now + mesh_probe_backoff_ms_for_failures(entry.0);
+}
+
+async fn record_mesh_probe_retryable_cooldown(
+    state: &SharedState,
+    endpoint: &str,
+    now: u128,
+    cooldown_ms: u128,
+) {
+    let mut backoff = state.mesh_probe_backoff.lock().await;
+    let entry = backoff.entry(endpoint.to_string()).or_insert((0, 0));
+    entry.1 = entry.1.max(now.saturating_add(cooldown_ms));
 }
 
 async fn choose_mesh_forward_target(
@@ -1271,7 +1319,13 @@ async fn try_forward_chat_to_mesh(
                     };
                 }
                 attempted_targets.push(target.endpoint.clone());
-                record_mesh_probe_failure(state, target.endpoint.as_str(), now_ms()).await;
+                record_mesh_probe_retryable_cooldown(
+                    state,
+                    target.endpoint.as_str(),
+                    now_ms(),
+                    mesh_forward_retryable_cooldown_ms(),
+                )
+                .await;
                 debug.decision = "forward_retryable".to_string();
                 debug.detail = Some(format!(
                     "status={status};timeout_ms={request_timeout_ms};attempted={}",
@@ -3945,9 +3999,10 @@ mod tests {
         remove_work_id_from_scout_queue, request_host_is_local, requested_request_id,
         resolve_inference_mode, should_abort_on_degenerate_output, should_attempt_mesh_forward,
         should_bypass_speculative_for_fast_verifier, should_forward_to_mesh,
-        should_refuse_mesh_degraded, strip_control_tokens, truncate_prompt_context_for_scout,
-        InferenceMode, MeshEndpointCandidate, MeshEndpointScore, MeshEndpointSource,
-        ScoutSupplyEstimate, WorkRequest,
+        should_include_bootstrap_registry_mesh_candidates, should_refuse_mesh_degraded,
+        strip_control_tokens, truncate_prompt_context_for_scout, InferenceMode,
+        MeshEndpointCandidate, MeshEndpointScore, MeshEndpointSource, ScoutSupplyEstimate,
+        WorkRequest,
     };
     use axum::http::{HeaderMap, HeaderValue};
     use std::collections::{HashSet, VecDeque};
@@ -4299,6 +4354,14 @@ mod tests {
             false,
             InferenceMode::Standard
         ));
+    }
+
+    #[test]
+    fn mesh_registry_fallback_only_runs_without_live_peer_candidates() {
+        assert!(should_include_bootstrap_registry_mesh_candidates(0, 0));
+        assert!(should_include_bootstrap_registry_mesh_candidates(0, 2));
+        assert!(should_include_bootstrap_registry_mesh_candidates(2, 0));
+        assert!(!should_include_bootstrap_registry_mesh_candidates(2, 3));
     }
 
     #[test]
