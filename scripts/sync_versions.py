@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import re
 from pathlib import Path
 
@@ -28,10 +29,24 @@ def replace_in_file(path: Path, pattern: str, replacement: str) -> None:
     path.write_text(updated, encoding="utf-8")
 
 
+def sync_package_lock(path: Path, version: str) -> None:
+    if not path.exists():
+        print(f"Warning: {path} not found, skipping version sync.")
+        return
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["version"] = version
+    packages = payload.get("packages")
+    if isinstance(packages, dict):
+        root_package = packages.get("")
+        if isinstance(root_package, dict):
+            root_package["version"] = version
+    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+
+
 def sync_version(version: str) -> None:
-    # Rust Workspace
+    # Rust crates
     replace_in_file(
-        ROOT / "desktop" / "rust" / "Cargo.toml",
+        ROOT / "desktop" / "rust" / "daemon" / "Cargo.toml",
         r'^version = "\d+\.\d+\.\d+"$',
         f'version = "{version}"',
     )
@@ -50,17 +65,28 @@ def sync_version(version: str) -> None:
             r'^version = "\d+\.\d+\.\d+"$',
             f'version = "{version}"',
         )
+    replace_in_file(
+        ROOT / "desktop" / "rust" / "shard-gui" / "Cargo.toml",
+        r'^version = "\d+\.\d+\.\d+"$',
+        f'version = "{version}"',
+    )
     # Web Package
     replace_in_file(
         ROOT / "web" / "package.json",
         r'"version": "\d+\.\d+\.\d+"',
         f'"version": "{version}"',
     )
+    sync_package_lock(ROOT / "web" / "package-lock.json", version)
     # Tauri Config
     replace_in_file(
         ROOT / "web" / "src-tauri" / "tauri.conf.json",
         r'"version": "\d+\.\d+\.\d+"',
         f'"version": "{version}"',
+    )
+    replace_in_file(
+        ROOT / "web" / "src-tauri" / "Cargo.toml",
+        r'^version = "\d+\.\d+\.\d+"$',
+        f'version = "{version}"',
     )
     replace_in_file(
         ROOT / "web" / "src" / "lib" / "version.ts",
@@ -137,6 +163,11 @@ def sync_version(version: str) -> None:
         ROOT / "README.md",
         r"releases/tag/v\d+\.\d+\.\d+",
         f"releases/tag/v{version}",
+    )
+    replace_in_file(
+        ROOT / "docs" / "VERSION",
+        r"\d+\.\d+\.\d+",
+        version,
     )
 
 

@@ -25,7 +25,7 @@ describe("metrics summary node estimation", () => {
             status: "ok",
             ready_for_inference: true,
             model_id: "meta-llama/Llama-3.2-1B",
-            rust_version: "0.6.5",
+            rust_version: "0.6.6",
           }),
         } as unknown as Response
       }
@@ -37,7 +37,7 @@ describe("metrics summary node estimation", () => {
             ready_for_inference: false,
             readiness_reason: "queue_backpressure",
             model_id: "meta-llama/Llama-3.2-1B",
-            rust_version: "0.6.5",
+            rust_version: "0.6.6",
           }),
         } as unknown as Response
       }

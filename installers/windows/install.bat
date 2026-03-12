@@ -4,7 +4,7 @@ setlocal enabledelayedexpansion
 title Shard Node Installer
 color 0b
 
-set "VERSION=0.6.5"
+set "VERSION=0.6.6"
 set "SERVICE_NAME=ShardNode"
 set "SOURCE_DIR=%~dp0"
 set "SILENT=0"

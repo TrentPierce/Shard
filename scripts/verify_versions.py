@@ -10,6 +10,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 VERSION_FILE = ROOT / "VERSION"
 MODEL_MANIFEST = ROOT / "deploy" / "models" / "manifest.json"
+WEB_PACKAGE_LOCK = ROOT / "web" / "package-lock.json"
 
 
 @dataclass(frozen=True)
@@ -29,8 +30,10 @@ def read_version() -> str:
 def collect_checks(version: str) -> list[VersionCheck]:
     checks = [
         VersionCheck(ROOT / "desktop" / "rust" / "daemon" / "Cargo.toml", rf'^version = "{re.escape(version)}"$', "daemon crate version"),
+        VersionCheck(ROOT / "desktop" / "rust" / "shard-gui" / "Cargo.toml", rf'^version = "{re.escape(version)}"$', "shard-gui crate version"),
         VersionCheck(ROOT / "web" / "package.json", rf'"version": "{re.escape(version)}"', "web package version"),
         VersionCheck(ROOT / "web" / "src-tauri" / "tauri.conf.json", rf'"version": "{re.escape(version)}"', "tauri app version"),
+        VersionCheck(ROOT / "web" / "src-tauri" / "Cargo.toml", rf'^version = "{re.escape(version)}"$', "tauri rust crate version"),
         VersionCheck(ROOT / "web" / "src" / "lib" / "version.ts", rf'export const SHARD_VERSION = "{re.escape(version)}"', "web runtime version"),
         VersionCheck(ROOT / "sdk" / "python" / "pyproject.toml", rf'^version = "{re.escape(version)}"$', "python sdk version"),
         VersionCheck(ROOT / "sdk" / "python" / "shard" / "__init__.py", rf'__version__ = "{re.escape(version)}"', "python runtime sdk version"),
@@ -42,6 +45,7 @@ def collect_checks(version: str) -> list[VersionCheck]:
         VersionCheck(ROOT / "installers" / "winget" / "manifest.yaml", rf"releases/download/v{re.escape(version)}/shard-{re.escape(version)}-windows-x64\.exe", "winget installer URL version"),
         VersionCheck(ROOT / "installers" / "windows" / "installer.iss", rf'#define MyAppVersion "{re.escape(version)}"', "inno installer version"),
         VersionCheck(ROOT / "installers" / "windows" / "shard.nsi", rf'!define VERSION "{re.escape(version)}"', "nsis installer version"),
+        VersionCheck(ROOT / "docs" / "VERSION", rf'^{re.escape(version)}$', "docs version mirror"),
     ]
     for crate in [
         "shard-common",
@@ -61,6 +65,27 @@ def collect_checks(version: str) -> list[VersionCheck]:
             )
         )
     return checks
+
+
+def validate_web_package_lock(version: str) -> list[str]:
+    if not WEB_PACKAGE_LOCK.exists():
+        return [f"{WEB_PACKAGE_LOCK}: file not found"]
+
+    try:
+        payload = json.loads(WEB_PACKAGE_LOCK.read_text(encoding="utf-8"))
+    except Exception as exc:  # pragma: no cover - defensive
+        return [f"{WEB_PACKAGE_LOCK}: invalid JSON ({exc})"]
+
+    failures: list[str] = []
+    if payload.get("version") != version:
+        failures.append(f"{WEB_PACKAGE_LOCK}: expected top-level version to equal {version}")
+
+    packages = payload.get("packages")
+    root_package = packages.get("") if isinstance(packages, dict) else None
+    if not isinstance(root_package, dict) or root_package.get("version") != version:
+        failures.append(f"{WEB_PACKAGE_LOCK}: expected packages[''].version to equal {version}")
+
+    return failures
 
 
 def validate_model_manifest() -> list[str]:
@@ -120,6 +145,7 @@ def main() -> None:
         if re.search(check.pattern, text, flags=re.MULTILINE) is None:
             failures.append(f"{check.path}: expected {check.description} to match {check.pattern!r}")
 
+    failures.extend(validate_web_package_lock(version))
     failures.extend(validate_model_manifest())
 
     if failures:

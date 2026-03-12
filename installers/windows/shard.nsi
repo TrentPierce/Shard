@@ -13,7 +13,7 @@ InstallDirRegKey HKLM "Software\Shard" "InstallDir"
 RequestExecutionLevel admin
 
 ; Version
-!define VERSION "0.6.5"
+!define VERSION "0.6.6"
 !define PUBLISHER "Shard Network"
 !define URL "https://shard.network"
 

@@ -34,7 +34,7 @@ curl http://localhost:9091/health
 A healthy response looks like:
 
 ```json
-{ "status": "ok", "rust_version": "0.6.5" }
+{ "status": "ok", "rust_version": "0.6.6" }
 ```
 
 ## Test Inference

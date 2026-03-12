@@ -9,23 +9,23 @@ interface LandingPageProps {
 
 const pillars = [
     {
-        title: "Join as a browser Scout",
-        body: "WebGPU-capable browsers can contribute draft tokens to verifier nodes in real time.",
+        title: "Answer locally first",
+        body: "Simple prompts can complete directly in the browser for zero-hop latency and private-by-default UX.",
     },
     {
-        title: "Verifier-backed quality",
-        body: "Verifier nodes score and validate drafts before tokens are finalized and streamed.",
+        title: "Escalate when it matters",
+        body: "Harder requests route to desktop verifier nodes that keep heavyweight models hot and ready.",
     },
     {
-        title: "Operational integration",
-        body: "Overflow routing, SLA metrics, and Prometheus/Grafana support are built into the stack.",
+        title: "Benchmark WAN scouts separately",
+        body: "Experimental browser scouts stay available for research without defining the product path.",
     },
 ]
 
 const roleCards = [
-    { role: "Scout", desc: "Lightweight browser contributor for speculative drafts." },
-    { role: "Verifier", desc: "Full node operator who validates and serves final tokens." },
-    { role: "Builder", desc: "Product team integrating resilient AI endpoints." },
+    { role: "Browser", desc: "Local-first runtime that answers easy prompts and routes the rest." },
+    { role: "Verifier", desc: "Desktop heavy-inference worker for escalated requests and local speculative decode." },
+    { role: "Builder", desc: "Product team integrating resilient AI endpoints without central lock-in." },
 ]
 
 export default function LandingPage({ onEnter }: LandingPageProps) {
@@ -36,11 +36,11 @@ export default function LandingPage({ onEnter }: LandingPageProps) {
             <div className="landing-modern__bg" aria-hidden="true" />
 
             <section className="landing-modern__hero">
-                <p className="landing-modern__eyebrow">Shard Network | Release 0.6.2</p>
-                <h1>Distributed inference with production controls.</h1>
+                <p className="landing-modern__eyebrow">Shard Network | Release 0.6.6</p>
+                <h1>Local-first AI routing with desktop heavy inference.</h1>
                 <p className="landing-modern__lead">
-                    Shard combines browser Scouts and verifier nodes into a fault-tolerant inference mesh with
-                    bootstrap health checks, failover paths, and OpenAI-compatible APIs.
+                    Shard answers easy prompts in the browser, escalates harder requests to verifier nodes, and keeps
+                    experimental WAN scout workflows available for benchmark research only.
                 </p>
 
                 <div className="landing-modern__actions" style={{ position: "relative", zIndex: 10 }}>

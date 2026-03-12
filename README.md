@@ -4,7 +4,7 @@
   <p><strong>Local-first AI routing with browser answers, desktop inference, and experimental WAN scouts.</strong></p>
 
   [![CI/CD](https://github.com/TrentPierce/Shard/actions/workflows/ci.yml/badge.svg)](https://github.com/TrentPierce/Shard/actions/workflows/ci.yml)
-  [![Version](https://img.shields.io/badge/version-0.6.5-blue.svg)](https://github.com/TrentPierce/Shard/releases/tag/v0.6.5)
+  [![Version](https://img.shields.io/badge/version-0.6.6-blue.svg)](https://github.com/TrentPierce/Shard/releases/tag/v0.6.6)
   [![License: BSL 1.1](https://img.shields.io/badge/License-BSL%201.1-blue.svg)](LICENSE)
 
   [Live Network](https://shardnetwork.live) &nbsp;·&nbsp; [Quick Start](#quick-start) &nbsp;·&nbsp; [Docs](docs/) &nbsp;·&nbsp; [Python SDK](#python-sdk)

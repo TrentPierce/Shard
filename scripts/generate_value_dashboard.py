@@ -183,7 +183,7 @@ with PdfPages(pdf_path) as pdf:
     fig = plt.figure(figsize=(8.5, 11))
     fig.patch.set_facecolor("white")
     text = "\n".join([
-        "Shard Value Summary (v0.6.5)",
+        "Shard Value Summary (v0.6.6)",
         "",
         "What Shard Is:",
         "- A distributed inference network combining browser scouts and verifier nodes.",
