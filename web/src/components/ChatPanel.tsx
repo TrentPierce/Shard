@@ -54,6 +54,7 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
         appendAssistantToken,
         replaceAssistantMessage,
         snapshot,
+        snapshotForNetwork,
     } = useConversationState()
     const [input, setInput] = useState("")
     const [streaming, setStreaming] = useState(false)
@@ -107,6 +108,14 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
         setInput("")
         setStreaming(true)
         const startedAt = performance.now()
+        let networkSnapshotPromise: Promise<typeof convo> | null = null
+
+        const getNetworkSnapshot = () => {
+            if (!networkSnapshotPromise) {
+                networkSnapshotPromise = snapshotForNetwork(convo.rawMessages, text)
+            }
+            return networkSnapshotPromise
+        }
 
         const browserRuntimeAvailable = await canUseBrowserChatRuntime()
         const decision = decideChatRoute({
@@ -140,7 +149,8 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
                     if (routeMode !== "auto") {
                         throw error
                     }
-                    const fallbackUsesCompaction = convo.compaction.wasCompacted
+                    const networkConvo = await getNetworkSnapshot()
+                    const fallbackUsesCompaction = networkConvo.compaction.wasCompacted
                     const fallbackDecision: ChatRouteDecision = {
                         kind: fallbackUsesCompaction
                             ? "network_route_with_compaction"
@@ -163,18 +173,19 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
                     replaceAssistantMessage("")
                     networkAttempted = true
                     await sendNetworkMessage(
-                        fallbackUsesCompaction ? convo.compactedMessages : convo.rawMessages,
+                        fallbackUsesCompaction ? networkConvo.compactedMessages : networkConvo.rawMessages,
                         appendAssistantToken,
                         () => undefined,
                         fallbackDecision.networkMode,
                     )
                 }
             } else {
+                const networkConvo = await getNetworkSnapshot()
                 networkAttempted = true
                 await sendNetworkMessage(
                     decision.kind === "network_route_with_compaction"
-                        ? convo.compactedMessages
-                        : convo.rawMessages,
+                        ? networkConvo.compactedMessages
+                        : networkConvo.rawMessages,
                     appendAssistantToken,
                     () => undefined,
                     decision.networkMode,

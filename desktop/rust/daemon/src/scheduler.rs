@@ -178,6 +178,17 @@ fn mesh_forward_request_timeout_ms() -> u64 {
     })
 }
 
+fn mesh_forward_overload_timeout_ms() -> u64 {
+    static TIMEOUT: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+    *TIMEOUT.get_or_init(|| {
+        std::env::var("SHARD_MESH_FORWARD_OVERLOAD_TIMEOUT_MS")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .map(|v| v.clamp(500, 60_000))
+            .unwrap_or(15_000)
+    })
+}
+
 fn mesh_forward_history_fresh_ms() -> u128 {
     static FRESH_MS: std::sync::OnceLock<u128> = std::sync::OnceLock::new();
     *FRESH_MS.get_or_init(|| {
@@ -207,7 +218,40 @@ fn mesh_forward_retryable_cooldown_ms() -> u128 {
             .ok()
             .and_then(|v| v.parse::<u128>().ok())
             .filter(|v| *v > 0)
-            .unwrap_or(3_000)
+            .unwrap_or(12_000)
+    })
+}
+
+fn mesh_forward_in_flight_penalty_ms() -> f64 {
+    static PENALTY: std::sync::OnceLock<f64> = std::sync::OnceLock::new();
+    *PENALTY.get_or_init(|| {
+        std::env::var("SHARD_MESH_FORWARD_IN_FLIGHT_PENALTY_MS")
+            .ok()
+            .and_then(|v| v.parse::<f64>().ok())
+            .filter(|v| v.is_finite() && *v >= 0.0)
+            .unwrap_or(2_500.0)
+    })
+}
+
+fn mesh_forward_queue_saturation_penalty_ms() -> f64 {
+    static PENALTY: std::sync::OnceLock<f64> = std::sync::OnceLock::new();
+    *PENALTY.get_or_init(|| {
+        std::env::var("SHARD_MESH_FORWARD_QUEUE_SATURATION_PENALTY_MS")
+            .ok()
+            .and_then(|v| v.parse::<f64>().ok())
+            .filter(|v| v.is_finite() && *v >= 0.0)
+            .unwrap_or(4_000.0)
+    })
+}
+
+fn mesh_forward_queue_headroom_slots() -> usize {
+    static SLOTS: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *SLOTS.get_or_init(|| {
+        std::env::var("SHARD_MESH_FORWARD_QUEUE_HEADROOM_SLOTS")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .map(|v| v.min(4))
+            .unwrap_or(1)
     })
 }
 
@@ -555,6 +599,8 @@ struct MeshEndpointCandidate {
 struct MeshEndpointScore {
     endpoint: String,
     queue_depth: f64,
+    effective_queue_depth: f64,
+    queue_cap: Option<f64>,
     latency_ms: f64,
     reported_latency_ms: f64,
     probe_rtt_ms: f64,
@@ -649,6 +695,19 @@ fn mesh_forward_effective_request_timeout_ms(
     derived.clamp(base, 90_000)
 }
 
+fn mesh_forward_request_timeout_ms_for_attempt(
+    target: &MeshEndpointScore,
+    local_latency_ms: f64,
+    force_forward: bool,
+) -> u64 {
+    let timeout_ms = mesh_forward_effective_request_timeout_ms(target, local_latency_ms);
+    if force_forward {
+        timeout_ms.min(mesh_forward_overload_timeout_ms())
+    } else {
+        timeout_ms
+    }
+}
+
 fn blend_f64_ewma(previous: Option<f64>, sample: f64, alpha: f64) -> f64 {
     let alpha = alpha.clamp(0.0, 1.0);
     match previous {
@@ -676,6 +735,7 @@ fn mesh_forward_telemetry_penalty_ms(
     now: u128,
 ) -> (f64, Option<f64>) {
     let mut penalty = (telemetry.failures.min(4) as f64) * mesh_forward_failure_penalty_ms();
+    penalty += telemetry.in_flight_forwards as f64 * mesh_forward_in_flight_penalty_ms();
     let mut historical_latency_ms = None;
     let history_weight = mesh_forward_history_weight();
     let stale_penalty_ms = mesh_forward_stale_penalty_ms();
@@ -712,6 +772,24 @@ fn mesh_forward_telemetry_penalty_ms(
     }
 
     (penalty, historical_latency_ms)
+}
+
+fn mesh_forward_queue_headroom_required(request_max_tokens: usize) -> f64 {
+    if request_max_tokens <= mesh_forward_fast_tier_max_tokens() {
+        return 0.0;
+    }
+    mesh_forward_queue_headroom_slots() as f64
+}
+
+fn mesh_endpoint_has_queue_headroom(score: &MeshEndpointScore, request_max_tokens: usize) -> bool {
+    let Some(queue_cap) = score.queue_cap else {
+        return true;
+    };
+    let headroom = mesh_forward_queue_headroom_required(request_max_tokens);
+    if headroom <= 0.0 {
+        return score.effective_queue_depth < queue_cap;
+    }
+    score.effective_queue_depth + headroom < queue_cap
 }
 
 fn should_include_bootstrap_registry_mesh_candidates(
@@ -838,6 +916,10 @@ fn filter_mesh_forward_candidates(
     mut scored: Vec<MeshEndpointScore>,
     request_max_tokens: usize,
 ) -> Vec<MeshEndpointScore> {
+    if scored.is_empty() {
+        return scored;
+    }
+    scored.retain(|candidate| mesh_endpoint_has_queue_headroom(candidate, request_max_tokens));
     if scored.is_empty() {
         return scored;
     }
@@ -1072,6 +1154,7 @@ async fn score_mesh_endpoint(
     let queue_depth = json_number(payload.get("queue_depth"))
         .or_else(|| json_number(payload.get("active_leases")))
         .unwrap_or(0.0);
+    let queue_cap = json_number(payload.get("verifier_queue_cap")).filter(|value| *value > 0.0);
     let reported_latency_ms = json_number(payload.get("p95_latency_ms"))
         .or_else(|| json_number(payload.get("average_latency_ms")))
         .or_else(|| json_number(payload.get("node_latency_ms")))
@@ -1081,18 +1164,29 @@ async fn score_mesh_endpoint(
         candidate.peer_latency_ms,
         probe_rtt_ms,
     );
-    let telemetry =
-        mesh_endpoint_telemetry_snapshot(state, candidate.endpoint.as_str()).await;
+    let telemetry = mesh_endpoint_telemetry_snapshot(state, candidate.endpoint.as_str()).await;
     let (telemetry_penalty_ms, historical_latency_ms) =
         mesh_forward_telemetry_penalty_ms(&telemetry, latency_ms, now);
+    let effective_queue_depth = queue_depth + telemetry.in_flight_forwards as f64;
+    let saturation_penalty_ms = queue_cap
+        .filter(|cap| effective_queue_depth >= *cap)
+        .map(|cap| {
+            let ratio = (effective_queue_depth / cap.max(1.0)).clamp(1.0, 3.0);
+            mesh_forward_queue_saturation_penalty_ms() * ratio
+        })
+        .unwrap_or(0.0);
     Some(MeshEndpointScore {
         endpoint: candidate.endpoint.clone(),
         queue_depth,
+        effective_queue_depth,
+        queue_cap,
         latency_ms,
         reported_latency_ms,
         probe_rtt_ms,
         peer_latency_ms: candidate.peer_latency_ms,
-        score: mesh_forward_score(latency_ms, queue_depth, queue_weight_ms) + telemetry_penalty_ms,
+        score: mesh_forward_score(latency_ms, effective_queue_depth, queue_weight_ms)
+            + telemetry_penalty_ms
+            + saturation_penalty_ms,
         telemetry_penalty_ms,
         historical_latency_ms,
         tier: "unknown",
@@ -1130,7 +1224,11 @@ async fn record_mesh_probe_success(
         score.reported_latency_ms,
         0.35,
     ));
-    entry.last_queue_depth = Some(blend_f64_ewma(entry.last_queue_depth, score.queue_depth, 0.35));
+    entry.last_queue_depth = Some(blend_f64_ewma(
+        entry.last_queue_depth,
+        score.queue_depth,
+        0.35,
+    ));
 }
 
 async fn record_mesh_probe_failure(state: &SharedState, endpoint: &str, now: u128) {
@@ -1148,7 +1246,21 @@ async fn record_mesh_probe_retryable_cooldown(
 ) {
     let mut telemetry = state.mesh_endpoint_telemetry.lock().await;
     let entry = telemetry.entry(endpoint.to_string()).or_default();
-    entry.next_eligible_at_ms = entry.next_eligible_at_ms.max(now.saturating_add(cooldown_ms));
+    entry.next_eligible_at_ms = entry
+        .next_eligible_at_ms
+        .max(now.saturating_add(cooldown_ms));
+}
+
+async fn record_mesh_forward_dispatch_start(state: &SharedState, endpoint: &str) {
+    let mut telemetry = state.mesh_endpoint_telemetry.lock().await;
+    let entry = telemetry.entry(endpoint.to_string()).or_default();
+    entry.in_flight_forwards = entry.in_flight_forwards.saturating_add(1);
+}
+
+async fn record_mesh_forward_dispatch_end(state: &SharedState, endpoint: &str) {
+    let mut telemetry = state.mesh_endpoint_telemetry.lock().await;
+    let entry = telemetry.entry(endpoint.to_string()).or_default();
+    entry.in_flight_forwards = entry.in_flight_forwards.saturating_sub(1);
 }
 
 async fn record_mesh_forward_success(
@@ -1160,6 +1272,7 @@ async fn record_mesh_forward_success(
     let mut telemetry = state.mesh_endpoint_telemetry.lock().await;
     let entry = telemetry.entry(target.endpoint.clone()).or_default();
     entry.failures = 0;
+    entry.in_flight_forwards = entry.in_flight_forwards.saturating_sub(1);
     entry.next_eligible_at_ms = 0;
     entry.last_forward_success_at_ms = Some(now);
     entry.last_forward_latency_ms = Some(blend_f64_ewma(
@@ -1244,6 +1357,8 @@ async fn choose_mesh_forward_target(
                     probe_rtt_ms = score.probe_rtt_ms,
                     peer_latency_ms = score.peer_latency_ms,
                     queue_depth = score.queue_depth,
+                    effective_queue_depth = score.effective_queue_depth,
+                    queue_cap = ?score.queue_cap,
                     score = score.score,
                     telemetry_penalty_ms = score.telemetry_penalty_ms,
                     historical_latency_ms = ?score.historical_latency_ms,
@@ -1339,7 +1454,11 @@ async fn try_forward_chat_to_mesh(
     let min_improvement = mesh_forward_min_improvement_ms();
     let queue_trigger = mesh_forward_local_queue_trigger();
     let next_hop = mesh_forward_current_hop(headers).saturating_add(1);
-    let max_target_attempts = mesh_forward_target_attempts();
+    let max_target_attempts = if force_forward {
+        mesh_forward_target_attempts().min(1)
+    } else {
+        mesh_forward_target_attempts()
+    };
     let mut attempted_targets = Vec::new();
     let mut debug = MeshForwardAttemptDebug::default();
 
@@ -1400,6 +1519,8 @@ async fn try_forward_chat_to_mesh(
             target_score = target.score,
             target_latency_ms = target.latency_ms,
             target_queue_depth = target.queue_depth,
+            target_effective_queue_depth = target.effective_queue_depth,
+            target_queue_cap = ?target.queue_cap,
             target_tier = target.tier,
             local_score,
             local_queue_depth,
@@ -1423,7 +1544,7 @@ async fn try_forward_chat_to_mesh(
         }
 
         let request_timeout_ms =
-            mesh_forward_effective_request_timeout_ms(&target, local_latency_ms);
+            mesh_forward_request_timeout_ms_for_attempt(&target, local_latency_ms, force_forward);
         let mut request_builder = mesh_forward_client()
             .post(format!("{}/v1/chat/completions", target.endpoint))
             .timeout(Duration::from_millis(request_timeout_ms))
@@ -1443,6 +1564,7 @@ async fn try_forward_chat_to_mesh(
             request_builder = request_builder.header("x-shard-route", value);
         }
 
+        record_mesh_forward_dispatch_start(state, target.endpoint.as_str()).await;
         let forward_started = std::time::Instant::now();
         match request_builder.send().await {
             Ok(resp) => {
@@ -1455,13 +1577,7 @@ async fn try_forward_chat_to_mesh(
                         && status != reqwest::StatusCode::TOO_MANY_REQUESTS)
                 {
                     let forward_latency_ms = forward_started.elapsed().as_secs_f64() * 1000.0;
-                    record_mesh_forward_success(
-                        state,
-                        &target,
-                        forward_latency_ms,
-                        now_ms(),
-                    )
-                    .await;
+                    record_mesh_forward_success(state, &target, forward_latency_ms, now_ms()).await;
                     let mut out_headers = HeaderMap::new();
                     if let Some(content_type) = content_type {
                         if let Ok(parsed) = HeaderValue::from_bytes(content_type.as_bytes()) {
@@ -1501,6 +1617,8 @@ async fn try_forward_chat_to_mesh(
                         target = %target.endpoint,
                         target_tier = target.tier,
                         queue_depth = target.queue_depth,
+                        effective_queue_depth = target.effective_queue_depth,
+                        queue_cap = ?target.queue_cap,
                         target_latency_ms = target.latency_ms,
                         telemetry_penalty_ms = target.telemetry_penalty_ms,
                         historical_latency_ms = ?target.historical_latency_ms,
@@ -1532,6 +1650,7 @@ async fn try_forward_chat_to_mesh(
                     mesh_forward_retryable_cooldown_ms(),
                 )
                 .await;
+                record_mesh_forward_dispatch_end(state, target.endpoint.as_str()).await;
                 debug.decision = "forward_retryable".to_string();
                 debug.detail = Some(format!(
                     "status={status};timeout_ms={request_timeout_ms};attempted={}",
@@ -1548,6 +1667,7 @@ async fn try_forward_chat_to_mesh(
             Err(error) => {
                 attempted_targets.push(target.endpoint.clone());
                 record_mesh_probe_failure(state, target.endpoint.as_str(), now_ms()).await;
+                record_mesh_forward_dispatch_end(state, target.endpoint.as_str()).await;
                 debug.decision = "forward_error".to_string();
                 debug.detail = Some(format!(
                     "error={error:?};timeout_ms={request_timeout_ms};attempted={}",
@@ -4201,15 +4321,17 @@ mod tests {
         endpoint_from_multiaddr, enqueue_scout_work, filter_mesh_forward_candidates,
         infer_client_ip, is_self_mesh_candidate, local_scout_fallback_allowed,
         mesh_forward_effective_latency_ms, mesh_forward_history_freshness,
-        mesh_forward_telemetry_penalty_ms, mesh_forward_score, model_pair_acceptance_rates,
-        normalize_endpoint, parse_speculative_min_request_tokens, probe_allowed_for_request,
+        mesh_forward_in_flight_penalty_ms, mesh_forward_overload_timeout_ms,
+        mesh_forward_request_timeout_ms_for_attempt, mesh_forward_score,
+        mesh_forward_telemetry_penalty_ms, model_pair_acceptance_rates, normalize_endpoint,
+        parse_speculative_min_request_tokens, probe_allowed_for_request,
         remove_work_id_from_scout_queue, request_host_is_local, requested_request_id,
-        resolve_inference_mode, should_abort_on_degenerate_output, should_attempt_mesh_forward,
-        should_bypass_speculative_for_fast_verifier, should_forward_to_mesh,
-        should_include_bootstrap_registry_mesh_candidates, should_refuse_mesh_degraded,
-        strip_control_tokens, truncate_prompt_context_for_scout, InferenceMode,
-        MeshEndpointCandidate, MeshEndpointScore, MeshEndpointSource, ScoutSupplyEstimate,
-        WorkRequest,
+        resolve_inference_mode, should_abort_on_degenerate_output,
+        should_attempt_mesh_forward, should_bypass_speculative_for_fast_verifier,
+        should_forward_to_mesh, should_include_bootstrap_registry_mesh_candidates,
+        should_refuse_mesh_degraded, strip_control_tokens, truncate_prompt_context_for_scout,
+        InferenceMode, MeshEndpointCandidate, MeshEndpointScore, MeshEndpointSource,
+        ScoutSupplyEstimate, WorkRequest,
     };
     use crate::MeshEndpointTelemetry;
     use axum::http::{HeaderMap, HeaderValue};
@@ -4606,6 +4728,7 @@ mod tests {
     fn recent_slow_forward_history_adds_mesh_penalty() {
         let telemetry = MeshEndpointTelemetry {
             failures: 0,
+            in_flight_forwards: 0,
             next_eligible_at_ms: 0,
             last_probe_success_at_ms: Some(50_000),
             last_probe_latency_ms: Some(260.0),
@@ -4614,10 +4737,21 @@ mod tests {
             last_forward_success_at_ms: Some(50_000),
             last_forward_latency_ms: Some(520.0),
         };
-        let (penalty, historical) =
-            mesh_forward_telemetry_penalty_ms(&telemetry, 220.0, 60_000);
+        let (penalty, historical) = mesh_forward_telemetry_penalty_ms(&telemetry, 220.0, 60_000);
         assert!(penalty > 150.0);
         assert_eq!(historical, Some(520.0));
+    }
+
+    #[test]
+    fn in_flight_forwards_add_mesh_penalty() {
+        let telemetry = MeshEndpointTelemetry {
+            failures: 0,
+            in_flight_forwards: 2,
+            ..MeshEndpointTelemetry::default()
+        };
+        let (penalty, historical) = mesh_forward_telemetry_penalty_ms(&telemetry, 220.0, 60_000);
+        assert!(penalty >= mesh_forward_in_flight_penalty_ms() * 2.0);
+        assert_eq!(historical, None);
     }
 
     #[test]
@@ -4626,6 +4760,8 @@ mod tests {
             MeshEndpointScore {
                 endpoint: "http://fast-a:9091".to_string(),
                 queue_depth: 0.0,
+                effective_queue_depth: 0.0,
+                queue_cap: Some(2.0),
                 latency_ms: 120.0,
                 reported_latency_ms: 90.0,
                 probe_rtt_ms: 30.0,
@@ -4640,6 +4776,8 @@ mod tests {
             MeshEndpointScore {
                 endpoint: "http://fast-b:9091".to_string(),
                 queue_depth: 1.0,
+                effective_queue_depth: 1.0,
+                queue_cap: Some(2.0),
                 latency_ms: 220.0,
                 reported_latency_ms: 170.0,
                 probe_rtt_ms: 50.0,
@@ -4654,6 +4792,8 @@ mod tests {
             MeshEndpointScore {
                 endpoint: "http://slow:9091".to_string(),
                 queue_depth: 2.0,
+                effective_queue_depth: 2.0,
+                queue_cap: Some(2.0),
                 latency_ms: 680.0,
                 reported_latency_ms: 620.0,
                 probe_rtt_ms: 60.0,
@@ -4677,11 +4817,13 @@ mod tests {
     }
 
     #[test]
-    fn long_requests_keep_slow_mesh_targets_available() {
+    fn long_requests_keep_slower_targets_when_queue_headroom_exists() {
         let scored = vec![
             MeshEndpointScore {
                 endpoint: "http://fast-a:9091".to_string(),
                 queue_depth: 0.0,
+                effective_queue_depth: 0.0,
+                queue_cap: Some(2.0),
                 latency_ms: 120.0,
                 reported_latency_ms: 90.0,
                 probe_rtt_ms: 30.0,
@@ -4696,6 +4838,8 @@ mod tests {
             MeshEndpointScore {
                 endpoint: "http://standard:9091".to_string(),
                 queue_depth: 2.0,
+                effective_queue_depth: 2.0,
+                queue_cap: Some(4.0),
                 latency_ms: 320.0,
                 reported_latency_ms: 250.0,
                 probe_rtt_ms: 70.0,
@@ -4709,12 +4853,14 @@ mod tests {
             },
             MeshEndpointScore {
                 endpoint: "http://slow:9091".to_string(),
-                queue_depth: 4.0,
+                queue_depth: 2.0,
+                effective_queue_depth: 2.0,
+                queue_cap: Some(4.0),
                 latency_ms: 880.0,
                 reported_latency_ms: 780.0,
                 probe_rtt_ms: 100.0,
                 peer_latency_ms: 95.0,
-                score: 1360.0,
+                score: 1120.0,
                 telemetry_penalty_ms: 0.0,
                 historical_latency_ms: None,
                 tier: "unknown",
@@ -4740,6 +4886,79 @@ mod tests {
             filtered.last().map(|candidate| candidate.tier),
             Some("slow")
         );
+    }
+
+    #[test]
+    fn heavy_requests_require_remote_queue_headroom() {
+        let filtered = filter_mesh_forward_candidates(
+            vec![
+                MeshEndpointScore {
+                    endpoint: "http://busy:9091".to_string(),
+                    queue_depth: 1.0,
+                    effective_queue_depth: 1.0,
+                    queue_cap: Some(2.0),
+                    latency_ms: 150.0,
+                    reported_latency_ms: 110.0,
+                    probe_rtt_ms: 40.0,
+                    peer_latency_ms: 20.0,
+                    score: 250.0,
+                    telemetry_penalty_ms: 0.0,
+                    historical_latency_ms: None,
+                    tier: "unknown",
+                    capability_tier: Some("gpu_fast".to_string()),
+                    source: MeshEndpointSource::DirectPeer,
+                },
+                MeshEndpointScore {
+                    endpoint: "http://ready:9091".to_string(),
+                    queue_depth: 0.0,
+                    effective_queue_depth: 0.0,
+                    queue_cap: Some(2.0),
+                    latency_ms: 180.0,
+                    reported_latency_ms: 150.0,
+                    probe_rtt_ms: 30.0,
+                    peer_latency_ms: 25.0,
+                    score: 180.0,
+                    telemetry_penalty_ms: 0.0,
+                    historical_latency_ms: None,
+                    tier: "unknown",
+                    capability_tier: Some("gpu_fast".to_string()),
+                    source: MeshEndpointSource::DirectPeer,
+                },
+            ],
+            256,
+        );
+
+        let endpoints = filtered
+            .iter()
+            .map(|candidate| candidate.endpoint.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(endpoints, vec!["http://ready:9091"]);
+    }
+
+    #[test]
+    fn force_forward_timeout_is_capped_for_overload_path() {
+        let target = MeshEndpointScore {
+            endpoint: "http://ready:9091".to_string(),
+            queue_depth: 0.0,
+            effective_queue_depth: 0.0,
+            queue_cap: Some(2.0),
+            latency_ms: 18_500.0,
+            reported_latency_ms: 17_900.0,
+            probe_rtt_ms: 60.0,
+            peer_latency_ms: 35.0,
+            score: 18_500.0,
+            telemetry_penalty_ms: 0.0,
+            historical_latency_ms: Some(18_000.0),
+            tier: "standard",
+            capability_tier: None,
+            source: MeshEndpointSource::DirectPeer,
+        };
+
+        let normal_timeout = mesh_forward_request_timeout_ms_for_attempt(&target, 17_000.0, false);
+        let overload_timeout = mesh_forward_request_timeout_ms_for_attempt(&target, 17_000.0, true);
+
+        assert!(normal_timeout >= overload_timeout);
+        assert_eq!(overload_timeout, mesh_forward_overload_timeout_ms());
     }
 
     #[test]
@@ -4807,6 +5026,8 @@ mod tests {
         let fast = MeshEndpointScore {
             endpoint: "http://gpu-fast:9091".to_string(),
             queue_depth: 0.0,
+            effective_queue_depth: 0.0,
+            queue_cap: Some(2.0),
             latency_ms: 480.0,
             reported_latency_ms: 430.0,
             probe_rtt_ms: 50.0,
@@ -4821,6 +5042,8 @@ mod tests {
         let slow = MeshEndpointScore {
             endpoint: "http://cpu-slow:9091".to_string(),
             queue_depth: 0.0,
+            effective_queue_depth: 0.0,
+            queue_cap: Some(2.0),
             latency_ms: 180.0,
             reported_latency_ms: 150.0,
             probe_rtt_ms: 30.0,

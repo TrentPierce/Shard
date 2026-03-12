@@ -5,11 +5,16 @@ import {
     type PromptCompactionOptions,
     type PromptCompactionResult,
 } from "./prompt-compaction"
+import {
+    rankMessagesBySemanticRelevance,
+    type SemanticRelevanceResult,
+} from "./webnn-embeddings"
 
 export type ConversationSnapshot = {
     rawMessages: ChatMessage[]
     compactedMessages: ChatMessage[]
     compaction: PromptCompactionResult
+    semantic?: SemanticRelevanceResult
 }
 
 export function useConversationState() {
@@ -87,6 +92,29 @@ export function useConversationState() {
         [buildHistory],
     )
 
+    const snapshotForNetwork = useCallback(
+        async (
+            rawMessages: ChatMessage[],
+            focusText: string,
+            options?: PromptCompactionOptions,
+        ): Promise<ConversationSnapshot> => {
+            const semantic = await rankMessagesBySemanticRelevance(rawMessages, focusText).catch(
+                () => undefined,
+            )
+            const compaction = compactConversation(rawMessages, {
+                ...options,
+                relevanceScores: semantic?.scores,
+            })
+            return {
+                rawMessages,
+                compactedMessages: compaction.messages,
+                compaction,
+                semantic,
+            }
+        },
+        [],
+    )
+
     const clearConversation = useCallback(() => {
         setMessages([])
     }, [])
@@ -100,6 +128,7 @@ export function useConversationState() {
             replaceAssistantMessage,
             buildHistory,
             snapshot,
+            snapshotForNetwork,
             clearConversation,
         }),
         [
@@ -110,6 +139,7 @@ export function useConversationState() {
             replaceAssistantMessage,
             buildHistory,
             snapshot,
+            snapshotForNetwork,
             clearConversation,
         ],
     )

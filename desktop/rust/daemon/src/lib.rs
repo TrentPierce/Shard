@@ -1267,6 +1267,7 @@ pub(crate) struct ScoutClientRuntimeStatus {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct MeshEndpointTelemetry {
     pub failures: u32,
+    pub in_flight_forwards: u32,
     pub next_eligible_at_ms: u128,
     pub last_probe_success_at_ms: Option<u128>,
     pub last_probe_latency_ms: Option<f64>,

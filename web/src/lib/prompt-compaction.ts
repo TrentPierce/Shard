@@ -6,6 +6,8 @@ export type PromptCompactionOptions = {
     maxRecentMessages?: number
     summaryMaxChars?: number
     perMessageChars?: number
+    relevanceScores?: number[]
+    semanticKeepCount?: number
 }
 
 export type PromptCompactionResult = {
@@ -16,6 +18,7 @@ export type PromptCompactionResult = {
     originalChars: number
     compactedChars: number
     summaryChars: number
+    semanticMessagesKept: number
 }
 
 const DEFAULT_OPTIONS: Required<PromptCompactionOptions> = {
@@ -24,6 +27,8 @@ const DEFAULT_OPTIONS: Required<PromptCompactionOptions> = {
     maxRecentMessages: 8,
     summaryMaxChars: 1000,
     perMessageChars: 320,
+    relevanceScores: [],
+    semanticKeepCount: 2,
 }
 
 function countChars(messages: ChatMessage[]): number {
@@ -107,6 +112,36 @@ function trimMessagesToBudget(
     return current
 }
 
+function selectSemanticallyRelevantMessages(
+    olderMessages: ChatMessage[],
+    originalMessages: ChatMessage[],
+    relevanceScores: number[],
+    keepCount: number,
+): ChatMessage[] {
+    if (olderMessages.length === 0 || keepCount <= 0 || relevanceScores.length !== originalMessages.length) {
+        return []
+    }
+
+    const olderCount = olderMessages.length
+    const ranked = olderMessages
+        .map((message, index) => ({
+            index,
+            message,
+            score: relevanceScores[index] ?? 0,
+        }))
+        .filter((entry) => entry.score > 0.05)
+        .sort((left, right) => {
+            if (right.score !== left.score) {
+                return right.score - left.score
+            }
+            return left.index - right.index
+        })
+        .slice(0, Math.min(keepCount, olderCount))
+        .sort((left, right) => left.index - right.index)
+
+    return ranked.map((entry) => entry.message)
+}
+
 export function compactConversation(
     messages: ChatMessage[],
     options: PromptCompactionOptions = {},
@@ -127,16 +162,27 @@ export function compactConversation(
             originalChars,
             compactedChars: originalChars,
             summaryChars: 0,
+            semanticMessagesKept: 0,
         }
     }
 
     const recentCount = Math.min(resolved.maxRecentMessages, messages.length)
     const recentMessages = messages.slice(-recentCount)
     const olderMessages = messages.slice(0, Math.max(0, messages.length - recentCount))
-    const summaryMessage = buildSummaryMessage(olderMessages, resolved)
+    const semanticMessages = selectSemanticallyRelevantMessages(
+        olderMessages,
+        messages,
+        resolved.relevanceScores,
+        resolved.semanticKeepCount,
+    )
+    const semanticMessageSet = new Set(semanticMessages.map((message) => message.timestamp))
+    const olderMessagesForSummary = olderMessages.filter(
+        (message) => !semanticMessageSet.has(message.timestamp),
+    )
+    const summaryMessage = buildSummaryMessage(olderMessagesForSummary, resolved)
     let compactedMessages = summaryMessage
-        ? [summaryMessage, ...recentMessages]
-        : recentMessages
+        ? [summaryMessage, ...semanticMessages, ...recentMessages]
+        : [...semanticMessages, ...recentMessages]
 
     compactedMessages = compactedMessages.map((message) => ({
         ...message,
@@ -172,5 +218,6 @@ export function compactConversation(
         originalChars,
         compactedChars: countChars(compactedMessages),
         summaryChars: summaryMessage?.content.length ?? 0,
+        semanticMessagesKept: semanticMessages.length,
     }
 }
