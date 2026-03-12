@@ -19,6 +19,23 @@ const CHAT_TIMEOUT_MS = parseTimeoutMs(
   65000,
 )
 
+const PASSTHROUGH_RESPONSE_HEADERS = [
+  "x-shard-backend",
+  "x-shard-backend-attempts",
+  "x-shard-served-by",
+  "x-shard-mesh-forwarded",
+  "x-shard-mesh-forward-target",
+  "x-shard-mesh-target-tier",
+  "x-shard-mesh-forwarded-by",
+  "x-shard-mesh-decision",
+  "x-shard-mesh-detail",
+  "x-shard-mesh-candidates",
+  "x-shard-mesh-eligible",
+  "x-shard-mesh-probed",
+  "x-shard-mesh-scored",
+  "x-shard-mesh-filtered",
+] as const
+
 function parseCorsOrigins(raw: string | undefined): string[] {
   return (raw ?? "")
     .split(",")
@@ -52,6 +69,17 @@ function corsHeadersForRequest(request: NextRequest): Record<string, string> {
     "Access-Control-Allow-Origin": origin,
     Vary: "Origin",
   }
+}
+
+function collectShardRouteHeaders(response: Response): Record<string, string> {
+  const forwarded: Record<string, string> = {}
+  for (const headerName of PASSTHROUGH_RESPONSE_HEADERS) {
+    const value = response.headers.get(headerName)
+    if (value) {
+      forwarded[headerName] = value
+    }
+  }
+  return forwarded
 }
 
 export async function GET() {
@@ -142,6 +170,7 @@ export async function POST(request: NextRequest) {
 
     if (response.body) {
       const corsHeaders = corsHeadersForRequest(request)
+      const routeHeaders = collectShardRouteHeaders(response)
       return new NextResponse(response.body, {
         status: response.status,
         headers: {
@@ -150,6 +179,7 @@ export async function POST(request: NextRequest) {
           Connection: "keep-alive",
           "X-Shard-Backend": backendUsed,
           "X-Shard-Backend-Attempts": String(attempts.length),
+          ...routeHeaders,
           ...corsHeaders,
         },
       })
@@ -157,9 +187,10 @@ export async function POST(request: NextRequest) {
 
     const data = await response.json()
     const corsHeaders = corsHeadersForRequest(request)
+    const routeHeaders = collectShardRouteHeaders(response)
     return NextResponse.json(
       { ...data, backend: backendUsed, backend_attempts: attempts },
-      { status: response.status, headers: corsHeaders },
+      { status: response.status, headers: { ...routeHeaders, ...corsHeaders } },
     )
   } catch (error) {
     recordChatProxyResult({

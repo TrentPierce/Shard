@@ -27,6 +27,8 @@ type RouteInput = {
 
 const SIMPLE_PROMPT_RE =
     /\b(summarize|summary|translate|rewrite|rephrase|paraphrase|shorten|grammar|proofread|draft a|title ideas|headline ideas|bullet points)\b/i
+const EASY_LOCAL_PROMPT_RE =
+    /\b(what is|what does|how does|explain|briefly explain|quick answer|quick explanation|define|tell me about)\b/i
 
 const COMPLEX_PROMPT_RE =
     /\b(debug|refactor|implement|architecture|tradeoffs|step[- ]by[- ]step|analyze|analysis|compare|benchmark|optimize|prove|reasoning|distributed|system design|plan|deploy|production|integrate|integration|latency|throughput)\b/i
@@ -36,6 +38,7 @@ const SYSTEM_HEAVY_RE = /\b(architecture|tradeoffs|distributed|scheduler|latency
 const LANGUAGE_RE = /\b(typescript|javascript|python|rust|sql|go)\b/i
 const MULTISTEP_RE = /\b(first|second|third|then|finally|walk me through|how would you|design a|build a)\b/i
 const SHORT_LOCAL_PROMPT_RE = /\b(explain in one paragraph|one sentence|tl;dr|quick summary|briefly)\b/i
+const FOLLOW_UP_LOCAL_RE = /\b(what about|why|how so|what does that mean|can you clarify|say more|continue)\b/i
 
 function totalChars(messages: ChatMessage[]): number {
     return messages.reduce((sum, message) => sum + message.content.length, 0)
@@ -58,6 +61,8 @@ function scoreComplexity(history: ChatMessage[], prompt: string): number {
     if (MULTISTEP_RE.test(prompt)) score += 0.2
     if (CODE_RE.test(prompt)) score += 0.4
     if (SIMPLE_PROMPT_RE.test(prompt)) score -= 0.2
+    if (EASY_LOCAL_PROMPT_RE.test(prompt) && promptChars < 240) score -= 0.12
+    if (FOLLOW_UP_LOCAL_RE.test(prompt) && promptChars < 140 && history.length <= 8) score -= 0.08
     if (SHORT_LOCAL_PROMPT_RE.test(prompt) && promptChars < 220) score -= 0.1
     return Math.max(0, Math.min(1, score))
 }
@@ -111,7 +116,7 @@ export function decideChatRoute(input: RouteInput): ChatRouteDecision {
         }
     }
 
-    if (browserRuntimeAvailable && complexityScore <= 0.3 && !compact) {
+    if (browserRuntimeAvailable && complexityScore <= 0.38 && !compact) {
         return {
             kind: "local_answer",
             reason: "auto_local_simple_prompt",

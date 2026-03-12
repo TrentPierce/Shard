@@ -28,7 +28,7 @@ describe("browser router", () => {
 
     expect(decision.kind).toBe("network_route")
     expect(decision.networkMode).toBe("standard")
-    expect(decision.complexityScore).toBeGreaterThan(0.5)
+    expect(decision.complexityScore).toBeGreaterThan(0.4)
   })
 
   it("compacts long conversations before routing to the network", () => {
@@ -69,5 +69,19 @@ describe("browser router", () => {
 
     expect(decision.kind).toBe("network_route")
     expect(decision.networkMode).toBe("experimental_wan")
+  })
+
+  it("keeps short explanatory follow-up prompts local in auto mode", () => {
+    const decision = decideChatRoute({
+      history: [
+        message("Shard uses a browser-first router.", "assistant"),
+        message("What does that mean?", "user"),
+      ],
+      prompt: "Can you clarify how that works?",
+      mode: "auto",
+      browserRuntimeAvailable: true,
+    })
+
+    expect(decision.kind).toBe("local_answer")
   })
 })

@@ -125,7 +125,10 @@ async fn recent_scout_submitters_count(state: &SharedState, now: u128) -> usize 
 }
 
 fn live_scout_timeout_ms(state: &SharedState) -> u64 {
-    state.scout_timeout_ms.load(Ordering::Relaxed).clamp(100, 60_000)
+    state
+        .scout_timeout_ms
+        .load(Ordering::Relaxed)
+        .clamp(100, 60_000)
 }
 
 fn live_max_scouts(state: &SharedState) -> usize {
@@ -137,7 +140,10 @@ fn live_acceptance_threshold(state: &SharedState) -> f64 {
 }
 
 fn live_heartbeat_interval_seconds(state: &SharedState) -> u64 {
-    state.heartbeat_interval_seconds.load(Ordering::Relaxed).clamp(2, 300)
+    state
+        .heartbeat_interval_seconds
+        .load(Ordering::Relaxed)
+        .clamp(2, 300)
 }
 
 #[derive(Debug, Deserialize)]
@@ -187,7 +193,9 @@ pub(crate) async fn network_config_update_handler(
             .store(value.clamp(100, 60_000), Ordering::Relaxed);
     }
     if let Some(value) = req.max_scouts {
-        state.max_scouts.store(value.clamp(1, 256), Ordering::Relaxed);
+        state
+            .max_scouts
+            .store(value.clamp(1, 256), Ordering::Relaxed);
     }
     if let Some(value) = req.acceptance_threshold {
         let bounded = value.clamp(0.0, 1.0);
@@ -1414,8 +1422,7 @@ async fn scout_bootstrap_assignment_allowed(
     if queue_depth > scout_bootstrap_queue_depth_max() {
         return false;
     }
-    if !scout_bootstrap_allow_hard_circuit() && p95_latency_ms > scout_bootstrap_latency_max_ms()
-    {
+    if !scout_bootstrap_allow_hard_circuit() && p95_latency_ms > scout_bootstrap_latency_max_ms() {
         return false;
     }
 
@@ -1423,11 +1430,11 @@ async fn scout_bootstrap_assignment_allowed(
         let mut runtime = state.scout_client_runtime.lock().await;
         prune_scout_client_runtime(&mut runtime, now);
         let has_active_runtime = runtime.get(scout_id).is_some_and(|status| {
-                status
-                    .runtime_mode
-                    .as_deref()
-                    .map(|mode| mode.eq_ignore_ascii_case("webgpu"))
-                    .unwrap_or(false)
+            status
+                .runtime_mode
+                .as_deref()
+                .map(|mode| mode.eq_ignore_ascii_case("webgpu"))
+                .unwrap_or(false)
                 && now.saturating_sub(status.last_event_ms) <= scout_client_active_window_ms()
         });
         let browser_draft_capable = runtime
@@ -4145,6 +4152,10 @@ pub(crate) async fn metrics_summary_handler(
         gpu_utilization_delta_percent: (offload_percentage * 0.6).min(90.0),
         cloud_gpu_usd_per_million_tokens: 4.0,
     });
+    let deployment_region = std::env::var("FLY_REGION")
+        .ok()
+        .or_else(|| std::env::var("SHARD_REGION").ok())
+        .or_else(|| std::env::var("AWS_REGION").ok());
 
     let mut payload = serde_json::Map::new();
     payload.insert("active_nodes".to_string(), serde_json::json!(active_nodes));
@@ -4219,6 +4230,7 @@ pub(crate) async fn metrics_summary_handler(
         "gossipsub_p95_latency_ms".to_string(),
         serde_json::json!(gossipsub.p95_ms),
     );
+    payload.insert("region".to_string(), serde_json::json!(deployment_region));
     payload.insert(
         "draft_capable_scouts".to_string(),
         serde_json::json!(draft_capable_scout_count),

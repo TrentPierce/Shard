@@ -99,6 +99,21 @@ export type ChatTelemetryDetail = {
     error?: string
 }
 
+export type ChatExecutionResult = {
+    latencyMs: number
+    inferenceMode: NetworkInferenceMode | "browser_local"
+    transport: ChatTransport
+    backend?: string
+    backendAttempts?: number
+    servedBy?: string
+    meshForwarded?: boolean
+    meshDecision?: string
+    meshDetail?: string
+    meshForwardTarget?: string
+    meshTargetTier?: string
+    meshForwardedBy?: string
+}
+
 function dispatchChatEvent(name: "shard:chat-success" | "shard:chat-failure", detail: ChatTelemetryDetail) {
     if (typeof window === "undefined") return
     window.dispatchEvent(new CustomEvent<ChatTelemetryDetail>(name, { detail }))
@@ -112,11 +127,40 @@ export function emitChatFailure(detail: ChatTelemetryDetail) {
     dispatchChatEvent("shard:chat-failure", detail)
 }
 
+function parseIntegerHeader(value: string | null): number | undefined {
+    if (!value) return undefined
+    const parsed = Number.parseInt(value, 10)
+    return Number.isFinite(parsed) ? parsed : undefined
+}
+
+function extractExecutionHeaders(
+    res: Response,
+    inferenceMode: NetworkInferenceMode,
+    latencyMs: number,
+    transport: Exclude<ChatTransport, "browser_local">,
+): ChatExecutionResult {
+    return {
+        latencyMs,
+        inferenceMode,
+        transport,
+        backend: res.headers.get("x-shard-backend") ?? undefined,
+        backendAttempts: parseIntegerHeader(res.headers.get("x-shard-backend-attempts")),
+        servedBy: res.headers.get("x-shard-served-by") ?? undefined,
+        meshForwarded: (res.headers.get("x-shard-mesh-forwarded") ?? "").toLowerCase() === "true",
+        meshDecision: res.headers.get("x-shard-mesh-decision") ?? undefined,
+        meshDetail: res.headers.get("x-shard-mesh-detail") ?? undefined,
+        meshForwardTarget: res.headers.get("x-shard-mesh-forward-target") ?? undefined,
+        meshTargetTier: res.headers.get("x-shard-mesh-target-tier") ?? undefined,
+        meshForwardedBy: res.headers.get("x-shard-mesh-forwarded-by") ?? undefined,
+    }
+}
+
 async function sendMessageNonStreaming(
     history: ChatMessage[],
     onToken: (token: string) => void,
     inferenceMode: NetworkInferenceMode,
-): Promise<void> {
+): Promise<ChatExecutionResult> {
+    const startedAt = performance.now()
     const body: ChatCompletionRequest = {
         model: DEFAULT_MODEL_ID,
         messages: history.map((m) => ({ role: m.role, content: m.content })),
@@ -141,6 +185,12 @@ async function sendMessageNonStreaming(
     const data = await res.json()
     const content = sanitizeAssistantContent(data?.choices?.[0]?.message?.content ?? "")
     if (content) onToken(content)
+    return extractExecutionHeaders(
+        res,
+        inferenceMode,
+        Math.round(performance.now() - startedAt),
+        "network_sync",
+    )
 }
 
 
@@ -158,7 +208,7 @@ export async function sendMessage(
     onToken: (token: string) => void,
     onDone: () => void,
     inferenceMode: NetworkInferenceMode = "standard",
-): Promise<void> {
+): Promise<ChatExecutionResult> {
     const startedAt = performance.now()
     try {
         const body: ChatCompletionRequest = {
@@ -184,15 +234,21 @@ export async function sendMessage(
 
         const reader = res.body?.getReader()
         if (!reader) {
-            await sendMessageNonStreaming(history, onToken, inferenceMode)
+            const execution = await sendMessageNonStreaming(history, onToken, inferenceMode)
             emitChatSuccess({
                 latencyMs: Math.round(performance.now() - startedAt),
                 inferenceMode,
                 transport: "network_sync",
             })
             onDone()
-            return
+            return execution
         }
+        const execution = extractExecutionHeaders(
+            res,
+            inferenceMode,
+            Math.round(performance.now() - startedAt),
+            "network_stream",
+        )
 
         const decoder = new TextDecoder()
         let buffer = ""
@@ -219,7 +275,10 @@ export async function sendMessage(
                         transport: "network_stream",
                     })
                     onDone()
-                    return
+                    return {
+                        ...execution,
+                        latencyMs: Math.round(performance.now() - startedAt),
+                    }
                 }
 
                 try {
@@ -241,6 +300,10 @@ export async function sendMessage(
             transport: "network_stream",
         })
         onDone()
+        return {
+            ...execution,
+            latencyMs: Math.round(performance.now() - startedAt),
+        }
     } catch (error) {
         emitChatFailure({
             latencyMs: Math.round(performance.now() - startedAt),

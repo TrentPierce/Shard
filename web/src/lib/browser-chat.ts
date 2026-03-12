@@ -1,5 +1,5 @@
 import { checkWebGPUSupport, generateBrowserChatCompletion } from "./webllm"
-import { emitChatSuccess, type ChatMessage } from "./api"
+import { emitChatSuccess, type ChatExecutionResult, type ChatMessage } from "./api"
 
 let browserRuntimeSupportPromise: Promise<boolean> | null = null
 
@@ -16,7 +16,7 @@ export async function sendBrowserChatMessage(
     history: ChatMessage[],
     onToken: (token: string) => void,
     onDone: () => void,
-): Promise<void> {
+): Promise<ChatExecutionResult> {
     const startedAt = performance.now()
     const response = await generateBrowserChatCompletion(
         history.map((message) => ({
@@ -40,4 +40,9 @@ export async function sendBrowserChatMessage(
         transport: "browser_local",
     })
     onDone()
+    return {
+        latencyMs: Math.round(performance.now() - startedAt),
+        inferenceMode: "browser_local",
+        transport: "browser_local",
+    }
 }

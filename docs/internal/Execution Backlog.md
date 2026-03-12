@@ -38,7 +38,13 @@ This backlog replaces the old scout-first product framing. Experimental WAN work
 - Complexity: M
 - Acceptance: Misroutes drop on the maintained prompt suite and Auto mode keeps obvious easy prompts local.
 
-3. P1-T3 Improve user-visible route status and failure messaging.
+3. P0-T3 Add a per-prompt route visualizer to `/chat`.
+
+- Owner: Web Lead
+- Complexity: M
+- Acceptance: Each prompt shows the browser decision, compaction state, transport, backend, and mesh-forward outcome directly in the chat UI.
+
+4. P1-T4 Improve user-visible route status and failure messaging.
 
 - Owner: Web Lead + Design
 - Complexity: S
@@ -46,19 +52,25 @@ This backlog replaces the old scout-first product framing. Experimental WAN work
 
 ### E2 Browser-Owned Context Compaction
 
-1. P0-T4 Add compaction metrics and trigger visibility.
+1. P0-T5 Add compaction metrics and trigger visibility.
 
 - Owner: Web Lead
 - Complexity: M
 - Acceptance: Browser telemetry captures compaction ratio, compaction count, and when compaction was chosen before network escalation.
 
-2. P1-T5 Improve summary quality for long chats.
+2. P0-T6 Add semantic compaction so relevant older turns survive escalation.
+
+- Owner: Web Lead + ML Infra
+- Complexity: M
+- Acceptance: Network-bound prompts keep the most relevant older messages, not just the newest window, and regression tests cover the ranking path.
+
+3. P1-T7 Improve summary quality for long chats.
 
 - Owner: Web Lead + ML Infra
 - Complexity: M
 - Acceptance: Long sessions remain coherent after compaction in the maintained scenario set.
 
-3. P1-T6 Add regression tests for compacted escalation payloads.
+4. P1-T8 Add regression tests for compacted escalation payloads.
 
 - Owner: Web Lead + QA
 - Complexity: S
@@ -66,19 +78,25 @@ This backlog replaces the old scout-first product framing. Experimental WAN work
 
 ### E3 Desktop-Local Speculative Throughput
 
-1. P0-T7 Benchmark `local_speculative` against `standard` on target hardware classes.
+1. P0-T9 Benchmark `local_speculative` against `standard` on target hardware classes.
 
 - Owner: Backend Lead
 - Complexity: M
 - Acceptance: Controlled repeated runs report p50, p95, throughput, and correctness for both modes.
 
-2. P0-T8 Remove avoidable daemon overhead in the local speculative path.
+2. P0-T10 Remove avoidable daemon overhead in the local speculative path.
 
 - Owner: Backend Lead
 - Complexity: L
 - Acceptance: Local speculative mode beats or matches standard on the primary target machine class without correctness regressions.
 
-3. P1-T9 Move toward a true verifier-local draft+target path where supported.
+3. P0-T11 Add adaptive local speculative bypass when live timings show no savings.
+
+- Owner: Backend Lead
+- Complexity: M
+- Acceptance: `local_speculative` avoids self-inflicted regressions on already-fast verifiers or negative-savings windows.
+
+4. P1-T12 Move toward a true verifier-local draft+target path where supported.
 
 - Owner: Backend Lead + ML Infra
 - Complexity: L
@@ -86,25 +104,37 @@ This backlog replaces the old scout-first product framing. Experimental WAN work
 
 ### E4 Heavy-Work Mesh Routing and Failover
 
-1. P0-T10 Improve verifier selection for standard and local speculative network routes.
+1. P0-T13 Improve verifier selection for standard and local speculative network routes.
 
 - Owner: Backend Lead + Networking Lead
 - Complexity: M
 - Acceptance: Short requests prefer healthy fast tiers and failover remains predictable under one-node degradation.
 
-2. P1-T11 Reduce reconnect churn and dial noise in mixed verifier pools.
+2. P0-T14 Add stronger queue-aware and region-aware penalties to the mesh scorer.
+
+- Owner: Backend Lead + Networking Lead
+- Complexity: M
+- Acceptance: Live heavy-work runs stop selecting near-saturated or cross-region verifier targets unless the improvement is real.
+
+3. P0-T15 Reduce heavy-work mesh p95 on the Fly pool, with focused `iad` reruns.
+
+- Owner: Backend Lead + QA
+- Complexity: M
+- Acceptance: The maintained live multi-node benchmark shows lower tail latency for the mesh-enabled product path in `iad`.
+
+4. P1-T16 Reduce reconnect churn and dial noise in mixed verifier pools.
 
 - Owner: Networking Lead
 - Complexity: M
 - Acceptance: Stable peers are preferred and noisy peers stop dominating the active pool.
 
-3. P1-T12 Add mixed-pool routing benchmarks for heavy work.
+5. P1-T17 Add mixed-pool routing benchmarks for heavy work.
 
 - Owner: Backend Lead + QA
 - Complexity: M
 - Acceptance: Benchmark artifacts compare one-node, multi-node, and failover scenarios for the product path.
 
-4. P1-T13 Feed recent forward-latency history and freshness into the mesh scorer.
+6. P1-T18 Feed recent forward-latency history and freshness into the mesh scorer.
 
 - Owner: Backend Lead + Networking Lead
 - Complexity: M
@@ -112,19 +142,19 @@ This backlog replaces the old scout-first product framing. Experimental WAN work
 
 ### E5 Low-Power Browser Capability and WebNN Prep
 
-1. P1-T14 Add browser accelerator telemetry that separates current WebGPU runtime support from future WebNN eligibility.
+1. P1-T19 Add browser accelerator telemetry that separates current WebGPU runtime support from future WebNN eligibility.
 
 - Owner: Web Lead
 - Complexity: M
 - Acceptance: Capability surfaces report `backgroundAcceleration`, `lowPowerEligible`, and probe warm-state without changing the default browser runtime path.
 
-2. P1-T15 De-risk WebNN with embeddings and background utility work before draft-token generation.
+2. P0-T20 De-risk WebNN with embeddings and background utility work before draft-token generation.
 
 - Owner: Web Lead + ML Infra
 - Complexity: M
 - Acceptance: A worker-based WebNN path is proven on a low-risk task before any speculative draft-token claim is made.
 
-3. P2-T16 Unify browser model manifests across WebGPU and WebNN variants.
+3. P2-T21 Unify browser model manifests across WebGPU and WebNN variants.
 
 - Owner: ML Infra + Release Engineer
 - Complexity: L
@@ -132,19 +162,19 @@ This backlog replaces the old scout-first product framing. Experimental WAN work
 
 ### E6 Release, SDK, and Workflow Reliability
 
-1. P0-T17 Keep root `VERSION` as the single source of truth across web, Rust, SDKs, docs, and installers.
+1. P0-T22 Keep root `VERSION` as the single source of truth across web, Rust, SDKs, docs, and installers.
 
 - Owner: Release Engineer
 - Complexity: S
 - Acceptance: CI fails on mismatch and release automation updates the Python SDK, web app, and desktop artifacts consistently.
 
-2. P0-T18 Keep GitHub Actions and release lanes healthy.
+2. P0-T23 Keep GitHub Actions and release lanes healthy.
 
 - Owner: Release Engineer
 - Complexity: S
 - Acceptance: CI is green, release workflows publish release artifacts, and optional SDK publish lanes fail loudly but do not silently drift.
 
-3. P1-T19 Standardize release notes and published benchmark claims.
+3. P1-T24 Standardize release notes and published benchmark claims.
 
 - Owner: Release Engineer + Tech Writer
 - Complexity: S
@@ -152,19 +182,19 @@ This backlog replaces the old scout-first product framing. Experimental WAN work
 
 ### E7 Production Readiness and Operations
 
-1. P0-T20 Define ship gates for browser-local latency, verifier-routed latency, error rate, and failover behavior.
+1. P0-T25 Define ship gates for browser-local latency, verifier-routed latency, error rate, and failover behavior.
 
 - Owner: SRE Lead
 - Complexity: S
 - Acceptance: Release RC docs and dashboards reflect the product path rather than scout participation.
 
-2. P0-T21 Validate product-mode soak tests before public release.
+2. P0-T26 Validate product-mode soak tests before public release.
 
 - Owner: SRE + QA
 - Complexity: M
 - Acceptance: Browser-local, network-only, and auto-routed sessions pass the soak window without false-ready states or sustained failures.
 
-3. P1-T22 Tighten alerting around route failures and false healthy states.
+3. P1-T27 Tighten alerting around route failures and false healthy states.
 
 - Owner: SRE
 - Complexity: M
@@ -172,19 +202,19 @@ This backlog replaces the old scout-first product framing. Experimental WAN work
 
 ### E8 Experimental Research Tracks
 
-1. P1-T23 Keep experimental WAN scouts benchmarkable but out of the main product startup path.
+1. P1-T28 Keep experimental WAN scouts benchmarkable but out of the main product startup path.
 
 - Owner: Web Lead + Backend Lead
 - Complexity: S
 - Acceptance: Experimental WAN remains opt-in and public claims use separate benchmark artifacts.
 
-2. P2-T24 Explore richer browser prompt-state reuse.
+2. P2-T29 Explore richer browser prompt-state reuse.
 
 - Owner: Web Lead
 - Complexity: M
 - Acceptance: Any reuse optimization has strict correctness guards and does not change the default product contract.
 
-3. P2-T25 Evaluate regional pipeline or activation-transfer research only after the product path is solid.
+3. P2-T30 Evaluate regional pipeline or activation-transfer research only after the product path is solid.
 
 - Owner: ML Infra + Architect
 - Complexity: L
@@ -220,3 +250,4 @@ Shard is ready for a normal production launch only when all of the following are
 - The Python SDK now exposes signed contributor-control endpoints so developers can register and report a verifier node programmatically.
 - Mesh routing now has endpoint-history scoring, but tail-latency tuning still needs more measured work on live multi-node pools.
 - Browser capability surfaces now distinguish current WebGPU execution from future low-power WebNN eligibility, but the ONNX/WebNN runtime path does not ship yet.
+- The next concrete product-path wins are: better route visualization, better easy-prompt local retention, stronger mesh selection under overload, and a `local_speculative` path that stops opting into non-productive work.

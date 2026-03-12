@@ -244,6 +244,28 @@ fn mesh_forward_queue_saturation_penalty_ms() -> f64 {
     })
 }
 
+fn mesh_forward_same_family_penalty_ms() -> f64 {
+    static PENALTY: std::sync::OnceLock<f64> = std::sync::OnceLock::new();
+    *PENALTY.get_or_init(|| {
+        std::env::var("SHARD_MESH_FORWARD_SAME_FAMILY_PENALTY_MS")
+            .ok()
+            .and_then(|v| v.parse::<f64>().ok())
+            .filter(|v| v.is_finite() && *v >= 0.0)
+            .unwrap_or(350.0)
+    })
+}
+
+fn mesh_forward_cross_family_penalty_ms() -> f64 {
+    static PENALTY: std::sync::OnceLock<f64> = std::sync::OnceLock::new();
+    *PENALTY.get_or_init(|| {
+        std::env::var("SHARD_MESH_FORWARD_CROSS_FAMILY_PENALTY_MS")
+            .ok()
+            .and_then(|v| v.parse::<f64>().ok())
+            .filter(|v| v.is_finite() && *v >= 0.0)
+            .unwrap_or(2_500.0)
+    })
+}
+
 fn mesh_forward_queue_headroom_slots() -> usize {
     static SLOTS: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
     *SLOTS.get_or_init(|| {
@@ -340,6 +362,17 @@ fn mesh_forward_local_queue_trigger() -> f64 {
             .and_then(|v| v.parse::<f64>().ok())
             .filter(|v| v.is_finite() && *v >= 0.0)
             .unwrap_or(2.0)
+    })
+}
+
+fn local_speculative_min_verifier_latency_ms() -> u64 {
+    static LATENCY_MS: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+    *LATENCY_MS.get_or_init(|| {
+        std::env::var("SHARD_LOCAL_SPECULATIVE_MIN_VERIFIER_LATENCY_MS")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .map(|v| v.clamp(250, 10_000))
+            .unwrap_or(1_000)
     })
 }
 
@@ -601,6 +634,7 @@ struct MeshEndpointScore {
     queue_depth: f64,
     effective_queue_depth: f64,
     queue_cap: Option<f64>,
+    remote_region: Option<String>,
     latency_ms: f64,
     reported_latency_ms: f64,
     probe_rtt_ms: f64,
@@ -779,6 +813,49 @@ fn mesh_forward_queue_headroom_required(request_max_tokens: usize) -> f64 {
         return 0.0;
     }
     mesh_forward_queue_headroom_slots() as f64
+}
+
+fn local_region_hint() -> Option<&'static str> {
+    static REGION: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+    REGION
+        .get_or_init(|| {
+            std::env::var("FLY_REGION")
+                .ok()
+                .or_else(|| std::env::var("SHARD_REGION").ok())
+                .or_else(|| std::env::var("AWS_REGION").ok())
+                .map(|value| value.trim().to_ascii_lowercase())
+                .filter(|value| !value.is_empty())
+        })
+        .as_deref()
+}
+
+fn region_family(region: &str) -> &'static str {
+    match region.trim().to_ascii_lowercase().as_str() {
+        "iad" | "lax" | "dfw" | "ord" | "mia" | "sea" | "sjc" | "atl" | "ewr" | "yyz" => "na",
+        "lhr" | "ams" | "cdg" | "fra" | "mad" | "waw" | "arn" | "otp" => "eu",
+        "nrt" | "hkg" | "sin" | "syd" | "bom" | "maa" | "gru" | "scl" => "global",
+        _ => "unknown",
+    }
+}
+
+fn mesh_forward_region_penalty_ms(remote_region: Option<&str>) -> f64 {
+    let Some(local_region) = local_region_hint() else {
+        return 0.0;
+    };
+    let Some(remote_region) = remote_region
+        .map(|value| value.trim().to_ascii_lowercase())
+        .filter(|value| !value.is_empty())
+    else {
+        return 0.0;
+    };
+    if local_region == remote_region {
+        return 0.0;
+    }
+    if region_family(local_region) == region_family(remote_region.as_str()) {
+        mesh_forward_same_family_penalty_ms()
+    } else {
+        mesh_forward_cross_family_penalty_ms()
+    }
 }
 
 fn mesh_endpoint_has_queue_headroom(score: &MeshEndpointScore, request_max_tokens: usize) -> bool {
@@ -1155,6 +1232,12 @@ async fn score_mesh_endpoint(
         .or_else(|| json_number(payload.get("active_leases")))
         .unwrap_or(0.0);
     let queue_cap = json_number(payload.get("verifier_queue_cap")).filter(|value| *value > 0.0);
+    let remote_region = payload
+        .get("region")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
     let reported_latency_ms = json_number(payload.get("p95_latency_ms"))
         .or_else(|| json_number(payload.get("average_latency_ms")))
         .or_else(|| json_number(payload.get("node_latency_ms")))
@@ -1175,18 +1258,21 @@ async fn score_mesh_endpoint(
             mesh_forward_queue_saturation_penalty_ms() * ratio
         })
         .unwrap_or(0.0);
+    let region_penalty_ms = mesh_forward_region_penalty_ms(remote_region.as_deref());
     Some(MeshEndpointScore {
         endpoint: candidate.endpoint.clone(),
         queue_depth,
         effective_queue_depth,
         queue_cap,
+        remote_region,
         latency_ms,
         reported_latency_ms,
         probe_rtt_ms,
         peer_latency_ms: candidate.peer_latency_ms,
         score: mesh_forward_score(latency_ms, effective_queue_depth, queue_weight_ms)
             + telemetry_penalty_ms
-            + saturation_penalty_ms,
+            + saturation_penalty_ms
+            + region_penalty_ms,
         telemetry_penalty_ms,
         historical_latency_ms,
         tier: "unknown",
@@ -1352,6 +1438,7 @@ async fn choose_mesh_forward_target(
                 tracing::debug!(
                     endpoint = %score.endpoint,
                     source = ?score.source,
+                    remote_region = ?score.remote_region,
                     latency_ms = score.latency_ms,
                     reported_latency_ms = score.reported_latency_ms,
                     probe_rtt_ms = score.probe_rtt_ms,
@@ -1521,6 +1608,7 @@ async fn try_forward_chat_to_mesh(
             target_queue_depth = target.queue_depth,
             target_effective_queue_depth = target.effective_queue_depth,
             target_queue_cap = ?target.queue_cap,
+            target_region = ?target.remote_region,
             target_tier = target.tier,
             local_score,
             local_queue_depth,
@@ -1616,6 +1704,7 @@ async fn try_forward_chat_to_mesh(
                     tracing::info!(
                         target = %target.endpoint,
                         target_tier = target.tier,
+                        target_region = ?target.remote_region,
                         queue_depth = target.queue_depth,
                         effective_queue_depth = target.effective_queue_depth,
                         queue_cap = ?target.queue_cap,
@@ -3588,6 +3677,40 @@ pub(crate) async fn chat_completions_handler(
         }
     }
 
+    if use_speculative && inference_mode == InferenceMode::LocalSpeculative {
+        let avg_verifier_ms = state.avg_latency_ms.load(Ordering::Relaxed) as u64;
+        if avg_verifier_ms > 0 && avg_verifier_ms < local_speculative_min_verifier_latency_ms() {
+            tracing::debug!(
+                avg_verifier_ms,
+                threshold_ms = local_speculative_min_verifier_latency_ms(),
+                "adaptive bypass: local speculative path skipped because verifier is already fast"
+            );
+            state.system_metrics.inc_speculative_bypass();
+            use_speculative = false;
+            speculative_skip_reason = Some(format!(
+                "local_speculative_fast_verifier:avg_verifier_ms={avg_verifier_ms},threshold_ms={}",
+                local_speculative_min_verifier_latency_ms()
+            ));
+        } else if let Some(config) = speculative_config.as_ref() {
+            let draft_token_count =
+                effective_draft_token_count(config.draft_token_count, max_tokens as usize);
+            let budget_ms =
+                adaptive_speculative_budget_ms(&state, max_tokens as usize, draft_token_count);
+            if budget_ms == 0 {
+                tracing::debug!(
+                    draft_token_count,
+                    request_max_tokens = max_tokens,
+                    "adaptive bypass: local speculative path skipped because estimated savings are non-positive"
+                );
+                state.system_metrics.inc_speculative_bypass();
+                use_speculative = false;
+                speculative_skip_reason = Some(format!(
+                    "local_speculative_non_positive_budget:draft_token_count={draft_token_count},request_max_tokens={max_tokens}"
+                ));
+            }
+        }
+    }
+
     // ── Adaptive Speculative Bypass ──
     // If historical acceptance rate is too low, skip speculative decoding entirely
     // to avoid the costly TTFT penalty (waiting for scouts that produce rejected drafts).
@@ -4762,6 +4885,7 @@ mod tests {
                 queue_depth: 0.0,
                 effective_queue_depth: 0.0,
                 queue_cap: Some(2.0),
+                remote_region: None,
                 latency_ms: 120.0,
                 reported_latency_ms: 90.0,
                 probe_rtt_ms: 30.0,
@@ -4778,6 +4902,7 @@ mod tests {
                 queue_depth: 1.0,
                 effective_queue_depth: 1.0,
                 queue_cap: Some(2.0),
+                remote_region: None,
                 latency_ms: 220.0,
                 reported_latency_ms: 170.0,
                 probe_rtt_ms: 50.0,
@@ -4794,6 +4919,7 @@ mod tests {
                 queue_depth: 2.0,
                 effective_queue_depth: 2.0,
                 queue_cap: Some(2.0),
+                remote_region: None,
                 latency_ms: 680.0,
                 reported_latency_ms: 620.0,
                 probe_rtt_ms: 60.0,
@@ -4824,6 +4950,7 @@ mod tests {
                 queue_depth: 0.0,
                 effective_queue_depth: 0.0,
                 queue_cap: Some(2.0),
+                remote_region: None,
                 latency_ms: 120.0,
                 reported_latency_ms: 90.0,
                 probe_rtt_ms: 30.0,
@@ -4840,6 +4967,7 @@ mod tests {
                 queue_depth: 2.0,
                 effective_queue_depth: 2.0,
                 queue_cap: Some(4.0),
+                remote_region: None,
                 latency_ms: 320.0,
                 reported_latency_ms: 250.0,
                 probe_rtt_ms: 70.0,
@@ -4856,6 +4984,7 @@ mod tests {
                 queue_depth: 2.0,
                 effective_queue_depth: 2.0,
                 queue_cap: Some(4.0),
+                remote_region: None,
                 latency_ms: 880.0,
                 reported_latency_ms: 780.0,
                 probe_rtt_ms: 100.0,
@@ -4897,6 +5026,7 @@ mod tests {
                     queue_depth: 1.0,
                     effective_queue_depth: 1.0,
                     queue_cap: Some(2.0),
+                    remote_region: None,
                     latency_ms: 150.0,
                     reported_latency_ms: 110.0,
                     probe_rtt_ms: 40.0,
@@ -4913,6 +5043,7 @@ mod tests {
                     queue_depth: 0.0,
                     effective_queue_depth: 0.0,
                     queue_cap: Some(2.0),
+                    remote_region: None,
                     latency_ms: 180.0,
                     reported_latency_ms: 150.0,
                     probe_rtt_ms: 30.0,
@@ -4942,6 +5073,7 @@ mod tests {
             queue_depth: 0.0,
             effective_queue_depth: 0.0,
             queue_cap: Some(2.0),
+            remote_region: None,
             latency_ms: 18_500.0,
             reported_latency_ms: 17_900.0,
             probe_rtt_ms: 60.0,
@@ -5028,6 +5160,7 @@ mod tests {
             queue_depth: 0.0,
             effective_queue_depth: 0.0,
             queue_cap: Some(2.0),
+            remote_region: None,
             latency_ms: 480.0,
             reported_latency_ms: 430.0,
             probe_rtt_ms: 50.0,
@@ -5044,6 +5177,7 @@ mod tests {
             queue_depth: 0.0,
             effective_queue_depth: 0.0,
             queue_cap: Some(2.0),
+            remote_region: None,
             latency_ms: 180.0,
             reported_latency_ms: 150.0,
             probe_rtt_ms: 30.0,
