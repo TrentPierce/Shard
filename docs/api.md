@@ -4,7 +4,12 @@
 
 The browser product experience is local-first. For simple prompts, the browser may answer without calling `POST /v1/chat/completions` at all.
 
-When the browser escalates to the network, it uses the same OpenAI-compatible API surface.
+When the browser escalates to the network, it uses the same OpenAI-compatible API surface and may send either:
+
+- the raw conversation window
+- a compacted conversation window produced in the browser
+
+The verifier remains stateless with respect to long-lived user session ownership.
 
 ## Canonical Schemas
 
@@ -22,7 +27,7 @@ When the browser escalates to the network, it uses the same OpenAI-compatible AP
   - clean baseline path
 - `local_speculative`
   - verifier-local speculative path
-  - default network acceleration mode used by browser `Auto` escalations today
+  - explicit opt-in acceleration path until it beats `standard` on target hardware
 - `experimental_wan`
   - explicit benchmark-only browser-scout path
 - `distributed`
@@ -30,12 +35,89 @@ When the browser escalates to the network, it uses the same OpenAI-compatible AP
 - `speculative`
   - legacy alias for `experimental_wan`
 - `auto`
-  - accepted by the daemon and currently resolves to `local_speculative`
+  - accepted by the daemon
+  - currently resolves to `standard` for network work, while browser product surfaces usually decide the route before the daemon sees the request
+
+### Browser Router Outcomes
+
+The browser router currently resolves one of:
+
+- `local_answer`
+- `network_route`
+- `network_route_with_compaction`
+
+These outcomes are browser-side product behavior, not extra daemon API modes.
 
 ### Header `Authorization: Bearer <api_key>`
 
 - required when `SHARD_REQUIRE_API_KEY=true`
 - always required when `X-Shard-Route: private`
+
+## Programmatic Contribution
+
+The public developer story is now split into two responsibilities:
+
+- consume inference through `POST /v1/chat/completions`
+- contribute compute through daemon contributor/control-plane endpoints
+
+The browser remains the local-first router for end users, but contributor registration and liveness are daemon responsibilities.
+
+### Local Contributor Control
+
+- `GET /node/status`
+- `GET /health`
+- `POST /node/toggle-participation`
+
+These are the simplest programmatic controls for a local desktop node that is already running.
+
+### Signed Contributor Control Plane
+
+- `POST /signed/register-node`
+- `POST /signed/heartbeat`
+- `POST /signed/metrics-report`
+- `POST /signed/deregister-node`
+
+These endpoints are the canonical API-first contribution surface for desktop nodes today.
+
+Contract rules:
+
+- requests are wrapped in a signed envelope
+- `signer_pubkey_hex` must match `payload.node_pubkey`
+- nonces must strictly increase per signer
+- timestamps must be fresh
+
+Current payload families:
+
+- registration / deregistration
+  - `node_pubkey`
+  - `role`
+  - optional `capacity`
+  - optional `timestamp_ms`
+- heartbeat
+  - `node_pubkey`
+  - `role`
+  - `queue_depth`
+  - `node_latency_ms`
+  - `uptime_seconds`
+  - optional `capability_tier`
+  - optional `gpu_available`
+  - optional `accepts_scout_work`
+  - optional `public_api`
+  - optional `public_api_addr`
+  - optional `timestamp_ms`
+- metrics report
+  - `node_pubkey`
+  - `role`
+  - `queue_depth`
+  - `node_latency_ms`
+  - `uptime_seconds`
+  - optional `capability_tier`
+  - optional `gpu_available`
+  - optional `accepts_scout_work`
+  - optional `public_api`
+  - optional `timestamp_ms`
+
+The Python SDK exposes these flows through `client.contribution`.
 
 ## `GET /v1/scout/work`
 
@@ -74,10 +156,10 @@ This is an experimental WAN endpoint, not part of the default product request pa
 
 ## Signed Envelope Endpoints
 
-- `POST /v1/signed/register`
-- `POST /v1/signed/heartbeat`
-- `POST /v1/signed/metrics`
-- `POST /v1/signed/deregister`
+- `POST /signed/register-node`
+- `POST /signed/heartbeat`
+- `POST /signed/metrics-report`
+- `POST /signed/deregister-node`
 
 All signed endpoints require:
 

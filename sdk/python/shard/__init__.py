@@ -10,10 +10,12 @@ from shard.errors import (
     ShardError,
 )
 
+ShardClient = Client
 __version__ = "0.6.6"
 
 __all__ = [
     "Client",
+    "ShardClient",
     "ShardError",
     "ConnectionError",
     "AuthenticationError",

@@ -1,7 +1,7 @@
 "use client"
 
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react"
-import { sendMessage as sendNetworkMessage } from "@/lib/api"
+import { emitChatFailure, sendMessage as sendNetworkMessage } from "@/lib/api"
 import { sendBrowserChatMessage, canUseBrowserChatRuntime } from "@/lib/browser-chat"
 import {
   decideChatRoute,
@@ -9,6 +9,7 @@ import {
   type ChatRouteMode,
 } from "@/lib/browser-router"
 import { useConversationState } from "@/lib/conversation-state"
+import { emitRouteDecision } from "@/lib/route-telemetry"
 
 function describeIdleMode(mode: ChatRouteMode) {
   switch (mode) {
@@ -71,6 +72,7 @@ export default function ChatPage() {
     const convo = snapshot(userMessage)
     setInput("")
     setStreaming(true)
+    const startedAt = performance.now()
 
     const browserRuntimeAvailable = await canUseBrowserChatRuntime()
     const decision = decideChatRoute({
@@ -79,8 +81,18 @@ export default function ChatPage() {
       mode: routeMode,
       browserRuntimeAvailable,
     })
+    emitRouteDecision({
+      mode: routeMode,
+      decision,
+      browserRuntimeAvailable,
+      promptChars: content.length,
+      historyMessages: convo.rawMessages.length,
+      historyChars: convo.rawMessages.reduce((sum, message) => sum + message.content.length, 0),
+      fallback: false,
+    })
     setLastDecision(decision)
     beginAssistantMessage()
+    let networkAttempted = false
 
     try {
       if (decision.kind === "local_answer") {
@@ -101,11 +113,21 @@ export default function ChatPage() {
               : "network_route",
             reason: "auto_local_failed_network_fallback",
             complexityScore: decision.complexityScore,
-            networkMode: "local_speculative",
+            networkMode: "standard",
             shouldCompact: fallbackUsesCompaction,
           }
+          emitRouteDecision({
+            mode: routeMode,
+            decision: fallbackDecision,
+            browserRuntimeAvailable,
+            promptChars: content.length,
+            historyMessages: convo.rawMessages.length,
+            historyChars: convo.rawMessages.reduce((sum, message) => sum + message.content.length, 0),
+            fallback: true,
+          })
           setLastDecision(fallbackDecision)
           replaceAssistantMessage("")
+          networkAttempted = true
           await sendNetworkMessage(
             fallbackUsesCompaction ? convo.compactedMessages : convo.rawMessages,
             appendAssistantToken,
@@ -114,6 +136,7 @@ export default function ChatPage() {
           )
         }
       } else {
+        networkAttempted = true
         await sendNetworkMessage(
           decision.kind === "network_route_with_compaction"
             ? convo.compactedMessages
@@ -123,7 +146,15 @@ export default function ChatPage() {
           decision.networkMode,
         )
       }
-    } catch {
+    } catch (error) {
+      if (decision.kind === "local_answer" && !networkAttempted) {
+        emitChatFailure({
+          latencyMs: Math.round(performance.now() - startedAt),
+          inferenceMode: "browser_local",
+          transport: "browser_local",
+          error: String((error as Error)?.message ?? error ?? "unknown error"),
+        })
+      }
       replaceAssistantMessage(
         "Unable to complete the request. If you are using Auto mode, verify the local browser runtime or daemon endpoint. For WAN scout testing, use Experimental WAN only when the verifier is prepared for it.",
       )

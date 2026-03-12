@@ -46,9 +46,10 @@ Shard is now organized around a local-first execution rule:
 
 ### `local_speculative`
 
-- Default network acceleration path for browser escalations from `Auto`.
+- Explicit opt-in network acceleration path.
 - Keeps speculative work inside the verifier boundary instead of waiting on a remote browser draft.
 - This is where future desktop-local draft-plus-target acceleration should continue to evolve.
+- It remains opt-in until it beats `standard` on the target hardware class.
 
 ### `experimental_wan`
 

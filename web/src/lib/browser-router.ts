@@ -29,9 +29,13 @@ const SIMPLE_PROMPT_RE =
     /\b(summarize|summary|translate|rewrite|rephrase|paraphrase|shorten|grammar|proofread|draft a|title ideas|headline ideas|bullet points)\b/i
 
 const COMPLEX_PROMPT_RE =
-    /\b(debug|refactor|implement|architecture|tradeoffs|step[- ]by[- ]step|analyze|analysis|compare|benchmark|optimize|prove|reasoning|distributed|system design|plan)\b/i
+    /\b(debug|refactor|implement|architecture|tradeoffs|step[- ]by[- ]step|analyze|analysis|compare|benchmark|optimize|prove|reasoning|distributed|system design|plan|deploy|production|integrate|integration|latency|throughput)\b/i
 
 const CODE_RE = /```|function\s+\w+|class\s+\w+|console\.|stack trace|error[:\s]/i
+const SYSTEM_HEAVY_RE = /\b(architecture|tradeoffs|distributed|scheduler|latency|throughput|production|integration)\b/i
+const LANGUAGE_RE = /\b(typescript|javascript|python|rust|sql|go)\b/i
+const MULTISTEP_RE = /\b(first|second|third|then|finally|walk me through|how would you|design a|build a)\b/i
+const SHORT_LOCAL_PROMPT_RE = /\b(explain in one paragraph|one sentence|tl;dr|quick summary|briefly)\b/i
 
 function totalChars(messages: ChatMessage[]): number {
     return messages.reduce((sum, message) => sum + message.content.length, 0)
@@ -41,14 +45,20 @@ function scoreComplexity(history: ChatMessage[], prompt: string): number {
     let score = 0
     const promptChars = prompt.length
     const conversationChars = totalChars(history)
+    const lineCount = prompt.split(/\r?\n/).filter(Boolean).length
     if (promptChars > 280) score += 0.2
     if (promptChars > 700) score += 0.2
     if (conversationChars > 3500) score += 0.2
     if (history.length > 8) score += 0.15
     if (history.length > 14) score += 0.15
+    if (lineCount > 8) score += 0.15
     if (COMPLEX_PROMPT_RE.test(prompt)) score += 0.35
+    if (SYSTEM_HEAVY_RE.test(prompt)) score += 0.2
+    if (LANGUAGE_RE.test(prompt)) score += 0.15
+    if (MULTISTEP_RE.test(prompt)) score += 0.2
     if (CODE_RE.test(prompt)) score += 0.4
     if (SIMPLE_PROMPT_RE.test(prompt)) score -= 0.2
+    if (SHORT_LOCAL_PROMPT_RE.test(prompt) && promptChars < 220) score -= 0.1
     return Math.max(0, Math.min(1, score))
 }
 
@@ -101,7 +111,7 @@ export function decideChatRoute(input: RouteInput): ChatRouteDecision {
         }
     }
 
-    if (browserRuntimeAvailable && complexityScore <= 0.35 && !compact) {
+    if (browserRuntimeAvailable && complexityScore <= 0.3 && !compact) {
         return {
             kind: "local_answer",
             reason: "auto_local_simple_prompt",
@@ -113,9 +123,13 @@ export function decideChatRoute(input: RouteInput): ChatRouteDecision {
 
     return {
         kind: compact ? "network_route_with_compaction" : "network_route",
-        reason: compact ? "auto_network_compacted_context" : "auto_network_complex_prompt",
+        reason: compact
+            ? "auto_network_compacted_context"
+            : complexityScore > 0.55
+                ? "auto_network_heavy_prompt"
+                : "auto_network_complex_prompt",
         complexityScore,
-        networkMode: "local_speculative",
+        networkMode: "standard",
         shouldCompact: compact,
     }
 }

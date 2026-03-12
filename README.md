@@ -139,6 +139,7 @@ Experimental WAN:
 3. If the prompt stays local, WebLLM answers directly in the browser.
 4. If the prompt escalates, the browser sends raw or compacted messages to a verifier daemon.
 5. The daemon resolves `standard`, `local_speculative`, or `experimental_wan` execution.
+   `standard` is the current default network path; `local_speculative` remains explicit opt-in until it proves a production uplift.
 6. The final response is returned through the same OpenAI-compatible API.
 
 ---
@@ -180,6 +181,31 @@ response = client.chat.completions.create(
 )
 print(response.choices[0].message.content)
 ```
+
+Programmatic contribution is also available through the SDK:
+
+```python
+from shard import ShardClient
+
+client = ShardClient(base_url="http://localhost:9091")
+contributor = client.contribution.create_session()
+contributor.set_participation(True)
+contributor.register_node(role="verifier", capacity=1)
+contributor.heartbeat(
+    role="verifier",
+    queue_depth=0,
+    node_latency_ms=24,
+    uptime_seconds=15,
+    capability_tier="gpu_fast",
+    gpu_available=True,
+    public_api=True,
+)
+```
+
+That lets developers integrate both sides of the network:
+
+- consume inference with `/v1/chat/completions`
+- contribute verifier capacity with the signed contributor control plane
 
 ---
 

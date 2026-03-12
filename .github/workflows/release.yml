@@ -23,7 +23,7 @@ jobs:
   build-linux:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev libayatana-appindicator3-dev libxdo-dev
       - run: cd desktop/rust && cargo build --release
@@ -35,7 +35,7 @@ jobs:
           cp desktop/rust/target/release/shard-gui dist/shard-gui-linux-x86_64
           tar -C dist -czf dist/shard-linux-x86_64.tar.gz shard-daemon-linux-x86_64 shard-gui-linux-x86_64
       - run: python scripts/generate_release_manifest.py --tag "${{ env.RELEASE_TAG }}" --out dist/release-manifest-linux.json --artifact dist/shard-daemon-linux-x86_64 --artifact dist/shard-gui-linux-x86_64 --artifact dist/shard-daemon-linux-x86_64.tar.gz --artifact dist/shard-linux-x86_64.tar.gz
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: release-linux-bundle
           path: |
@@ -45,7 +45,7 @@ jobs:
             dist/shard-linux-x86_64.tar.gz
             dist/release-manifest-linux.json
       - if: env.DRY_RUN != 'true'
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           files: |
             dist/shard-daemon-linux-x86_64
@@ -55,7 +55,7 @@ jobs:
   build-windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - run: cd desktop/rust && cargo build --release
       - run: |
@@ -71,7 +71,7 @@ jobs:
           Copy-Item desktop/rust/target/release/shard-gui.exe dist/shard-gui-windows-x86_64.exe -Force
           Compress-Archive -Path dist/shard-daemon-windows-x86_64.exe,dist/shard-gui-windows-x86_64.exe -DestinationPath dist/shard-windows-x86_64.zip
       - run: python scripts/generate_release_manifest.py --tag "${{ env.RELEASE_TAG }}" --out dist/release-manifest-windows.json --artifact dist/shard-daemon-windows-x86_64.exe --artifact dist/shard-gui-windows-x86_64.exe --artifact dist/shard-windows-x86_64.zip
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: release-windows-bundle
           path: |
@@ -80,13 +80,13 @@ jobs:
             dist/shard-windows-x86_64.zip
             dist/release-manifest-windows.json
       - if: env.DRY_RUN != 'true'
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           files: dist/*
   build-macos:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - run: cd desktop/rust && cargo build --release
       - run: |
@@ -97,7 +97,7 @@ jobs:
           cp desktop/rust/target/release/shard-gui dist/shard-gui-macos
           tar -C dist -czf dist/shard-macos.tar.gz shard-daemon-macos shard-gui-macos
       - run: python scripts/generate_release_manifest.py --tag "${{ env.RELEASE_TAG }}" --out dist/release-manifest-macos.json --artifact dist/shard-daemon-macos --artifact dist/shard-gui-macos --artifact dist/shard-daemon-macos.tar.gz --artifact dist/shard-macos.tar.gz
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: release-macos-bundle
           path: |
@@ -107,7 +107,7 @@ jobs:
             dist/shard-macos.tar.gz
             dist/release-manifest-macos.json
       - if: env.DRY_RUN != 'true'
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           files: |
             dist/shard-daemon-macos
@@ -121,10 +121,10 @@ jobs:
       TWINE_USERNAME: __token__
       TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.11'
       - run: cd sdk/python && python -m pip install --upgrade pip build twine && python -m build
       - if: env.TWINE_PASSWORD != '' && env.DRY_RUN != 'true'
-        run: cd sdk/python && twine upload dist/*
+        run: cd sdk/python && twine upload --skip-existing dist/*

@@ -2,7 +2,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react"
 import { useAppContext, type NodeMode } from "@/lib/context"
-import { sendMessage as sendNetworkMessage } from "@/lib/api"
+import { emitChatFailure, sendMessage as sendNetworkMessage } from "@/lib/api"
 import { sendBrowserChatMessage, canUseBrowserChatRuntime } from "@/lib/browser-chat"
 import {
     decideChatRoute,
@@ -13,6 +13,7 @@ import { useConversationState } from "@/lib/conversation-state"
 import { useProductSignals } from "@/hooks/useProductSignals"
 import { Activity, Cpu, Send, Sparkles, Bot } from "lucide-react"
 import { apiUrl } from "@/lib/config"
+import { emitRouteDecision } from "@/lib/route-telemetry"
 
 interface ChatPanelProps {
     mode: NodeMode
@@ -105,6 +106,7 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
         const convo = snapshot(userMessage)
         setInput("")
         setStreaming(true)
+        const startedAt = performance.now()
 
         const browserRuntimeAvailable = await canUseBrowserChatRuntime()
         const decision = decideChatRoute({
@@ -113,8 +115,18 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
             mode: routeMode,
             browserRuntimeAvailable,
         })
+        emitRouteDecision({
+            mode: routeMode,
+            decision,
+            browserRuntimeAvailable,
+            promptChars: text.length,
+            historyMessages: convo.rawMessages.length,
+            historyChars: convo.rawMessages.reduce((sum, message) => sum + message.content.length, 0),
+            fallback: false,
+        })
         setLastDecision(decision)
         beginAssistantMessage()
+        let networkAttempted = false
 
         try {
             if (decision.kind === "local_answer") {
@@ -135,11 +147,21 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
                             : "network_route",
                         reason: "auto_local_failed_network_fallback",
                         complexityScore: decision.complexityScore,
-                        networkMode: "local_speculative",
+                        networkMode: "standard",
                         shouldCompact: fallbackUsesCompaction,
                     }
+                    emitRouteDecision({
+                        mode: routeMode,
+                        decision: fallbackDecision,
+                        browserRuntimeAvailable,
+                        promptChars: text.length,
+                        historyMessages: convo.rawMessages.length,
+                        historyChars: convo.rawMessages.reduce((sum, message) => sum + message.content.length, 0),
+                        fallback: true,
+                    })
                     setLastDecision(fallbackDecision)
                     replaceAssistantMessage("")
+                    networkAttempted = true
                     await sendNetworkMessage(
                         fallbackUsesCompaction ? convo.compactedMessages : convo.rawMessages,
                         appendAssistantToken,
@@ -148,6 +170,7 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
                     )
                 }
             } else {
+                networkAttempted = true
                 await sendNetworkMessage(
                     decision.kind === "network_route_with_compaction"
                         ? convo.compactedMessages
@@ -159,6 +182,14 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
             }
         } catch (err: any) {
             console.error("Chat Error:", err)
+            if (decision.kind === "local_answer" && !networkAttempted) {
+                emitChatFailure({
+                    latencyMs: Math.round(performance.now() - startedAt),
+                    inferenceMode: "browser_local",
+                    transport: "browser_local",
+                    error: String(err?.message ?? err ?? "unknown error"),
+                })
+            }
             replaceAssistantMessage(
                 "Unable to complete the request. Check the local verifier or browser runtime, and only use Experimental WAN when the benchmark scout path is explicitly prepared.",
             )

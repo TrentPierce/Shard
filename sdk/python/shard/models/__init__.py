@@ -1,4 +1,5 @@
 from .chat import ChatRequest, ChatResponse, ChatStreamChunk
+from .contribution import ContributionAck
 from .mesh import MeshTopology, Peer
 from .metrics import MetricsSummary, WebGPUCoverage
 from .node import LogEntry, NodeStatus
@@ -8,6 +9,7 @@ __all__ = [
     "ChatRequest",
     "ChatResponse",
     "ChatStreamChunk",
+    "ContributionAck",
     "NodeStatus",
     "LogEntry",
     "WalletAddress",

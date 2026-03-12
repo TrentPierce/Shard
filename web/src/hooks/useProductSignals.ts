@@ -6,6 +6,13 @@ import {
   CONTRIBUTION_STATUS_EVENT,
   type ContributionStatus,
 } from "@/lib/contribution-status"
+import {
+  DEFAULT_ROUTE_ANALYTICS,
+  reduceRouteAnalytics,
+  ROUTE_DECISION_EVENT,
+  type RouteAnalyticsSnapshot,
+  type RouteDecisionDetail,
+} from "@/lib/route-telemetry"
 
 type HealthSnapshot = {
   rust_sidecar?: string
@@ -22,8 +29,21 @@ type AnalyticsSnapshot = {
   successfulChats: number
   failedChats: number
   avgLatencyMs: number
+  browserLocalSuccessfulChats: number
+  networkSuccessfulChats: number
+  avgBrowserLatencyMs: number
+  avgNetworkLatencyMs: number
+  lastChatTransport: string
   contributionTransitions: number
   lastContributionState: string
+  routeDecisions: number
+  localRouteDecisions: number
+  networkRouteDecisions: number
+  compactedRouteDecisions: number
+  browserFallbackRoutes: number
+  avgRouteComplexityX100: number
+  lastRouteKind: string
+  lastRouteReason: string
 }
 
 const ANALYTICS_KEY = "shard-analytics-v1"
@@ -36,8 +56,14 @@ function loadAnalytics(): AnalyticsSnapshot {
       successfulChats: 0,
       failedChats: 0,
       avgLatencyMs: 0,
+      browserLocalSuccessfulChats: 0,
+      networkSuccessfulChats: 0,
+      avgBrowserLatencyMs: 0,
+      avgNetworkLatencyMs: 0,
+      lastChatTransport: "unknown",
       contributionTransitions: 0,
       lastContributionState: "unknown",
+      ...DEFAULT_ROUTE_ANALYTICS,
     }
   }
   try {
@@ -47,8 +73,21 @@ function loadAnalytics(): AnalyticsSnapshot {
       successfulChats: Number(parsed.successfulChats || 0),
       failedChats: Number(parsed.failedChats || 0),
       avgLatencyMs: Number(parsed.avgLatencyMs || 0),
+      browserLocalSuccessfulChats: Number(parsed.browserLocalSuccessfulChats || 0),
+      networkSuccessfulChats: Number(parsed.networkSuccessfulChats || 0),
+      avgBrowserLatencyMs: Number(parsed.avgBrowserLatencyMs || 0),
+      avgNetworkLatencyMs: Number(parsed.avgNetworkLatencyMs || 0),
+      lastChatTransport: String(parsed.lastChatTransport || "unknown"),
       contributionTransitions: Number(parsed.contributionTransitions || 0),
       lastContributionState: String(parsed.lastContributionState || "unknown"),
+      routeDecisions: Number(parsed.routeDecisions || 0),
+      localRouteDecisions: Number(parsed.localRouteDecisions || 0),
+      networkRouteDecisions: Number(parsed.networkRouteDecisions || 0),
+      compactedRouteDecisions: Number(parsed.compactedRouteDecisions || 0),
+      browserFallbackRoutes: Number(parsed.browserFallbackRoutes || 0),
+      avgRouteComplexityX100: Number(parsed.avgRouteComplexityX100 || 0),
+      lastRouteKind: String(parsed.lastRouteKind || "none"),
+      lastRouteReason: String(parsed.lastRouteReason || "unknown"),
     }
   } catch {
     return {
@@ -56,8 +95,14 @@ function loadAnalytics(): AnalyticsSnapshot {
       successfulChats: 0,
       failedChats: 0,
       avgLatencyMs: 0,
+      browserLocalSuccessfulChats: 0,
+      networkSuccessfulChats: 0,
+      avgBrowserLatencyMs: 0,
+      avgNetworkLatencyMs: 0,
+      lastChatTransport: "unknown",
       contributionTransitions: 0,
       lastContributionState: "unknown",
+      ...DEFAULT_ROUTE_ANALYTICS,
     }
   }
 }
@@ -105,9 +150,38 @@ export function useProductSignals() {
   }, [])
 
   useEffect(() => {
+    const onRouteDecision = (event: Event) => {
+      const detail = (event as CustomEvent<RouteDecisionDetail>).detail
+      if (!detail?.decision) return
+      setAnalytics((prev) => {
+        const routeSnapshot = reduceRouteAnalytics(
+          {
+            routeDecisions: prev.routeDecisions,
+            localRouteDecisions: prev.localRouteDecisions,
+            networkRouteDecisions: prev.networkRouteDecisions,
+            compactedRouteDecisions: prev.compactedRouteDecisions,
+            browserFallbackRoutes: prev.browserFallbackRoutes,
+            avgRouteComplexityX100: prev.avgRouteComplexityX100,
+            lastRouteKind: (prev.lastRouteKind as RouteAnalyticsSnapshot["lastRouteKind"]) ?? "none",
+            lastRouteReason: prev.lastRouteReason,
+          },
+          detail,
+        )
+        const next = { ...prev, ...routeSnapshot }
+        saveAnalytics(next)
+        return next
+      })
+    }
+
     const onSuccess = (event: Event) => {
-      const detail = (event as CustomEvent<{ latencyMs?: number }>).detail
+      const detail = (
+        event as CustomEvent<{
+          latencyMs?: number
+          transport?: "browser_local" | "network_stream" | "network_sync"
+        }>
+      ).detail
       const latencyMs = Number(detail?.latencyMs || 0)
+      const transport = detail?.transport || "unknown"
       setAnalytics((prev) => {
         const successfulChats = prev.successfulChats + 1
         const nextAvg =
@@ -120,23 +194,53 @@ export function useProductSignals() {
           ...prev,
           successfulChats,
           avgLatencyMs: nextAvg,
+          browserLocalSuccessfulChats:
+            prev.browserLocalSuccessfulChats + (transport === "browser_local" ? 1 : 0),
+          networkSuccessfulChats:
+            prev.networkSuccessfulChats + (transport === "browser_local" ? 0 : 1),
+          avgBrowserLatencyMs:
+            transport === "browser_local"
+              ? Math.round(
+                  ((prev.avgBrowserLatencyMs * prev.browserLocalSuccessfulChats) + latencyMs) /
+                    Math.max(prev.browserLocalSuccessfulChats + 1, 1),
+                )
+              : prev.avgBrowserLatencyMs,
+          avgNetworkLatencyMs:
+            transport === "browser_local"
+              ? prev.avgNetworkLatencyMs
+              : Math.round(
+                  ((prev.avgNetworkLatencyMs * prev.networkSuccessfulChats) + latencyMs) /
+                    Math.max(prev.networkSuccessfulChats + 1, 1),
+                ),
+          lastChatTransport: transport,
         }
         saveAnalytics(next)
         return next
       })
     }
 
-    const onFailure = () => {
+    const onFailure = (event: Event) => {
+      const detail = (
+        event as CustomEvent<{
+          transport?: "browser_local" | "network_stream" | "network_sync"
+        }>
+      ).detail
       setAnalytics((prev) => {
-        const next = { ...prev, failedChats: prev.failedChats + 1 }
+        const next = {
+          ...prev,
+          failedChats: prev.failedChats + 1,
+          lastChatTransport: detail?.transport || prev.lastChatTransport,
+        }
         saveAnalytics(next)
         return next
       })
     }
 
+    window.addEventListener(ROUTE_DECISION_EVENT, onRouteDecision as EventListener)
     window.addEventListener("shard:chat-success", onSuccess as EventListener)
     window.addEventListener("shard:chat-failure", onFailure)
     return () => {
+      window.removeEventListener(ROUTE_DECISION_EVENT, onRouteDecision as EventListener)
       window.removeEventListener("shard:chat-success", onSuccess as EventListener)
       window.removeEventListener("shard:chat-failure", onFailure)
     }

@@ -9,14 +9,12 @@ This runbook is the operator procedure for running and judging a Shard release c
    - EC2 verifier
 2. Use one runtime profile on both verifiers:
    - `deploy/release/rc1.env`
-   - plus one explicit benchmark overlay:
-     - `deploy/release/benchmark.env` for `short_rc_stability`
-     - `deploy/release/long_benchmark.env` for `long_scout_generation`
+   - plus only the minimum overlay required for the scenario you are testing
 3. Verify parity on both hosts:
 
 ```bash
 curl http://127.0.0.1:9091/health
-curl http://127.0.0.1:9091/v1/system/scout-config
+curl http://127.0.0.1:9091/metrics/summary
 ```
 
 ## 2. Apply Frozen Profile
@@ -85,60 +83,35 @@ pwsh -File scripts/dev/check_verifier_parity.ps1 \
   -RemoteUrl http://35.175.242.222:9091
 ```
 
-The parity check must report `ok: true` before matrix runs.
+The parity check must report `ok: true` before any release validation.
 
-### Profile selection
+## 3. Validate the Shipping Product Path
 
-- Use `benchmark.env` for `short_rc_stability`
-- Use `long_benchmark.env` for `long_scout_generation`
+Start with the normal local-first product path:
 
-Local + EC2 redeploy helper:
-
-```bash
-# short RC stability
-pwsh -File scripts/dev/redeploy_local_and_ec2.ps1 -BenchmarkProfile short
-
-# long scout-generation baseline / uplift work
-pwsh -File scripts/dev/redeploy_local_and_ec2.ps1 -BenchmarkProfile long
-```
-
-## 3. Run Release Matrices
-
-### Short RC stability gate
+- browser `Auto` mode for simple prompts
+- browser `Auto` mode for clearly complex prompts
+- verifier `standard`
+- verifier `local_speculative` only as an explicit comparison path
+- multi-backend failover with at least one degraded or unavailable backend
 
 ```bash
-python benchmarks/distributed/run_release_matrix.py \
-  --matrix-class short_rc_stability \
-  --one-node-pool http://127.0.0.1:9191 \
-  --two-node-pool http://127.0.0.1:9191,http://35.175.242.222:9091 \
-  --runs-per-scenario 3 \
-  --scouts 16 \
-  --scout-mode browser
+curl http://127.0.0.1:9091/health
+curl http://127.0.0.1:9091/metrics/summary
 ```
 
-Artifacts are written to `reports/release-rc/release-rc-<timestamp>/`.
+The release candidate should not be judged primarily on browser-scout participation. Judge it on:
 
-Use this class to answer whether the RC is stable enough to release on short requests.
+- whether browser `Auto` chooses sane routes
+- whether browser-local answers stay fast and correct
+- whether verifier escalation remains healthy and low-error
+- whether `standard` remains the correct default
+- whether `local_speculative` is stable and worth enabling later
+- whether failover and mesh routing behave predictably when backends degrade
 
-### Long scout-engagement matrix
+## 4. Validate Desktop-Local Speculative Throughput
 
-```bash
-python benchmarks/distributed/run_release_matrix.py \
-  --matrix-class long_scout_generation \
-  --one-node-pool http://127.0.0.1:9191 \
-  --two-node-pool http://127.0.0.1:9191,http://35.175.242.222:9091 \
-  --runs-per-scenario 3 \
-  --scouts 16 \
-  --scout-mode browser
-```
-
-Use this class to answer whether scouts are actually engaging speculatively and improving long generations.
-
-Before the long matrix, deploy the long overlay profile:
-
-```bash
-pwsh -File scripts/dev/redeploy_local_and_ec2.ps1 -BenchmarkProfile long
-```
+Run repeated `standard` versus `local_speculative` comparisons on the target hardware class before enabling any production uplift claim.
 
 The release matrix now fails closed by default:
 
@@ -146,26 +119,32 @@ The release matrix now fails closed by default:
 - If inter-run queue drain never clears, the matrix aborts.
 - Only use `--allow-dirty-readiness` or `--allow-dirty-flush` for local debugging.
 
-## 4. Go/No-Go Decision
+## 5. Optional Experimental WAN Benchmark
 
-Read:
+Only run the experimental WAN path if you are explicitly benchmarking it. Use [REMOTE_LLAMA_SCOUT_TEST_RUNBOOK.md](REMOTE_LLAMA_SCOUT_TEST_RUNBOOK.md) and keep the results separate from the product release decision.
 
-- `go-no-go-summary.json`
-- `go-no-go-report.md`
+## 6. Go/No-Go Decision
 
-Release only if the `short_rc_stability` recommendation is `GO` and all stability gates in [release-rc-checklist.md](D:\Dev\Projects\Shard\Shard\docs\release-rc-checklist.md) pass.
+Release only if the product path meets the gates in [release-rc-checklist.md](D:\Dev\Projects\Shard\Shard\docs\release-rc-checklist.md):
 
-Use the `long_scout_generation` report to judge scout uplift separately from ship/no-ship stability.
+- browser-local responses are healthy
+- verifier-routed responses are healthy
+- `standard` is healthy as the default routed path
+- contributor-control endpoints remain healthy for API-driven node participation
+- failover and mesh routing remain predictable
 
-## 5. Rollback Conditions
+Experimental WAN data may inform future research, but it should not decide a normal product launch.
+
+## 7. Rollback Conditions
 
 Rollback immediately if any of these persist for 10 minutes:
 
 - `p95_latency_ms > 6000`
 - `error_rate > 8%`
-- repeated scout ingress hard-circuit events and no recovery
+- repeated verifier degradation with no recovery
+- false-ready health states or route decisions that trap users in failing execution paths
 
-## 6. Rollback Commands
+## 8. Rollback Commands
 
 ### Docker mesh/local verifier
 

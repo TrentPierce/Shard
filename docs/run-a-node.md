@@ -48,7 +48,7 @@ curl http://localhost:9091/v1/chat/completions \
   -d '{"model": "default", "messages": [{"role": "user", "content": "Hello"}]}'
 ```
 
-Default network acceleration path:
+Optional verifier-local speculative path:
 
 ```bash
 curl http://localhost:9091/v1/chat/completions \
@@ -56,6 +56,8 @@ curl http://localhost:9091/v1/chat/completions \
   -H "X-Shard-Inference-Mode: local_speculative" \
   -d '{"model": "default", "messages": [{"role": "user", "content": "Explain Shard in one paragraph."}]}'
 ```
+
+Keep `standard` as the default production network mode until `local_speculative` proves a repeated wall-clock uplift on your target hardware.
 
 Experimental WAN scout path:
 

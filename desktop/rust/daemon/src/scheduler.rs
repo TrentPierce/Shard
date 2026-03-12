@@ -36,9 +36,7 @@ pub(crate) fn resolve_inference_mode(raw: Option<&str>) -> InferenceMode {
         {
             InferenceMode::ExperimentalWanSpeculative
         }
-        Some(mode) if mode == "auto" || mode == "local_speculative" => {
-            InferenceMode::LocalSpeculative
-        }
+        Some(mode) if mode == "local_speculative" => InferenceMode::LocalSpeculative,
         _ => InferenceMode::Standard,
     }
 }
@@ -3436,13 +3434,14 @@ mod tests {
     #[test]
     fn local_speculative_aliases_map_to_local_mode() {
         assert_eq!(
-            resolve_inference_mode(Some("auto")),
-            InferenceMode::LocalSpeculative
-        );
-        assert_eq!(
             resolve_inference_mode(Some("local_speculative")),
             InferenceMode::LocalSpeculative
         );
+    }
+
+    #[test]
+    fn auto_alias_maps_to_standard_mode() {
+        assert_eq!(resolve_inference_mode(Some("auto")), InferenceMode::Standard);
     }
 
     #[test]

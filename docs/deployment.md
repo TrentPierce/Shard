@@ -1,5 +1,16 @@
 # Deployment
 
+## Product Defaults
+
+Normal deployments should use the local-first product path:
+
+- keep `NEXT_PUBLIC_ENABLE_EXPERIMENTAL_WAN_SCOUT` unset or `false`
+- use `/chat` for product traffic
+- use the verifier daemon as the heavy-work backend
+- use `/benchmark/scout` only for explicit experimental WAN tests
+
+Experimental scout tuning should not be part of the default production startup path.
+
 ## Required Environment Variables
 
 - `SHARD_BACKEND_URLS` / `NEXT_PUBLIC_SHARD_BACKEND_URLS` for HA backend lists
@@ -63,13 +74,19 @@
 - `NEXT_PUBLIC_ENABLE_BROWSER_P2P`
   - experimental browser libp2p path
 
-## Product Defaults
+## Experimental WAN Controls
 
-Normal deployments should use the local-first product path:
+These settings matter only when benchmarking the experimental WAN scout path:
 
-- keep `NEXT_PUBLIC_ENABLE_EXPERIMENTAL_WAN_SCOUT` unset or `false`
-- use `/chat` for product traffic
-- use `/benchmark/scout` only for explicit experimental WAN tests
+- `SHARD_SCOUT_TIMEOUT_MS`
+- `SHARD_SCOUT_WORK_QUEUE_MAX`
+- `SHARD_SCOUT_BACKPRESSURE_*`
+- `SHARD_SCOUT_ADMISSION_*`
+- `SHARD_SCOUT_POLL_MIN_INTERVAL_MS`
+- `SHARD_SCOUT_DRAFT_MIN_INTERVAL_MS`
+- `SHARD_SCOUT_ACTIVE_CAP*`
+
+They should not be treated as the primary production optimization surface for the local-first product loop.
 
 ## Core Services
 
@@ -99,6 +116,7 @@ npm run cf:pages:list --prefix web
 - Configure both in `SHARD_BACKEND_URLS` so the web API proxy can fail over automatically
 - Do not rely on a single bootstrap or public telemetry endpoint
 - Keep mesh forwarding enabled on verifier nodes so standard requests can spill into healthier peers
+- Keep model weights hot on verifier nodes; browser sessions should own chat history and compaction before escalation
 
 ## Health Checks
 

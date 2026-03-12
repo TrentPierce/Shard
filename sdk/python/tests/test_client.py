@@ -3,6 +3,7 @@ from __future__ import annotations
 import httpx
 import pytest
 
+from shard import ShardClient
 from shard.client import Client
 from shard.errors import (
     ConnectionError,
@@ -21,6 +22,12 @@ def test_client_headers_and_context_manager() -> None:
     with Client(base_url="http://testserver", wallet="w1", api_key="k1") as client:
         assert client._http.headers["X-Shard-Wallet"] == "w1"
         assert client._http.headers["Authorization"] == "Bearer k1"
+
+
+def test_public_shard_client_alias_points_to_client() -> None:
+    client = ShardClient(base_url="http://testserver")
+    assert isinstance(client, Client)
+    client.close()
 
 
 def test_raise_for_status_additional_branches() -> None:

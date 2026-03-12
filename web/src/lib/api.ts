@@ -22,7 +22,7 @@ export interface ChatCompletionRequest {
     messages: { role: string; content: string }[]
     temperature?: number
     max_tokens?: number
-    stream?: boolean
+ stream?: boolean
 }
 
 const API_KEY = process.env.NEXT_PUBLIC_SHARD_API_KEY?.trim() || ""
@@ -90,6 +90,28 @@ export type NetworkInferenceMode =
     | "distributed"
     | "speculative"
 
+export type ChatTransport = "browser_local" | "network_stream" | "network_sync"
+
+export type ChatTelemetryDetail = {
+    latencyMs: number
+    inferenceMode?: NetworkInferenceMode | "browser_local"
+    transport: ChatTransport
+    error?: string
+}
+
+function dispatchChatEvent(name: "shard:chat-success" | "shard:chat-failure", detail: ChatTelemetryDetail) {
+    if (typeof window === "undefined") return
+    window.dispatchEvent(new CustomEvent<ChatTelemetryDetail>(name, { detail }))
+}
+
+export function emitChatSuccess(detail: ChatTelemetryDetail) {
+    dispatchChatEvent("shard:chat-success", detail)
+}
+
+export function emitChatFailure(detail: ChatTelemetryDetail) {
+    dispatchChatEvent("shard:chat-failure", detail)
+}
+
 async function sendMessageNonStreaming(
     history: ChatMessage[],
     onToken: (token: string) => void,
@@ -135,96 +157,99 @@ export async function sendMessage(
     history: ChatMessage[],
     onToken: (token: string) => void,
     onDone: () => void,
-    inferenceMode: NetworkInferenceMode = "local_speculative",
+    inferenceMode: NetworkInferenceMode = "standard",
 ): Promise<void> {
     const startedAt = performance.now()
-
-    const body: ChatCompletionRequest = {
-        model: DEFAULT_MODEL_ID,
-        messages: history.map((m) => ({ role: m.role, content: m.content })),
-        stream: true,
-        max_tokens: 256,
-    }
-
-    const res = await fetchWithLocalFallback("/v1/chat/completions", {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/json",
-            "X-Shard-Inference-Mode": inferenceMode,
-            ...authHeaders(),
-        },
-        body: JSON.stringify(body),
-    })
-
-    if (!res.ok) {
-        throw new Error(`API error: ${res.status} ${res.statusText}`)
-    }
-
-    const reader = res.body?.getReader()
-    if (!reader) {
-        await sendMessageNonStreaming(history, onToken, inferenceMode)
-        if (typeof window !== "undefined") {
-            window.dispatchEvent(
-                new CustomEvent("shard:chat-success", {
-                    detail: { latencyMs: Math.round(performance.now() - startedAt) },
-                })
-            )
+    try {
+        const body: ChatCompletionRequest = {
+            model: DEFAULT_MODEL_ID,
+            messages: history.map((m) => ({ role: m.role, content: m.content })),
+            stream: true,
+            max_tokens: 256,
         }
-        onDone()
-        return
-    }
 
-    const decoder = new TextDecoder()
-    let buffer = ""
+        const res = await fetchWithLocalFallback("/v1/chat/completions", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "X-Shard-Inference-Mode": inferenceMode,
+                ...authHeaders(),
+            },
+            body: JSON.stringify(body),
+        })
 
-    while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-
-        buffer += decoder.decode(value, { stream: true })
-
-        // Process SSE lines
-        const lines = buffer.split("\n")
-        buffer = lines.pop() ?? "" // Keep incomplete line in buffer
-
-        for (const line of lines) {
-            const trimmed = line.trim()
-            if (!trimmed || !trimmed.startsWith("data: ")) continue
-
-            const data = trimmed.slice(6) // Remove "data: " prefix
-            if (data === "[DONE]") {
-                if (typeof window !== "undefined") {
-                    window.dispatchEvent(
-                        new CustomEvent("shard:chat-success", {
-                            detail: { latencyMs: Math.round(performance.now() - startedAt) },
-                        })
-                    )
-                }
-                onDone()
-                return
-            }
-
-            try {
-                const parsed = JSON.parse(data)
-                const delta = parsed?.choices?.[0]?.delta?.content
-                if (delta) {
-                    const clean = sanitizeAssistantContent(delta)
-                    if (clean) onToken(clean)
-                }
-            } catch {
-                // Skip malformed JSON chunks
-            }
+        if (!res.ok) {
+            throw new Error(`API error: ${res.status} ${res.statusText}`)
         }
-    }
 
-    if (typeof window !== "undefined") {
-        window.dispatchEvent(
-            new CustomEvent("shard:chat-success", {
-                detail: { latencyMs: Math.round(performance.now() - startedAt) },
+        const reader = res.body?.getReader()
+        if (!reader) {
+            await sendMessageNonStreaming(history, onToken, inferenceMode)
+            emitChatSuccess({
+                latencyMs: Math.round(performance.now() - startedAt),
+                inferenceMode,
+                transport: "network_sync",
             })
-        )
+            onDone()
+            return
+        }
+
+        const decoder = new TextDecoder()
+        let buffer = ""
+
+        while (true) {
+            const { done, value } = await reader.read()
+            if (done) break
+
+            buffer += decoder.decode(value, { stream: true })
+
+            // Process SSE lines
+            const lines = buffer.split("\n")
+            buffer = lines.pop() ?? "" // Keep incomplete line in buffer
+
+            for (const line of lines) {
+                const trimmed = line.trim()
+                if (!trimmed || !trimmed.startsWith("data: ")) continue
+
+                const data = trimmed.slice(6) // Remove "data: " prefix
+                if (data === "[DONE]") {
+                    emitChatSuccess({
+                        latencyMs: Math.round(performance.now() - startedAt),
+                        inferenceMode,
+                        transport: "network_stream",
+                    })
+                    onDone()
+                    return
+                }
+
+                try {
+                    const parsed = JSON.parse(data)
+                    const delta = parsed?.choices?.[0]?.delta?.content
+                    if (delta) {
+                        const clean = sanitizeAssistantContent(delta)
+                        if (clean) onToken(clean)
+                    }
+                } catch {
+                    // Skip malformed JSON chunks
+                }
+            }
+        }
+
+        emitChatSuccess({
+            latencyMs: Math.round(performance.now() - startedAt),
+            inferenceMode,
+            transport: "network_stream",
+        })
+        onDone()
+    } catch (error) {
+        emitChatFailure({
+            latencyMs: Math.round(performance.now() - startedAt),
+            inferenceMode,
+            transport: "network_stream",
+            error: String((error as Error)?.message ?? error ?? "unknown error"),
+        })
+        throw error
     }
-    onDone()
 }
 
 // ─── Non-Streaming Chat ─────────────────────────────────────────────────────
