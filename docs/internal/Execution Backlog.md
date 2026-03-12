@@ -17,9 +17,10 @@ This backlog replaces the old scout-first product framing. Experimental WAN work
 2. E2 Browser-Owned Context Compaction
 3. E3 Desktop-Local Speculative Throughput
 4. E4 Heavy-Work Mesh Routing and Failover
-5. E5 Release, SDK, and Workflow Reliability
-6. E6 Production Readiness and Operations
-7. E7 Experimental Research Tracks
+5. E5 Low-Power Browser Capability and WebNN Prep
+6. E6 Release, SDK, and Workflow Reliability
+7. E7 Production Readiness and Operations
+8. E8 Experimental Research Tracks
 
 ## 3. Priority Queue
 
@@ -103,61 +104,87 @@ This backlog replaces the old scout-first product framing. Experimental WAN work
 - Complexity: M
 - Acceptance: Benchmark artifacts compare one-node, multi-node, and failover scenarios for the product path.
 
-### E5 Release, SDK, and Workflow Reliability
+4. P1-T13 Feed recent forward-latency history and freshness into the mesh scorer.
 
-1. P0-T13 Keep root `VERSION` as the single source of truth across web, Rust, SDKs, docs, and installers.
+- Owner: Backend Lead + Networking Lead
+- Complexity: M
+- Acceptance: Slow-but-alive peers are down-ranked by recent actual forward latency instead of being selected solely from live probe snapshots.
+
+### E5 Low-Power Browser Capability and WebNN Prep
+
+1. P1-T14 Add browser accelerator telemetry that separates current WebGPU runtime support from future WebNN eligibility.
+
+- Owner: Web Lead
+- Complexity: M
+- Acceptance: Capability surfaces report `backgroundAcceleration`, `lowPowerEligible`, and probe warm-state without changing the default browser runtime path.
+
+2. P1-T15 De-risk WebNN with embeddings and background utility work before draft-token generation.
+
+- Owner: Web Lead + ML Infra
+- Complexity: M
+- Acceptance: A worker-based WebNN path is proven on a low-risk task before any speculative draft-token claim is made.
+
+3. P2-T16 Unify browser model manifests across WebGPU and WebNN variants.
+
+- Owner: ML Infra + Release Engineer
+- Complexity: L
+- Acceptance: One logical model version can declare both TVM/WebGPU and ONNX/WebNN artifacts without version drift.
+
+### E6 Release, SDK, and Workflow Reliability
+
+1. P0-T17 Keep root `VERSION` as the single source of truth across web, Rust, SDKs, docs, and installers.
 
 - Owner: Release Engineer
 - Complexity: S
 - Acceptance: CI fails on mismatch and release automation updates the Python SDK, web app, and desktop artifacts consistently.
 
-2. P0-T14 Keep GitHub Actions and release lanes healthy.
+2. P0-T18 Keep GitHub Actions and release lanes healthy.
 
 - Owner: Release Engineer
 - Complexity: S
 - Acceptance: CI is green, release workflows publish release artifacts, and optional SDK publish lanes fail loudly but do not silently drift.
 
-3. P1-T15 Standardize release notes and published benchmark claims.
+3. P1-T19 Standardize release notes and published benchmark claims.
 
 - Owner: Release Engineer + Tech Writer
 - Complexity: S
 - Acceptance: Product release notes refer to the local-first path and separate experimental WAN data from product claims.
 
-### E6 Production Readiness and Operations
+### E7 Production Readiness and Operations
 
-1. P0-T16 Define ship gates for browser-local latency, verifier-routed latency, error rate, and failover behavior.
+1. P0-T20 Define ship gates for browser-local latency, verifier-routed latency, error rate, and failover behavior.
 
 - Owner: SRE Lead
 - Complexity: S
 - Acceptance: Release RC docs and dashboards reflect the product path rather than scout participation.
 
-2. P0-T17 Validate product-mode soak tests before public release.
+2. P0-T21 Validate product-mode soak tests before public release.
 
 - Owner: SRE + QA
 - Complexity: M
 - Acceptance: Browser-local, network-only, and auto-routed sessions pass the soak window without false-ready states or sustained failures.
 
-3. P1-T18 Tighten alerting around route failures and false healthy states.
+3. P1-T22 Tighten alerting around route failures and false healthy states.
 
 - Owner: SRE
 - Complexity: M
 - Acceptance: Operators can distinguish browser-runtime failures, verifier degradation, and proxy failover churn quickly.
 
-### E7 Experimental Research Tracks
+### E8 Experimental Research Tracks
 
-1. P1-T19 Keep experimental WAN scouts benchmarkable but out of the main product startup path.
+1. P1-T23 Keep experimental WAN scouts benchmarkable but out of the main product startup path.
 
 - Owner: Web Lead + Backend Lead
 - Complexity: S
 - Acceptance: Experimental WAN remains opt-in and public claims use separate benchmark artifacts.
 
-2. P2-T20 Explore richer browser prompt-state reuse.
+2. P2-T24 Explore richer browser prompt-state reuse.
 
 - Owner: Web Lead
 - Complexity: M
 - Acceptance: Any reuse optimization has strict correctness guards and does not change the default product contract.
 
-3. P2-T21 Evaluate regional pipeline or activation-transfer research only after the product path is solid.
+3. P2-T25 Evaluate regional pipeline or activation-transfer research only after the product path is solid.
 
 - Owner: ML Infra + Architect
 - Complexity: L
@@ -191,3 +218,5 @@ Shard is ready for a normal production launch only when all of the following are
 - Experimental WAN correctness is proven on the compatible Llama pair, but the path is still slower than the verifier-only baseline in controlled comparison.
 - The next major product-performance milestone is verifier-local speculative uplift over `standard`, not more WAN draft coordination.
 - The Python SDK now exposes signed contributor-control endpoints so developers can register and report a verifier node programmatically.
+- Mesh routing now has endpoint-history scoring, but tail-latency tuning still needs more measured work on live multi-node pools.
+- Browser capability surfaces now distinguish current WebGPU execution from future low-power WebNN eligibility, but the ONNX/WebNN runtime path does not ship yet.

@@ -11,13 +11,17 @@ That means:
 - speculative decoding should stay inside the verifier boundary by default
 - WAN browser scouts should remain an experimental research track until they beat the simpler path honestly
 
-## Current Reality (March 11, 2026)
+## Current Reality (March 12, 2026)
 
 - Discovery, routing, and verifier controls are materially better than before.
 - The compatible Llama experimental WAN path is correct and repeatable.
 - The latest same-machine live-site `10 vs 10` comparison is still slower overall than verifier-only baseline:
   - baseline: `11295.1 ms` average, `11297 ms` median
   - experimental WAN: `12004.4 ms` average, `11888 ms` median
+- Heavy-work verifier mesh forwarding is now the real distributed product path:
+  - clean three-node Fly overload run (`v2`): pinned local `6/18` success, pinned mesh `18/18` success
+  - clean three-node Fly overload run (`v2`): pinned mesh `23.22 s` average, `37.13 s` p95
+  - later post-deploy runs stayed at `18/18` mesh success but were noisier on tail latency, which means routing quality is improving while cluster conditions still matter
 - Experimental WAN correctness was strong in that run:
   - `10/10` wait hits
   - `10/10` verification attempts
@@ -34,7 +38,8 @@ The architectural conclusion is clear: WAN scout speculation is a useful experim
 2. Browser-owned history and compaction should shrink network work before escalation.
 3. Desktop-local speculation is a better latency bet than WAN token-level coordination.
 4. Mesh routing should optimize verifier selection for non-speculative heavy work.
-5. Experimental WAN work should be benchmarked separately from product claims.
+5. Low-power browser contributors need a separate capability lane from bursty WebGPU contributors.
+6. Experimental WAN work should be benchmarked separately from product claims.
 
 ## Phase 1: Router Quality
 
@@ -100,6 +105,7 @@ Route non-speculative and verifier-heavy work to the best healthy nodes.
 
 - Prefer fast healthy verifier tiers for short standard requests.
 - Keep slower nodes for spillover and longer jobs.
+- Feed recent forward-latency history, freshness, and cooldown telemetry back into the scorer.
 - Reduce reconnect churn and dial noise in the active peer set.
 
 ### Success Criteria
@@ -108,7 +114,27 @@ Route non-speculative and verifier-heavy work to the best healthy nodes.
 - Stable peers are preferred over noisy peers.
 - Routing quality improves without starving healthy slower capacity.
 
-## Phase 5: Experimental Research Tracks
+## Phase 5: Low-Power Browser Capability and WebNN Prep
+
+### Objective
+
+Prepare a real low-power contributor lane without pretending the ONNX/WebNN execution path already ships.
+
+### Changes
+
+- Detect WebNN capability in the browser alongside WebGPU and WASM.
+- Run an active tiny-graph probe instead of relying on `navigator.ml` existence alone.
+- Persist WebNN warm-state per session so repeated tab joins do not re-pay avoidable probe cost.
+- Start with embeddings and low-risk background tasks before draft-token generation.
+- Design unified model manifests that can describe WebGPU/TVM and WebNN/ONNX variants of the same logical model.
+
+### Success Criteria
+
+- Browser telemetry can distinguish current WebGPU runtime support from future low-power WebNN eligibility.
+- WebNN experiments prove they are actually using the low-power path instead of silently falling back to CPU.
+- Model-variant metadata stays version-aligned across browser engines.
+
+## Phase 6: Experimental Research Tracks
 
 ### Objective
 
@@ -142,4 +168,5 @@ Keep benchmark classes separate:
 2. Browser compaction tuning
 3. Desktop-local speculative profiling
 4. Heavy-work mesh routing
-5. Experimental research tracks
+5. Low-power browser capability and WebNN prep
+6. Experimental research tracks

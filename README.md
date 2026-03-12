@@ -1,7 +1,7 @@
 <div align="center">
   <img src="docs/assets/logo.png" alt="Shard Network" width="160" />
   <h1>Shard Network</h1>
-  <p><strong>Local-first AI routing with browser answers, desktop inference, and experimental WAN scouts.</strong></p>
+  <p><strong>Local-first AI routing with browser answers, desktop inference, mesh failover, and experimental WAN scouts.</strong></p>
 
   [![CI/CD](https://github.com/TrentPierce/Shard/actions/workflows/ci.yml/badge.svg)](https://github.com/TrentPierce/Shard/actions/workflows/ci.yml)
   [![Version](https://img.shields.io/badge/version-0.6.6-blue.svg)](https://github.com/TrentPierce/Shard/releases/tag/v0.6.6)
@@ -18,6 +18,8 @@ Shard is an OpenAI-compatible AI runtime that starts in the browser and escalate
 
 - Browser local-first router: lightweight prompts can complete entirely in the browser with no network round-trip.
 - Desktop verifier nodes: Rust daemons run heavier inference and the default network execution path.
+- History-aware mesh forwarding: verifier nodes can spill heavy work into healthier peers when local queues back up.
+- Low-power browser capability detection: Shard now distinguishes current WebGPU execution from future WebNN/NPU eligibility.
 - Experimental WAN scouts: browser draft and verify experiments remain available behind explicit benchmark flows, but they are no longer the main product path.
 
 Clients still use the standard `/v1/chat/completions` API.
@@ -71,16 +73,19 @@ Use [docs/REMOTE_LLAMA_SCOUT_TEST_RUNBOOK.md](docs/REMOTE_LLAMA_SCOUT_TEST_RUNBO
 
 ---
 
-## Current Benchmark Position (March 11, 2026)
+## Current Benchmark Position (March 12, 2026)
 
 These are the defensible benchmark statements today:
 
 | Scenario | Result | What it means |
 | --- | --- | --- |
 | Browser local-first chat | Product default | Simple prompts can complete entirely in-browser with no network round-trip. |
+| 3 Fly verifiers, heavy `256`-token request, pinned local (`18` requests) | `6/18` success, `35.1 s` p95 in the clean `v2` run | Local-only routing still drops overloaded heavy requests on constrained verifier pools. |
+| 3 Fly verifiers, heavy `256`-token request, mesh enabled (`18` requests) | `18/18` success, `37.1 s` p95, `23.22 s` average in the clean `v2` run | Mesh forwarding converts overload failures into successful routed completions, but tail latency still needs work. |
 | Local Llama 8B verifier baseline (`10 vs 10`, same machine) | `11295.1 ms` average, `11297 ms` median | Current verifier-only reference for the experimental WAN comparison. |
 | Experimental WAN Llama scout (`10 vs 10`, live site, same machine) | `12004.4 ms` average, `11888 ms` median | Correctness is strong, but wall-clock is still slower than baseline. |
 | Experimental WAN verification quality (`10 vs 10`, same machine) | `10/10` wait hits, `4/4` accepted draft tokens on every run | The compatible Llama pair is real and repeatable. |
+| Browser accelerator classification | WebGPU remains the active browser runtime; WebNN is probed and cached as low-power capability groundwork | The project can now classify future background NPU contributors without pretending the ONNX/WebNN execution path already ships. |
 | Browser scout timing after reuse patch | First request: `prefill_ms=258`, `decode_ms=119`, `submit_ms=9`; repeated identical requests: `generate_ms=0`, `reuse=exact_prompt_cache` | Prompt-state reuse works and removes repeated identical browser generation cost after the first hit. |
 | Browser Qwen draft against local Qwen 9B verifier | Rejected in strict mode | This pair is not a safe speculative match. |
 
@@ -88,8 +93,10 @@ These are the defensible benchmark statements today:
 
 - Local-first browser routing is the product architecture.
 - Harder prompts can escalate cleanly to a desktop verifier path.
+- Mesh forwarding can preserve completion success under heavy verifier overload, even when local-only routing fails.
 - The compatible Llama experimental WAN scout path is correct and repeatable.
 - The same-machine experimental WAN path is still slower overall than verifier-only baseline, even with perfect `4/4` acceptance on every measured run.
+- WebNN/NPU capability detection now exists as groundwork for low-power background contributors, but WebGPU remains the current browser inference path.
 - Exact prompt caching and prompt-state reuse materially reduce repeated identical browser-scout cost.
 
 ### What we are not claiming yet
@@ -108,6 +115,8 @@ These are the defensible benchmark statements today:
 | Local-first router | Browser decides between a local answer and a network escalation |
 | Browser-owned context compaction | Older chat turns are summarized and trimmed before network escalation |
 | Desktop heavy inference | Rust verifier daemon handles larger prompts and longer generations |
+| History-aware mesh forwarding | Verifier nodes keep recent forward-latency and freshness telemetry so slow-but-alive peers are down-ranked before selection |
+| Low-power capability groundwork | Browser capability detection probes WebNN/NPU availability and caches warm-state data for future background lanes |
 | Experimental WAN scouts | Opt-in browser draft path for compatibility and benchmark work |
 | libp2p mesh networking | Multi-seed bootstrap, discovery, health sharing, and request forwarding for non-speculative routes |
 | Observability | Metrics, structured logs, speculative traces, and benchmark harnesses |

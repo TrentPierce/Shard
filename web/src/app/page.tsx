@@ -29,7 +29,7 @@ const joinPaths: JoinPath[] = [
   {
     title: "Join from your browser",
     eyebrow: "Fastest path",
-    description: "Best for non-technical users. Open the site in Chrome or Edge and let the browser answer simpler prompts locally before it ever needs the network.",
+    description: "Best for non-technical users. Open the site in Chrome or Edge and let the browser answer simpler prompts locally before it ever needs the network. Shard now also classifies low-power WebNN-capable browsers separately, even though the shipping browser runtime is still WebGPU.",
     href: "/start#browser",
     cta: "Use browser client",
     checklist: [
@@ -65,8 +65,8 @@ const joinPaths: JoinPath[] = [
 ]
 
 const benchmarkRows: BenchmarkRow[] = [
-  { scenario: "3 Fly nodes, verifier-only", p95Ms: 986.605, tps: 0.55, errorPct: 0, verdict: "Current fast-node baseline on pinned Fly hardware" },
-  { scenario: "3 Fly nodes, browser scouts attached", p95Ms: 965.127, tps: 0.55, errorPct: 0, verdict: "Experimental WAN scouts stay neutral on fast verifiers because the daemon bypasses waits when they are not profitable" },
+  { scenario: "3 Fly nodes, heavy work, pinned local", p95Ms: 35107.047, tps: 0, errorPct: 66.67, verdict: "Clean March 12 v2 overload run: local-only routing dropped 12 of 18 requests under heavy load" },
+  { scenario: "3 Fly nodes, heavy work, mesh enabled", p95Ms: 37129.033, tps: 0, errorPct: 0, verdict: "Clean March 12 v2 overload run: mesh forwarding restored 18/18 success while tail latency still needs tuning" },
   { scenario: "Local Llama 8B verifier, remote browser scout (10 vs 10)", p95Ms: 9936.093, tps: 0, errorPct: 0, verdict: "Compatible Llama WAN scouts work end to end, but they remain a benchmark path rather than the primary product architecture" },
   { scenario: "Qwen browser draft against local Qwen 9B verifier", p95Ms: 0, tps: 0, errorPct: 0, verdict: "Strict mode rejects the pair; it is not a safe speculative match today" },
 ]
@@ -74,6 +74,8 @@ const benchmarkRows: BenchmarkRow[] = [
 const takeaways = [
   "The product path is now local-first: let the browser handle simple prompts and reserve desktop verifiers for heavier work.",
   "Desktop-local speculative decoding is the right place to keep draft-and-verify acceleration because it avoids WAN coordination costs.",
+  "Mesh forwarding is now history-aware: recent forward latency and freshness data can down-rank slow-but-alive peers before they get picked.",
+  "Browser capability detection now separates current WebGPU execution from future low-power WebNN eligibility.",
   "WAN browser scouts remain useful for benchmark and research work, but they are no longer the default fast path.",
 ]
 
@@ -195,7 +197,7 @@ export default function HomePage() {
                 </p>
                 <p className="mt-1 text-sm text-ink-300">
                   {probeResult?.eligible
-                    ? `${probeResult.browser} with ${probeResult.estimated_vram_mb}MB estimated VRAM`
+                    ? `${probeResult.browser} with ${probeResult.estimated_vram_mb}MB estimated VRAM. WebGPU is the current shipped browser runtime; low-power WebNN classification is tracked separately.`
                     : "Chrome or Edge with WebGPU gives the best local browser runtime."}
                 </p>
               </div>
@@ -255,7 +257,7 @@ export default function HomePage() {
           <p className="text-xs uppercase tracking-[0.22em] text-ink-400">Latest validated benchmark result</p>
           <h2 className="mt-2 text-3xl font-semibold text-ink-50">What works right now</h2>
           <p className="mt-3 text-sm leading-6 text-ink-300">
-            These rows reflect the latest validated benchmark and compatibility evidence. The Fly rows are the current fast-node baseline. The local Llama row is a correctness milestone, not a fair speed benchmark, because the verifier and scout share one machine. The Qwen row is included because it established an incompatibility we now guard against.
+            These rows reflect the latest validated benchmark and compatibility evidence. The Fly rows now focus on heavy-work overload behavior because that is the real product-path distributed test. The local Llama row is a correctness milestone, not a fair speed benchmark, because the verifier and scout share one machine. The Qwen row is included because it established an incompatibility we now guard against.
           </p>
           <div className="mt-5 overflow-hidden rounded-2xl border border-ring">
             <table className="min-w-full divide-y divide-ring text-left text-sm">

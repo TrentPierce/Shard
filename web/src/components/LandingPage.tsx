@@ -17,8 +17,8 @@ const pillars = [
         body: "Harder requests route to desktop verifier nodes that keep heavyweight models hot and ready.",
     },
     {
-        title: "Benchmark WAN scouts separately",
-        body: "Experimental browser scouts stay available for research without defining the product path.",
+        title: "Classify low-power contributors",
+        body: "Browsers now distinguish active WebGPU runtime support from future WebNN/NPU eligibility so Shard can grow a quieter background lane without changing the shipping path yet.",
     },
 ]
 
@@ -40,7 +40,7 @@ export default function LandingPage({ onEnter }: LandingPageProps) {
                 <h1>Local-first AI routing with desktop heavy inference.</h1>
                 <p className="landing-modern__lead">
                     Shard answers easy prompts in the browser, escalates harder requests to verifier nodes, and keeps
-                    experimental WAN scout workflows available for benchmark research only.
+                    experimental WAN scout workflows available for benchmark research only while it prepares a separate low-power browser contributor lane.
                 </p>
 
                 <div className="landing-modern__actions" style={{ position: "relative", zIndex: 10 }}>

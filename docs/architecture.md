@@ -17,6 +17,7 @@ Shard is now organized around a local-first execution rule:
 - `web/src/lib/conversation-state.ts`: browser-owned chat history and assistant token assembly.
 - `web/src/lib/prompt-compaction.ts`: browser-side summary and trimming for long conversations.
 - `web/src/lib/webllm.ts`: browser local-answer runtime plus experimental scout runtime.
+- `web/src/lib/scout-capability.ts`: browser accelerator detection for current WebGPU runtime support plus future WebNN/NPU eligibility.
 - `web/src/lib/swarm.ts` and `web/src/lib/scout-engine.ts`: experimental scout lifecycle and timing instrumentation.
 - `desktop/rust/daemon/src/scheduler.rs`: inference-mode resolution, verifier scheduling, and speculative routing rules.
 
@@ -69,6 +70,21 @@ The browser is the source of truth for session context.
 
 This is intentionally different from trying to serialize browser KV cache into a different verifier runtime. Shard keeps the browser-side state model-agnostic.
 
+## Browser Accelerator Classification
+
+Shard now distinguishes between two browser capability classes:
+
+- interactive browser runtime: currently WebGPU/WebLLM only
+- low-power background eligibility: detected via WebNN capability probe and session warm-state tracking
+
+This matters because the current browser execution path is still GPU-backed, while the future low-power contributor lane is expected to come from ONNX/WebNN workers on NPUs.
+
+Today:
+
+- WebGPU is the only shipped browser inference runtime.
+- WebNN detection is groundwork, not the active generation path.
+- The browser performs a tiny active WebNN probe and caches warm-state for the current session so future worker-based experiments can classify likely NPU-capable nodes without repeating cold startup every page load.
+
 ## Experimental WAN Scout Path
 
 The browser-scout path still exists, but it is separated from the default chat architecture.
@@ -91,6 +107,7 @@ It is not the default fast path for end users.
 - Verifier nodes still participate in a libp2p mesh for bootstrap, health sharing, and request forwarding.
 - Mesh forwarding is a verifier-side optimization for non-speculative routes.
 - Short and latency-sensitive work should prefer the healthiest fast verifier tier.
+- The scorer now keeps recent endpoint history, including actual forward latency, probe freshness, and cooldown state, so slow-but-alive peers are penalized instead of being retried blindly.
 - Speculative modes stay local to the selected verifier because token-level WAN coordination has a poor latency ceiling.
 
 ## Security Gates
@@ -111,6 +128,7 @@ It is not the default fast path for end users.
 - `NEXT_PUBLIC_ENABLE_EXPERIMENTAL_WAN_SCOUT` is disabled by default for product sessions.
 - `/benchmark/scout` remains the explicit entry point for WAN scout tests.
 - Scout timing now logs `prefill_ms`, `decode_ms`, `submit_ms`, and `reuse` to separate browser generation cost from transport overhead.
+- Browser capability surfaces can now report `backgroundAcceleration`, `lowPowerEligible`, `webnnProbeMs`, and `webnnWarmState` without changing the default WebGPU runtime path.
 
 ## Decision Records
 
