@@ -35,6 +35,12 @@ describe("swarm handleScoutWork", () => {
     expect(result.success).toBe(false)
     expect(result.detail).toContain("No usable draft produced")
     expect(submitDraft).not.toHaveBeenCalled()
-    expect(reportScoutClientEvent).toHaveBeenCalledWith("fallback_draft_used", "engine_uninitialized")
+    expect(reportScoutClientEvent).toHaveBeenCalledWith(
+      "fallback_draft_used",
+      "engine_uninitialized",
+      undefined,
+      undefined,
+      { apiBase: undefined },
+    )
   })
 })

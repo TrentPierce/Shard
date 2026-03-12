@@ -265,7 +265,7 @@ export default function BenchmarkScoutPage() {
       setRuntimeApiBaseOverride(null)
       setRuntimeApiHeaderOverrides(null)
     }
-  }, [draftModel, parsedBackend.backendUrl, parsedBackend.headers])
+  }, [directBrowserBackend, draftModel, parsedBackend.backendUrl, parsedBackend.headers])
 
   useEffect(() => {
     if (typeof window === "undefined") return

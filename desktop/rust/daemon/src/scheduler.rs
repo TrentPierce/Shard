@@ -1543,11 +1543,14 @@ fn adaptive_speculative_budget_ms(
     if avg_verifier_ms == 0 {
         return u64::MAX;
     }
-    let avg_draft_ms = state.avg_draft_arrival_ms.load(Ordering::Relaxed) as u64;
-    let avg_accepted_x100 = state.avg_accepted_tokens_x100.load(Ordering::Relaxed) as u64;
-    if avg_draft_ms == 0 || avg_accepted_x100 == 0 {
-        return u64::MAX;
-    }
+    let avg_draft_ms = match state.avg_draft_arrival_ms.load(Ordering::Relaxed) as u64 {
+        0 => speculative_prior_draft_arrival_ms(),
+        sample => sample,
+    };
+    let avg_accepted_x100 = match state.avg_accepted_tokens_x100.load(Ordering::Relaxed) as u64 {
+        0 => speculative_prior_accepted_tokens_x100(),
+        sample => sample,
+    };
     let budget = adaptive_speculative_budget_ms_with(
         avg_verifier_ms,
         avg_draft_ms,
@@ -2662,9 +2665,10 @@ pub(crate) async fn chat_completions_handler(
     let use_speculative = inference_mode.is_speculative();
 
     let speculative_config = if use_speculative {
-        let mut config = SpeculativeConfig::default();
-        config.scout_timeout_ms = state.scout_timeout_ms.load(Ordering::Relaxed).clamp(100, 60_000);
-        Some(config)
+        Some(SpeculativeConfig {
+            scout_timeout_ms: state.scout_timeout_ms.load(Ordering::Relaxed).clamp(100, 60_000),
+            ..SpeculativeConfig::default()
+        })
     } else {
         None
     };

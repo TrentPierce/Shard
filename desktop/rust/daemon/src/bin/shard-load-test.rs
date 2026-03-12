@@ -101,6 +101,15 @@ struct BenchmarkReport {
     estimated_gpu_savings_percent: f64,
 }
 
+#[derive(Debug)]
+struct ModeStats {
+    latencies: Vec<f64>,
+    successes: usize,
+    failures: usize,
+    offloaded_tokens: usize,
+    expected_offload_tokens_per_success: usize,
+}
+
 fn now_ms() -> u128 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -317,42 +326,38 @@ fn mode_report(
     requests: usize,
     concurrency: usize,
     started: Instant,
-    latencies: Vec<f64>,
-    successes: usize,
-    failures: usize,
-    offloaded_tokens: usize,
-    expected_offload_tokens_per_success: usize,
+    stats: ModeStats,
 ) -> ModeReport {
     let elapsed_s = started.elapsed().as_secs_f64().max(0.001);
-    let throughput = successes as f64 / elapsed_s;
-    let average = if latencies.is_empty() {
+    let throughput = stats.successes as f64 / elapsed_s;
+    let average = if stats.latencies.is_empty() {
         0.0
     } else {
-        latencies.iter().sum::<f64>() / latencies.len() as f64
+        stats.latencies.iter().sum::<f64>() / stats.latencies.len() as f64
     };
 
     ModeReport {
         mode: mode.to_string(),
         requests,
         concurrency,
-        successes,
-        failures,
+        successes: stats.successes,
+        failures: stats.failures,
         throughput_rps: throughput,
         average_latency_ms: average,
-        p50_latency_ms: percentile(&latencies, 0.50),
-        p95_latency_ms: percentile(&latencies, 0.95),
-        p99_latency_ms: percentile(&latencies, 0.99),
-        offload_percent: if successes == 0 || expected_offload_tokens_per_success == 0 {
+        p50_latency_ms: percentile(&stats.latencies, 0.50),
+        p95_latency_ms: percentile(&stats.latencies, 0.95),
+        p99_latency_ms: percentile(&stats.latencies, 0.99),
+        offload_percent: if stats.successes == 0 || stats.expected_offload_tokens_per_success == 0 {
             0.0
         } else {
-            (offloaded_tokens as f64
-                / (successes as f64 * expected_offload_tokens_per_success as f64))
+            (stats.offloaded_tokens as f64
+                / (stats.successes as f64 * stats.expected_offload_tokens_per_success as f64))
                 * 100.0
         },
         failure_rate_percent: if requests == 0 {
             0.0
         } else {
-            (failures as f64 / requests as f64) * 100.0
+            (stats.failures as f64 / requests as f64) * 100.0
         },
     }
 }
@@ -409,11 +414,13 @@ async fn run_baseline_mode(client: &Client, args: &Args) -> anyhow::Result<ModeR
         args.requests,
         args.concurrency,
         started,
-        latencies,
-        successes,
-        failures,
-        0,
-        0,
+        ModeStats {
+            latencies,
+            successes,
+            failures,
+            offloaded_tokens: 0,
+            expected_offload_tokens_per_success: 0,
+        },
     ))
 }
 
@@ -540,11 +547,13 @@ async fn run_distributed_mode(client: &Client, args: &Args) -> anyhow::Result<Mo
         total_requests,
         concurrency,
         started,
-        latencies,
-        successes,
-        failures,
-        offloaded_tokens.load(Ordering::Relaxed),
-        draft_tokens.len(),
+        ModeStats {
+            latencies,
+            successes,
+            failures,
+            offloaded_tokens: offloaded_tokens.load(Ordering::Relaxed),
+            expected_offload_tokens_per_success: draft_tokens.len(),
+        },
     ))
 }
 
