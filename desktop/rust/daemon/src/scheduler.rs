@@ -2039,6 +2039,19 @@ fn local_scout_fallback_allowed(
         && avg_latency_ms <= local_scout_fallback_remote_latency_cap_ms()
 }
 
+fn build_chat_prompt(messages: &[ChatMessage]) -> String {
+    let mut prompt = String::new();
+    prompt.push_str("<|begin_of_text|>");
+    for msg in messages {
+        prompt.push_str(&format!(
+            "<|start_header_id|>{}<|end_header_id|>\n\n{}<|eot_id|>",
+            msg.role, msg.content
+        ));
+    }
+    prompt.push_str("<|start_header_id|>assistant<|end_header_id|>\n\n");
+    prompt
+}
+
 async fn local_daemon_draft_capable(state: &SharedState) -> bool {
     let engine_guard = state.engine.lock().await;
     engine_guard.is_some()
@@ -3633,15 +3646,7 @@ pub(crate) async fn chat_completions_handler(
         None
     };
 
-    let mut prompt = String::new();
-    prompt.push_str("<|begin_of_text|>");
-    for msg in &req.messages {
-        prompt.push_str(&format!(
-            "<|start_header_id|>{}\n\n{}<|eot_id|>",
-            msg.role, msg.content
-        ));
-    }
-    prompt.push_str("<|start_header_id|>assistant<|end_header_id|>\n\n");
+    let prompt = build_chat_prompt(&req.messages);
 
     let request_id =
         requested_request_id(&headers).unwrap_or_else(|| format!("req-{}", uuid::Uuid::new_v4()));
@@ -4493,11 +4498,11 @@ mod tests {
         should_attempt_mesh_forward, should_bypass_speculative_for_fast_verifier,
         should_forward_to_mesh, should_include_bootstrap_registry_mesh_candidates,
         should_refuse_mesh_degraded, strip_control_tokens, truncate_prompt_context_for_scout,
-        verify_draft_tokens,
+        verify_draft_tokens, build_chat_prompt,
         InferenceMode, MeshEndpointCandidate, MeshEndpointScore, MeshEndpointSource,
         ScoutSupplyEstimate, WorkRequest,
     };
-    use crate::MeshEndpointTelemetry;
+    use crate::{ChatMessage, MeshEndpointTelemetry};
     use anyhow::Result;
     use axum::http::{HeaderMap, HeaderValue};
     use std::collections::{HashSet, VecDeque};
@@ -4831,6 +4836,25 @@ mod tests {
         assert_eq!(engine.position, 4);
         rollback_engine_context(&mut engine, result.consumed_tokens, "test");
         assert_eq!(engine.position, 0);
+    }
+
+    #[test]
+    fn chat_prompt_uses_llama_header_delimiters() {
+        let prompt = build_chat_prompt(&[
+            ChatMessage {
+                role: "system".to_string(),
+                content: "You are concise.".to_string(),
+            },
+            ChatMessage {
+                role: "user".to_string(),
+                content: "hey".to_string(),
+            },
+        ]);
+
+        assert!(prompt.starts_with("<|begin_of_text|>"));
+        assert!(prompt.contains("<|start_header_id|>system<|end_header_id|>\n\nYou are concise.<|eot_id|>"));
+        assert!(prompt.contains("<|start_header_id|>user<|end_header_id|>\n\nhey<|eot_id|>"));
+        assert!(prompt.ends_with("<|start_header_id|>assistant<|end_header_id|>\n\n"));
     }
 
     #[test]
