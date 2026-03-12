@@ -9,6 +9,8 @@ When the browser escalates to the network, it uses the same OpenAI-compatible AP
 - the raw conversation window
 - a compacted conversation window produced in the browser
 
+Before that escalation, the browser may run semantic ranking and compaction in a worker lane that prefers ONNX/WebNN and falls back to ONNX/WASM or hashed embeddings.
+
 The verifier remains stateless with respect to long-lived user session ownership.
 
 ## Canonical Schemas
@@ -47,6 +49,16 @@ The browser router currently resolves one of:
 - `network_route_with_compaction`
 
 These outcomes are browser-side product behavior, not extra daemon API modes.
+
+### Browser-side semantic compaction
+
+The browser may semantically rank older messages before producing a compacted network payload.
+
+- preferred backend: `onnx-webnn`
+- fallback backend: `onnx-wasm`
+- last-resort fallback: deterministic hashed embeddings
+
+This is browser product behavior and does not change the public daemon request schema.
 
 ### Header `Authorization: Bearer <api_key>`
 

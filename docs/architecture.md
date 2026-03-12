@@ -17,7 +17,8 @@ Shard is now organized around a local-first execution rule:
 - `web/src/lib/conversation-state.ts`: browser-owned chat history and assistant token assembly.
 - `web/src/lib/prompt-compaction.ts`: browser-side summary and trimming for long conversations.
 - `web/src/lib/webllm.ts`: browser local-answer runtime plus experimental scout runtime.
-- `web/src/lib/scout-capability.ts`: browser accelerator detection for current WebGPU runtime support plus future WebNN/NPU eligibility.
+- `web/src/lib/scout-capability.ts`: browser accelerator detection for current WebGPU runtime support plus the low-power ONNX/WebNN worker lane.
+- `web/src/lib/webnn-embeddings.ts` and `web/src/lib/webnn-embeddings-worker.ts`: semantic ranking and compaction helpers that prefer ONNX/WebNN, then fall back to ONNX/WASM or hashed embeddings.
 - `web/src/lib/swarm.ts` and `web/src/lib/scout-engine.ts`: experimental scout lifecycle and timing instrumentation.
 - `desktop/rust/daemon/src/scheduler.rs`: inference-mode resolution, verifier scheduling, and speculative routing rules.
 
@@ -70,20 +71,21 @@ The browser is the source of truth for session context.
 
 This is intentionally different from trying to serialize browser KV cache into a different verifier runtime. Shard keeps the browser-side state model-agnostic.
 
-## Browser Accelerator Classification
+## Browser Accelerator Classification and Semantic Worker Lane
 
 Shard now distinguishes between two browser capability classes:
 
 - interactive browser runtime: currently WebGPU/WebLLM only
-- low-power background eligibility: detected via WebNN capability probe and session warm-state tracking
+- low-power background worker lane: ONNX/WebNN when available, with ONNX/WASM or hashed fallback
 
-This matters because the current browser execution path is still GPU-backed, while the future low-power contributor lane is expected to come from ONNX/WebNN workers on NPUs.
+This matters because the current browser generation path is still GPU-backed, while browser-side semantic ranking and compaction can now run in a lower-risk worker lane without claiming full browser generation on WebNN.
 
 Today:
 
 - WebGPU is the only shipped browser inference runtime.
-- WebNN detection is groundwork, not the active generation path.
-- The browser performs a tiny active WebNN probe and caches warm-state for the current session so future worker-based experiments can classify likely NPU-capable nodes without repeating cold startup every page load.
+- ONNX/WebNN is the shipped semantic worker path for embeddings-style ranking and compaction tasks.
+- The worker prefers `webnn`, falls back to `wasm`, and then to deterministic hashed embeddings if runtime initialization fails.
+- The browser still performs capability probing and caches warm-state so repeated sessions do not re-pay avoidable probe cost.
 
 ## Experimental WAN Scout Path
 

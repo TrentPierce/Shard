@@ -114,24 +114,24 @@ Route non-speculative and verifier-heavy work to the best healthy nodes.
 - Stable peers are preferred over noisy peers.
 - Routing quality improves without starving healthy slower capacity.
 
-## Phase 5: Low-Power Browser Capability and WebNN Prep
+## Phase 5: Low-Power Browser Capability and ONNX/WebNN Worker Lane
 
 ### Objective
 
-Prepare a real low-power contributor lane without pretending the ONNX/WebNN execution path already ships.
+Ship a real low-power browser worker lane for semantic tasks while keeping browser generation on the proven WebGPU path.
 
 ### Changes
 
 - Detect WebNN capability in the browser alongside WebGPU and WASM.
-- Run an active tiny-graph probe instead of relying on `navigator.ml` existence alone.
+- Run an active worker/runtime probe instead of relying on `navigator.ml` existence alone.
 - Persist WebNN warm-state per session so repeated tab joins do not re-pay avoidable probe cost.
-- Start with embeddings and low-risk background tasks before draft-token generation.
-- Design unified model manifests that can describe WebGPU/TVM and WebNN/ONNX variants of the same logical model.
+- Ship embeddings and low-risk semantic background tasks before draft-token generation.
+- Use unified model manifests that describe WebGPU/TVM and WebNN/ONNX variants of the same logical model.
 
 ### Success Criteria
 
-- Browser telemetry can distinguish current WebGPU runtime support from future low-power WebNN eligibility.
-- WebNN experiments prove they are actually using the low-power path instead of silently falling back to CPU.
+- Browser telemetry can distinguish WebGPU generation capability from the ONNX/WebNN semantic worker lane.
+- ONNX/WebNN worker runs can prove they are actually using `webnn` instead of silently falling back to `wasm` or hashed embeddings.
 - Model-variant metadata stays version-aligned across browser engines.
 
 ## Phase 6: Experimental Research Tracks

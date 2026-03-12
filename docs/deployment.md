@@ -11,6 +11,12 @@ Normal deployments should use the local-first product path:
 
 Experimental scout tuning should not be part of the default production startup path.
 
+The default browser product path now includes a low-risk semantic worker lane:
+
+- WebGPU/WebLLM remains the browser generation runtime
+- ONNX/WebNN is used for semantic ranking and compaction when available
+- ONNX/WASM and hashed embeddings remain valid fallback paths
+
 ## Required Environment Variables
 
 - `SHARD_BACKEND_URLS` / `NEXT_PUBLIC_SHARD_BACKEND_URLS` for HA backend lists

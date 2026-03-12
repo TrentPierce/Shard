@@ -4,6 +4,8 @@ This guide gets a Shard verifier node running in a few minutes.
 
 The verifier is the heavy-inference worker in the current Shard architecture. Browser sessions may answer easy prompts locally, then escalate harder prompts to your daemon when more compute is needed.
 
+The browser now also owns semantic compaction before escalation. That worker lane prefers ONNX/WebNN for low-risk ranking work, but your node still receives a normal compacted chat payload through the standard API.
+
 ## Prerequisites
 
 - Docker and Docker Compose, or a local binary build
@@ -86,7 +88,7 @@ On first launch, ShardGUI auto-downloads the default verifier model from `deploy
 ## How This Node Fits the Product
 
 - Browser `Auto` mode keeps easy prompts local when possible.
-- Harder prompts route to the verifier daemon.
+- Harder prompts route to the verifier daemon, often after browser-side semantic compaction.
 - The daemon is designed to keep model weights hot while treating per-request state as disposable.
 - Experimental browser scouts are benchmark-only and no longer part of the normal chat startup path.
 
