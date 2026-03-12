@@ -12,6 +12,7 @@ describe("browser router", () => {
       prompt: "Summarize Shard in one paragraph.",
       mode: "auto",
       browserRuntimeAvailable: true,
+      browserRuntimePreferred: true,
     })
 
     expect(decision.kind).toBe("local_answer")
@@ -24,6 +25,7 @@ describe("browser router", () => {
       prompt: "Refactor this distributed scheduler and explain the architecture tradeoffs.",
       mode: "auto",
       browserRuntimeAvailable: true,
+      browserRuntimePreferred: true,
     })
 
     expect(decision.kind).toBe("network_route")
@@ -40,6 +42,7 @@ describe("browser router", () => {
       prompt: "Keep going.",
       mode: "auto",
       browserRuntimeAvailable: true,
+      browserRuntimePreferred: true,
     })
 
     expect(decision.kind).toBe("network_route_with_compaction")
@@ -65,6 +68,7 @@ describe("browser router", () => {
       prompt: "Run the experimental path.",
       mode: "experimental-wan",
       browserRuntimeAvailable: true,
+      browserRuntimePreferred: true,
     })
 
     expect(decision.kind).toBe("network_route")
@@ -80,8 +84,22 @@ describe("browser router", () => {
       prompt: "Can you clarify how that works?",
       mode: "auto",
       browserRuntimeAvailable: true,
+      browserRuntimePreferred: true,
     })
 
     expect(decision.kind).toBe("local_answer")
+  })
+
+  it("routes simple prompts to the network when the browser runtime is not preferred", () => {
+    const decision = decideChatRoute({
+      history: [message("hi")],
+      prompt: "hi",
+      mode: "auto",
+      browserRuntimeAvailable: true,
+      browserRuntimePreferred: false,
+    })
+
+    expect(decision.kind).toBe("network_route")
+    expect(decision.reason).toBe("auto_network_runtime_not_preferred")
   })
 })

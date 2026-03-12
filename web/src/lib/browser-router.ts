@@ -23,6 +23,7 @@ type RouteInput = {
     prompt: string
     mode: ChatRouteMode
     browserRuntimeAvailable: boolean
+    browserRuntimePreferred?: boolean
 }
 
 const SIMPLE_PROMPT_RE =
@@ -74,6 +75,7 @@ function shouldCompact(history: ChatMessage[]): boolean {
 
 export function decideChatRoute(input: RouteInput): ChatRouteDecision {
     const { history, prompt, mode, browserRuntimeAvailable } = input
+    const browserRuntimePreferred = input.browserRuntimePreferred ?? browserRuntimeAvailable
     const complexityScore = scoreComplexity(history, prompt)
     const compact = shouldCompact(history)
 
@@ -116,7 +118,7 @@ export function decideChatRoute(input: RouteInput): ChatRouteDecision {
         }
     }
 
-    if (browserRuntimeAvailable && complexityScore <= 0.38 && !compact) {
+    if (browserRuntimeAvailable && browserRuntimePreferred && complexityScore <= 0.38 && !compact) {
         return {
             kind: "local_answer",
             reason: "auto_local_simple_prompt",
@@ -130,6 +132,8 @@ export function decideChatRoute(input: RouteInput): ChatRouteDecision {
         kind: compact ? "network_route_with_compaction" : "network_route",
         reason: compact
             ? "auto_network_compacted_context"
+            : browserRuntimeAvailable && !browserRuntimePreferred
+                ? "auto_network_runtime_not_preferred"
             : complexityScore > 0.55
                 ? "auto_network_heavy_prompt"
                 : "auto_network_complex_prompt",

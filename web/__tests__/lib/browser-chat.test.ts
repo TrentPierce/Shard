@@ -1,24 +1,50 @@
-import { canUseBrowserChatRuntime, sendBrowserChatMessage } from "@/lib/browser-chat"
+import {
+  canUseBrowserChatRuntime,
+  sendBrowserChatMessage,
+  shouldPreferBrowserChatRuntime,
+} from "@/lib/browser-chat"
 
 jest.mock("@/lib/webllm", () => ({
   checkWebGPUSupport: jest.fn(),
   generateBrowserChatCompletion: jest.fn(),
+  isModelCached: jest.fn(),
 }))
 
-const { checkWebGPUSupport, generateBrowserChatCompletion } = jest.requireMock("@/lib/webllm") as {
+const { checkWebGPUSupport, generateBrowserChatCompletion, isModelCached } = jest.requireMock("@/lib/webllm") as {
   checkWebGPUSupport: jest.Mock
   generateBrowserChatCompletion: jest.Mock
+  isModelCached: jest.Mock
 }
 
 describe("browser chat", () => {
+  const originalNavigator = global.navigator
+
   beforeEach(() => {
     jest.clearAllMocks()
+    Object.defineProperty(global, "navigator", {
+      value: { userAgent: "Mozilla/5.0 Chrome/122.0" },
+      configurable: true,
+    })
+  })
+
+  afterAll(() => {
+    Object.defineProperty(global, "navigator", {
+      value: originalNavigator,
+      configurable: true,
+    })
   })
 
   it("reports runtime support when WebGPU is available", async () => {
     checkWebGPUSupport.mockResolvedValue({ supported: true })
 
     await expect(canUseBrowserChatRuntime()).resolves.toBe(true)
+  })
+
+  it("does not prefer uncached browser runtimes in auto mode", async () => {
+    checkWebGPUSupport.mockResolvedValue({ supported: true })
+    isModelCached.mockResolvedValue(false)
+
+    await expect(shouldPreferBrowserChatRuntime()).resolves.toBe(false)
   })
 
   it("streams a local browser answer and emits completion", async () => {

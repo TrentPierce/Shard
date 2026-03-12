@@ -1,7 +1,14 @@
-import { checkWebGPUSupport, generateBrowserChatCompletion } from "./webllm"
+import { checkWebGPUSupport, generateBrowserChatCompletion, isModelCached } from "./webllm"
 import { emitChatSuccess, type ChatExecutionResult, type ChatMessage } from "./api"
 
 let browserRuntimeSupportPromise: Promise<boolean> | null = null
+let browserRuntimePreferencePromise: Promise<boolean> | null = null
+
+function isFirefoxBrowser(): boolean {
+    if (typeof navigator === "undefined") return false
+    const ua = navigator.userAgent.toLowerCase()
+    return ua.includes("firefox") && !ua.includes("seamonkey")
+}
 
 export async function canUseBrowserChatRuntime(): Promise<boolean> {
     if (!browserRuntimeSupportPromise) {
@@ -10,6 +17,26 @@ export async function canUseBrowserChatRuntime(): Promise<boolean> {
             .catch(() => false)
     }
     return browserRuntimeSupportPromise
+}
+
+export async function shouldPreferBrowserChatRuntime(): Promise<boolean> {
+    if (!browserRuntimePreferencePromise) {
+        browserRuntimePreferencePromise = (async () => {
+            const supported = await canUseBrowserChatRuntime()
+            if (!supported) {
+                return false
+            }
+            if (isFirefoxBrowser()) {
+                return false
+            }
+            try {
+                return await isModelCached()
+            } catch {
+                return false
+            }
+        })()
+    }
+    return browserRuntimePreferencePromise
 }
 
 export async function sendBrowserChatMessage(

@@ -51,6 +51,15 @@ export function resolveCorsOrigin(request: Pick<NextRequest, "headers" | "nextUr
   if (!origin) {
     return null
   }
+  const forwardedHost = request.headers.get("x-forwarded-host") || request.headers.get("host")
+  const forwardedProto = request.headers.get("x-forwarded-proto") || "https"
+  if (forwardedHost && origin === `${forwardedProto}://${forwardedHost}`) {
+    return origin
+  }
+  const siteOrigin = process.env.NEXT_PUBLIC_SITE_URL?.trim().replace(/\/$/, "")
+  if (siteOrigin && origin === siteOrigin) {
+    return origin
+  }
   if (origin === request.nextUrl.origin) {
     return origin
   }

@@ -5,7 +5,11 @@ import {
   emitChatFailure,
   sendMessage as sendNetworkMessage,
 } from "@/lib/api"
-import { sendBrowserChatMessage, canUseBrowserChatRuntime } from "@/lib/browser-chat"
+import {
+  sendBrowserChatMessage,
+  canUseBrowserChatRuntime,
+  shouldPreferBrowserChatRuntime,
+} from "@/lib/browser-chat"
 import {
   decideChatRoute,
   type ChatRouteDecision,
@@ -140,12 +144,16 @@ export default function ChatPage() {
       return networkSnapshotPromise
     }
 
-    const browserRuntimeAvailable = await canUseBrowserChatRuntime()
+    const [browserRuntimeAvailable, browserRuntimePreferred] = await Promise.all([
+      canUseBrowserChatRuntime(),
+      shouldPreferBrowserChatRuntime(),
+    ])
     const decision = decideChatRoute({
       history: convo.rawMessages,
       prompt: content,
       mode: routeMode,
       browserRuntimeAvailable,
+      browserRuntimePreferred,
     })
     emitRouteDecision({
       mode: routeMode,
