@@ -46,10 +46,13 @@ function parseCorsOrigins(raw: string | undefined): string[] {
 const CORS_ALLOWLIST = parseCorsOrigins(process.env.SHARD_CORS_ORIGINS)
 const CORS_ALLOWLIST_SET = new Set(CORS_ALLOWLIST)
 
-function resolveCorsOrigin(request: NextRequest): string | null {
+export function resolveCorsOrigin(request: Pick<NextRequest, "headers" | "nextUrl">): string | null {
   const origin = request.headers.get("origin")
   if (!origin) {
     return null
+  }
+  if (origin === request.nextUrl.origin) {
+    return origin
   }
   if (CORS_ALLOWLIST_SET.has("*")) {
     return origin
