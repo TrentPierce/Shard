@@ -2074,6 +2074,7 @@ async fn generate_local_daemon_draft(
         }
     };
     let engine = engine_guard.as_mut()?;
+    let mut consumed_tokens = 0usize;
 
     let mut tokens = engine.tokenize(&work.prompt_context, 4096).ok()?;
     if !tokens.is_empty() && tokens[0] == 128000 {
@@ -2082,6 +2083,7 @@ async fn generate_local_daemon_draft(
     if engine.eval(&tokens).is_err() {
         return None;
     }
+    consumed_tokens = consumed_tokens.saturating_add(tokens.len());
 
     let target = (work.min_tokens.max(4) as usize).min(32);
     let mut draft_tokens = Vec::with_capacity(target);
@@ -2110,7 +2112,10 @@ async fn generate_local_daemon_draft(
         if engine.eval(&[best_idx as i32]).is_err() {
             break;
         }
+        consumed_tokens = consumed_tokens.saturating_add(1);
     }
+
+    rollback_engine_context(engine, consumed_tokens, "local_daemon_draft");
 
     if draft_tokens.is_empty() {
         return None;
@@ -3281,6 +3286,8 @@ pub(crate) async fn verify_draft_tokens(
     draft_tokens: &[i32],
     eval_prompt: bool,
 ) -> DraftVerificationResult {
+    let mut prompt_evaluated = false;
+    let mut consumed_tokens = 0usize;
     // 1. Evaluate the prompt context first to build KV cache
     if eval_prompt && engine.eval(prompt_tokens).is_err() {
         tracing::warn!("verify_draft_tokens: prompt eval failed");
@@ -3289,7 +3296,13 @@ pub(crate) async fn verify_draft_tokens(
             accepted_text: String::new(),
             first_rejection_idx: None,
             resample_token: None,
+            prompt_evaluated,
+            consumed_tokens,
         };
+    }
+    if eval_prompt {
+        prompt_evaluated = true;
+        consumed_tokens = consumed_tokens.saturating_add(prompt_tokens.len());
     }
 
     let mut accepted_tokens = Vec::new();
@@ -3391,6 +3404,7 @@ pub(crate) async fn verify_draft_tokens(
                 if engine.eval(&[draft_token]).is_err() {
                     break;
                 }
+                consumed_tokens = consumed_tokens.saturating_add(1);
             } else {
                 // First rejection — log the top-5 for diagnostics.
                 // Sort the small top partition (≤top_k+1 elements) to get true top-5.
@@ -3416,6 +3430,8 @@ pub(crate) async fn verify_draft_tokens(
                     accepted_text,
                     first_rejection_idx,
                     resample_token,
+                    prompt_evaluated,
+                    consumed_tokens,
                 };
             }
         } else {
@@ -3434,6 +3450,8 @@ pub(crate) async fn verify_draft_tokens(
         accepted_text,
         first_rejection_idx,
         resample_token: None,
+        prompt_evaluated,
+        consumed_tokens,
     }
 }
 
@@ -3849,6 +3867,7 @@ pub(crate) async fn chat_completions_handler(
             let mut speculative_draft = speculative_draft;
             let mut engine_guard = state.engine.lock().await;
             if let Some(engine) = engine_guard.as_mut() {
+                let mut engine_tokens_evaluated = 0usize;
                 if let Ok(mut tokens) = engine.tokenize(&prompt, 4096) {
                     if !tokens.is_empty() && tokens[0] == 128000 {
                         tokens.remove(0);
@@ -3918,7 +3937,9 @@ pub(crate) async fn chat_completions_handler(
                                 ));
                                 completion_tokens_generated = completion_tokens_generated
                                     .saturating_add(accepted_count);
-                                prompt_already_evaluated = true;
+                                prompt_already_evaluated = result.prompt_evaluated;
+                                engine_tokens_evaluated = engine_tokens_evaluated
+                                    .saturating_add(result.consumed_tokens);
                                 state.system_metrics.inc_speculative_draft_tokens(draft_count);
                                 state.system_metrics.inc_speculative_accepted_tokens(accepted_count);
                                 state.system_metrics.inc_speculative_rejected_tokens(rejected_count);
@@ -3987,7 +4008,12 @@ pub(crate) async fn chat_completions_handler(
                     let prompt_ready = if prompt_already_evaluated {
                         true
                     } else {
-                        engine.eval(&tokens).is_ok()
+                        let ready = engine.eval(&tokens).is_ok();
+                        if ready {
+                            engine_tokens_evaluated =
+                                engine_tokens_evaluated.saturating_add(tokens.len());
+                        }
+                        ready
                     };
                     if prompt_ready {
                         let generation_started_ms = now_ms();
@@ -4048,6 +4074,8 @@ pub(crate) async fn chat_completions_handler(
                                 if engine.eval(&[best_idx as i32]).is_err() {
                                     break;
                                 }
+                                engine_tokens_evaluated =
+                                    engine_tokens_evaluated.saturating_add(1);
                                 completion_tokens_generated =
                                     completion_tokens_generated.saturating_add(1);
                                 emitted += 1;
@@ -4072,6 +4100,7 @@ pub(crate) async fn chat_completions_handler(
                         ).await;
                     }
                 }
+                rollback_engine_context(engine, engine_tokens_evaluated, "chat_stream");
             } else {
                 let err = serde_json::json!({"error": "No model engine loaded in this daemon"});
                 yield Ok(Event::default().data(err.to_string()));
@@ -4142,6 +4171,7 @@ pub(crate) async fn chat_completions_handler(
         {
             let mut engine_guard = state.engine.lock().await;
             if let Some(engine) = engine_guard.as_mut() {
+                let mut engine_tokens_evaluated = 0usize;
                 if let Ok(mut tokens) = engine.tokenize(&prompt, 4096) {
                     if !tokens.is_empty() && tokens[0] == 128000 {
                         tokens.remove(0);
@@ -4216,7 +4246,9 @@ pub(crate) async fn chat_completions_handler(
                             ));
                             completion_tokens_generated =
                                 completion_tokens_generated.saturating_add(accepted_count);
-                            prompt_already_evaluated = true;
+                            prompt_already_evaluated = result.prompt_evaluated;
+                            engine_tokens_evaluated = engine_tokens_evaluated
+                                .saturating_add(result.consumed_tokens);
                             state
                                 .system_metrics
                                 .inc_speculative_draft_tokens(draft_count);
@@ -4287,7 +4319,12 @@ pub(crate) async fn chat_completions_handler(
                     let prompt_ready = if prompt_already_evaluated {
                         true
                     } else {
-                        engine.eval(&tokens).is_ok()
+                        let ready = engine.eval(&tokens).is_ok();
+                        if ready {
+                            engine_tokens_evaluated =
+                                engine_tokens_evaluated.saturating_add(tokens.len());
+                        }
+                        ready
                     };
                     if prompt_ready {
                         let generation_started_ms = now_ms();
@@ -4342,6 +4379,8 @@ pub(crate) async fn chat_completions_handler(
                                 if engine.eval(&[best_idx as i32]).is_err() {
                                     break;
                                 }
+                                engine_tokens_evaluated =
+                                    engine_tokens_evaluated.saturating_add(1);
                                 completion_tokens_generated =
                                     completion_tokens_generated.saturating_add(1);
                                 emitted += 1;
@@ -4368,6 +4407,7 @@ pub(crate) async fn chat_completions_handler(
                         .await;
                     }
                 }
+                rollback_engine_context(engine, engine_tokens_evaluated, "chat_completion");
             } else {
                 full_text = "No model engine loaded in this daemon".to_string();
             }
@@ -4449,16 +4489,54 @@ mod tests {
         mesh_forward_telemetry_penalty_ms, model_pair_acceptance_rates, normalize_endpoint,
         parse_speculative_min_request_tokens, probe_allowed_for_request,
         remove_work_id_from_scout_queue, request_host_is_local, requested_request_id,
-        resolve_inference_mode, should_abort_on_degenerate_output,
+        resolve_inference_mode, rollback_engine_context, should_abort_on_degenerate_output,
         should_attempt_mesh_forward, should_bypass_speculative_for_fast_verifier,
         should_forward_to_mesh, should_include_bootstrap_registry_mesh_candidates,
         should_refuse_mesh_degraded, strip_control_tokens, truncate_prompt_context_for_scout,
+        verify_draft_tokens,
         InferenceMode, MeshEndpointCandidate, MeshEndpointScore, MeshEndpointSource,
         ScoutSupplyEstimate, WorkRequest,
     };
     use crate::MeshEndpointTelemetry;
+    use anyhow::Result;
     use axum::http::{HeaderMap, HeaderValue};
     use std::collections::{HashSet, VecDeque};
+
+    struct MockVerifierModel {
+        logits: Vec<Vec<f32>>,
+        cursor: usize,
+        position: i32,
+    }
+
+    impl shard_verifier::inference::VerifierModel for MockVerifierModel {
+        fn eval(&mut self, tokens: &[i32]) -> Result<i32> {
+            self.position += tokens.len() as i32;
+            Ok(self.position)
+        }
+
+        fn tokenize(&mut self, _text: &str, _max_tokens: usize) -> Result<Vec<i32>> {
+            Ok(Vec::new())
+        }
+
+        fn get_logits(&mut self, _vocab_size: usize) -> Result<Vec<f32>> {
+            let logits = self
+                .logits
+                .get(self.cursor)
+                .cloned()
+                .unwrap_or_else(|| vec![0.0; 16]);
+            self.cursor = self.cursor.saturating_add(1);
+            Ok(logits)
+        }
+
+        fn token_to_piece(&mut self, token_id: i32) -> Result<String> {
+            Ok(format!("tok_{token_id}"))
+        }
+
+        fn rollback(&mut self, steps: i32) -> Result<i32> {
+            self.position = self.position.saturating_sub(steps);
+            Ok(self.position)
+        }
+    }
 
     #[test]
     fn experimental_wan_aliases_map_to_experimental_mode() {
@@ -4715,6 +4793,44 @@ mod tests {
     fn degeneration_guard_detects_repetitive_suffix() {
         assert!(should_abort_on_degenerate_output("endendendend", "end").is_some());
         assert!(should_abort_on_degenerate_output("hello world ", "there").is_none());
+    }
+
+    #[test]
+    fn verify_draft_tokens_reports_consumed_context() {
+        let mut engine = MockVerifierModel {
+            logits: vec![
+                {
+                    let mut logits = vec![0.0; 128];
+                    logits[3] = 10.0;
+                    logits
+                },
+                {
+                    let mut logits = vec![0.0; 128];
+                    logits[4] = 10.0;
+                    logits
+                },
+            ],
+            cursor: 0,
+            position: 0,
+        };
+
+        let result = tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(verify_draft_tokens(
+                &mut engine,
+                "meta-llama/Llama-3.2-1B",
+                "meta-llama/Llama-3.1-8B",
+                &[11, 12],
+                &[3, 4],
+                true,
+            ));
+
+        assert!(result.prompt_evaluated);
+        assert_eq!(result.accepted_tokens, vec![3, 4]);
+        assert_eq!(result.consumed_tokens, 4);
+        assert_eq!(engine.position, 4);
+        rollback_engine_context(&mut engine, result.consumed_tokens, "test");
+        assert_eq!(engine.position, 0);
     }
 
     #[test]

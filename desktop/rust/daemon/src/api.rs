@@ -3369,6 +3369,7 @@ pub(crate) async fn generate_local_fallback_tokens(
     let Some(engine) = engine_guard.as_mut() else {
         return out;
     };
+    let mut consumed_tokens = 0usize;
 
     let Ok(mut tokens) = engine.tokenize(prompt_context, 4096) else {
         return out;
@@ -3379,6 +3380,7 @@ pub(crate) async fn generate_local_fallback_tokens(
     if engine.eval(&tokens).is_err() {
         return out;
     }
+    consumed_tokens = consumed_tokens.saturating_add(tokens.len());
 
     let mut emitted = 0u32;
     while emitted < max_new_tokens {
@@ -3407,8 +3409,10 @@ pub(crate) async fn generate_local_fallback_tokens(
         if engine.eval(&[best_idx as i32]).is_err() {
             break;
         }
+        consumed_tokens = consumed_tokens.saturating_add(1);
         emitted += 1;
     }
+    rollback_engine_context(engine, consumed_tokens, "local_fallback_tokens");
     out
 }
 

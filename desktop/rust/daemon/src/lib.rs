@@ -966,6 +966,8 @@ struct DraftVerificationResult {
     first_rejection_idx: Option<usize>,
     #[allow(dead_code)]
     resample_token: Option<i32>,
+    prompt_evaluated: bool,
+    consumed_tokens: usize,
 }
 
 async fn capture_alert<F>(state: &SharedState, f: F)
@@ -1633,6 +1635,30 @@ fn now_ms() -> u128 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| d.as_millis())
+}
+
+pub(crate) fn rollback_engine_context(
+    engine: &mut impl shard_verifier::inference::VerifierModel,
+    consumed_tokens: usize,
+    scope: &str,
+) {
+    if consumed_tokens == 0 {
+        return;
+    }
+    let steps = consumed_tokens.min(i32::MAX as usize) as i32;
+    match engine.rollback(steps) {
+        Ok(position) => {
+            tracing::debug!(scope, steps, position, "rolled back verifier engine context");
+        }
+        Err(err) => {
+            tracing::warn!(
+                scope,
+                steps,
+                error = %err,
+                "failed to roll back verifier engine context"
+            );
+        }
+    }
 }
 
 fn data_dir() -> std::path::PathBuf {
@@ -5100,6 +5126,7 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
                                                     return;
                                                 }
                                             };
+                                            let mut consumed_tokens = 0usize;
 
                                             let mut tokens = match engine.tokenize(&work.prompt_context, 4096) {
                                                 Ok(t) => t,
@@ -5111,6 +5138,7 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
                                             if engine.eval(&tokens).is_err() {
                                                 return;
                                             }
+                                            consumed_tokens = consumed_tokens.saturating_add(tokens.len());
 
                                             let target = (work.min_tokens.max(4) as usize).min(32);
                                             let mut draft_tokens = Vec::with_capacity(target);
@@ -5148,7 +5176,10 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
                                                 if engine.eval(&[best_idx as i32]).is_err() {
                                                     break;
                                                 }
+                                                consumed_tokens = consumed_tokens.saturating_add(1);
                                             }
+
+                                            rollback_engine_context(engine, consumed_tokens, "daemon_scout_worker");
 
                                             drop(engine_guard);
 
