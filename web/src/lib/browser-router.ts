@@ -36,6 +36,8 @@ const COMPLEX_PROMPT_RE =
 
 const CODE_RE = /```|function\s+\w+|class\s+\w+|console\.|stack trace|error[:\s]/i
 const SYSTEM_HEAVY_RE = /\b(architecture|tradeoffs|distributed|scheduler|latency|throughput|production|integration)\b/i
+const SHARD_PRODUCT_RE = /\b(shard|verifier|mesh forwarding|browser router|local-first|offload|speculative)\b/i
+const SHARD_PRODUCT_SYSTEM_RE = /\b(shard|verifier|mesh|router|local-first|offload|speculative)\b.*\b(route|routing|network|latency|scheduler|forward|forwarding|architecture|prompts)\b|\b(route|routing|network|latency|scheduler|forward|forwarding|architecture|prompts)\b.*\b(shard|verifier|mesh|router|local-first|offload|speculative)\b/i
 const LANGUAGE_RE = /\b(typescript|javascript|python|rust|sql|go)\b/i
 const MULTISTEP_RE = /\b(first|second|third|then|finally|walk me through|how would you|design a|build a)\b/i
 const SHORT_LOCAL_PROMPT_RE = /\b(explain in one paragraph|one sentence|tl;dr|quick summary|briefly)\b/i
@@ -58,6 +60,7 @@ function scoreComplexity(history: ChatMessage[], prompt: string): number {
     if (lineCount > 8) score += 0.15
     if (COMPLEX_PROMPT_RE.test(prompt)) score += 0.35
     if (SYSTEM_HEAVY_RE.test(prompt)) score += 0.2
+    if (SHARD_PRODUCT_RE.test(prompt)) score += 0.34
     if (LANGUAGE_RE.test(prompt)) score += 0.15
     if (MULTISTEP_RE.test(prompt)) score += 0.2
     if (CODE_RE.test(prompt)) score += 0.4
@@ -114,6 +117,18 @@ export function decideChatRoute(input: RouteInput): ChatRouteDecision {
             reason: "experimental_wan_mode",
             complexityScore,
             networkMode: "experimental_wan",
+            shouldCompact: compact,
+        }
+    }
+
+    if (browserRuntimeAvailable && SHARD_PRODUCT_SYSTEM_RE.test(prompt) && prompt.length >= 32) {
+        return {
+            kind: compact ? "network_route_with_compaction" : "network_route",
+            reason: compact
+                ? "auto_network_shard_context_compacted"
+                : "auto_network_product_specific_prompt",
+            complexityScore,
+            networkMode: "standard",
             shouldCompact: compact,
         }
     }

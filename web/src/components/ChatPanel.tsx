@@ -132,15 +132,17 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
             browserRuntimeAvailable,
             browserRuntimePreferred,
         })
-        emitRouteDecision({
-            mode: routeMode,
-            decision,
-            browserRuntimeAvailable,
-            promptChars: text.length,
-            historyMessages: convo.rawMessages.length,
-            historyChars: convo.rawMessages.reduce((sum, message) => sum + message.content.length, 0),
-            fallback: false,
-        })
+        if (decision.kind === "local_answer") {
+            emitRouteDecision({
+                mode: routeMode,
+                decision,
+                browserRuntimeAvailable,
+                promptChars: text.length,
+                historyMessages: convo.rawMessages.length,
+                historyChars: convo.rawMessages.reduce((sum, message) => sum + message.content.length, 0),
+                fallback: false,
+            })
+        }
         setLastDecision(decision)
         beginAssistantMessage()
         let networkAttempted = false
@@ -176,6 +178,13 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
                         historyMessages: convo.rawMessages.length,
                         historyChars: convo.rawMessages.reduce((sum, message) => sum + message.content.length, 0),
                         fallback: true,
+                        compactedMessages: fallbackUsesCompaction
+                            ? networkConvo.compactedMessages.length
+                            : networkConvo.rawMessages.length,
+                        compactedChars: networkConvo.compaction.compactedChars,
+                        originalChars: networkConvo.compaction.originalChars,
+                        semanticBackend: networkConvo.semantic?.backend,
+                        semanticMessagesKept: networkConvo.compaction.semanticMessagesKept,
                     })
                     setLastDecision(fallbackDecision)
                     replaceAssistantMessage("")
@@ -189,6 +198,23 @@ export default function ChatPanel({ mode }: ChatPanelProps) {
                 }
             } else {
                 const networkConvo = await getNetworkSnapshot()
+                emitRouteDecision({
+                    mode: routeMode,
+                    decision,
+                    browserRuntimeAvailable,
+                    promptChars: text.length,
+                    historyMessages: convo.rawMessages.length,
+                    historyChars: convo.rawMessages.reduce((sum, message) => sum + message.content.length, 0),
+                    fallback: false,
+                    compactedMessages:
+                        decision.kind === "network_route_with_compaction"
+                            ? networkConvo.compactedMessages.length
+                            : networkConvo.rawMessages.length,
+                    compactedChars: networkConvo.compaction.compactedChars,
+                    originalChars: networkConvo.compaction.originalChars,
+                    semanticBackend: networkConvo.semantic?.backend,
+                    semanticMessagesKept: networkConvo.compaction.semanticMessagesKept,
+                })
                 networkAttempted = true
                 await sendNetworkMessage(
                     decision.kind === "network_route_with_compaction"

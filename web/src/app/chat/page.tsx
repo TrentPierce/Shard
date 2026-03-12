@@ -155,15 +155,17 @@ export default function ChatPage() {
       browserRuntimeAvailable,
       browserRuntimePreferred,
     })
-    emitRouteDecision({
-      mode: routeMode,
-      decision,
-      browserRuntimeAvailable,
-      promptChars: content.length,
-      historyMessages: convo.rawMessages.length,
-      historyChars: convo.rawMessages.reduce((sum, message) => sum + message.content.length, 0),
-      fallback: false,
-    })
+    if (decision.kind === "local_answer") {
+      emitRouteDecision({
+        mode: routeMode,
+        decision,
+        browserRuntimeAvailable,
+        promptChars: content.length,
+        historyMessages: convo.rawMessages.length,
+        historyChars: convo.rawMessages.reduce((sum, message) => sum + message.content.length, 0),
+        fallback: false,
+      })
+    }
     setLastDecision(decision)
     const traceId = `${userMessage.timestamp}`
     setRouteTraces((prev) => [
@@ -219,6 +221,13 @@ export default function ChatPage() {
             historyMessages: convo.rawMessages.length,
             historyChars: convo.rawMessages.reduce((sum, message) => sum + message.content.length, 0),
             fallback: true,
+            compactedMessages: fallbackUsesCompaction
+              ? networkConvo.compactedMessages.length
+              : networkConvo.rawMessages.length,
+            compactedChars: networkConvo.compaction.compactedChars,
+            originalChars: networkConvo.compaction.originalChars,
+            semanticBackend: networkConvo.semantic?.backend,
+            semanticMessagesKept: networkConvo.compaction.semanticMessagesKept,
           })
           setLastDecision(fallbackDecision)
           updateTrace(setRouteTraces, traceId, {
@@ -258,6 +267,23 @@ export default function ChatPage() {
         }
       } else {
         const networkConvo = await getNetworkSnapshot()
+        emitRouteDecision({
+          mode: routeMode,
+          decision,
+          browserRuntimeAvailable,
+          promptChars: content.length,
+          historyMessages: convo.rawMessages.length,
+          historyChars: convo.rawMessages.reduce((sum, message) => sum + message.content.length, 0),
+          fallback: false,
+          compactedMessages:
+            decision.kind === "network_route_with_compaction"
+              ? networkConvo.compactedMessages.length
+              : networkConvo.rawMessages.length,
+          compactedChars: networkConvo.compaction.compactedChars,
+          originalChars: networkConvo.compaction.originalChars,
+          semanticBackend: networkConvo.semantic?.backend,
+          semanticMessagesKept: networkConvo.compaction.semanticMessagesKept,
+        })
         updateTrace(setRouteTraces, traceId, {
           compacted: decision.kind === "network_route_with_compaction",
           semanticBackend: networkConvo.semantic?.backend,

@@ -312,7 +312,7 @@ export function getCapabilityRecommendation(
                 : "For better performance, try Chrome or Edge"
         case "unsupported":
             return webnnAvailable
-                ? "This browser exposes WebNN, but Shard still needs the ONNX/WebNN worker path before it can contribute here."
+                ? "This browser exposes WebNN, and Shard can now use the ONNX/WebNN embeddings worker path for low-risk background compaction tasks."
                 : "Try Chrome or Edge for Scout mode"
     }
 }

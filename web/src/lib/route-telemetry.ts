@@ -10,6 +10,11 @@ export type RouteDecisionDetail = {
     historyMessages: number
     historyChars: number
     fallback: boolean
+    compactedMessages?: number
+    compactedChars?: number
+    originalChars?: number
+    semanticBackend?: string
+    semanticMessagesKept?: number
 }
 
 export type RouteAnalyticsSnapshot = {

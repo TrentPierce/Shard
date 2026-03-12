@@ -17,6 +17,7 @@ import {
     type WebWorkerMLCEngine,
     type InitProgressReport,
 } from "@mlc-ai/web-llm"
+import { browserModelManifest, getBrowserDraftManifest } from "./browser-model-manifest"
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -85,18 +86,18 @@ export type DraftModelPreset = "llama" | "qwen"
 // Keep scout draft model aligned with verifier family to maximize acceptance.
 // Prefer the lighter q4f16 WebLLM variant so browser scouts start faster and
 // return drafts sooner on consumer GPUs.
-const DRAFT_MODEL = "Llama-3.2-1B-Instruct-q4f16_1-MLC"
-const QWEN_DRAFT_MODEL = "Qwen3-0.6B-q4f16_1-MLC"
+const DRAFT_MODEL = browserModelManifest.draft.primaryModelId
+const QWEN_DRAFT_MODEL = browserModelManifest.qwenDraft.primaryModelId
 
 // Mobile devices use the same fast variant by default.
-const NANO_MODEL = "Llama-3.2-1B-Instruct-q4f16_1-MLC"
-const QWEN_NANO_MODEL = "Qwen3-0.6B-q4f16_1-MLC"
+const NANO_MODEL = browserModelManifest.draft.mobileModelId
+const QWEN_NANO_MODEL = browserModelManifest.qwenDraft.mobileModelId
 
 // Compatibility fallback if Llama artifacts fail to load on a specific browser build.
-const FALLBACK_DRAFT_MODEL = "TinyLlama-1.1B-Chat-v1.0-q4f32_1-MLC"
-const FALLBACK_NANO_MODEL = "TinyLlama-1.1B-Chat-v1.0-q4f16_1-MLC"
-const QWEN_FALLBACK_DRAFT_MODEL = "Qwen2.5-0.5B-Instruct-q4f16_1-MLC"
-const QWEN_FALLBACK_NANO_MODEL = "Qwen2.5-0.5B-Instruct-q4f16_1-MLC"
+const FALLBACK_DRAFT_MODEL = browserModelManifest.draft.fallbackModelId
+const FALLBACK_NANO_MODEL = browserModelManifest.draft.mobileFallbackModelId
+const QWEN_FALLBACK_DRAFT_MODEL = browserModelManifest.qwenDraft.fallbackModelId
+const QWEN_FALLBACK_NANO_MODEL = browserModelManifest.qwenDraft.mobileFallbackModelId
 
 // Mobile device memory threshold (4GB in bytes)
 const MOBILE_MEMORY_THRESHOLD = 4 * 1024 * 1024 * 1024
@@ -134,11 +135,7 @@ function isQwenModel(modelId: string): boolean {
 }
 
 export function resolveDraftModelPreset(preset?: string | null): string {
-    const normalized = String(preset || "").trim().toLowerCase()
-    if (normalized === "qwen" || normalized === "qwen3" || normalized === "qwen-0.6b") {
-        return QWEN_DRAFT_MODEL
-    }
-    return DRAFT_MODEL
+    return getBrowserDraftManifest(preset).primaryModelId
 }
 
 function getFallbackModelFor(modelId: string): string {

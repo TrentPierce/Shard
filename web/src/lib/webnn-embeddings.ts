@@ -1,11 +1,11 @@
 import type { ChatMessage } from "./api"
+import { browserModelManifest } from "./browser-model-manifest"
 import {
     buildHashedTextEmbedding,
     cosineSimilarity,
-    DEFAULT_EMBEDDING_DIMENSIONS,
 } from "./embedding-core"
 
-export type EmbeddingBackend = "webnn-worker" | "hash-fallback" | "unsupported"
+export type EmbeddingBackend = "onnx-webnn" | "onnx-wasm" | "hash-fallback" | "unsupported"
 
 export type SemanticRelevanceResult = {
     backend: EmbeddingBackend
@@ -19,7 +19,7 @@ type WorkerSuccessResponse = {
     id: number
     ok: true
     embeddings: number[][]
-    backend: "webnn-worker" | "hash-fallback"
+    backend: "onnx-webnn" | "onnx-wasm" | "hash-fallback"
     dimensions: number
     probeMs?: number
     reason?: string
@@ -43,8 +43,12 @@ const pendingRequests = new Map<
     }
 >()
 
-function localEmbeddings(texts: string[], dimensions = DEFAULT_EMBEDDING_DIMENSIONS): number[][] {
-    return texts.map((text) => Array.from(buildHashedTextEmbedding(text, dimensions)))
+function localEmbeddings(
+    texts: string[],
+    dimensions = browserModelManifest.webnnEmbedding.embeddingDimensions,
+): number[][] {
+    const resolvedDimensions = dimensions || browserModelManifest.webnnEmbedding.embeddingDimensions
+    return texts.map((text) => Array.from(buildHashedTextEmbedding(text, resolvedDimensions)))
 }
 
 function getEmbeddingWorker(): Worker | null {
@@ -97,7 +101,7 @@ async function embedTexts(texts: string[]): Promise<{
         return {
             embeddings: localEmbeddings(texts),
             backend: typeof window === "undefined" ? "unsupported" : "hash-fallback",
-            dimensions: DEFAULT_EMBEDDING_DIMENSIONS,
+            dimensions: browserModelManifest.webnnEmbedding.embeddingDimensions,
             reason: typeof window === "undefined" ? "No browser worker runtime" : "Worker unavailable",
         }
     }
@@ -109,7 +113,6 @@ async function embedTexts(texts: string[]): Promise<{
             id,
             type: "embed_batch",
             texts,
-            dimensions: DEFAULT_EMBEDDING_DIMENSIONS,
         })
     }).catch(() => null)
 
@@ -117,7 +120,7 @@ async function embedTexts(texts: string[]): Promise<{
         return {
             embeddings: localEmbeddings(texts),
             backend: "hash-fallback",
-            dimensions: DEFAULT_EMBEDDING_DIMENSIONS,
+            dimensions: browserModelManifest.webnnEmbedding.embeddingDimensions,
             reason: "Worker embedding path failed",
         }
     }
@@ -139,7 +142,7 @@ export async function rankMessagesBySemanticRelevance(
         return {
             backend: "unsupported",
             scores: [],
-            dimensions: DEFAULT_EMBEDDING_DIMENSIONS,
+            dimensions: browserModelManifest.webnnEmbedding.embeddingDimensions,
             reason: "No messages to rank",
         }
     }

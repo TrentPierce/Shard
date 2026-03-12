@@ -33,6 +33,19 @@ describe("browser router", () => {
     expect(decision.complexityScore).toBeGreaterThan(0.4)
   })
 
+  it("routes shard-specific product architecture prompts to the network path", () => {
+    const decision = decideChatRoute({
+      history: [message("How does Shard work?")],
+      prompt: "Summarize how Shard routes simple prompts through the browser and verifier mesh.",
+      mode: "auto",
+      browserRuntimeAvailable: true,
+      browserRuntimePreferred: true,
+    })
+
+    expect(decision.kind).toBe("network_route")
+    expect(decision.networkMode).toBe("standard")
+  })
+
   it("compacts long conversations before routing to the network", () => {
     const history = Array.from({ length: 12 }, (_, idx) =>
       message(`Turn ${idx} ${"x".repeat(420)}`, idx % 2 === 0 ? "user" : "assistant"),

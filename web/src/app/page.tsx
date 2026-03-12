@@ -29,7 +29,7 @@ const joinPaths: JoinPath[] = [
   {
     title: "Join from your browser",
     eyebrow: "Fastest path",
-    description: "Best for non-technical users. Open the site in Chrome or Edge and let the browser answer simpler prompts locally before it ever needs the network. Shard now also classifies low-power WebNN-capable browsers separately, even though the shipping browser runtime is still WebGPU.",
+    description: "Best for non-technical users. Open the site in Chrome or Edge and let the browser answer simpler prompts locally before it ever needs the network. Shard now also uses a low-power ONNX/WebNN worker lane for semantic compaction before escalation.",
     href: "/start#browser",
     cta: "Use browser client",
     checklist: [
@@ -75,7 +75,7 @@ const takeaways = [
   "The product path is now local-first: let the browser handle simple prompts and reserve desktop verifiers for heavier work.",
   "Desktop-local speculative decoding is the right place to keep draft-and-verify acceleration because it avoids WAN coordination costs.",
   "Mesh forwarding is now history-aware: recent forward latency and freshness data can down-rank slow-but-alive peers before they get picked.",
-  "Browser capability detection now separates current WebGPU execution from future low-power WebNN eligibility.",
+  "Browser capability detection now separates current WebGPU execution from the low-power ONNX/WebNN worker lane.",
   "WAN browser scouts remain useful for benchmark and research work, but they are no longer the default fast path.",
 ]
 
