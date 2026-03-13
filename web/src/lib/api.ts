@@ -43,11 +43,11 @@ function sanitizeAssistantContent(raw: string): string {
     return out
 }
 
-function authHeaders(): Record<string, string> {
+export function authHeaders(): Record<string, string> {
     return API_KEY ? { "Authorization": `Bearer ${API_KEY}` } : {}
 }
 
-async function fetchWithLocalFallback(path: string, init: RequestInit): Promise<Response> {
+export async function fetchWithLocalFallback(path: string, init: RequestInit): Promise<Response> {
     const primary = apiUrl(path)
     let primaryError: unknown = null
     let primaryResponse: Response | null = null
@@ -139,19 +139,20 @@ function extractExecutionHeaders(
     latencyMs: number,
     transport: Exclude<ChatTransport, "browser_local">,
 ): ChatExecutionResult {
+    const headers = res.headers ?? new Headers()
     return {
         latencyMs,
         inferenceMode,
         transport,
-        backend: res.headers.get("x-shard-backend") ?? undefined,
-        backendAttempts: parseIntegerHeader(res.headers.get("x-shard-backend-attempts")),
-        servedBy: res.headers.get("x-shard-served-by") ?? undefined,
-        meshForwarded: (res.headers.get("x-shard-mesh-forwarded") ?? "").toLowerCase() === "true",
-        meshDecision: res.headers.get("x-shard-mesh-decision") ?? undefined,
-        meshDetail: res.headers.get("x-shard-mesh-detail") ?? undefined,
-        meshForwardTarget: res.headers.get("x-shard-mesh-forward-target") ?? undefined,
-        meshTargetTier: res.headers.get("x-shard-mesh-target-tier") ?? undefined,
-        meshForwardedBy: res.headers.get("x-shard-mesh-forwarded-by") ?? undefined,
+        backend: headers.get("x-shard-backend") ?? undefined,
+        backendAttempts: parseIntegerHeader(headers.get("x-shard-backend-attempts")),
+        servedBy: headers.get("x-shard-served-by") ?? undefined,
+        meshForwarded: (headers.get("x-shard-mesh-forwarded") ?? "").toLowerCase() === "true",
+        meshDecision: headers.get("x-shard-mesh-decision") ?? undefined,
+        meshDetail: headers.get("x-shard-mesh-detail") ?? undefined,
+        meshForwardTarget: headers.get("x-shard-mesh-forward-target") ?? undefined,
+        meshTargetTier: headers.get("x-shard-mesh-target-tier") ?? undefined,
+        meshForwardedBy: headers.get("x-shard-mesh-forwarded-by") ?? undefined,
     }
 }
 

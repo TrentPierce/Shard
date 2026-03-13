@@ -53,7 +53,7 @@ use std::{
     net::{IpAddr, SocketAddr},
     path::{Path, PathBuf},
     sync::{
-        atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicU16, AtomicU32, AtomicU64, AtomicUsize, Ordering},
         Arc,
     },
     time::{Duration, SystemTime, UNIX_EPOCH},
@@ -61,6 +61,7 @@ use std::{
 use tokio::sync::{mpsc, Mutex, Notify};
 use tower_http::cors::{Any, CorsLayer};
 
+pub mod agents;
 pub mod api;
 pub mod bootstrap_discovery;
 pub mod bootstrap_ring;
@@ -69,13 +70,16 @@ pub mod consensus;
 pub mod inference;
 pub mod ledger;
 pub mod network;
+pub mod provenance;
 pub mod scheduler;
 pub mod security;
 pub mod telemetry_ws;
+use agents::*;
 use api::*;
 use canary::*;
 use consensus::leader::{ElectionMessage, LeaderElectionConfig, LeaderElectionHandle, LeaderInput};
 use network::policy::{NetworkPolicy, PolicyDecision};
+use provenance::*;
 use scheduler::*;
 use shard_common::common::node_config::{NodeRole, NodeRuntimeConfig};
 use shard_common::common::pow_challenge::PowChallengeManager;
@@ -592,6 +596,7 @@ pub(crate) struct SharedState {
     system_metrics: Arc<SystemMetrics>,
     node_metric_reports: Arc<Mutex<HashMap<String, NodeMetricSnapshot>>>,
     metrics_persistence: Arc<MetricsPersistence>,
+    receipt_store: Arc<ReceiptStore>,
     heartbeat_timeout_ms: u128,
     idempotent_results: Arc<Mutex<HashMap<String, WorkResponse>>>,
     node_reputation: Arc<Mutex<HashMap<String, NodeReputation>>>,
@@ -606,6 +611,7 @@ pub(crate) struct SharedState {
     max_scouts: Arc<AtomicUsize>,
     acceptance_threshold_bps: Arc<AtomicU64>,
     public_host: Option<String>,
+    control_port: Arc<AtomicU16>,
     tcp_port: u16,
     webrtc_port: u16,
     quic_port: u16,
@@ -1648,7 +1654,12 @@ pub(crate) fn rollback_engine_context(
     let steps = consumed_tokens.min(i32::MAX as usize) as i32;
     match engine.rollback(steps) {
         Ok(position) => {
-            tracing::debug!(scope, steps, position, "rolled back verifier engine context");
+            tracing::debug!(
+                scope,
+                steps,
+                position,
+                "rolled back verifier engine context"
+            );
         }
         Err(err) => {
             tracing::warn!(
@@ -2295,6 +2306,13 @@ fn resolve_metrics_persistence(data: &Path) -> MetricsPersistence {
             MetricsPersistence::Sqlite { path }
         }
     }
+}
+
+fn resolve_receipt_store(data: &Path) -> ReceiptStore {
+    let path = std::env::var("SHARD_RECEIPTS_SQLITE_PATH")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| data.join("receipts.db"));
+    ReceiptStore::new(path)
 }
 
 fn wallet_password_from_env(env_name: &str) -> Result<String> {
@@ -3131,6 +3149,20 @@ fn create_router(
         .route("/private-mesh/groups", get(private_mesh_groups_handler))
         .route("/private-mesh/route", post(private_mesh_route_handler))
         .route("/admin/api-keys", post(admin_api_key_handler))
+        .route("/v1/agents/tasks", post(agent_task_create_handler))
+        .route(
+            "/v1/executions/:execution_id",
+            get(execution_summary_handler),
+        )
+        .route(
+            "/v1/executions/:execution_id/receipts",
+            get(execution_receipts_handler),
+        )
+        .route(
+            "/v1/executions/:execution_id/provenance",
+            get(execution_provenance_handler),
+        )
+        .route("/v1/capabilities", get(capabilities_handler))
         .route("/v1/chat/completions", post(chat_completions_handler))
         .route("/ws/generate", get(ws_generate_handler))
         .route("/scout/penalty", post(scout_penalty_update_handler))
@@ -3502,6 +3534,8 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
     let loaded_reputation = load_reputation(&node_reputation_path);
     let metrics_persistence = Arc::new(resolve_metrics_persistence(&data));
     metrics_persistence.initialize().await?;
+    let receipt_store = Arc::new(resolve_receipt_store(&data));
+    receipt_store.initialize().await?;
     let heartbeat_timeout_ms = std::env::var("SHARD_HEARTBEAT_TIMEOUT_MS")
         .ok()
         .and_then(|v| v.parse::<u128>().ok())
@@ -3586,6 +3620,7 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
         system_metrics: Arc::new(SystemMetrics::default()),
         node_metric_reports: Arc::new(Mutex::new(HashMap::new())),
         metrics_persistence,
+        receipt_store,
         heartbeat_timeout_ms,
         idempotent_results: Arc::new(Mutex::new(HashMap::new())),
         node_reputation: Arc::new(Mutex::new(loaded_reputation)),
@@ -3610,6 +3645,7 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
             .public_host
             .clone()
             .and_then(|h| normalize_public_host(&h)),
+        control_port: Arc::new(AtomicU16::new(cli.control_port)),
         tcp_port: cli.tcp_port,
         webrtc_port: cli.webrtc_port,
         quic_port: cli.quic_port,
@@ -4148,6 +4184,7 @@ pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
         .local_addr()
         .map(|addr| addr.port())
         .unwrap_or(cli.control_port);
+    state.control_port.store(control_port, Ordering::Relaxed);
     let private_ipv6_control_listener = if cli.public_api {
         fly_private_ipv6().and_then(|ipv6| {
             ipv6.parse::<std::net::Ipv6Addr>().ok().map(|addr| {

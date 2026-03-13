@@ -12,6 +12,7 @@ from shard.errors import (
     ServerError,
     ShardError,
 )
+from shard.resources.agents import AgentsResource
 from shard.resources.chat import ChatResource
 from shard.resources.contribution import ContributionResource
 from shard.resources.mesh import MeshResource
@@ -50,6 +51,7 @@ class Client:
         self._http = httpx.Client(base_url=self.base_url, headers=headers, timeout=timeout)
 
         self.chat = ChatResource(self)
+        self.agents = AgentsResource(self)
         self.contribution = ContributionResource(self)
         self.node = NodeResource(self)
         self.wallet = WalletResource(self)

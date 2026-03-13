@@ -1,3 +1,4 @@
+from .agents import AgentsResource
 from .chat import ChatResource
 from .contribution import ContributionResource
 from .mesh import MeshResource
@@ -7,6 +8,7 @@ from .wallet import WalletResource
 
 __all__ = [
     "ChatResource",
+    "AgentsResource",
     "ContributionResource",
     "NodeResource",
     "WalletResource",

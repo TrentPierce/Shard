@@ -9,6 +9,7 @@ describe("SiteNav mobile menu", () => {
   it("toggles mobile menu open and closed", () => {
     render(<SiteNav />)
 
+    expect(screen.getByRole("link", { name: /provenance/i })).toBeInTheDocument()
     expect(screen.queryByLabelText(/mobile menu/i)).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole("button", { name: /toggle menu/i }))
@@ -18,4 +19,3 @@ describe("SiteNav mobile menu", () => {
     expect(screen.queryByLabelText(/mobile menu/i)).not.toBeInTheDocument()
   })
 })
-
