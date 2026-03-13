@@ -699,8 +699,8 @@ export default function ProvenancePage() {
                           Selected sources
                         </p>
                         <div className="mt-3 flex flex-wrap gap-2">
-                          {execution.execution.result.selected_source_ids.length > 0 ? (
-                            execution.execution.result.selected_source_ids.map((sourceId) => (
+                          {(execution.execution.result.selected_source_ids ?? []).length > 0 ? (
+                            (execution.execution.result.selected_source_ids ?? []).map((sourceId) => (
                               <span
                                 key={sourceId}
                                 className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-ink-100"
@@ -722,8 +722,8 @@ export default function ProvenancePage() {
                         Planner sub-questions
                       </p>
                       <div className="mt-3 space-y-3">
-                        {execution.execution.result.sub_questions.length > 0 ? (
-                          execution.execution.result.sub_questions.map(
+                        {(execution.execution.result.sub_questions ?? []).length > 0 ? (
+                          (execution.execution.result.sub_questions ?? []).map(
                             (item: PlannerSubQuestion, index) => (
                               <div
                                 key={`${item.question}-${index}`}

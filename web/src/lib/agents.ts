@@ -78,8 +78,8 @@ export interface PlannerSubQuestion {
 export interface ResearchBriefArtifact {
   brief: string
   planner_notes?: string | null
-  sub_questions: PlannerSubQuestion[]
-  selected_source_ids: string[]
+  sub_questions?: PlannerSubQuestion[] | null
+  selected_source_ids?: string[] | null
   source_summaries: ResearchSourceSummary[]
 }
 

@@ -66,10 +66,10 @@ const nextMoves = [
     cta: "Open quick start",
   },
   {
-    title: "Try the compatibility chat",
+    title: "Try simple chat",
     body: "Use chat when you only need a familiar interface. Use workflows when you need routing evidence.",
     href: "/chat",
-    cta: "Open chat",
+    cta: "Open simple chat",
   },
 ] as const
 

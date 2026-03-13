@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import Link from "next/link"
 import { apiUrl } from "@/lib/config"
 
 export default function LeaderboardPage() {
@@ -30,6 +31,32 @@ export default function LeaderboardPage() {
         <div className="mt-6 rounded-2xl border border-amber-300/20 bg-amber-300/10 p-4 text-sm text-amber-100">
           If you are new here, open the Provenance page first. This ledger remains available for
           network operators and historical balance tracking.
+        </div>
+        <div className="mt-6 grid gap-4 md:grid-cols-2">
+          <div className="rounded-2xl border border-white/10 bg-base-950/45 p-4">
+            <p className="text-xs uppercase tracking-[0.18em] text-ink-400">Best for</p>
+            <p className="mt-2 text-sm leading-7 text-ink-100">
+              Operators who still need the legacy balance view while the provenance-first product
+              rolls out.
+            </p>
+          </div>
+          <div className="rounded-2xl border border-white/10 bg-base-950/45 p-4">
+            <p className="text-xs uppercase tracking-[0.18em] text-ink-400">Most visitors should do this instead</p>
+            <div className="mt-3 flex flex-wrap gap-3">
+              <Link
+                href="/provenance"
+                className="inline-flex min-h-11 items-center justify-center rounded-full bg-accent-500 px-5 py-3 text-sm font-semibold text-base-950 transition hover:bg-accent-400"
+              >
+                Open provenance demo
+              </Link>
+              <Link
+                href="/start"
+                className="inline-flex min-h-11 items-center justify-center rounded-full border border-white/10 bg-white/5 px-5 py-3 text-sm font-semibold text-ink-50 transition hover:bg-white/10"
+              >
+                Quick start
+              </Link>
+            </div>
+          </div>
         </div>
       </section>
 

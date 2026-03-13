@@ -9,7 +9,7 @@ const navItems = [
   { href: "/", label: "Overview" },
   { href: "/provenance", label: "Provenance" },
   { href: "/start", label: "Quick Start" },
-  { href: "/chat", label: "Chat" },
+  { href: "/chat", label: "Simple Chat" },
 ]
 
 export function SiteNav() {

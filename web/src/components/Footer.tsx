@@ -12,7 +12,7 @@ const footerSections = [
       { name: "Overview", href: "/" },
       { name: "Provenance Demo", href: "/provenance" },
       { name: "Quick Start", href: "/start" },
-      { name: "Compatibility Chat", href: "/chat" },
+      { name: "Simple Chat", href: "/chat" },
     ],
   },
   {

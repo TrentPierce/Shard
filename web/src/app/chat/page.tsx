@@ -1,6 +1,7 @@
 "use client"
 
 import { FormEvent, KeyboardEvent, useEffect, useMemo, useRef, useState } from "react"
+import Link from "next/link"
 import {
   emitChatFailure,
   sendMessage as sendNetworkMessage,
@@ -21,11 +22,11 @@ import { emitRouteDecision } from "@/lib/route-telemetry"
 function describeIdleMode(mode: ChatRouteMode) {
   switch (mode) {
     case "browser":
-      return "Browser-only mode"
+      return "Local-only chat"
     case "network":
-      return "Network-only mode"
+      return "Network-only chat"
     case "experimental-wan":
-      return "Experimental WAN mode"
+      return "Lab WAN chat"
     default:
       return "Simple chat: local when possible, network when needed"
   }
@@ -347,44 +348,80 @@ export default function ChatPage() {
       className="box-border h-[calc(100dvh-4rem)] supports-[height:100svh]:h-[calc(100svh-4rem)] py-4 sm:py-6"
     >
       <section className="relative flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-ring bg-base-900 shadow-panel">
-        <div className="absolute right-4 top-4 flex flex-col items-end gap-2">
-          <div className="flex items-center gap-2 rounded-full border border-ring bg-base-800/90 px-3 py-1 text-xs text-ink-100">
-            <span className="h-2.5 w-2.5 rounded-full bg-accent-400 animate-pulseSoft" />
-            {statusText}
-          </div>
-          <select
-            value={routeMode}
-            onChange={(event) => setRouteMode(event.target.value as ChatRouteMode)}
-            className="rounded-full border border-ring bg-base-800/90 px-3 py-1 text-xs text-ink-100 outline-none"
-          >
-            <option value="auto">Auto</option>
-            <option value="browser">Browser Only</option>
-            <option value="network">Network Only</option>
-            <option value="experimental-wan">Experimental WAN</option>
-          </select>
-        </div>
+        <div className="border-b border-white/10 bg-[radial-gradient(circle_at_top_left,_rgba(51,208,193,0.16),_transparent_30%),linear-gradient(135deg,rgba(14,28,40,0.96),rgba(9,17,27,0.94))] px-4 py-5 sm:px-6">
+          <div className="grid gap-4 lg:grid-cols-[1.05fr_0.95fr] lg:items-end">
+            <div className="max-w-4xl">
+              <p className="text-xs uppercase tracking-[0.2em] text-accent-300">Compatibility chat</p>
+              <h1 className="mt-2 text-2xl font-semibold text-ink-50 sm:text-3xl">
+                Talk to Shard without running a full workflow.
+              </h1>
+              <p className="mt-2 max-w-3xl text-sm leading-7 text-ink-200">
+                This page is the quick, familiar surface. It still shows route traces for each
+                message, but the flagship product is the Provenance demo where you can inspect the
+                final answer, the receipts, and the full workflow map together.
+              </p>
+              <div className="mt-4 flex flex-wrap gap-3">
+                <Link
+                  href="/provenance"
+                  className="inline-flex min-h-11 items-center justify-center rounded-full bg-accent-500 px-5 py-3 text-sm font-semibold text-base-950 transition hover:bg-accent-400"
+                >
+                  Open the flagship demo
+                </Link>
+                <span className="inline-flex items-center gap-2 rounded-full border border-ring bg-base-800/90 px-3 py-2 text-xs text-ink-100">
+                  <span className="h-2.5 w-2.5 rounded-full bg-accent-400 animate-pulseSoft" />
+                  {statusText}
+                </span>
+              </div>
+            </div>
 
-        <div className="border-b border-white/10 bg-[linear-gradient(135deg,rgba(51,208,193,0.08),rgba(255,155,104,0.06))] px-4 py-4 sm:px-6">
-          <div className="max-w-4xl">
-            <p className="text-xs uppercase tracking-[0.2em] text-accent-300">Compatibility chat</p>
-            <h1 className="mt-2 text-2xl font-semibold text-ink-50">
-              Use this page when you want simple chat.
-            </h1>
-            <p className="mt-2 max-w-3xl text-sm leading-6 text-ink-200">
-              This is the lightweight Shard surface. It still shows route traces for each message,
-              but the flagship product is the Provenance demo where you can inspect a full
-              step-by-step workflow map.
-            </p>
+            <div className="rounded-[1.5rem] border border-white/10 bg-base-950/55 p-4">
+              <p className="text-xs uppercase tracking-[0.18em] text-ink-400">Routing mode</p>
+              <p className="mt-2 text-sm leading-6 text-ink-200">
+                Leave this on <span className="font-semibold text-ink-50">Smart route</span> unless
+                you are testing a specific path.
+              </p>
+              <select
+                value={routeMode}
+                onChange={(event) => setRouteMode(event.target.value as ChatRouteMode)}
+                className="mt-4 h-11 w-full rounded-xl border border-ring bg-base-800/90 px-3 text-sm text-ink-100 outline-none"
+              >
+                <option value="auto">Smart route</option>
+                <option value="browser">Local only</option>
+                <option value="network">Network only</option>
+                <option value="experimental-wan">Lab WAN</option>
+              </select>
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3">
+                  <p className="text-xs uppercase tracking-[0.18em] text-ink-400">Best for</p>
+                  <p className="mt-2 text-sm text-ink-100">
+                    Quick questions and compatibility checks.
+                  </p>
+                </div>
+                <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3">
+                  <p className="text-xs uppercase tracking-[0.18em] text-ink-400">Not for</p>
+                  <p className="mt-2 text-sm text-ink-100">
+                    Full workflow debugging. Use Provenance for that.
+                  </p>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
         <div className="grid min-h-0 flex-1 gap-4 overflow-hidden px-4 pb-4 pt-6 sm:px-6 lg:grid-cols-[minmax(0,1fr)_320px]">
           <div className="min-h-0 space-y-4 overflow-y-auto pr-1">
           {messages.length === 0 ? (
-            <div className="mx-auto mt-12 max-w-xl rounded-xl border border-ring bg-base-800 p-4 text-center sm:mt-16">
-              <p className="text-sm text-ink-100">
-                This is the simple chat surface. If you want the flagship `research_brief`
-                workflow with the receipt graph and routing explanation, use the Provenance page.
+            <div className="mx-auto mt-10 max-w-2xl rounded-[1.6rem] border border-ring bg-[linear-gradient(160deg,rgba(17,30,42,0.92),rgba(10,18,28,0.96))] p-6 text-left sm:mt-12">
+              <p className="text-xs uppercase tracking-[0.18em] text-accent-300">Good first prompt</p>
+              <p className="mt-3 text-lg font-semibold text-ink-50">
+                Ask a simple question and watch how Shard routes it.
+              </p>
+              <p className="mt-3 text-sm leading-7 text-ink-200">
+                Example: <span className="text-ink-50">“Explain Shard in plain English.”</span>
+              </p>
+              <p className="mt-3 text-sm leading-7 text-ink-300">
+                This page keeps the experience familiar. If you want the bigger story, open
+                Provenance and run the research workflow instead.
               </p>
             </div>
           ) : null}
