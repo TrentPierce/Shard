@@ -66,6 +66,14 @@ class ResearchBriefArtifact(BaseModel):
     source_summaries: list[ResearchSourceSummary] = []
 
 
+class ExecutionTaskContext(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    workflow_kind: str
+    question: str
+    source_count: int
+    source_ids: list[str] = []
+
+
 class ExecutionReceipt(BaseModel):
     model_config = ConfigDict(extra="ignore")
     receipt_id: str
@@ -77,6 +85,7 @@ class ExecutionReceipt(BaseModel):
     timestamp_ms: int
     workflow_kind: str
     step_kind: str | None = None
+    task_context: ExecutionTaskContext | None = None
     policy_snapshot: ExecutionPolicy | None = None
     candidate_rankings: list[CapabilityDescriptor] = []
     selected_candidate: CapabilityDescriptor | None = None
@@ -159,6 +168,7 @@ class AgentTaskRequest(BaseModel):
 class AgentTaskResponse(BaseModel):
     model_config = ConfigDict(extra="ignore")
     ok: bool = True
+    detail: str | None = None
     execution: ExecutionSummary
     provenance: ProvenanceGraph
     receipts: list[ExecutionReceipt] = []

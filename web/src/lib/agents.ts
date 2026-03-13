@@ -76,6 +76,13 @@ export interface ResearchBriefArtifact {
   source_summaries: ResearchSourceSummary[]
 }
 
+export interface ExecutionTaskContext {
+  workflow_kind: string
+  question: string
+  source_count: number
+  source_ids: string[]
+}
+
 export interface ExecutionReceipt {
   receipt_id: string
   execution_id: string
@@ -86,6 +93,7 @@ export interface ExecutionReceipt {
   timestamp_ms: number
   workflow_kind: string
   step_kind?: string | null
+  task_context?: ExecutionTaskContext | null
   policy_snapshot?: ExecutionPolicy | null
   candidate_rankings: CapabilityDescriptor[]
   selected_candidate?: CapabilityDescriptor | null
@@ -154,6 +162,7 @@ export interface ProvenanceGraph {
 
 export interface AgentTaskResponse {
   ok: boolean
+  detail?: string | null
   execution: ExecutionSummary
   provenance: ProvenanceGraph
   receipts: ExecutionReceipt[]
@@ -304,6 +313,24 @@ export async function fetchCapabilities(): Promise<CapabilitiesResponse> {
   })
 }
 
+function deriveExecutionDetail(
+  execution: ExecutionSummary,
+  receipts: ExecutionReceipt[],
+): string | null {
+  if (execution.status !== "failed" && execution.status !== "orphaned") {
+    return null
+  }
+  const terminalReceipt = [...receipts].reverse().find((receipt) => {
+    return receipt.failure_reason || receipt.fallback_reason || receipt.summary
+  })
+  return (
+    terminalReceipt?.failure_reason ??
+    terminalReceipt?.fallback_reason ??
+    terminalReceipt?.summary ??
+    null
+  )
+}
+
 export async function submitResearchBrief(
   input: AgentTaskRequest,
 ): Promise<AgentTaskResponse> {
@@ -341,4 +368,25 @@ export async function getExecutionProvenance(
 export async function listCapabilities(): Promise<CapabilityDescriptor[]> {
   const response = await fetchCapabilities()
   return response.capabilities
+}
+
+export async function fetchExecutionBundle(
+  executionId: string,
+): Promise<AgentTaskResponse> {
+  const [summaryResponse, receiptsResponse, provenanceResponse] = await Promise.all([
+    fetchExecutionSummary(executionId),
+    fetchExecutionReceipts(executionId),
+    fetchExecutionProvenance(executionId),
+  ])
+  const execution = summaryResponse.execution
+  if (!execution) {
+    throw new Error(`Execution ${executionId} was not found`)
+  }
+  return {
+    ok: execution.status !== "failed" && execution.status !== "orphaned",
+    detail: deriveExecutionDetail(execution, receiptsResponse.receipts),
+    execution,
+    receipts: receiptsResponse.receipts,
+    provenance: provenanceResponse.provenance,
+  }
 }

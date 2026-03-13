@@ -21,7 +21,9 @@ with ShardClient(base_url="http://localhost:9091") as client:
 ## Research Workflow Provenance
 
 The v1 agent surface is intentionally opinionated around `research_brief`. It returns an
-execution summary, append-only receipts, and a reconstructable provenance graph.
+execution summary, append-only receipts, and a reconstructable provenance graph. Failed
+workflow submissions still return the persisted receipt chain and provenance bundle so the
+unhappy path remains debuggable.
 
 ```python
 from shard import ShardClient
@@ -54,6 +56,7 @@ with ShardClient(base_url="http://localhost:9091") as client:
 
     execution_id = task.execution.execution_id
     print(task.execution.status)
+    print(task.detail)
     print(task.provenance.incomplete)
 
     receipts = client.agents.receipts(execution_id)

@@ -43,6 +43,61 @@ def test_agents_submit_success(make_client):
     assert response.execution.status == "completed"
 
 
+def test_agents_submit_failure_still_returns_receipts(make_client):
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/v1/agents/tasks"
+        return httpx.Response(
+            200,
+            json={
+                "ok": False,
+                "detail": "all candidates failed for step synthesize_brief",
+                "execution": {
+                    "execution_id": "exec-failed",
+                    "workflow_kind": "research_brief",
+                    "status": "failed",
+                    "created_at_ms": 1,
+                    "updated_at_ms": 2,
+                    "source_count": 1,
+                },
+                "provenance": {
+                    "execution_id": "exec-failed",
+                    "root_receipt_id": "rcpt-1",
+                    "nodes": [],
+                    "edges": [],
+                    "incomplete": True,
+                },
+                "receipts": [
+                    {
+                        "receipt_id": "rcpt-1",
+                        "execution_id": "exec-failed",
+                        "step_id": "workflow",
+                        "attempt_id": "workflow-1",
+                        "event_kind": "planned",
+                        "timestamp_ms": 1,
+                        "workflow_kind": "research_brief",
+                        "task_context": {
+                            "workflow_kind": "research_brief",
+                            "question": "What changed?",
+                            "source_count": 1,
+                            "source_ids": ["s1"],
+                        },
+                    }
+                ],
+            },
+        )
+
+    client = make_client(handler)
+    response = client.agents.submit(
+        question="What changed?",
+        sources=[{"id": "s1", "content": "A market shifted."}],
+    )
+
+    assert response.ok is False
+    assert response.detail == "all candidates failed for step synthesize_brief"
+    assert response.receipts[0].task_context is not None
+    assert response.receipts[0].task_context.question == "What changed?"
+
+
 def test_agents_status_and_receipts(make_client):
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/v1/executions/exec-2":

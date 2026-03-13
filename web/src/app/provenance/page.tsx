@@ -12,6 +12,7 @@ import {
   type TrustTier,
   defaultExecutionPolicy,
   fetchCapabilities,
+  fetchExecutionBundle,
   submitResearchBriefTask,
 } from "@/lib/agents"
 
@@ -96,11 +97,22 @@ export default function ProvenancePage() {
   const [sources, setSources] = useState<SourceDraft[]>(starterSources)
   const [policy, setPolicy] = useState<ExecutionPolicy>(defaultExecutionPolicy())
   const [execution, setExecution] = useState<AgentTaskResponse | null>(null)
+  const [executionIdInput, setExecutionIdInput] = useState("")
   const [capabilities, setCapabilities] = useState<CapabilityDescriptor[]>([])
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
+  const [loadingExecution, setLoadingExecution] = useState(false)
   const [loadingCapabilities, setLoadingCapabilities] = useState(false)
   const [isPending, startTransition] = useTransition()
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const executionId = new URLSearchParams(window.location.search).get("execution_id")
+      if (executionId) {
+        setExecutionIdInput((current) => current || executionId)
+      }
+    }
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -199,10 +211,31 @@ export default function ProvenancePage() {
         policy,
       })
       startTransition(() => setExecution(payload))
+      setExecutionIdInput(payload.execution.execution_id)
+      setErrorMessage(payload.detail ?? null)
     } catch (error) {
       setErrorMessage(String((error as Error)?.message ?? error ?? "workflow failed"))
     } finally {
       setSubmitting(false)
+    }
+  }
+
+  async function handleLoadExecution() {
+    const executionId = executionIdInput.trim()
+    if (!executionId) {
+      setErrorMessage("Execution ID is required to load stored provenance.")
+      return
+    }
+    setErrorMessage(null)
+    setLoadingExecution(true)
+    try {
+      const payload = await fetchExecutionBundle(executionId)
+      startTransition(() => setExecution(payload))
+      setErrorMessage(payload.detail ?? null)
+    } catch (error) {
+      setErrorMessage(String((error as Error)?.message ?? error ?? "execution lookup failed"))
+    } finally {
+      setLoadingExecution(false)
     }
   }
 
@@ -270,6 +303,31 @@ export default function ProvenancePage() {
             >
               {submitting || isPending ? "Running..." : "Run provenance demo"}
             </button>
+          </div>
+
+          <div className="mt-6 rounded-2xl border border-white/10 bg-base-950/50 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <div>
+                <p className="text-sm font-medium text-ink-100">Reload a stored execution</p>
+                <p className="text-xs text-ink-400">Use the retrieval APIs to inspect an existing receipt chain without rerunning the workflow.</p>
+              </div>
+              <div className="flex w-full gap-3 sm:w-auto">
+                <input
+                  value={executionIdInput}
+                  onChange={(event) => setExecutionIdInput(event.target.value)}
+                  className="h-11 min-w-[15rem] rounded-xl border border-white/10 bg-base-900/80 px-3 text-sm text-ink-50 outline-none transition focus:border-accent-300"
+                  placeholder="exec-..."
+                />
+                <button
+                  type="button"
+                  onClick={() => void handleLoadExecution()}
+                  disabled={loadingExecution || isPending}
+                  className="inline-flex min-h-11 items-center justify-center rounded-xl border border-white/12 bg-white/5 px-4 py-3 text-sm font-semibold text-ink-50 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {loadingExecution ? "Loading..." : "Load"}
+                </button>
+              </div>
+            </div>
           </div>
 
           <label className="mt-6 block">
@@ -423,6 +481,36 @@ export default function ProvenancePage() {
               />
             </div>
 
+            <div className="mt-4 grid gap-4 sm:grid-cols-[1fr_0.9fr]">
+              <input
+                type="text"
+                value={policy.capability_tags.join(", ")}
+                onChange={(event) =>
+                  setPolicy((current) =>
+                    mergePolicy(current, {
+                      capability_tags: event.target.value
+                        .split(",")
+                        .map((tag) => tag.trim())
+                        .filter(Boolean),
+                    }),
+                  )
+                }
+                className="h-11 rounded-xl border border-white/10 bg-base-900/80 px-3 text-sm text-ink-50 outline-none transition focus:border-accent-300"
+                placeholder="Capability tags (comma separated)"
+              />
+              <input
+                type="text"
+                value={policy.data_residency ?? ""}
+                onChange={(event) =>
+                  setPolicy((current) =>
+                    mergePolicy(current, { data_residency: event.target.value || null }),
+                  )
+                }
+                className="h-11 rounded-xl border border-white/10 bg-base-900/80 px-3 text-sm text-ink-50 outline-none transition focus:border-accent-300"
+                placeholder="Data residency (for example us)"
+              />
+            </div>
+
             <div className="mt-4 flex flex-wrap gap-3">
               {policy.fallback_order.map((tier, index) => (
                 <div key={tier} className="flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-2">
@@ -476,6 +564,10 @@ export default function ProvenancePage() {
                   <StatCard label="Receipts" value={String(execution.receipts.length)} />
                   <StatCard label="Failures" value={String(execution.receipts.filter((receipt) => receipt.event_kind === "failed").length)} />
                   <StatCard label="Observed cost" value={formatUsd(observedCost)} />
+                </div>
+                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                  <StatCard label="Question" value={execution.receipts.find((receipt) => receipt.task_context)?.task_context?.question ?? execution.execution.question ?? "n/a"} />
+                  <StatCard label="Sources" value={String(execution.receipts.find((receipt) => receipt.task_context)?.task_context?.source_count ?? execution.execution.source_count)} />
                 </div>
                 <article className="mt-5 rounded-[1.4rem] border border-white/10 bg-[linear-gradient(135deg,_rgba(18,32,44,0.78),_rgba(11,18,24,0.92))] p-5">
                   <p className="text-xs uppercase tracking-[0.18em] text-ink-400">Final brief</p>

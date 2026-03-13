@@ -59,7 +59,7 @@ const paths: PathCard[] = [
     steps: [
       "Start with `/v1/chat/completions` if you need a familiar surface.",
       "Adopt `POST /v1/agents/tasks` for the `research_brief` workflow.",
-      "Fetch receipts and provenance graphs to debug routing and fallback behavior.",
+      "Fetch receipts and provenance graphs to debug routing and fallback behavior, including failed workflow runs.",
     ],
     notes: [
       "The Python SDK exposes `client.agents.submit/status/receipts/provenance/capabilities`.",

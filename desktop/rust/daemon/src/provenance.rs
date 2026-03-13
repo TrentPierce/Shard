@@ -173,10 +173,21 @@ pub struct ResearchSourceSummary {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct PlannerSubQuestion {
+    pub question: String,
+    #[serde(default)]
+    pub relevant_source_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ResearchBriefArtifact {
     pub brief: String,
     #[serde(default)]
     pub planner_notes: Option<String>,
+    #[serde(default)]
+    pub sub_questions: Vec<PlannerSubQuestion>,
+    #[serde(default)]
+    pub selected_source_ids: Vec<String>,
     #[serde(default)]
     pub source_summaries: Vec<ResearchSourceSummary>,
 }
@@ -525,24 +536,25 @@ pub fn build_provenance_graph(receipts: &[ExecutionReceipt]) -> ProvenanceGraph 
 
 impl ProvenanceGraphBuilder {
     pub fn summarize(&self, receipts: &[ExecutionReceipt]) -> Option<ExecutionSummary> {
-        let first = receipts.first()?;
-        let last = receipts.last()?;
-        let task_context = receipts
+        let ordered = ordered_receipts(receipts);
+        let first = ordered.first()?;
+        let last = ordered.last()?;
+        let task_context = ordered
             .iter()
             .find_map(|receipt| receipt.task_context.clone());
-        let result = receipts
+        let result = ordered
             .iter()
             .rev()
             .find_map(|receipt| receipt.result.clone());
-        let latest_summary = receipts
+        let latest_summary = ordered
             .iter()
             .rev()
             .find_map(|receipt| receipt.summary.clone());
-        let current_step = receipts
+        let current_step = ordered
             .iter()
             .rev()
             .find_map(|receipt| receipt.step_kind.clone());
-        let status = if receipts.iter().rev().any(|receipt| {
+        let status = if ordered.iter().rev().any(|receipt| {
             receipt.event_kind == ReceiptEventKind::Completed && receipt.result.is_some()
         }) {
             ExecutionStatus::Completed
@@ -572,10 +584,24 @@ impl ProvenanceGraphBuilder {
     }
 
     pub fn build(&self, receipts: &[ExecutionReceipt]) -> ProvenanceGraph {
-        let mut nodes = Vec::with_capacity(receipts.len());
+        let ordered = ordered_receipts(receipts);
+        let mut nodes = Vec::with_capacity(ordered.len());
         let mut edges = Vec::new();
-        let root_receipt_id = receipts.first().map(|receipt| receipt.receipt_id.clone());
-        for receipt in receipts {
+        let receipt_ids = ordered
+            .iter()
+            .map(|receipt| receipt.receipt_id.clone())
+            .collect::<HashSet<_>>();
+        let root_receipt_id = ordered
+            .iter()
+            .find(|receipt| {
+                receipt
+                    .parent_receipt_id
+                    .as_ref()
+                    .is_none_or(|parent| !receipt_ids.contains(parent))
+            })
+            .map(|receipt| receipt.receipt_id.clone())
+            .or_else(|| ordered.first().map(|receipt| receipt.receipt_id.clone()));
+        for receipt in &ordered {
             if let Some(parent_receipt_id) = receipt.parent_receipt_id.as_ref() {
                 edges.push(ProvenanceEdge {
                     from_receipt_id: parent_receipt_id.clone(),
@@ -610,11 +636,21 @@ impl ProvenanceGraphBuilder {
                 model_metadata: receipt.model_metadata.clone(),
             });
         }
-        let incomplete = !receipts.iter().any(|receipt| {
-            receipt.event_kind == ReceiptEventKind::Completed && receipt.result.is_some()
+        let missing_parent_links = ordered.iter().any(|receipt| {
+            receipt
+                .parent_receipt_id
+                .as_ref()
+                .is_some_and(|parent| !receipt_ids.contains(parent))
         });
+        let incomplete = missing_parent_links
+            || ordered
+                .iter()
+                .any(|receipt| receipt.event_kind == ReceiptEventKind::Orphaned)
+            || !ordered.iter().any(|receipt| {
+                receipt.event_kind == ReceiptEventKind::Completed && receipt.result.is_some()
+            });
         ProvenanceGraph {
-            execution_id: receipts
+            execution_id: ordered
                 .first()
                 .map(|receipt| receipt.execution_id.clone())
                 .unwrap_or_default(),
@@ -624,6 +660,16 @@ impl ProvenanceGraphBuilder {
             incomplete,
         }
     }
+}
+
+fn ordered_receipts(receipts: &[ExecutionReceipt]) -> Vec<ExecutionReceipt> {
+    let mut ordered = receipts.to_vec();
+    ordered.sort_by(|left, right| {
+        left.timestamp_ms
+            .cmp(&right.timestamp_ms)
+            .then_with(|| left.receipt_id.cmp(&right.receipt_id))
+    });
+    ordered
 }
 
 #[cfg(test)]
@@ -702,6 +748,20 @@ mod tests {
     }
 
     #[test]
+    fn provenance_graph_marks_missing_parent_links_incomplete() {
+        let receipts = vec![sample_receipt(
+            ReceiptEventKind::Dispatched,
+            Some("missing-root"),
+            "r-child",
+            "a1",
+            3,
+        )];
+        let graph = build_provenance_graph(&receipts);
+        assert_eq!(graph.root_receipt_id.as_deref(), Some("r-child"));
+        assert!(graph.incomplete);
+    }
+
+    #[test]
     fn execution_summary_prefers_completed_result() {
         let mut completed = sample_receipt(ReceiptEventKind::Completed, Some("r3"), "r4", "a1", 4);
         completed.result = Some(ResearchBriefArtifact {
@@ -720,6 +780,25 @@ mod tests {
             summary.result.as_ref().map(|item| item.brief.as_str()),
             Some("Final brief")
         );
+    }
+
+    #[test]
+    fn execution_summary_orders_unsorted_receipts_before_summarizing() {
+        let mut completed = sample_receipt(ReceiptEventKind::Completed, Some("r2"), "r3", "a1", 3);
+        completed.result = Some(ResearchBriefArtifact {
+            brief: "Final brief".to_string(),
+            planner_notes: Some("notes".to_string()),
+            source_summaries: vec![],
+        });
+        let receipts = vec![
+            completed,
+            sample_receipt(ReceiptEventKind::Planned, None, "r1", "a1", 1),
+            sample_receipt(ReceiptEventKind::Dispatched, Some("r1"), "r2", "a1", 2),
+        ];
+        let summary = build_execution_summary(&receipts).expect("summary");
+        assert_eq!(summary.created_at_ms, 1);
+        assert_eq!(summary.updated_at_ms, 3);
+        assert_eq!(summary.status, ExecutionStatus::Completed);
     }
 
     #[test]

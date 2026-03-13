@@ -75,4 +75,94 @@ describe("agent provenance api client", () => {
     expect(response.provenance.execution_id).toBe("exec-2")
     expect((global.fetch as jest.Mock).mock.calls[0][0]).toContain("/v1/executions/exec-2/provenance")
   })
+
+  it("hydrates an execution bundle from summary, receipts, and provenance endpoints", async () => {
+    const { fetchExecutionBundle } = await import("@/lib/agents")
+    ;(global.fetch as jest.Mock).mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.endsWith("/v1/executions/exec-9")) {
+        return {
+          ok: true,
+          status: 200,
+          statusText: "OK",
+          json: async () => ({
+            ok: true,
+            execution: {
+              execution_id: "exec-9",
+              workflow_kind: "research_brief",
+              status: "failed",
+              created_at_ms: 1,
+              updated_at_ms: 2,
+              source_count: 2,
+            },
+          }),
+        }
+      }
+      if (url.endsWith("/v1/executions/exec-9/receipts")) {
+        return {
+          ok: true,
+          status: 200,
+          statusText: "OK",
+          json: async () => ({
+            ok: true,
+            receipts: [
+              {
+                receipt_id: "rcpt-9",
+                execution_id: "exec-9",
+                step_id: "planner",
+                attempt_id: "planner-1",
+                event_kind: "planned",
+                timestamp_ms: 1,
+                workflow_kind: "research_brief",
+                task_context: {
+                  workflow_kind: "research_brief",
+                  question: "What changed?",
+                  source_count: 2,
+                  source_ids: ["s1", "s2"],
+                },
+                candidate_rankings: [],
+              },
+              {
+                receipt_id: "rcpt-10",
+                execution_id: "exec-9",
+                step_id: "result",
+                attempt_id: "result-1",
+                event_kind: "failed",
+                timestamp_ms: 2,
+                workflow_kind: "research_brief",
+                failure_reason: "all candidates failed for step synthesize_brief",
+                candidate_rankings: [],
+              },
+            ],
+          }),
+        }
+      }
+      if (url.endsWith("/v1/executions/exec-9/provenance")) {
+        return {
+          ok: true,
+          status: 200,
+          statusText: "OK",
+          json: async () => ({
+            ok: true,
+            provenance: {
+              execution_id: "exec-9",
+              root_receipt_id: "rcpt-9",
+              nodes: [],
+              edges: [],
+              incomplete: true,
+            },
+          }),
+        }
+      }
+      throw new Error(`Unexpected fetch ${url}`)
+    })
+
+    const response = await fetchExecutionBundle("exec-9")
+
+    expect(response.execution.execution_id).toBe("exec-9")
+    expect(response.ok).toBe(false)
+    expect(response.detail).toBe("all candidates failed for step synthesize_brief")
+    expect(response.receipts[0].task_context?.question).toBe("What changed?")
+    expect((global.fetch as jest.Mock).mock.calls).toHaveLength(3)
+  })
 })

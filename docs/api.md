@@ -77,6 +77,7 @@ This is the receipt-first v1 workflow surface for cross-topology agent execution
   - `execution` summary
   - append-only `receipts`
   - a reconstructable `provenance` graph derived from those receipts
+  - optional `detail` when the workflow fails but still returns a debuggable execution bundle
 
 ### Request Body
 
@@ -150,6 +151,7 @@ curl -X POST http://127.0.0.1:9091/v1/agents/tasks \
   - `fallback_applied`
   - `orphaned`
 - each receipt carries `parent_receipt_id`
+- failed workflow submissions still return persisted `execution`, `receipts`, and `provenance` so the unhappy path remains inspectable
 - the provenance graph is reconstructed from receipt parentage rather than maintained as mutable coordinator state
 
 ## `GET /v1/executions/{execution_id}`
@@ -187,6 +189,7 @@ Important receipt fields:
 - `attempt_id`
 - `parent_receipt_id`
 - `policy_snapshot`
+- optional `task_context`
 - `candidate_rankings`
 - `selected_candidate`
 - `supply_tier`

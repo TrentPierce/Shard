@@ -85,7 +85,7 @@ const differentiators: Differentiator[] = [
     summary:
       "Shard makes failure behavior visible instead of pretending the happy path is the only path.",
     detail:
-      "Timeouts, incompatible candidates, public fallback blocks, and restart-recovery orphaning all remain visible in the provenance graph.",
+      "Timeouts, incompatible candidates, public fallback blocks, and restart-recovery orphaning all remain visible in the provenance graph, and failed submissions still return the execution bundle.",
   },
   {
     title: "Compatibility without lock-in",

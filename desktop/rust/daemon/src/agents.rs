@@ -3,7 +3,7 @@ use crate::provenance::{
     build_execution_summary, new_receipt_id, CapabilityDescriptor, ExecutionModelMetadata,
     ExecutionPolicy, ExecutionReceipt, ExecutionSummary, ExecutionTaskContext, ProvenanceGraph,
     ProvenanceGraphBuilder, ReceiptEventKind, ReceiptWriter, ResearchBriefArtifact,
-    ResearchSourceSummary, SupplyTier, TrustTier,
+    ResearchSourceSummary, PlannerSubQuestion, SupplyTier, TrustTier,
 };
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
@@ -34,6 +34,8 @@ pub struct AgentTaskRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentTaskResponse {
     pub ok: bool,
+    #[serde(default)]
+    pub detail: Option<String>,
     pub execution: ExecutionSummary,
     pub provenance: ProvenanceGraph,
     #[serde(default)]
@@ -69,6 +71,44 @@ struct StepRunResult {
     completed_receipt_id: String,
     actual_cost_usd: f64,
     supply_tier: SupplyTier,
+}
+
+#[derive(Debug, Clone)]
+struct WorkflowExecutionError {
+    detail: String,
+    parent_receipt_id: String,
+}
+
+impl std::fmt::Display for WorkflowExecutionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.detail.as_str())
+    }
+}
+
+impl std::error::Error for WorkflowExecutionError {}
+
+#[derive(Debug, Clone)]
+struct ResearchWorkflowResult {
+    artifact: ResearchBriefArtifact,
+    total_cost_usd: f64,
+    final_parent_receipt_id: String,
+}
+
+#[derive(Debug, Clone)]
+struct PlannerPlan {
+    planner_notes: String,
+    sub_questions: Vec<PlannerSubQuestion>,
+    selected_source_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct PlannerPlanResponse {
+    #[serde(default)]
+    planner_notes: Option<String>,
+    #[serde(default)]
+    sub_questions: Vec<PlannerSubQuestion>,
+    #[serde(default)]
+    selected_source_ids: Vec<String>,
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -261,15 +301,10 @@ where
         }
     }
 
-    async fn run_research_brief(
-        &self,
-        request: AgentTaskRequest,
-    ) -> Result<(ExecutionSummary, ProvenanceGraph, Vec<ExecutionReceipt>)> {
+    async fn run_research_brief(&self, request: AgentTaskRequest) -> Result<AgentTaskResponse> {
         let execution_id = format!("exec-{}", uuid::Uuid::new_v4());
         let policy = normalize_policy(request.policy.clone());
         let workflow_started_ms = now_ms();
-        let mut spent_cost_usd = 0.0;
-        let mut spent_public_cost_usd = 0.0;
         let task_context = ExecutionTaskContext {
             workflow_kind: request.workflow_kind.clone(),
             question: request.question.clone(),
@@ -314,6 +349,116 @@ where
         };
         self.receipt_writer.append(&planned).await?;
 
+        let (ok, detail) = match self
+            .run_research_brief_steps(
+                execution_id.as_str(),
+                &request,
+                &policy,
+                workflow_started_ms,
+                planned.receipt_id.as_str(),
+            )
+            .await
+        {
+            Ok(result) => {
+                let final_receipt = ExecutionReceipt {
+                    receipt_id: new_receipt_id(),
+                    execution_id: execution_id.clone(),
+                    step_id: "result".to_string(),
+                    attempt_id: format!("result-{}", uuid::Uuid::new_v4()),
+                    parent_receipt_id: Some(result.final_parent_receipt_id),
+                    event_kind: ReceiptEventKind::Completed,
+                    timestamp_ms: now_ms(),
+                    workflow_kind: request.workflow_kind.clone(),
+                    step_kind: Some("workflow_result".to_string()),
+                    task_context: None,
+                    policy_snapshot: Some(policy.clone()),
+                    candidate_rankings: Vec::new(),
+                    selected_candidate: None,
+                    supply_tier: None,
+                    trust_tier: Some(policy.trust_tier.clone()),
+                    capability_match_reason: Some("workflow_complete".to_string()),
+                    estimated_cost_usd: None,
+                    actual_cost_usd: Some(result.total_cost_usd),
+                    latency_ms: None,
+                    outcome: Some("completed".to_string()),
+                    failure_reason: None,
+                    fallback_reason: None,
+                    node_identity: Some(self.state.node_public_key.clone()),
+                    agent_identity: Some("workflow-controller".to_string()),
+                    model_metadata: None,
+                    summary: Some("Research brief assembled".to_string()),
+                    result: Some(result.artifact),
+                };
+                self.receipt_writer.append(&final_receipt).await?;
+                (true, None)
+            }
+            Err(error) => {
+                let failure = error.to_string();
+                let parent_receipt_id = error
+                    .downcast_ref::<WorkflowExecutionError>()
+                    .map(|workflow_error| workflow_error.parent_receipt_id.clone())
+                    .unwrap_or_else(|| planned.receipt_id.clone());
+                let failed_receipt = ExecutionReceipt {
+                    receipt_id: new_receipt_id(),
+                    execution_id: execution_id.clone(),
+                    step_id: "result".to_string(),
+                    attempt_id: format!("result-{}", uuid::Uuid::new_v4()),
+                    parent_receipt_id: Some(parent_receipt_id),
+                    event_kind: ReceiptEventKind::Failed,
+                    timestamp_ms: now_ms(),
+                    workflow_kind: request.workflow_kind.clone(),
+                    step_kind: Some("workflow_result".to_string()),
+                    task_context: None,
+                    policy_snapshot: Some(policy.clone()),
+                    candidate_rankings: Vec::new(),
+                    selected_candidate: None,
+                    supply_tier: None,
+                    trust_tier: Some(policy.trust_tier.clone()),
+                    capability_match_reason: Some("workflow_failed".to_string()),
+                    estimated_cost_usd: None,
+                    actual_cost_usd: None,
+                    latency_ms: None,
+                    outcome: Some("failed".to_string()),
+                    failure_reason: Some(failure.clone()),
+                    fallback_reason: None,
+                    node_identity: Some(self.state.node_public_key.clone()),
+                    agent_identity: Some("workflow-controller".to_string()),
+                    model_metadata: None,
+                    summary: Some("Research brief failed before completion".to_string()),
+                    result: None,
+                };
+                self.receipt_writer.append(&failed_receipt).await?;
+                (false, Some(failure))
+            }
+        };
+
+        let receipts = self
+            .receipt_writer
+            .list_for_execution(execution_id.as_str())
+            .await?;
+        let summary = build_execution_summary(&receipts)
+            .ok_or_else(|| anyhow!("execution summary unavailable"))?;
+        let graph = self.graph_builder.build(&receipts);
+        Ok(AgentTaskResponse {
+            ok,
+            detail,
+            execution: summary,
+            provenance: graph,
+            receipts,
+        })
+    }
+
+    async fn run_research_brief_steps(
+        &self,
+        execution_id: &str,
+        request: &AgentTaskRequest,
+        policy: &ExecutionPolicy,
+        workflow_started_ms: u128,
+        planned_receipt_id: &str,
+    ) -> Result<ResearchWorkflowResult> {
+        let mut spent_cost_usd = 0.0;
+        let mut spent_public_cost_usd = 0.0;
+
         let planner_step = WorkflowStep {
             step_id: "planner".to_string(),
             step_kind: "planner".to_string(),
@@ -328,11 +473,11 @@ where
             supply_tier,
         } = self
             .execute_step(
-                execution_id.as_str(),
+                execution_id,
                 request.workflow_kind.as_str(),
-                &request,
-                &policy,
-                planned.receipt_id.as_str(),
+                request,
+                policy,
+                planned_receipt_id,
                 &planner_step,
                 spent_cost_usd,
                 spent_public_cost_usd,
@@ -344,15 +489,21 @@ where
             spent_public_cost_usd += actual_cost_usd;
         }
 
+        let planner_plan = derive_planner_plan(
+            request.question.as_str(),
+            planner_notes.as_str(),
+            request.sources.as_slice(),
+        );
+        let selected_sources = planner_selected_sources(&planner_plan, request.sources.as_slice());
         let mut source_summaries = Vec::new();
         let planner_parent_receipt_id = parent_receipt_id.clone();
-        for source in request.sources.iter().take(MAX_RESEARCH_SOURCES) {
+        for source in selected_sources {
             let summary_step = WorkflowStep {
                 step_id: format!("summarize-{}", source.id),
                 step_kind: "summarize_source".to_string(),
                 prompt: build_source_summary_prompt(
                     request.question.as_str(),
-                    planner_notes.as_str(),
+                    &planner_plan,
                     source,
                 ),
                 required_tags: vec!["summarization".to_string(), "low_cost".to_string()],
@@ -365,10 +516,10 @@ where
                 supply_tier,
             } = self
                 .execute_step(
-                    execution_id.as_str(),
+                    execution_id,
                     request.workflow_kind.as_str(),
-                    &request,
-                    &policy,
+                    request,
+                    policy,
                     planner_parent_receipt_id.as_str(),
                     &summary_step,
                     spent_cost_usd,
@@ -393,7 +544,7 @@ where
             step_kind: "synthesize_brief".to_string(),
             prompt: build_synthesis_prompt(
                 request.question.as_str(),
-                planner_notes.as_str(),
+                &planner_plan,
                 source_summaries.as_slice(),
             ),
             required_tags: vec![
@@ -405,15 +556,15 @@ where
         };
         let StepRunResult {
             text: brief,
-            completed_receipt_id: parent_receipt_id,
+            completed_receipt_id: synthesis_receipt_id,
             actual_cost_usd,
             supply_tier: _supply_tier,
         } = self
             .execute_step(
-                execution_id.as_str(),
+                execution_id,
                 request.workflow_kind.as_str(),
-                &request,
-                &policy,
+                request,
+                policy,
                 parent_receipt_id.as_str(),
                 &synthesis_step,
                 spent_cost_usd,
@@ -423,49 +574,17 @@ where
             .await?;
         spent_cost_usd += actual_cost_usd;
 
-        let final_receipt = ExecutionReceipt {
-            receipt_id: new_receipt_id(),
-            execution_id: execution_id.clone(),
-            step_id: "result".to_string(),
-            attempt_id: format!("result-{}", uuid::Uuid::new_v4()),
-            parent_receipt_id: Some(parent_receipt_id),
-            event_kind: ReceiptEventKind::Completed,
-            timestamp_ms: now_ms(),
-            workflow_kind: request.workflow_kind.clone(),
-            step_kind: Some("workflow_result".to_string()),
-            task_context: None,
-            policy_snapshot: Some(policy.clone()),
-            candidate_rankings: Vec::new(),
-            selected_candidate: None,
-            supply_tier: None,
-            trust_tier: Some(policy.trust_tier.clone()),
-            capability_match_reason: Some("workflow_complete".to_string()),
-            estimated_cost_usd: None,
-            actual_cost_usd: Some(spent_cost_usd),
-            latency_ms: None,
-            outcome: Some("completed".to_string()),
-            failure_reason: None,
-            fallback_reason: None,
-            node_identity: Some(self.state.node_public_key.clone()),
-            agent_identity: Some("workflow-controller".to_string()),
-            model_metadata: None,
-            summary: Some("Research brief assembled".to_string()),
-            result: Some(ResearchBriefArtifact {
+        Ok(ResearchWorkflowResult {
+            artifact: ResearchBriefArtifact {
                 brief,
-                planner_notes: Some(planner_notes),
+                planner_notes: Some(planner_plan.planner_notes),
+                sub_questions: planner_plan.sub_questions,
+                selected_source_ids: planner_plan.selected_source_ids,
                 source_summaries,
-            }),
-        };
-        self.receipt_writer.append(&final_receipt).await?;
-
-        let receipts = self
-            .receipt_writer
-            .list_for_execution(execution_id.as_str())
-            .await?;
-        let summary = build_execution_summary(&receipts)
-            .ok_or_else(|| anyhow!("execution summary unavailable"))?;
-        let graph = self.graph_builder.build(&receipts);
-        Ok((summary, graph, receipts))
+            },
+            total_cost_usd: spent_cost_usd,
+            final_parent_receipt_id: synthesis_receipt_id,
+        })
     }
 
     async fn execute_step(
@@ -562,10 +681,11 @@ where
                 result: None,
             };
             self.receipt_writer.append(&failed).await?;
-            return Err(anyhow!(
-                "no candidate satisfied policy for step {}",
-                step.step_kind
-            ));
+            return Err(WorkflowExecutionError {
+                detail: format!("no candidate satisfied policy for step {}", step.step_kind),
+                parent_receipt_id: failed.receipt_id,
+            }
+            .into());
         }
 
         let mut previous_receipt_id = ranking_receipt.receipt_id.clone();
@@ -744,7 +864,11 @@ where
                 }
             }
         }
-        Err(anyhow!("all candidates failed for step {}", step.step_kind))
+        Err(WorkflowExecutionError {
+            detail: format!("all candidates failed for step {}", step.step_kind),
+            parent_receipt_id: previous_receipt_id,
+        }
+        .into())
     }
 }
 
@@ -883,6 +1007,22 @@ fn normalize_policy(mut policy: ExecutionPolicy) -> ExecutionPolicy {
             SupplyTier::Public,
         ];
     }
+    policy.allowed_supply_tiers.dedup();
+    policy.fallback_order = policy
+        .fallback_order
+        .into_iter()
+        .filter(|tier| {
+            policy
+                .allowed_supply_tiers
+                .iter()
+                .any(|allowed| allowed == tier)
+        })
+        .fold(Vec::new(), |mut tiers, tier| {
+            if !tiers.iter().any(|existing| existing == &tier) {
+                tiers.push(tier);
+            }
+            tiers
+        });
     if policy.fallback_order.is_empty() {
         policy.fallback_order = policy.allowed_supply_tiers.clone();
     }
@@ -1357,18 +1497,17 @@ pub(crate) async fn agent_task_create_handler(
         LocalChatStepExecutor::new(),
     );
     match controller.run_research_brief(request).await {
-        Ok((summary, provenance, receipts)) => (
-            StatusCode::CREATED,
-            Json(serde_json::json!(AgentTaskResponse {
-                ok: true,
-                execution: summary,
-                provenance,
-                receipts,
-            })),
+        Ok(response) => (
+            if response.ok {
+                StatusCode::CREATED
+            } else {
+                StatusCode::OK
+            },
+            Json(serde_json::json!(response)),
         )
             .into_response(),
         Err(error) => (
-            StatusCode::BAD_GATEWAY,
+            StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({
                 "ok": false,
                 "detail": error.to_string(),
@@ -1713,5 +1852,23 @@ mod tests {
             ]
         );
         assert_eq!(normalized.fallback_order, normalized.allowed_supply_tiers);
+    }
+
+    #[test]
+    fn normalize_policy_filters_fallback_to_allowed_tiers() {
+        let normalized = normalize_policy(ExecutionPolicy {
+            allowed_supply_tiers: vec![SupplyTier::Private, SupplyTier::Public],
+            fallback_order: vec![
+                SupplyTier::Personal,
+                SupplyTier::Private,
+                SupplyTier::Private,
+                SupplyTier::Public,
+            ],
+            ..sample_policy()
+        });
+        assert_eq!(
+            normalized.fallback_order,
+            vec![SupplyTier::Private, SupplyTier::Public]
+        );
     }
 }
