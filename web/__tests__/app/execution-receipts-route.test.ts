@@ -13,35 +13,35 @@ jest.mock("@/lib/server/shard-json-proxy", () => ({
   proxyOptions: jest.fn(() => ({ ok: true })),
 }))
 
-describe("execution provenance route", () => {
+describe("execution receipts route", () => {
   it("proxies using the execution id path segment", async () => {
     const { GET } = await import(
-      "@/app/api/v1/executions/[executionId]/provenance/route"
+      "@/app/api/v1/executions/[executionId]/receipts/route"
     )
     const { proxyShardJsonGet } = await import("@/lib/server/shard-json-proxy")
 
     const request = {
       headers: new Headers(),
-      nextUrl: new URL("https://shardnetwork.live/api/v1/executions/exec-22/provenance"),
+      nextUrl: new URL("https://shardnetwork.live/api/v1/executions/exec-14/receipts"),
     } as any
 
-    await GET(request, { params: { executionId: "exec-22" } })
+    await GET(request, { params: { executionId: "exec-14" } })
 
     expect(proxyShardJsonGet).toHaveBeenCalledWith(
       request,
-      "/v1/executions/exec-22/provenance",
+      "/v1/executions/exec-14/receipts",
     )
   })
 
   it("responds to preflight checks", async () => {
     const { OPTIONS } = await import(
-      "@/app/api/v1/executions/[executionId]/provenance/route"
+      "@/app/api/v1/executions/[executionId]/receipts/route"
     )
     const { proxyOptions } = await import("@/lib/server/shard-json-proxy")
 
     const request = {
       headers: new Headers({ origin: "https://shardnetwork.live" }),
-      nextUrl: new URL("https://shardnetwork.live/api/v1/executions/exec-22/provenance"),
+      nextUrl: new URL("https://shardnetwork.live/api/v1/executions/exec-14/receipts"),
     } as any
 
     await OPTIONS(request)

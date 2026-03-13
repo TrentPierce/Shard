@@ -17,66 +17,83 @@ type JoinPath = {
   checklist: string[]
 }
 
-type BenchmarkRow = {
-  scenario: string
-  p95Ms: number
-  tps: number
-  errorPct: number
-  verdict: string
+type Differentiator = {
+  title: string
+  summary: string
+  detail: string
 }
 
 const joinPaths: JoinPath[] = [
   {
-    title: "Join from your browser",
-    eyebrow: "Fastest path",
-    description: "Best for non-technical users. Open the site in Chrome or Edge and let the browser answer simpler prompts locally before it ever needs the network. Shard now also uses a low-power ONNX/WebNN worker lane for semantic compaction before escalation.",
-    href: "/start#browser",
-    cta: "Use browser client",
+    title: "Run the provenance demo",
+    eyebrow: "Flagship flow",
+    description:
+      "Submit the `research_brief` workflow and inspect the receipt chain, fallback events, and provenance graph that explain exactly where each step ran.",
+    href: "/provenance",
+    cta: "Open provenance demo",
     checklist: [
-      "Open the site in Chrome or Edge",
-      "Use Auto mode for local-first routing",
-      "Let harder prompts escalate to the desktop verifier path only when needed",
+      "Paste a research question and source bundle",
+      "Choose supply tiers, trust floor, and public-spend guardrails",
+      "Inspect the execution graph and raw receipts after the run completes",
     ],
   },
   {
-    title: "Run a desktop verifier",
-    eyebrow: "More impact",
-    description: "Best for a spare PC. Download Shard GUI, let it fetch the model, then start the node and join the network.",
+    title: "Bring your own capacity",
+    eyebrow: "Personal or private",
+    description:
+      "Run Shard on your own machine or team hardware so agents can prefer personal and private capacity before they ever reach public supply.",
     href: "/start#desktop",
-    cta: "Run desktop node",
+    cta: "Set up a node",
     checklist: [
       "Download the latest Shard GUI release",
-      "Wait for the model download to finish",
-      "Save, restart the node, then click Start",
+      "Warm the local model and verify health",
+      "Use it as personal or private execution capacity before public fallback",
     ],
   },
   {
-    title: "Build on the API",
-    eyebrow: "For developers",
-    description: "Point your app at the OpenAI-compatible endpoint and keep your existing chat-completions workflow.",
+    title: "Integrate the API",
+    eyebrow: "Developer path",
+    description:
+      "Keep `/v1/chat/completions` for compatibility, then adopt the task and provenance APIs when you need workflow-level routing evidence.",
     href: "/start#api",
-    cta: "Use the API",
+    cta: "Read the integration path",
     checklist: [
-      "Install the SDK or call the REST endpoint",
-      "Send standard chat-completions payloads",
-      "Monitor live health and release status before production rollout",
+      "Start with the Python SDK or REST endpoints",
+      "Use chat as the baseline surface and tasks for `research_brief` workflows",
+      "Fetch receipts and provenance graphs to debug routing and fallback behavior",
     ],
   },
 ]
 
-const benchmarkRows: BenchmarkRow[] = [
-  { scenario: "3 Fly nodes, heavy work, pinned local", p95Ms: 35107.047, tps: 0, errorPct: 66.67, verdict: "Clean March 12 v2 overload run: local-only routing dropped 12 of 18 requests under heavy load" },
-  { scenario: "3 Fly nodes, heavy work, mesh enabled", p95Ms: 37129.033, tps: 0, errorPct: 0, verdict: "Clean March 12 v2 overload run: mesh forwarding restored 18/18 success while tail latency still needs tuning" },
-  { scenario: "Local Llama 8B verifier, remote browser scout (10 vs 10)", p95Ms: 9936.093, tps: 0, errorPct: 0, verdict: "Compatible Llama WAN scouts work end to end, but they remain a benchmark path rather than the primary product architecture" },
-  { scenario: "Qwen browser draft against local Qwen 9B verifier", p95Ms: 0, tps: 0, errorPct: 0, verdict: "Strict mode rejects the pair; it is not a safe speculative match today" },
-]
-
-const takeaways = [
-  "The product path is now local-first: let the browser handle simple prompts and reserve desktop verifiers for heavier work.",
-  "Desktop-local speculative decoding is the right place to keep draft-and-verify acceleration because it avoids WAN coordination costs.",
-  "Mesh forwarding is now history-aware: recent forward latency and freshness data can down-rank slow-but-alive peers before they get picked.",
-  "Browser capability detection now separates current WebGPU execution from the low-power ONNX/WebNN worker lane.",
-  "WAN browser scouts remain useful for benchmark and research work, but they are no longer the default fast path.",
+const differentiators: Differentiator[] = [
+  {
+    title: "Receipts before rhetoric",
+    summary:
+      "Every workflow step returns developer-facing receipts instead of opaque scheduler logs.",
+    detail:
+      "You can inspect candidate rankings, selected node metadata, trust tier, latency, cost, and fallback reasons as first-class artifacts.",
+  },
+  {
+    title: "Policy-aware routing",
+    summary:
+      "Tasks can constrain personal, private, and public capacity with explicit trust and budget rules.",
+    detail:
+      "The first v1 workflow, `research_brief`, uses those policies to decide where planning, summarization, and synthesis should run.",
+  },
+  {
+    title: "Graceful degradation",
+    summary:
+      "Shard makes failure behavior visible instead of pretending the happy path is the only path.",
+    detail:
+      "Timeouts, incompatible candidates, public fallback blocks, and restart-recovery orphaning all remain visible in the provenance graph.",
+  },
+  {
+    title: "Compatibility without lock-in",
+    summary:
+      "Chat remains available as the familiar baseline while the workflow APIs carry the differentiating product surface.",
+    detail:
+      "Teams can start with `/v1/chat/completions`, then adopt tasks, receipts, and provenance when they need traceable routing decisions.",
+  },
 ]
 
 function formatCompact(value: number) {
@@ -156,49 +173,80 @@ export default function HomePage() {
           <div>
             <div className="inline-flex items-center gap-2 rounded-full border border-white/12 bg-white/8 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.24em] text-ink-200">
               <span>Shard Network</span>
-              <span className="text-ink-400">Spring RC</span>
+              <span className="text-ink-400">V1 Launch Candidate</span>
             </div>
             <div className="mt-5 flex items-center gap-4">
-              <Image src="/brand-mark.png" alt="Shard Network" width={92} height={92} className="h-20 w-20 rounded-[1.7rem] border border-white/12 bg-white/6 p-2.5 shadow-[0_18px_45px_rgba(9,21,64,0.38)]" priority />
+              <Image
+                src="/brand-mark.png"
+                alt="Shard Network"
+                width={92}
+                height={92}
+                className="h-20 w-20 rounded-[1.7rem] border border-white/12 bg-white/6 p-2.5 shadow-[0_18px_45px_rgba(9,21,64,0.38)]"
+                priority
+              />
               <div>
-                <p className="text-sm uppercase tracking-[0.18em] text-ink-200">Local-first open AI</p>
-                <p className="text-sm text-ink-300">Browsers answer simpler prompts locally. Desktop verifiers handle heavier inference. Apps still use one standard API.</p>
+                <p className="text-sm uppercase tracking-[0.18em] text-ink-200">
+                  Cross-topology agent workflows
+                </p>
+                <p className="text-sm text-ink-300">
+                  Receipt-first workflow observability across personal, private, and public Shard
+                  capacity.
+                </p>
               </div>
             </div>
             <h1 className="mt-6 max-w-3xl text-balance text-4xl font-semibold tracking-tight text-ink-50 sm:text-6xl">
-              Join the network in minutes, even if you are not technical.
+              See exactly why every agent step ran where it did.
             </h1>
             <p className="mt-5 max-w-2xl text-base leading-7 text-ink-200 sm:text-lg">
-              Shard lets everyday users get instant browser-side answers for lighter prompts while routing harder requests to stronger desktop verifier nodes. Experimental WAN scout paths still exist, but they no longer define the core product flow.
+              Shard V1 is built around the `research_brief` workflow: one task submission yields a
+              final brief, an append-only receipt chain, and a provenance graph that explains
+              routing, fallback, latency, cost, and trust tier across personal, private, and public
+              supply.
             </p>
             <div className="mt-8 flex flex-col gap-3 sm:flex-row">
-              <Link href="/start#browser" className="inline-flex min-h-11 items-center justify-center rounded-xl bg-accent-500 px-5 py-3 text-sm font-semibold text-base-950 transition hover:bg-accent-400">
-                Start in Browser
+              <Link
+                href="/provenance"
+                className="inline-flex min-h-11 items-center justify-center rounded-xl bg-accent-500 px-5 py-3 text-sm font-semibold text-base-950 transition hover:bg-accent-400"
+              >
+                Open Provenance Demo
               </Link>
-              <Link href="/start#desktop" className="inline-flex min-h-11 items-center justify-center rounded-xl border border-white/15 bg-white/5 px-5 py-3 text-sm font-semibold text-ink-50 transition hover:bg-white/10">
-                Download Shard GUI
+              <Link
+                href="/start"
+                className="inline-flex min-h-11 items-center justify-center rounded-xl border border-white/15 bg-white/5 px-5 py-3 text-sm font-semibold text-ink-50 transition hover:bg-white/10"
+              >
+                View Quick Start
               </Link>
             </div>
             <div className="mt-6 grid gap-3 sm:grid-cols-3">
               <div className="rounded-2xl border border-white/10 bg-base-900 p-4">
-                <p className="text-xs uppercase tracking-[0.18em] text-ink-400">Release status</p>
-                <p className="mt-2 text-lg font-semibold text-amber-200">NO_GO</p>
-                <p className="mt-1 text-sm text-ink-300">Short-request release stability is the current release gate. Scout uplift is tracked separately and still being validated.</p>
+                <p className="text-xs uppercase tracking-[0.18em] text-ink-400">Flagship workflow</p>
+                <p className="mt-2 text-lg font-semibold text-cyan-100">research_brief</p>
+                <p className="mt-1 text-sm text-ink-300">
+                  Submit source bundles, apply routing policy, and inspect a reconstructable
+                  provenance graph.
+                </p>
               </div>
               <div className="rounded-2xl border border-white/10 bg-base-900 p-4">
-                <p className="text-xs uppercase tracking-[0.18em] text-ink-400">Best current path</p>
-                <p className="mt-2 text-lg font-semibold text-ink-50">Browser local-first + desktop verifier</p>
-                <p className="mt-1 text-sm text-ink-300">Use local browser answers for simple requests and let the network handle the heavier ones.</p>
+                <p className="text-xs uppercase tracking-[0.18em] text-ink-400">
+                  Compatibility layer
+                </p>
+                <p className="mt-2 text-lg font-semibold text-ink-50">Chat stays available</p>
+                <p className="mt-1 text-sm text-ink-300">
+                  `/v1/chat/completions` and the chat UI remain the baseline surface while workflow
+                  observability is the new product focus.
+                </p>
               </div>
               <div className="rounded-2xl border border-white/10 bg-base-900 p-4">
-                <p className="text-xs uppercase tracking-[0.18em] text-ink-400">Browser status</p>
+                <p className="text-xs uppercase tracking-[0.18em] text-ink-400">Personal tier</p>
                 <p className="mt-2 text-lg font-semibold text-ink-50">
-                  {probeResult?.eligible ? "Ready for local-first answers" : "Network-only mode"}
+                  {probeResult?.eligible
+                    ? "Ready for local execution"
+                    : "Use private or public tiers"}
                 </p>
                 <p className="mt-1 text-sm text-ink-300">
                   {probeResult?.eligible
-                    ? `${probeResult.browser} with ${probeResult.estimated_vram_mb}MB estimated VRAM. WebGPU is the current shipped browser runtime; low-power WebNN classification is tracked separately.`
-                    : "Chrome or Edge with WebGPU gives the best local browser runtime."}
+                    ? `${probeResult.browser} with ${probeResult.estimated_vram_mb}MB estimated VRAM. Local browser execution can still handle lightweight compatibility-chat requests.`
+                    : "If the browser runtime is unavailable, Shard can still route work to private or public capacity."}
                 </p>
               </div>
             </div>
@@ -207,12 +255,30 @@ export default function HomePage() {
           <aside className="rounded-[1.75rem] border border-white/12 bg-base-900 p-5">
             <p className="text-xs uppercase tracking-[0.2em] text-ink-400">Live network snapshot</p>
             <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
-              <StatCard label="Active verifiers" value={dashboard.verifierNodes.toLocaleString()} detail="Healthy nodes currently visible" />
-              <StatCard label="Active browser scouts" value={dashboard.scouts.toLocaleString()} detail="Tabs currently contributing or recently active" />
-              <StatCard label="Tokens generated" value={dashboard.totalTokensGenerated.toLocaleString()} detail="Observed processed + offloaded tokens" />
-              <StatCard label="Network speed" value={`${dashboard.tokensPerSecond.toLocaleString()} tok/s`} detail={dashboard.isLive ? "Live telemetry" : "Last known snapshot"} />
+              <StatCard
+                label="Active verifiers"
+                value={dashboard.verifierNodes.toLocaleString()}
+                detail="Healthy nodes currently visible"
+              />
+              <StatCard
+                label="Observed contributors"
+                value={telemetry.contributors.length.toLocaleString()}
+                detail="Personal, private, or public capacity reporting telemetry"
+              />
+              <StatCard
+                label="Tokens processed"
+                value={dashboard.totalTokensGenerated.toLocaleString()}
+                detail="Observed processed and forwarded tokens"
+              />
+              <StatCard
+                label="Network speed"
+                value={`${dashboard.tokensPerSecond.toLocaleString()} tok/s`}
+                detail={dashboard.isLive ? "Live telemetry" : "Last known snapshot"}
+              />
             </div>
-            {errorMessage ? <p className="mt-4 text-sm text-amber-200">Telemetry note: {errorMessage}</p> : null}
+            {errorMessage ? (
+              <p className="mt-4 text-sm text-amber-200">Telemetry note: {errorMessage}</p>
+            ) : null}
           </aside>
         </div>
       </section>
@@ -220,8 +286,10 @@ export default function HomePage() {
       <section className="mt-12">
         <div className="flex items-end justify-between gap-4">
           <div>
-            <p className="text-xs uppercase tracking-[0.22em] text-ink-400">Onboarding</p>
-            <h2 className="mt-2 text-3xl font-semibold text-ink-50">Pick the path that matches your comfort level.</h2>
+            <p className="text-xs uppercase tracking-[0.22em] text-ink-400">Start here</p>
+            <h2 className="mt-2 text-3xl font-semibold text-ink-50">
+              Pick the surface that matches what you need from Shard.
+            </h2>
           </div>
           <Link href="/start" className="text-sm font-medium text-accent-300 hover:text-accent-200">
             Full quick start
@@ -229,10 +297,17 @@ export default function HomePage() {
         </div>
         <div className="mt-5 grid gap-4 lg:grid-cols-3">
           {joinPaths.map((path, index) => (
-            <article key={path.title} className="rounded-[1.6rem] border border-ring bg-base-900/90 p-5 shadow-panel">
+            <article
+              key={path.title}
+              className="rounded-[1.6rem] border border-ring bg-base-900/90 p-5 shadow-panel"
+            >
               <div className="flex items-center justify-between">
-                <span className="text-xs uppercase tracking-[0.18em] text-accent-300">Step {index + 1}</span>
-                <span className="rounded-full border border-ring px-2 py-1 text-[11px] uppercase tracking-[0.16em] text-ink-400">{path.eyebrow}</span>
+                <span className="text-xs uppercase tracking-[0.18em] text-accent-300">
+                  Step {index + 1}
+                </span>
+                <span className="rounded-full border border-ring px-2 py-1 text-[11px] uppercase tracking-[0.16em] text-ink-400">
+                  {path.eyebrow}
+                </span>
               </div>
               <h3 className="mt-4 text-2xl font-semibold text-ink-50">{path.title}</h3>
               <p className="mt-3 text-sm leading-6 text-ink-300">{path.description}</p>
@@ -244,7 +319,10 @@ export default function HomePage() {
                   </li>
                 ))}
               </ul>
-              <Link href={path.href} className="mt-6 inline-flex min-h-11 items-center justify-center rounded-xl border border-accent-400/30 bg-accent-400/10 px-4 py-2.5 text-sm font-semibold text-accent-100 transition hover:border-accent-300 hover:bg-accent-400/15">
+              <Link
+                href={path.href}
+                className="mt-6 inline-flex min-h-11 items-center justify-center rounded-xl border border-accent-400/30 bg-accent-400/10 px-4 py-2.5 text-sm font-semibold text-accent-100 transition hover:border-accent-300 hover:bg-accent-400/15"
+              >
                 {path.cta}
               </Link>
             </article>
@@ -254,39 +332,23 @@ export default function HomePage() {
 
       <section className="mt-12 grid gap-6 lg:grid-cols-[0.95fr_1.05fr]">
         <article className="rounded-[1.6rem] border border-ring bg-base-900/90 p-6 shadow-panel">
-          <p className="text-xs uppercase tracking-[0.22em] text-ink-400">Latest validated benchmark result</p>
-          <h2 className="mt-2 text-3xl font-semibold text-ink-50">What works right now</h2>
+          <p className="text-xs uppercase tracking-[0.22em] text-ink-400">Product claims</p>
+          <h2 className="mt-2 text-3xl font-semibold text-ink-50">What Shard V1 is proving</h2>
           <p className="mt-3 text-sm leading-6 text-ink-300">
-            These rows reflect the latest validated benchmark and compatibility evidence. The Fly rows now focus on heavy-work overload behavior because that is the real product-path distributed test. The local Llama row is a correctness milestone, not a fair speed benchmark, because the verifier and scout share one machine. The Qwen row is included because it established an incompatibility we now guard against.
+            The current website is centered on workflow observability rather than generic benchmark
+            claims. Shard’s first differentiated surface is the ability to show why a workflow step
+            ran on personal, private, or public capacity and what happened when the ideal path
+            failed.
           </p>
-          <div className="mt-5 overflow-hidden rounded-2xl border border-ring">
-            <table className="min-w-full divide-y divide-ring text-left text-sm">
-              <thead className="bg-base-950/60 text-ink-300">
-                <tr>
-                  <th className="px-4 py-3 font-medium">Scenario</th>
-                  <th className="px-4 py-3 font-medium">p95 ms</th>
-                  <th className="px-4 py-3 font-medium">TPS</th>
-                  <th className="px-4 py-3 font-medium">Errors</th>
-                  <th className="px-4 py-3 font-medium">Takeaway</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-ring/70 bg-base-900/60 text-ink-100">
-                {benchmarkRows.map((row) => (
-                  <tr key={row.scenario}>
-                    <td className="px-4 py-3 font-medium text-ink-50">{row.scenario}</td>
-                    <td className="px-4 py-3">{row.p95Ms > 0 ? row.p95Ms.toLocaleString(undefined, { maximumFractionDigits: 3 }) : "n/a"}</td>
-                    <td className="px-4 py-3">{row.tps > 0 ? row.tps.toLocaleString(undefined, { maximumFractionDigits: 2 }) : "n/a"}</td>
-                    <td className="px-4 py-3">{row.p95Ms > 0 || row.errorPct > 0 ? `${row.errorPct.toFixed(2)}%` : "n/a"}</td>
-                    <td className="px-4 py-3 text-ink-300">{row.verdict}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
           <div className="mt-5 grid gap-3">
-            {takeaways.map((line) => (
-              <div key={line} className="rounded-2xl border border-ring bg-base-950/40 p-4 text-sm text-ink-200">
-                {line}
+            {differentiators.map((item) => (
+              <div
+                key={item.title}
+                className="rounded-2xl border border-ring bg-base-950/40 p-4 text-sm text-ink-200"
+              >
+                <p className="font-semibold text-ink-50">{item.title}</p>
+                <p className="mt-2 text-ink-200">{item.summary}</p>
+                <p className="mt-2 text-ink-400">{item.detail}</p>
               </div>
             ))}
           </div>
@@ -295,26 +357,39 @@ export default function HomePage() {
         <article className="rounded-[1.6rem] border border-ring bg-base-900/90 p-6 shadow-panel">
           <div className="flex items-end justify-between gap-4">
             <div>
-              <p className="text-xs uppercase tracking-[0.22em] text-ink-400">Live contribution map</p>
-              <h2 className="mt-2 text-3xl font-semibold text-ink-50">Who is helping right now</h2>
+              <p className="text-xs uppercase tracking-[0.22em] text-ink-400">
+                Live capacity map
+              </p>
+              <h2 className="mt-2 text-3xl font-semibold text-ink-50">
+                Which Shard capacity is visible right now
+              </h2>
             </div>
             <span className="rounded-full border border-ring px-3 py-1 text-xs uppercase tracking-[0.16em] text-ink-300">
               {telemetry.contributors.length} observed contributors
             </span>
           </div>
           <p className="mt-3 text-sm leading-6 text-ink-300">
-            This view combines proxy health probes, queue data, latency, uptime, model identity, and token totals so you can see which verifier nodes are healthy and which contributors are actually carrying work.
+            This view combines proxy health probes, queue data, latency, uptime, model identity,
+            and token totals so you can see which contributors are healthy enough to participate in
+            personal, private, or public routing.
           </p>
           <div className="mt-6 space-y-3">
             {contributionRows.length > 0 ? (
               contributionRows.map((row) => (
-                <div key={`${row.role}-${row.id}`} className="rounded-2xl border border-ring bg-base-950/40 p-4">
+                <div
+                  key={`${row.role}-${row.id}`}
+                  className="rounded-2xl border border-ring bg-base-950/40 p-4"
+                >
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
                       <p className="text-sm font-semibold text-ink-50">{row.id}</p>
                       <div className="mt-1 flex flex-wrap items-center gap-2">
-                        <p className="text-xs uppercase tracking-[0.16em] text-ink-400">{row.label}</p>
-                        <span className={`rounded-full border px-2 py-1 text-[11px] uppercase tracking-[0.14em] ${healthBadgeClass(row.health)}`}>
+                        <p className="text-xs uppercase tracking-[0.16em] text-ink-400">
+                          {row.label}
+                        </p>
+                        <span
+                          className={`rounded-full border px-2 py-1 text-[11px] uppercase tracking-[0.14em] ${healthBadgeClass(row.health)}`}
+                        >
                           {row.health}
                         </span>
                         {row.backend ? (
@@ -325,7 +400,9 @@ export default function HomePage() {
                       </div>
                     </div>
                     <div className="text-right">
-                      <p className="text-sm font-semibold text-accent-100">{formatCompact(row.tokensProcessed)} tokens</p>
+                      <p className="text-sm font-semibold text-accent-100">
+                        {formatCompact(row.tokensProcessed)} tokens
+                      </p>
                       <p className="text-xs text-ink-400">efficiency {row.efficiency}%</p>
                     </div>
                   </div>
@@ -354,13 +431,17 @@ export default function HomePage() {
                     <p className="mt-3 text-xs text-amber-100">readiness: {row.readinessReason}</p>
                   ) : null}
                   <div className="mt-3 h-3 overflow-hidden rounded-full bg-white/6">
-                    <div className="h-full rounded-full bg-accent-500" style={{ width: `${row.width}%` }} />
+                    <div
+                      className="h-full rounded-full bg-accent-500"
+                      style={{ width: `${row.width}%` }}
+                    />
                   </div>
                 </div>
               ))
             ) : (
               <div className="rounded-2xl border border-dashed border-ring p-6 text-sm text-ink-300">
-                Waiting for contributor telemetry. Once nodes or browser scouts report in, they will appear here automatically.
+                Waiting for contributor telemetry. Once nodes report in, they will appear here
+                automatically.
               </div>
             )}
           </div>

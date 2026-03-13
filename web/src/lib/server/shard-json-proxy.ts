@@ -4,6 +4,11 @@ import {
   forwardRequestHeaders,
   preferredBackendCandidatesFromHeaders,
 } from "@/lib/server/shard-backend"
+import {
+  buildPreflightResponse,
+  corsHeadersForRequest,
+  resolveCorsOrigin,
+} from "@/lib/server/cors"
 
 function parseTimeoutMs(raw: string | undefined, fallback: number): number {
   const parsed = Number.parseInt(raw ?? "", 10)
@@ -31,6 +36,10 @@ export async function proxyShardJsonGet(
   request: NextRequest,
   backendPath: string,
 ): Promise<NextResponse> {
+  if (request.headers.get("origin") && !resolveCorsOrigin(request)) {
+    return NextResponse.json({ ok: false, detail: "Origin not allowed" }, { status: 403 })
+  }
+
   try {
     const { response, backend, attempts } = await fetchWithBackendFailover(backendPath, {
       method: "GET",
@@ -42,7 +51,10 @@ export async function proxyShardJsonGet(
     const payload = await response.json().catch(() => ({}))
     return NextResponse.json(payload, {
       status: response.status,
-      headers: responseHeaders(backend, attempts),
+      headers: {
+        ...responseHeaders(backend, attempts),
+        ...corsHeadersForRequest(request),
+      },
     })
   } catch (error) {
     return NextResponse.json(
@@ -50,7 +62,7 @@ export async function proxyShardJsonGet(
         ok: false,
         detail: String((error as Error)?.message ?? error ?? "upstream request failed"),
       },
-      { status: 502 },
+      { status: 502, headers: corsHeadersForRequest(request) },
     )
   }
 }
@@ -59,6 +71,10 @@ export async function proxyShardJsonPost(
   request: NextRequest,
   backendPath: string,
 ): Promise<NextResponse> {
+  if (request.headers.get("origin") && !resolveCorsOrigin(request)) {
+    return NextResponse.json({ ok: false, detail: "Origin not allowed" }, { status: 403 })
+  }
+
   try {
     const bodyText = await request.text()
     const { response, backend, attempts } = await fetchWithBackendFailover(backendPath, {
@@ -73,7 +89,10 @@ export async function proxyShardJsonPost(
     const payload = await response.json().catch(() => ({}))
     return NextResponse.json(payload, {
       status: response.status,
-      headers: responseHeaders(backend, attempts),
+      headers: {
+        ...responseHeaders(backend, attempts),
+        ...corsHeadersForRequest(request),
+      },
     })
   } catch (error) {
     return NextResponse.json(
@@ -81,7 +100,11 @@ export async function proxyShardJsonPost(
         ok: false,
         detail: String((error as Error)?.message ?? error ?? "upstream request failed"),
       },
-      { status: 502 },
+      { status: 502, headers: corsHeadersForRequest(request) },
     )
   }
+}
+
+export function proxyOptions(request: NextRequest, methods: string) {
+  return buildPreflightResponse(request, methods)
 }

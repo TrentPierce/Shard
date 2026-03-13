@@ -6,9 +6,9 @@ import { usePathname } from "next/navigation"
 import { useEffect, useState } from "react"
 
 const navItems = [
-  { href: "/", label: "Dashboard" },
-  { href: "/chat", label: "Chat" },
+  { href: "/", label: "Overview" },
   { href: "/provenance", label: "Provenance" },
+  { href: "/chat", label: "Chat" },
   { href: "/start", label: "Quick Start" },
 ]
 
@@ -34,7 +34,9 @@ export function SiteNav() {
           />
           <span className="flex flex-col">
             <span>Shard</span>
-            <span className="text-[10px] font-medium tracking-[0.28em] text-ink-300">MESH AI</span>
+            <span className="text-[10px] font-medium tracking-[0.28em] text-ink-300">
+              RECEIPT FIRST
+            </span>
           </span>
         </Link>
 

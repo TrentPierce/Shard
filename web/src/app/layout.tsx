@@ -20,10 +20,11 @@ export const viewport: Viewport = {
 export const metadata: Metadata = {
   metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL || "https://shardnetwork.live"),
   title: {
-    default: "Shard | Live Telemetry Dashboard",
+    default: "Shard | Receipt-First Agent Workflows",
     template: "%s | Shard",
   },
-  description: "Local-first browser AI with desktop verifier routing, live telemetry, and OpenAI-compatible APIs.",
+  description:
+    "Receipt-first workflow observability for agent execution across personal, private, and public Shard capacity.",
   icons: {
     icon: [{ url: "/brand-mark.png", type: "image/png" }],
     shortcut: [{ url: "/brand-mark.png", type: "image/png" }],

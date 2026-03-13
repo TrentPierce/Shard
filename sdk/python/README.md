@@ -18,6 +18,59 @@ with ShardClient(base_url="http://localhost:9091") as client:
     print(client.metrics.summary())
 ```
 
+## Research Workflow Provenance
+
+The v1 agent surface is intentionally opinionated around `research_brief`. It returns an
+execution summary, append-only receipts, and a reconstructable provenance graph.
+
+```python
+from shard import ShardClient
+
+with ShardClient(base_url="http://localhost:9091") as client:
+    task = client.agents.submit(
+        question="What should Shard emphasize in its launch narrative?",
+        sources=[
+            {
+                "id": "market-notes",
+                "title": "Market notes",
+                "content": "Teams care about cross-topology routing clarity and failure visibility.",
+            },
+            {
+                "id": "operator-notes",
+                "title": "Operator notes",
+                "content": "Contributors value specialist work that improves their own local workflows first.",
+            },
+        ],
+        policy={
+            "allowed_supply_tiers": ["personal", "private", "public"],
+            "trust_tier": "verified_mesh",
+            "capability_tags": ["planning", "summarization", "synthesis"],
+            "fallback_order": ["personal", "private", "public"],
+            "budget_limit": 1.25,
+            "deadline_ms": 45_000,
+            "max_public_spend": 0.35,
+        },
+    )
+
+    execution_id = task.execution.execution_id
+    print(task.execution.status)
+    print(task.provenance.incomplete)
+
+    receipts = client.agents.receipts(execution_id)
+    provenance = client.agents.provenance(execution_id)
+    capabilities = client.agents.capabilities()
+
+    print(f"receipts={len(receipts)} nodes={len(provenance.nodes)} capabilities={len(capabilities)}")
+```
+
+Useful agent methods:
+
+- `client.agents.submit(...)`
+- `client.agents.status(execution_id)`
+- `client.agents.receipts(execution_id)`
+- `client.agents.provenance(execution_id)`
+- `client.agents.capabilities()`
+
 ## Programmatic Contribution
 
 The SDK can also register a contributor against the daemon's signed control-plane endpoints.

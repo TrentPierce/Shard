@@ -2,7 +2,7 @@ export const runtime = "edge"
 export const dynamic = "force-dynamic"
 
 import { NextRequest } from "next/server"
-import { proxyShardJsonGet } from "@/lib/server/shard-json-proxy"
+import { proxyOptions, proxyShardJsonGet } from "@/lib/server/shard-json-proxy"
 
 export async function GET(
   request: NextRequest,
@@ -12,4 +12,8 @@ export async function GET(
     request,
     `/v1/executions/${context.params.executionId}/provenance`,
   )
+}
+
+export async function OPTIONS(request: NextRequest) {
+  return proxyOptions(request, "GET, OPTIONS")
 }

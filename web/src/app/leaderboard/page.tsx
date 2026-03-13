@@ -19,8 +19,16 @@ export default function LeaderboardPage() {
 
   return (
     <main id="main-content" className="mx-auto mb-20 mt-12 w-full max-w-4xl px-4">
-      <h1 className="mb-4 text-3xl font-bold text-ink-50">Network Leaderboard</h1>
-      <p className="mb-8 text-sm text-ink-300">Top contributors providing verifiable inference on the Shard network.</p>
+      <h1 className="mb-4 text-3xl font-bold text-ink-50">Contributor Ledger</h1>
+      <p className="mb-4 text-sm text-ink-300">
+        This page shows the legacy operator credit surface. Shard V1 is currently centered on
+        receipt-first workflow provenance, but contributor balances remain available here for
+        operators who track the network economy.
+      </p>
+      <div className="mb-8 rounded-2xl border border-amber-300/20 bg-amber-300/10 p-4 text-sm text-amber-100">
+        Use <span className="font-semibold">Provenance</span> for the flagship product flow and
+        treat this page as an operator-facing ledger view.
+      </div>
 
       <div className="overflow-hidden rounded-2xl border border-ring bg-base-900">
         <table className="w-full border-collapse text-left">
@@ -28,7 +36,7 @@ export default function LeaderboardPage() {
             <tr>
               <th className="w-24 p-4 font-semibold">Rank</th>
               <th className="p-4 font-semibold">Wallet</th>
-              <th className="p-4 text-right font-semibold">Credits Earned</th>
+              <th className="p-4 text-right font-semibold">Legacy Credit Balance</th>
             </tr>
           </thead>
           <tbody>
@@ -54,7 +62,7 @@ export default function LeaderboardPage() {
             {data.length === 0 && (
               <tr>
                 <td colSpan={3} className="p-12 text-center text-sm italic text-ink-300">
-                  Leaderboard data unavailable or network is syncing.
+                  Contributor ledger data is unavailable or the network is still syncing.
                 </td>
               </tr>
             )}

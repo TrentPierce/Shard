@@ -13,35 +13,28 @@ jest.mock("@/lib/server/shard-json-proxy", () => ({
   proxyOptions: jest.fn(() => ({ ok: true })),
 }))
 
-describe("execution provenance route", () => {
-  it("proxies using the execution id path segment", async () => {
-    const { GET } = await import(
-      "@/app/api/v1/executions/[executionId]/provenance/route"
-    )
+describe("capabilities route", () => {
+  it("proxies to the daemon capabilities endpoint", async () => {
+    const { GET } = await import("@/app/api/v1/capabilities/route")
     const { proxyShardJsonGet } = await import("@/lib/server/shard-json-proxy")
 
     const request = {
       headers: new Headers(),
-      nextUrl: new URL("https://shardnetwork.live/api/v1/executions/exec-22/provenance"),
+      nextUrl: new URL("https://shardnetwork.live/api/v1/capabilities"),
     } as any
 
-    await GET(request, { params: { executionId: "exec-22" } })
+    await GET(request)
 
-    expect(proxyShardJsonGet).toHaveBeenCalledWith(
-      request,
-      "/v1/executions/exec-22/provenance",
-    )
+    expect(proxyShardJsonGet).toHaveBeenCalledWith(request, "/v1/capabilities")
   })
 
   it("responds to preflight checks", async () => {
-    const { OPTIONS } = await import(
-      "@/app/api/v1/executions/[executionId]/provenance/route"
-    )
+    const { OPTIONS } = await import("@/app/api/v1/capabilities/route")
     const { proxyOptions } = await import("@/lib/server/shard-json-proxy")
 
     const request = {
       headers: new Headers({ origin: "https://shardnetwork.live" }),
-      nextUrl: new URL("https://shardnetwork.live/api/v1/executions/exec-22/provenance"),
+      nextUrl: new URL("https://shardnetwork.live/api/v1/capabilities"),
     } as any
 
     await OPTIONS(request)

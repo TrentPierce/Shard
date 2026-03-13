@@ -5,7 +5,7 @@ import { useMemo } from "react"
 import { useAppContext } from "@/lib/context"
 
 type PathCard = {
-  id: "browser" | "desktop" | "api"
+  id: "provenance" | "desktop" | "api"
   title: string
   summary: string
   action: string
@@ -16,25 +16,27 @@ type PathCard = {
 
 const paths: PathCard[] = [
   {
-    id: "browser",
-    title: "Browser Client",
-    summary: "The easiest way to use Shard. Simple prompts can finish locally in-browser with no install required.",
-    action: "Open shardnetwork.live",
-    href: "https://www.shardnetwork.live/",
+    id: "provenance",
+    title: "Provenance Demo",
+    summary:
+      "The clearest way to understand Shard V1. Run the `research_brief` workflow and inspect the receipt chain immediately.",
+    action: "Open provenance demo",
+    href: "/provenance",
     steps: [
-      "Open the site in Chrome or Edge.",
-      "Use Auto mode to let the browser answer lighter prompts locally.",
-      "Escalate harder prompts to the desktop verifier path only when needed.",
+      "Provide a research question and source bundle.",
+      "Set supply tiers, trust floor, and budget constraints.",
+      "Review the execution summary, receipts, and provenance graph.",
     ],
     notes: [
-      "WAN browser scouts are now experimental and are only needed for benchmark or research sessions.",
-      "If WebGPU is unavailable, the page can still route requests to the network path.",
+      "This is the flagship v1 surface and the best place to evaluate Shard’s differentiation.",
+      "The graph remains useful even when a step fails or falls back to a less desirable route.",
     ],
   },
   {
     id: "desktop",
-    title: "Desktop Verifier",
-    summary: "The best path for a spare PC that should stay online and help the mesh.",
+    title: "Personal or Private Capacity",
+    summary:
+      "Run Shard on a spare PC or team machine so agents can prefer your own capacity before they fall back to public supply.",
     action: "Download Shard GUI",
     href: "https://github.com/TrentPierce/Shard/releases/latest",
     steps: [
@@ -43,24 +45,25 @@ const paths: PathCard[] = [
       "Save settings, restart the node once, then click Start.",
     ],
     notes: [
-      "After the model finishes downloading, restart once so the verifier comes up cleanly.",
-      "If health is green and the node shows a peer connection, it has joined the mesh.",
+      "Use this when you want local ownership over latency, trust, and data placement.",
+      "Healthy nodes can serve personal, private, or public work depending on policy.",
     ],
   },
   {
     id: "api",
-    title: "API Consumer",
-    summary: "Use the network like an OpenAI-compatible backend in your own app.",
+    title: "API + SDK Integration",
+    summary:
+      "Use chat as the compatibility baseline, then adopt task and provenance APIs when you need workflow-level observability.",
     action: "Read API docs",
-    href: "https://github.com/TrentPierce/Shard#python-sdk",
+    href: "https://github.com/TrentPierce/Shard/blob/main/docs/api.md",
     steps: [
-      "Point your client to the Shard endpoint.",
-      "Send standard chat-completions requests.",
-      "Check network health before production traffic.",
+      "Start with `/v1/chat/completions` if you need a familiar surface.",
+      "Adopt `POST /v1/agents/tasks` for the `research_brief` workflow.",
+      "Fetch receipts and provenance graphs to debug routing and fallback behavior.",
     ],
     notes: [
-      "This path is for developers. Most users should start with browser or desktop.",
-      "The API shape is already familiar if you have used OpenAI-compatible SDKs.",
+      "The Python SDK exposes `client.agents.submit/status/receipts/provenance/capabilities`.",
+      "Use this path if you are building agent workflows rather than just testing the UI.",
     ],
   },
 ]
@@ -78,13 +81,19 @@ export default function StartPage() {
     <main id="main-content" className="py-8 sm:py-10">
       <section className="rounded-[2rem] border border-ring bg-base-800 p-6 shadow-panel sm:p-8">
         <p className="text-xs uppercase tracking-[0.22em] text-ink-400">Quick Start</p>
-        <h1 className="mt-2 text-balance text-4xl font-semibold text-ink-50">Choose the easiest way for you to join the network.</h1>
+        <h1 className="mt-2 text-balance text-4xl font-semibold text-ink-50">
+          Choose how you want to experience Shard V1.
+        </h1>
         <p className="mt-4 max-w-3xl text-sm leading-6 text-ink-300 sm:text-base">
-          You do not need to understand distributed systems to use Shard. Pick the browser path for local-first responses, or the desktop path if you want your computer to act as a stronger verifier node.
+          Start with the provenance demo if you want to understand the product quickly. Use the
+          node path when you want your own capacity in the routing mix, and use the API path when
+          you are integrating Shard into agent workflows.
         </p>
         {contributionStatus ? (
           <div className="mt-5 rounded-2xl border border-ring bg-base-950/40 p-4">
-            <p className="text-xs uppercase tracking-[0.18em] text-accent-300">Browser status</p>
+            <p className="text-xs uppercase tracking-[0.18em] text-accent-300">
+              Local capacity status
+            </p>
             <p className="mt-2 text-lg font-semibold text-ink-50">{statusText}</p>
             <p className="mt-1 text-sm text-ink-300">{contributionStatus.reason}</p>
           </div>
@@ -133,24 +142,31 @@ export default function StartPage() {
         <p className="text-xs uppercase tracking-[0.22em] text-ink-400">Simple rule of thumb</p>
         <div className="mt-3 grid gap-4 md:grid-cols-3">
           <div>
-            <h3 className="text-lg font-semibold text-ink-50">Just want to help?</h3>
-            <p className="mt-2 text-sm text-ink-300">Use the browser client. It is the least technical path and now answers lighter prompts locally first.</p>
+            <h3 className="text-lg font-semibold text-ink-50">Need the clearest demo?</h3>
+            <p className="mt-2 text-sm text-ink-300">
+              Start with provenance. It shows the output, the receipt chain, and the routing graph
+              together.
+            </p>
           </div>
           <div>
-            <h3 className="text-lg font-semibold text-ink-50">Want more impact?</h3>
-            <p className="mt-2 text-sm text-ink-300">Run Shard GUI on a PC that can stay online as a verifier node.</p>
+            <h3 className="text-lg font-semibold text-ink-50">Want your own capacity?</h3>
+            <p className="mt-2 text-sm text-ink-300">
+              Run Shard GUI on a PC that can stay online as personal or private execution capacity.
+            </p>
           </div>
           <div>
             <h3 className="text-lg font-semibold text-ink-50">Building software?</h3>
-            <p className="mt-2 text-sm text-ink-300">Use the API path and treat Shard like an OpenAI-compatible backend.</p>
+            <p className="mt-2 text-sm text-ink-300">
+              Use the task APIs for workflow observability and keep chat for compatibility.
+            </p>
           </div>
         </div>
         <div className="mt-6 flex flex-wrap gap-3">
           <Link href="/" className="inline-flex min-h-11 items-center justify-center rounded-xl border border-ring px-4 py-2.5 text-sm font-semibold text-ink-100 hover:bg-base-800">
-            Back to dashboard
+            Back to overview
           </Link>
-          <Link href="/chat" className="inline-flex min-h-11 items-center justify-center rounded-xl bg-accent-500 px-4 py-2.5 text-sm font-semibold text-base-950 hover:bg-accent-400">
-            Test the API
+          <Link href="/provenance" className="inline-flex min-h-11 items-center justify-center rounded-xl bg-accent-500 px-4 py-2.5 text-sm font-semibold text-base-950 hover:bg-accent-400">
+            Run provenance demo
           </Link>
         </div>
       </section>

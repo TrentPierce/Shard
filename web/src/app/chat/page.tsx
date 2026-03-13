@@ -27,7 +27,7 @@ function describeIdleMode(mode: ChatRouteMode) {
     case "experimental-wan":
       return "Experimental WAN mode"
     default:
-      return "Auto route: browser first, network for harder prompts"
+      return "Compatibility chat: browser when possible, network for heavier prompts"
   }
 }
 
@@ -334,7 +334,7 @@ export default function ChatPage() {
         error: String((error as Error)?.message ?? error ?? "unknown error"),
       })
       replaceAssistantMessage(
-        "Unable to complete the request. If you are using Auto mode, verify the local browser runtime or daemon endpoint. For WAN scout testing, use Experimental WAN only when the verifier is prepared for it.",
+        "Unable to complete the request. This chat page is the compatibility surface, so verify the local browser runtime or daemon endpoint first. For workflow-level routing evidence, use the Provenance page.",
       )
     } finally {
       setStreaming(false)
@@ -369,7 +369,8 @@ export default function ChatPage() {
           {messages.length === 0 ? (
             <div className="mx-auto mt-12 max-w-xl rounded-xl border border-ring bg-base-800 p-4 text-center sm:mt-16">
               <p className="text-sm text-ink-100">
-                Ask anything. Simple prompts can finish locally in the browser, while heavier prompts route to the desktop verifier path.
+                This page keeps the familiar chat surface available. For the flagship
+                `research_brief` workflow and receipt graph, use the Provenance page.
               </p>
             </div>
           ) : null}
@@ -399,7 +400,8 @@ export default function ChatPage() {
             <div className="space-y-3">
               {routeTraces.length === 0 ? (
                 <div className="rounded-lg border border-dashed border-ring px-3 py-4 text-xs text-ink-400">
-                  Send a prompt to see whether it stayed local, compacted context, hit the verifier directly, or was mesh-forwarded.
+                  Send a prompt to inspect the compatibility route. For workflow-level provenance,
+                  use the dedicated Provenance demo.
                 </div>
               ) : (
                 routeTraces.map((trace) => (
