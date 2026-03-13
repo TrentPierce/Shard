@@ -2,9 +2,10 @@ use super::*;
 use anyhow::Result;
 use rusqlite::{params, Connection};
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum SupplyTier {
+    #[default]
     Personal,
     Private,
     Public,
@@ -20,30 +21,20 @@ impl SupplyTier {
     }
 }
 
-impl Default for SupplyTier {
-    fn default() -> Self {
-        Self::Personal
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum TrustTier {
+    #[default]
     Local,
     VerifiedMesh,
     PrivateAttested,
     PublicSpecialist,
 }
 
-impl Default for TrustTier {
-    fn default() -> Self {
-        Self::Local
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum ReceiptEventKind {
+    #[default]
     Planned,
     CandidateRanked,
     Dispatched,
@@ -67,15 +58,10 @@ impl ReceiptEventKind {
     }
 }
 
-impl Default for ReceiptEventKind {
-    fn default() -> Self {
-        Self::Planned
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum ExecutionStatus {
+    #[default]
     Running,
     Completed,
     Failed,
@@ -90,12 +76,6 @@ impl ExecutionStatus {
             Self::Failed => "failed",
             Self::Orphaned => "orphaned",
         }
-    }
-}
-
-impl Default for ExecutionStatus {
-    fn default() -> Self {
-        Self::Running
     }
 }
 
