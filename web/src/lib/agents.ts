@@ -70,9 +70,16 @@ export interface ResearchSourceSummary {
   summary: string
 }
 
+export interface PlannerSubQuestion {
+  question: string
+  relevant_source_ids: string[]
+}
+
 export interface ResearchBriefArtifact {
   brief: string
   planner_notes?: string | null
+  sub_questions: PlannerSubQuestion[]
+  selected_source_ids: string[]
   source_summaries: ResearchSourceSummary[]
 }
 
@@ -212,7 +219,7 @@ export function defaultExecutionPolicy(): ExecutionPolicy {
     deadline_ms: 45_000,
     capability_tags: ["planning", "summarization", "synthesis"],
     fallback_order: ["personal", "private", "public"],
-    data_residency: "us",
+    data_residency: null,
     max_public_spend: 0.35,
   }
 }
@@ -235,12 +242,29 @@ export function createDefaultSources(): ResearchSourceInput[] {
 }
 
 function mergePolicy(policy?: Partial<ExecutionPolicy>): ExecutionPolicy {
+  const defaults = defaultExecutionPolicy()
+  const allowedSupplyTiers =
+    policy?.allowed_supply_tiers && policy.allowed_supply_tiers.length > 0
+      ? policy.allowed_supply_tiers
+      : defaults.allowed_supply_tiers
+  const capabilityTags =
+    policy?.capability_tags && policy.capability_tags.length > 0
+      ? policy.capability_tags
+      : defaults.capability_tags
+  const requestedFallbackOrder =
+    policy?.fallback_order && policy.fallback_order.length > 0
+      ? policy.fallback_order
+      : allowedSupplyTiers
+  const fallbackOrder = requestedFallbackOrder.filter((tier) =>
+    allowedSupplyTiers.includes(tier),
+  )
+
   return {
-    ...defaultExecutionPolicy(),
+    ...defaults,
     ...policy,
-    allowed_supply_tiers: policy?.allowed_supply_tiers ?? defaultExecutionPolicy().allowed_supply_tiers,
-    capability_tags: policy?.capability_tags ?? defaultExecutionPolicy().capability_tags,
-    fallback_order: policy?.fallback_order ?? defaultExecutionPolicy().fallback_order,
+    allowed_supply_tiers: allowedSupplyTiers,
+    capability_tags: capabilityTags,
+    fallback_order: fallbackOrder.length > 0 ? fallbackOrder : allowedSupplyTiers,
   }
 }
 

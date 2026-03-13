@@ -23,7 +23,8 @@ with ShardClient(base_url="http://localhost:9091") as client:
 The v1 agent surface is intentionally opinionated around `research_brief`. It returns an
 execution summary, append-only receipts, and a reconstructable provenance graph. Failed
 workflow submissions still return the persisted receipt chain and provenance bundle so the
-unhappy path remains debuggable.
+unhappy path remains debuggable. Completed workflow results also include planner notes,
+sub-questions, and the source IDs selected for synthesis.
 
 ```python
 from shard import ShardClient
@@ -58,6 +59,7 @@ with ShardClient(base_url="http://localhost:9091") as client:
     print(task.execution.status)
     print(task.detail)
     print(task.provenance.incomplete)
+    print(task.execution.result.sub_questions if task.execution.result else [])
 
     receipts = client.agents.receipts(execution_id)
     provenance = client.agents.provenance(execution_id)
@@ -73,6 +75,15 @@ Useful agent methods:
 - `client.agents.receipts(execution_id)`
 - `client.agents.provenance(execution_id)`
 - `client.agents.capabilities()`
+
+If you omit `policy`, the SDK sends the same product defaults used by the Shard web demo:
+
+- `trust_tier = verified_mesh`
+- `budget_limit = 1.25`
+- `deadline_ms = 45000`
+- `capability_tags = ["planning", "summarization", "synthesis"]`
+- `fallback_order = ["personal", "private", "public"]`
+- `max_public_spend = 0.35`
 
 ## Programmatic Contribution
 

@@ -49,7 +49,8 @@ describe("agent provenance api client", () => {
     expect(body.workflow_kind).toBe("research_brief")
     expect(body.policy.trust_tier).toBe("verified_mesh")
     expect(body.policy.allowed_supply_tiers).toEqual(["private"])
-    expect(body.policy.fallback_order).toEqual(["personal", "private", "public"])
+    expect(body.policy.fallback_order).toEqual(["private"])
+    expect(body.policy.data_residency).toBeNull()
   })
 
   it("fetches provenance from the execution endpoint", async () => {

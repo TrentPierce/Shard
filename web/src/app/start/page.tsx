@@ -4,66 +4,41 @@ import Link from "next/link"
 import { useMemo } from "react"
 import { useAppContext } from "@/lib/context"
 
-type PathCard = {
-  id: "provenance" | "desktop" | "api"
-  title: string
-  summary: string
-  action: string
-  href: string
-  steps: string[]
-  notes: string[]
-}
-
-const paths: PathCard[] = [
+const paths = [
   {
     id: "provenance",
-    title: "Provenance Demo",
-    summary:
-      "The clearest way to understand Shard V1. Run the `research_brief` workflow and inspect the receipt chain immediately.",
+    title: "Start with the demo",
+    summary: "Best for first-time visitors. You will see the final answer, the raw receipts, and the full provenance graph together.",
     action: "Open provenance demo",
     href: "/provenance",
     steps: [
-      "Provide a research question and source bundle.",
-      "Set supply tiers, trust floor, and budget constraints.",
-      "Review the execution summary, receipts, and provenance graph.",
-    ],
-    notes: [
-      "This is the flagship v1 surface and the best place to evaluate Shard’s differentiation.",
-      "The graph remains useful even when a step fails or falls back to a less desirable route.",
+      "Ask one research question.",
+      "Paste a few source documents.",
+      "Run the workflow and inspect why each step ran where it did.",
     ],
   },
   {
     id: "desktop",
-    title: "Personal or Private Capacity",
-    summary:
-      "Run Shard on a spare PC or team machine so agents can prefer your own capacity before they fall back to public supply.",
+    title: "Add your own machine",
+    summary: "Best when you want your own PC or team hardware in the routing mix before public fallback.",
     action: "Download Shard GUI",
     href: "https://github.com/TrentPierce/Shard/releases/latest",
     steps: [
-      "Download and open Shard GUI.",
+      "Download the latest Shard GUI release.",
       "Let the model finish downloading on first run.",
-      "Save settings, restart the node once, then click Start.",
-    ],
-    notes: [
-      "Use this when you want local ownership over latency, trust, and data placement.",
-      "Healthy nodes can serve personal, private, or public work depending on policy.",
+      "Restart once, click Start, and confirm the node is healthy.",
     ],
   },
   {
     id: "api",
-    title: "API + SDK Integration",
-    summary:
-      "Use chat as the compatibility baseline, then adopt task and provenance APIs when you need workflow-level observability.",
+    title: "Integrate the API",
+    summary: "Best for developers. Keep chat for compatibility, then move to tasks when you need workflow observability.",
     action: "Read API docs",
     href: "https://github.com/TrentPierce/Shard/blob/main/docs/api.md",
     steps: [
-      "Start with `/v1/chat/completions` if you need a familiar surface.",
-      "Adopt `POST /v1/agents/tasks` for the `research_brief` workflow.",
-      "Fetch receipts and provenance graphs to debug routing and fallback behavior, including failed workflow runs.",
-    ],
-    notes: [
-      "The Python SDK exposes `client.agents.submit/status/receipts/provenance/capabilities`.",
-      "Use this path if you are building agent workflows rather than just testing the UI.",
+      "Use `/v1/chat/completions` for simple compatibility work.",
+      "Use `/v1/agents/tasks` for the `research_brief` workflow.",
+      "Fetch receipts and provenance graphs to debug the route after the run.",
     ],
   },
 ]
@@ -72,28 +47,36 @@ export default function StartPage() {
   const { contributionStatus } = useAppContext()
   const statusText = useMemo(() => {
     if (!contributionStatus) return null
-    if (contributionStatus.state === "contributing") return "Contributing"
+    if (contributionStatus.state === "contributing") return "Active"
     if (contributionStatus.state === "starting") return "Starting"
-    return "Not contributing"
+    return "Idle"
   }, [contributionStatus])
 
   return (
     <main id="main-content" className="py-8 sm:py-10">
-      <section className="rounded-[2rem] border border-ring bg-base-800 p-6 shadow-panel sm:p-8">
-        <p className="text-xs uppercase tracking-[0.22em] text-ink-400">Quick Start</p>
-        <h1 className="mt-2 text-balance text-4xl font-semibold text-ink-50">
-          Choose how you want to experience Shard V1.
+      <section className="glass-panel rounded-[2rem] px-6 py-8 sm:px-8 sm:py-10">
+        <p className="text-xs uppercase tracking-[0.24em] text-accent-300">Quick start</p>
+        <h1 className="mt-3 max-w-3xl text-balance text-4xl font-semibold text-ink-50 sm:text-5xl">
+          Pick the easiest path into Shard.
         </h1>
-        <p className="mt-4 max-w-3xl text-sm leading-6 text-ink-300 sm:text-base">
-          Start with the provenance demo if you want to understand the product quickly. Use the
-          node path when you want your own capacity in the routing mix, and use the API path when
-          you are integrating Shard into agent workflows.
+        <p className="mt-4 max-w-3xl text-base leading-7 text-ink-200">
+          If you only do one thing, run the provenance demo first. It shows what Shard actually
+          does: route one AI workflow across personal, private, and public capacity while explaining
+          every decision.
         </p>
+        <div className="mt-5 grid gap-3 sm:grid-cols-3">
+          <Callout label="What you bring" value="A question and a few source notes" />
+          <Callout label="What Shard does" value="Chooses the best place for each step" />
+          <Callout label="What you can inspect" value="Answer, receipts, and the map" />
+        </div>
+        <div className="mt-6 grid gap-4 md:grid-cols-3">
+          <Callout label="Fastest to understand" value="Provenance demo" />
+          <Callout label="Best for ownership" value="Run your own node" />
+          <Callout label="Best for builders" value="Use the API + SDK" />
+        </div>
         {contributionStatus ? (
-          <div className="mt-5 rounded-2xl border border-ring bg-base-950/40 p-4">
-            <p className="text-xs uppercase tracking-[0.18em] text-accent-300">
-              Local capacity status
-            </p>
+          <div className="mt-6 rounded-[1.5rem] border border-white/10 bg-[rgba(255,255,255,0.03)] p-4">
+            <p className="text-xs uppercase tracking-[0.18em] text-ink-400">Local capacity status</p>
             <p className="mt-2 text-lg font-semibold text-ink-50">{statusText}</p>
             <p className="mt-1 text-sm text-ink-300">{contributionStatus.reason}</p>
           </div>
@@ -101,75 +84,108 @@ export default function StartPage() {
       </section>
 
       <section className="mt-8 grid gap-4 lg:grid-cols-3">
-        {paths.map((path, index) => (
-          <article id={path.id} key={path.id} className="rounded-[1.6rem] border border-ring bg-base-900/90 p-5 shadow-panel">
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-xs uppercase tracking-[0.18em] text-accent-300">Option {index + 1}</span>
-              <a
-                href={path.href}
-                target={path.href.startsWith("http") ? "_blank" : undefined}
-                rel={path.href.startsWith("http") ? "noreferrer" : undefined}
-                className="rounded-full border border-ring px-3 py-1 text-[11px] uppercase tracking-[0.14em] text-ink-300 hover:border-accent-300 hover:text-accent-100"
-              >
-                {path.action}
-              </a>
-            </div>
-            <h2 className="mt-4 text-2xl font-semibold text-ink-50">{path.title}</h2>
-            <p className="mt-2 text-sm leading-6 text-ink-300">{path.summary}</p>
-            <ol className="mt-5 space-y-3 text-sm text-ink-100">
-              {path.steps.map((step, stepIndex) => (
-                <li key={step} className="flex gap-3">
-                  <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-accent-400/15 text-xs font-semibold text-accent-100">
-                    {stepIndex + 1}
-                  </span>
-                  <span>{step}</span>
-                </li>
-              ))}
-            </ol>
-            <div className="mt-5 rounded-2xl border border-ring bg-base-950/40 p-4">
-              <p className="text-xs uppercase tracking-[0.16em] text-ink-400">Good to know</p>
-              <div className="mt-3 space-y-2 text-sm text-ink-300">
-                {path.notes.map((note) => (
-                  <p key={note}>{note}</p>
-                ))}
+        {paths.map((path, index) => {
+          const external = path.href.startsWith("http")
+          return (
+            <article id={path.id} key={path.id} className="glass-panel rounded-[1.6rem] p-5">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-xs uppercase tracking-[0.18em] text-ink-400">
+                  Option {index + 1}
+                </span>
+                <a
+                  href={path.href}
+                  target={external ? "_blank" : undefined}
+                  rel={external ? "noreferrer" : undefined}
+                  className="rounded-full border border-white/10 px-3 py-1 text-[11px] uppercase tracking-[0.14em] text-accent-300 hover:border-accent-300 hover:text-ink-50"
+                >
+                  {path.action}
+                </a>
               </div>
-            </div>
-          </article>
-        ))}
+              <h2 className="mt-4 text-2xl font-semibold text-ink-50">{path.title}</h2>
+              <p className="mt-3 text-sm leading-6 text-ink-300">{path.summary}</p>
+              <ol className="mt-5 space-y-3 text-sm text-ink-100">
+                {path.steps.map((step, stepIndex) => (
+                  <li key={step} className="flex gap-3">
+                    <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-accent-500/16 text-xs font-semibold text-accent-300">
+                      {stepIndex + 1}
+                    </span>
+                    <span>{step}</span>
+                  </li>
+                ))}
+              </ol>
+            </article>
+          )
+        })}
       </section>
 
-      <section className="mt-8 rounded-[1.6rem] border border-ring bg-base-900/90 p-6 shadow-panel">
-        <p className="text-xs uppercase tracking-[0.22em] text-ink-400">Simple rule of thumb</p>
-        <div className="mt-3 grid gap-4 md:grid-cols-3">
-          <div>
-            <h3 className="text-lg font-semibold text-ink-50">Need the clearest demo?</h3>
-            <p className="mt-2 text-sm text-ink-300">
-              Start with provenance. It shows the output, the receipt chain, and the routing graph
-              together.
-            </p>
+      <section className="mt-8 grid gap-4 lg:grid-cols-[1.05fr_0.95fr]">
+        <article className="glass-panel rounded-[1.6rem] p-6">
+          <p className="text-xs uppercase tracking-[0.24em] text-ink-400">Simple rule</p>
+          <h2 className="mt-2 text-3xl font-semibold text-ink-50">
+            Start with the proof, then add the rest.
+          </h2>
+          <div className="mt-5 space-y-4">
+            <FactRow
+              title="New to Shard?"
+              body="Open the provenance demo first. It is the clearest explanation of the product."
+            />
+            <FactRow
+              title="Need your own hardware involved?"
+              body="Run a node so Shard can prefer your own machine or your team’s machines."
+            />
+            <FactRow
+              title="Building software?"
+              body="Keep chat for compatibility and use the workflow APIs when you need routing evidence."
+            />
           </div>
-          <div>
-            <h3 className="text-lg font-semibold text-ink-50">Want your own capacity?</h3>
-            <p className="mt-2 text-sm text-ink-300">
-              Run Shard GUI on a PC that can stay online as personal or private execution capacity.
-            </p>
+        </article>
+
+        <article className="glass-panel rounded-[1.6rem] p-6">
+          <p className="text-xs uppercase tracking-[0.24em] text-ink-400">The shortest explanation</p>
+          <h2 className="mt-2 text-3xl font-semibold text-ink-50">
+            Shard helps you answer one question:
+          </h2>
+          <p className="mt-4 text-xl font-semibold text-ink-50">
+            “Why did this AI step run there?”
+          </p>
+          <p className="mt-4 text-sm leading-7 text-ink-200">
+            The Shard demo answers that question with receipts, provenance, and a final result you
+            can actually inspect.
+          </p>
+          <div className="mt-6 flex flex-wrap gap-3">
+            <Link
+              href="/provenance"
+              className="inline-flex min-h-11 items-center justify-center rounded-full bg-accent-500 px-5 py-3 text-sm font-semibold text-base-950 hover:bg-accent-400"
+            >
+              Run the demo
+            </Link>
+            <Link
+              href="/"
+              className="inline-flex min-h-11 items-center justify-center rounded-full border border-white/10 bg-white/5 px-5 py-3 text-sm font-semibold text-ink-50 hover:bg-white/10"
+            >
+              Back to overview
+            </Link>
           </div>
-          <div>
-            <h3 className="text-lg font-semibold text-ink-50">Building software?</h3>
-            <p className="mt-2 text-sm text-ink-300">
-              Use the task APIs for workflow observability and keep chat for compatibility.
-            </p>
-          </div>
-        </div>
-        <div className="mt-6 flex flex-wrap gap-3">
-          <Link href="/" className="inline-flex min-h-11 items-center justify-center rounded-xl border border-ring px-4 py-2.5 text-sm font-semibold text-ink-100 hover:bg-base-800">
-            Back to overview
-          </Link>
-          <Link href="/provenance" className="inline-flex min-h-11 items-center justify-center rounded-xl bg-accent-500 px-4 py-2.5 text-sm font-semibold text-base-950 hover:bg-accent-400">
-            Run provenance demo
-          </Link>
-        </div>
+        </article>
       </section>
     </main>
+  )
+}
+
+function Callout({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="sunrise-chip rounded-[1.5rem] border border-white/10 p-4">
+      <p className="text-xs uppercase tracking-[0.18em] text-ink-400">{label}</p>
+      <p className="mt-2 text-xl font-semibold text-ink-50">{value}</p>
+    </div>
+  )
+}
+
+function FactRow({ title, body }: { title: string; body: string }) {
+  return (
+    <div className="rounded-2xl border border-white/10 bg-[rgba(255,255,255,0.03)] p-4">
+      <p className="text-lg font-semibold text-ink-50">{title}</p>
+      <p className="mt-2 text-sm leading-6 text-ink-300">{body}</p>
+    </div>
   )
 }

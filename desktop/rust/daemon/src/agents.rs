@@ -1,9 +1,9 @@
 use super::*;
 use crate::provenance::{
     build_execution_summary, new_receipt_id, CapabilityDescriptor, ExecutionModelMetadata,
-    ExecutionPolicy, ExecutionReceipt, ExecutionSummary, ExecutionTaskContext, ProvenanceGraph,
-    ProvenanceGraphBuilder, ReceiptEventKind, ReceiptWriter, ResearchBriefArtifact,
-    ResearchSourceSummary, PlannerSubQuestion, SupplyTier, TrustTier,
+    ExecutionPolicy, ExecutionReceipt, ExecutionSummary, ExecutionTaskContext, PlannerSubQuestion,
+    ProvenanceGraph, ProvenanceGraphBuilder, ReceiptEventKind, ReceiptWriter,
+    ResearchBriefArtifact, ResearchSourceSummary, SupplyTier, TrustTier,
 };
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
@@ -999,7 +999,29 @@ impl PolicyEvaluator {
     }
 }
 
+fn policy_is_blank(policy: &ExecutionPolicy) -> bool {
+    policy.allowed_supply_tiers.is_empty()
+        && matches!(policy.trust_tier, TrustTier::Local)
+        && policy.budget_limit.is_none()
+        && policy.deadline_ms.is_none()
+        && policy.capability_tags.is_empty()
+        && policy.fallback_order.is_empty()
+        && policy.data_residency.is_none()
+        && policy.max_public_spend.is_none()
+}
+
 fn normalize_policy(mut policy: ExecutionPolicy) -> ExecutionPolicy {
+    if policy_is_blank(&policy) {
+        policy.trust_tier = TrustTier::VerifiedMesh;
+        policy.budget_limit = Some(1.25);
+        policy.deadline_ms = Some(45_000);
+        policy.capability_tags = vec![
+            "planning".to_string(),
+            "summarization".to_string(),
+            "synthesis".to_string(),
+        ];
+        policy.max_public_spend = Some(0.35);
+    }
     if policy.allowed_supply_tiers.is_empty() {
         policy.allowed_supply_tiers = vec![
             SupplyTier::Personal,
@@ -1055,9 +1077,158 @@ fn estimate_step_cost_usd(
     (tokens * rate / 1000.0 * 100000.0).round() / 100000.0
 }
 
+fn derive_planner_plan(question: &str, raw: &str, sources: &[ResearchSource]) -> PlannerPlan {
+    let valid_source_ids = sources
+        .iter()
+        .take(MAX_RESEARCH_SOURCES)
+        .map(|source| source.id.as_str())
+        .collect::<HashSet<_>>();
+    let parsed = extract_json_object(raw)
+        .and_then(|json| serde_json::from_str::<PlannerPlanResponse>(json).ok());
+
+    let mut sub_questions = parsed
+        .as_ref()
+        .map(|payload| {
+            payload
+                .sub_questions
+                .iter()
+                .filter_map(|item| {
+                    let item_question = item.question.trim();
+                    if item_question.is_empty() {
+                        return None;
+                    }
+                    let relevant_source_ids = item
+                        .relevant_source_ids
+                        .iter()
+                        .map(|source_id| source_id.trim())
+                        .filter(|source_id| valid_source_ids.contains(source_id))
+                        .fold(Vec::new(), |mut source_ids, source_id| {
+                            if !source_ids.iter().any(|existing| existing == source_id) {
+                                source_ids.push(source_id.to_string());
+                            }
+                            source_ids
+                        });
+                    Some(PlannerSubQuestion {
+                        question: item_question.to_string(),
+                        relevant_source_ids,
+                    })
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    let mut selected_source_ids = parsed
+        .as_ref()
+        .map(|payload| {
+            payload
+                .selected_source_ids
+                .iter()
+                .map(|source_id| source_id.trim())
+                .filter(|source_id| valid_source_ids.contains(source_id))
+                .fold(Vec::new(), |mut selected, source_id| {
+                    if !selected.iter().any(|existing| existing == source_id) {
+                        selected.push(source_id.to_string());
+                    }
+                    selected
+                })
+        })
+        .unwrap_or_default();
+    if selected_source_ids.is_empty() {
+        for sub_question in &sub_questions {
+            for source_id in &sub_question.relevant_source_ids {
+                if !selected_source_ids
+                    .iter()
+                    .any(|existing| existing == source_id)
+                {
+                    selected_source_ids.push(source_id.clone());
+                }
+            }
+        }
+    }
+    if selected_source_ids.is_empty() {
+        selected_source_ids = sources
+            .iter()
+            .take(MAX_RESEARCH_SOURCES)
+            .map(|source| source.id.clone())
+            .collect();
+    }
+    if sub_questions.is_empty() {
+        sub_questions.push(PlannerSubQuestion {
+            question: format!("Answer the main question: {question}"),
+            relevant_source_ids: selected_source_ids.clone(),
+        });
+    }
+
+    let planner_notes = parsed
+        .as_ref()
+        .and_then(|payload| payload.planner_notes.as_ref())
+        .map(|notes| notes.trim())
+        .filter(|notes| !notes.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| {
+            format!(
+                "Focus on {} source(s): {}.",
+                selected_source_ids.len(),
+                selected_source_ids.join(", ")
+            )
+        });
+
+    PlannerPlan {
+        planner_notes,
+        sub_questions,
+        selected_source_ids,
+    }
+}
+
+fn extract_json_object(raw: &str) -> Option<&str> {
+    let start = raw.find('{')?;
+    let end = raw.rfind('}')?;
+    raw.get(start..=end)
+}
+
+fn planner_selected_sources<'a>(
+    planner_plan: &PlannerPlan,
+    sources: &'a [ResearchSource],
+) -> Vec<&'a ResearchSource> {
+    let mut selected = Vec::new();
+    for source_id in planner_plan
+        .selected_source_ids
+        .iter()
+        .take(MAX_RESEARCH_SOURCES)
+    {
+        if let Some(source) = sources.iter().find(|source| source.id == *source_id) {
+            selected.push(source);
+        }
+    }
+    if selected.is_empty() {
+        return sources.iter().take(MAX_RESEARCH_SOURCES).collect();
+    }
+    selected
+}
+
+fn planner_focus_for_source(planner_plan: &PlannerPlan, source_id: &str) -> String {
+    let focus = planner_plan
+        .sub_questions
+        .iter()
+        .filter(|item| {
+            item.relevant_source_ids.is_empty()
+                || item
+                    .relevant_source_ids
+                    .iter()
+                    .any(|candidate| candidate == source_id)
+        })
+        .map(|item| format!("- {}", item.question))
+        .collect::<Vec<_>>();
+    if focus.is_empty() {
+        "- Pull out the facts most relevant to the main question.".to_string()
+    } else {
+        focus.join("\n")
+    }
+}
+
 fn build_planner_prompt(question: &str, sources: &[ResearchSource]) -> String {
     let mut prompt = String::from(
-        "Create a concise research plan with 3 sub-questions and note which source IDs are likely relevant.\n\nQuestion:\n",
+        "You are the planning step for a Shard research_brief workflow.\nReturn only valid JSON with this exact shape:\n{\"planner_notes\":\"short string\",\"selected_source_ids\":[\"source-id\"],\"sub_questions\":[{\"question\":\"string\",\"relevant_source_ids\":[\"source-id\"]}]}\nChoose 2 to 4 sub-questions. Only use the provided source IDs.\n\nQuestion:\n",
     );
     prompt.push_str(question);
     prompt.push_str("\n\nAvailable sources:\n");
@@ -1070,20 +1241,25 @@ fn build_planner_prompt(question: &str, sources: &[ResearchSource]) -> String {
         }
         prompt.push('\n');
     }
-    prompt.push_str("\nReturn plain text with a short plan and no JSON.");
+    prompt.push_str(
+        "\nDo not add markdown fences, commentary, or any text before or after the JSON object.",
+    );
     prompt
 }
 
 fn build_source_summary_prompt(
     question: &str,
-    planner_notes: &str,
+    planner_plan: &PlannerPlan,
     source: &ResearchSource,
 ) -> String {
     let mut prompt = String::new();
     prompt.push_str("Question:\n");
     prompt.push_str(question);
     prompt.push_str("\n\nPlanner notes:\n");
-    prompt.push_str(planner_notes);
+    prompt.push_str(planner_plan.planner_notes.as_str());
+    let focus = planner_focus_for_source(planner_plan, source.id.as_str());
+    prompt.push_str("\n\nFocus questions for this source:\n");
+    prompt.push_str(focus.as_str());
     prompt.push_str("\n\nSource ID: ");
     prompt.push_str(source.id.as_str());
     if let Some(title) = source.title.as_ref() {
@@ -1105,7 +1281,7 @@ fn build_source_summary_prompt(
 
 fn build_synthesis_prompt(
     question: &str,
-    planner_notes: &str,
+    planner_plan: &PlannerPlan,
     source_summaries: &[ResearchSourceSummary],
 ) -> String {
     let mut prompt = String::from(
@@ -1113,7 +1289,18 @@ fn build_synthesis_prompt(
     );
     prompt.push_str(question);
     prompt.push_str("\n\nPlanner notes:\n");
-    prompt.push_str(planner_notes);
+    prompt.push_str(planner_plan.planner_notes.as_str());
+    prompt.push_str("\n\nSub-questions:\n");
+    for sub_question in &planner_plan.sub_questions {
+        prompt.push_str("- ");
+        prompt.push_str(sub_question.question.as_str());
+        if !sub_question.relevant_source_ids.is_empty() {
+            prompt.push_str(" [");
+            prompt.push_str(sub_question.relevant_source_ids.join(", ").as_str());
+            prompt.push(']');
+        }
+        prompt.push('\n');
+    }
     prompt.push_str("\n\nSource summaries:\n");
     for summary in source_summaries {
         prompt.push_str("- ");
@@ -1207,16 +1394,23 @@ fn candidate_matches_residency(candidate: &CapabilityDescriptor, policy: &Execut
     if required_residency.is_empty() {
         return true;
     }
-    if matches!(
-        candidate.supply_tier,
-        SupplyTier::Personal | SupplyTier::Private
-    ) {
+    let acceptable = residency_aliases(required_residency.as_str());
+    if acceptable.is_empty() {
+        return true;
+    }
+    if acceptable.iter().any(|alias| match alias.as_str() {
+        "local" | "personal" => candidate.supply_tier == SupplyTier::Personal,
+        "private" => candidate.supply_tier == SupplyTier::Private,
+        "public" => candidate.supply_tier == SupplyTier::Public,
+        _ => false,
+    }) {
         return true;
     }
     candidate.tags.iter().any(|tag| {
-        let normalized = tag.to_ascii_lowercase();
-        normalized == format!("residency:{required_residency}")
-            || normalized == format!("region:{required_residency}")
+        let normalized = tag.trim().to_ascii_lowercase();
+        acceptable.iter().any(|alias| {
+            normalized == format!("residency:{alias}") || normalized == format!("region:{alias}")
+        })
     })
 }
 
@@ -1276,10 +1470,80 @@ fn remaining_deadline_ms(started_at_ms: u128, deadline_ms: Option<u64>) -> Optio
     })
 }
 
+fn detected_deployment_residency_tags() -> Vec<String> {
+    let Some(region) = std::env::var("FLY_REGION")
+        .ok()
+        .or_else(|| std::env::var("SHARD_REGION").ok())
+        .or_else(|| std::env::var("AWS_REGION").ok())
+        .map(|value| value.trim().to_ascii_lowercase())
+        .filter(|value| !value.is_empty())
+    else {
+        return Vec::new();
+    };
+    residency_aliases(region.as_str())
+        .into_iter()
+        .map(|alias| format!("residency:{alias}"))
+        .chain(std::iter::once(format!("region:{region}")))
+        .fold(Vec::new(), |mut tags, tag| {
+            if !tags.iter().any(|existing| existing == &tag) {
+                tags.push(tag);
+            }
+            tags
+        })
+}
+
+fn residency_aliases(value: &str) -> Vec<String> {
+    let normalized = value.trim().to_ascii_lowercase();
+    if normalized.is_empty() {
+        return Vec::new();
+    }
+    let mut aliases = vec![normalized.clone()];
+    let mut push_alias = |alias: &str| {
+        if !aliases.iter().any(|existing| existing == alias) {
+            aliases.push(alias.to_string());
+        }
+    };
+    match normalized.as_str() {
+        "local" | "personal" => push_alias("local"),
+        "private" => push_alias("private"),
+        "public" => push_alias("public"),
+        "usa" => push_alias("us"),
+        value
+            if value.starts_with("us-")
+                || matches!(
+                    value,
+                    "iad" | "lax" | "dfw" | "ord" | "mia" | "sea" | "sjc" | "atl" | "ewr"
+                ) =>
+        {
+            push_alias("us");
+            push_alias("na");
+        }
+        value
+            if value.starts_with("eu-")
+                || matches!(
+                    value,
+                    "lhr" | "ams" | "cdg" | "fra" | "mad" | "waw" | "arn" | "otp"
+                ) =>
+        {
+            push_alias("eu");
+        }
+        value
+            if value.starts_with("ap-")
+                || matches!(value, "nrt" | "hkg" | "sin" | "syd" | "bom" | "maa") =>
+        {
+            push_alias("apac");
+            push_alias("global");
+        }
+        _ => {}
+    }
+    aliases
+}
+
 fn derive_candidate_tags(
     capability_tier: Option<&str>,
     gpu_available: Option<bool>,
     supply_tier: &SupplyTier,
+    residency_tags: &[String],
 ) -> Vec<String> {
     let mut tags = vec!["planning".to_string(), "summarization".to_string()];
     if gpu_available.unwrap_or(false)
@@ -1307,6 +1571,11 @@ fn derive_candidate_tags(
             tags.push("residency:public".to_string());
         }
     }
+    for tag in residency_tags {
+        if !tags.iter().any(|existing| existing == tag) {
+            tags.push(tag.clone());
+        }
+    }
     tags
 }
 
@@ -1324,6 +1593,7 @@ pub(crate) async fn capability_descriptors(state: &SharedState) -> Vec<Capabilit
         })
         .collect::<HashMap<_, _>>();
     let local_supply = local_supply_tier(state);
+    let local_residency_tags = detected_deployment_residency_tags();
     let mut capabilities = Vec::new();
     let mut seen = HashSet::new();
 
@@ -1344,7 +1614,12 @@ pub(crate) async fn capability_descriptors(state: &SharedState) -> Vec<Capabilit
         queue_depth: Some(topology.load as u64),
         latency_ms: Some(state.avg_latency_ms.load(Ordering::Relaxed) as u64),
         score: None,
-        tags: derive_candidate_tags(Some("local"), Some(true), &local_supply),
+        tags: derive_candidate_tags(
+            Some("local"),
+            Some(true),
+            &local_supply,
+            &local_residency_tags,
+        ),
         role: Some(state.node_role.clone()),
         healthy: Some(true),
         selection_reason: Some("local_control_plane".to_string()),
@@ -1383,6 +1658,7 @@ pub(crate) async fn capability_descriptors(state: &SharedState) -> Vec<Capabilit
                 snapshot.capability_tier.as_deref(),
                 snapshot.gpu_available,
                 &supply_tier,
+                &[],
             ),
             role: Some(snapshot.role),
             healthy: Some(snapshot.healthy),
@@ -1423,6 +1699,7 @@ pub(crate) async fn capability_descriptors(state: &SharedState) -> Vec<Capabilit
                 entry.capability_tier.as_deref(),
                 entry.gpu_available,
                 &supply_tier,
+                &[],
             ),
             role: entry.role.clone(),
             healthy: Some(true),
@@ -1686,6 +1963,21 @@ mod tests {
         }
     }
 
+    fn research_sources() -> Vec<ResearchSource> {
+        vec![
+            ResearchSource {
+                id: "s1".to_string(),
+                title: Some("Operator memo".to_string()),
+                content: "Local agents handle routine work.".to_string(),
+            },
+            ResearchSource {
+                id: "s2".to_string(),
+                title: Some("Cost report".to_string()),
+                content: "Public specialists handled synthesis.".to_string(),
+            },
+        ]
+    }
+
     #[test]
     fn policy_evaluator_keeps_personal_only_tasks_local() {
         let evaluator = PolicyEvaluator::default();
@@ -1852,6 +2144,18 @@ mod tests {
             ]
         );
         assert_eq!(normalized.fallback_order, normalized.allowed_supply_tiers);
+        assert_eq!(normalized.trust_tier, TrustTier::VerifiedMesh);
+        assert_eq!(normalized.budget_limit, Some(1.25));
+        assert_eq!(normalized.deadline_ms, Some(45_000));
+        assert_eq!(
+            normalized.capability_tags,
+            vec![
+                "planning".to_string(),
+                "summarization".to_string(),
+                "synthesis".to_string()
+            ]
+        );
+        assert_eq!(normalized.max_public_spend, Some(0.35));
     }
 
     #[test]
@@ -1870,5 +2174,66 @@ mod tests {
             normalized.fallback_order,
             vec![SupplyTier::Private, SupplyTier::Public]
         );
+    }
+
+    #[test]
+    fn planner_plan_uses_structured_sub_questions_to_select_sources() {
+        let sources = research_sources();
+        let plan = derive_planner_plan(
+            "What changed?",
+            r#"{"planner_notes":"Track cost and adoption.","selected_source_ids":[],"sub_questions":[{"question":"What changed in cost?","relevant_source_ids":["s2"]},{"question":"What changed in adoption?","relevant_source_ids":["s1","s2"]}]}"#,
+            sources.as_slice(),
+        );
+        assert_eq!(plan.planner_notes, "Track cost and adoption.");
+        assert_eq!(
+            plan.selected_source_ids,
+            vec!["s2".to_string(), "s1".to_string()]
+        );
+        assert_eq!(plan.sub_questions.len(), 2);
+    }
+
+    #[test]
+    fn planner_plan_falls_back_to_main_question_when_output_is_unstructured() {
+        let sources = research_sources();
+        let plan = derive_planner_plan(
+            "What changed?",
+            "Look at both sources and compare them.",
+            sources.as_slice(),
+        );
+        assert_eq!(
+            plan.selected_source_ids,
+            vec!["s1".to_string(), "s2".to_string()]
+        );
+        assert_eq!(plan.sub_questions.len(), 1);
+        assert!(plan.sub_questions[0].question.contains("What changed?"));
+    }
+
+    #[test]
+    fn residency_guard_requires_matching_tags_for_private_candidates() {
+        let policy = ExecutionPolicy {
+            data_residency: Some("us".to_string()),
+            ..sample_policy()
+        };
+        let private_without_region = candidate(
+            "private",
+            SupplyTier::Private,
+            TrustTier::VerifiedMesh,
+            50,
+            &["summarization", "private_mesh"],
+        );
+        assert!(!candidate_matches_residency(
+            &private_without_region,
+            &policy
+        ));
+
+        let private_with_region = CapabilityDescriptor {
+            tags: vec![
+                "summarization".to_string(),
+                "private_mesh".to_string(),
+                "residency:us".to_string(),
+            ],
+            ..private_without_region
+        };
+        assert!(candidate_matches_residency(&private_with_region, &policy));
     }
 }

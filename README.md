@@ -1,7 +1,7 @@
 <div align="center">
   <img src="docs/assets/logo.png" alt="Shard Network" width="160" />
   <h1>Shard Network</h1>
-  <p><strong>Local-first AI routing with browser answers, desktop inference, mesh failover, and experimental WAN scouts.</strong></p>
+  <p><strong>Receipt-first workflow observability for AI agents running across personal, private, and public capacity.</strong></p>
 
   [![CI/CD](https://github.com/TrentPierce/Shard/actions/workflows/ci.yml/badge.svg)](https://github.com/TrentPierce/Shard/actions/workflows/ci.yml)
   [![Version](https://img.shields.io/badge/version-0.6.6-blue.svg)](https://github.com/TrentPierce/Shard/releases/tag/v0.6.6)
@@ -14,143 +14,119 @@
 
 ## What Is Shard?
 
-Shard is an OpenAI-compatible AI runtime that starts in the browser and escalates to desktop verifier nodes only when the work is too complex, too long, or too stateful for the local path.
+Shard is an agent execution runtime that helps software decide where each step of a workflow should run:
 
-- Browser local-first router: lightweight prompts can complete entirely in the browser with no network round-trip.
-- Desktop verifier nodes: Rust daemons run heavier inference and the default network execution path.
-- History-aware mesh forwarding: verifier nodes can spill heavy work into healthier peers when local queues back up.
-- Low-power browser embeddings lane: Shard now distinguishes current WebGPU generation from an ONNX/WebNN worker lane used for semantic ranking and compaction before escalation.
-- Experimental WAN scouts: browser draft and verify experiments remain available behind explicit benchmark flows, but they are no longer the main product path.
+- `personal`: your own laptop or workstation
+- `private`: your team or company-owned Shard nodes
+- `public`: shared specialist capacity on the broader Shard mesh
 
-Clients still use the standard `/v1/chat/completions` API.
+The first Shard V1 workflow is `research_brief`.
 
-```text
-Browser router
-  -> local answer in browser
-  -> or compacted network request
-  -> desktop verifier daemon
-  -> final response
+You submit a question, a bundle of source documents, and a routing policy. Shard returns:
 
-Experimental WAN scout path remains opt-in:
-  benchmark scout browser -> draft tokens -> verifier -> validated response
-```
+- the final brief
+- an append-only receipt chain
+- a provenance graph that explains where each step ran
+- the fallback path if anything went wrong
+- latency, cost, trust tier, and selected candidate metadata for each step
 
----
+The goal is simple: make multi-step agent workflows understandable instead of opaque.
+
+## Why It Matters
+
+Most AI platforms can tell you the answer. Very few can tell you, in plain terms:
+
+- why a task used your own machine instead of the public market
+- why a public specialist was chosen for synthesis
+- what fallback fired when a node failed
+- how much the degraded path cost
+
+Shard treats those answers as product features, not hidden scheduler trivia.
+
+## What Makes Shard Different
+
+| Capability | What it means |
+| --- | --- |
+| Receipt-first execution | Every workflow step emits a durable receipt with routing, trust, cost, latency, and failure details. |
+| Reconstructable provenance | The graph is rebuilt from `parent_receipt_id` links rather than coordinator-only state. |
+| Cross-topology routing | One workflow can use personal, private, and public capacity under explicit policy. |
+| Graceful degradation | Failed and orphaned paths stay visible instead of disappearing behind a generic error. |
+| Familiar compatibility layer | `/v1/chat/completions` still works while the workflow APIs provide the differentiated surface. |
 
 ## Quick Start
 
-### Browser App
+### 1. Run the provenance demo
 
-1. Open [shardnetwork.live/chat](https://shardnetwork.live/chat).
-2. Leave the mode selector on `Auto` for the normal product path.
-3. Use `Browser Only` to force a local browser response.
-4. Use `Network Only` to force verifier-only routing.
-5. Use `Experimental WAN` only when you have explicitly prepared the benchmark scout path.
+Open [shardnetwork.live/provenance](https://shardnetwork.live/provenance).
 
-### Desktop Verifier
+This is the clearest way to understand Shard V1:
+
+1. Enter a research question.
+2. Paste a few source documents.
+3. Choose your supply tiers, trust floor, and budget guardrails.
+4. Run the workflow and inspect the returned brief, receipts, and provenance graph.
+
+### 2. Add your own capacity
 
 1. Download the latest **Shard GUI** from [GitHub Releases](https://github.com/TrentPierce/Shard/releases/latest).
-2. Let the app download the verifier model on first run.
+2. Let the local model finish downloading on first run.
 3. Save settings, restart once, then click **Start**.
 4. Confirm `http://127.0.0.1:9091/health` returns `status: ok`.
 
-### Docker Verifier
+That node can then serve personal, private, or public work depending on policy and deployment mode.
 
-```bash
-git clone https://github.com/TrentPierce/Shard.git
-cd Shard
-docker compose up --build shard-daemon -d
-curl http://localhost:9091/health
-```
+### 3. Integrate the API
 
-Required open ports: `4001/tcp`, `9091/tcp`, `9090/udp`, `9092/udp`
+Use the compatibility surface when you just need chat:
 
-Full node setup: [docs/run-a-node.md](docs/run-a-node.md)
+- `POST /v1/chat/completions`
 
-### Experimental WAN Scout
+Use the workflow surface when you need routing evidence:
 
-Use [docs/REMOTE_LLAMA_SCOUT_TEST_RUNBOOK.md](docs/REMOTE_LLAMA_SCOUT_TEST_RUNBOOK.md) only when you want to benchmark the experimental browser-scout path. It is not required for normal chat or node operation.
+- `POST /v1/agents/tasks`
+- `GET /v1/executions/{execution_id}`
+- `GET /v1/executions/{execution_id}/receipts`
+- `GET /v1/executions/{execution_id}/provenance`
+- `GET /v1/capabilities`
 
----
+## The V1 Workflow
 
-## Current Benchmark Position (March 12, 2026)
+`research_brief` is intentionally opinionated.
 
-These are the defensible benchmark statements today:
+It does three things:
 
-| Scenario | Result | What it means |
-| --- | --- | --- |
-| Browser local-first chat | Product default | Simple prompts can complete entirely in-browser with no network round-trip. |
-| 3 Fly verifiers, heavy `256`-token request, pinned local (`18` requests) | `6/18` success, `35.1 s` p95 in the clean `v2` run | Local-only routing still drops overloaded heavy requests on constrained verifier pools. |
-| 3 Fly verifiers, heavy `256`-token request, mesh enabled (`18` requests) | `18/18` success, `37.1 s` p95, `23.22 s` average in the clean `v2` run | Mesh forwarding converts overload failures into successful routed completions, but tail latency still needs work. |
-| 3 Fly verifiers, heavy routed product path (`v3` spot check) | `iad` mesh `18.17 s` avg / `32.59 s` p95, `lhr` mesh `16.19 s` avg / `21.92 s` p95, `lax` still noisy | The distributed verifier path is real, but region and pool health still drive tail behavior. |
-| Local Llama 8B verifier baseline (`10 vs 10`, same machine) | `11295.1 ms` average, `11297 ms` median | Current verifier-only reference for the experimental WAN comparison. |
-| Experimental WAN Llama scout (`10 vs 10`, live site, same machine) | `12004.4 ms` average, `11888 ms` median | Correctness is strong, but wall-clock is still slower than baseline. |
-| Experimental WAN verification quality (`10 vs 10`, same machine) | `10/10` wait hits, `4/4` accepted draft tokens on every run | The compatible Llama pair is real and repeatable. |
-| Browser embeddings lane | WebGPU remains the active browser generation runtime; ONNX/WebNN now runs low-risk semantic ranking and compaction work with safe fallback to ONNX/WASM or hashed embeddings | The browser can preserve more relevant history before escalation without changing the primary generation path. |
-| Browser scout timing after reuse patch | First request: `prefill_ms=258`, `decode_ms=119`, `submit_ms=9`; repeated identical requests: `generate_ms=0`, `reuse=exact_prompt_cache` | Prompt-state reuse works and removes repeated identical browser generation cost after the first hit. |
-| Browser Qwen draft against local Qwen 9B verifier | Rejected in strict mode | This pair is not a safe speculative match. |
+1. Plans the work by choosing sub-questions and the most relevant source IDs.
+2. Prefers cheaper personal or private nodes for source summarization when policy allows.
+3. Uses a stronger specialist candidate for synthesis when the trust and budget policy allow it.
 
-### What we can claim today
+The final artifact includes:
 
-- Local-first browser routing is the product architecture.
-- Harder prompts can escalate cleanly to a desktop verifier path.
-- Mesh forwarding can preserve completion success under heavy verifier overload, even when local-only routing fails.
-- The compatible Llama experimental WAN scout path is correct and repeatable.
-- The same-machine experimental WAN path is still slower overall than verifier-only baseline, even with perfect `4/4` acceptance on every measured run.
-- ONNX/WebNN now ships for low-risk browser-side semantic ranking and compaction, while WebGPU remains the current browser generation path.
-- Exact prompt caching and prompt-state reuse materially reduce repeated identical browser-scout cost.
+- `brief`
+- `planner_notes`
+- `sub_questions`
+- `selected_source_ids`
+- `source_summaries`
 
-### What we are not claiming yet
+## Product Status
 
-- WAN browser scouts as the default fast path.
-- Universal speedups from browser scouts over a network.
-- Production uplift for unverified draft and verifier model pairs.
+Shard V1 is centered on workflow observability, not agent economics.
 
----
+That means:
 
-## Key Features
+- receipts and provenance are in scope
+- graceful degradation is in scope
+- policy-aware routing across personal, private, and public supply is in scope
+- wallet-native settlement and agent-to-agent economics are deferred to a later release
 
-| Feature | Description |
-| --- | --- |
-| OpenAI-compatible API | Drop-in `/v1/chat/completions` interface |
-| Local-first router | Browser decides between a local answer and a network escalation |
-| Browser-owned context compaction | Older chat turns are summarized and trimmed before network escalation |
-| Desktop heavy inference | Rust verifier daemon handles larger prompts and longer generations |
-| History-aware mesh forwarding | Verifier nodes keep recent forward-latency and freshness telemetry so slow-but-alive peers are down-ranked before selection |
-| ONNX/WebNN semantic lane | Browser capability detection probes WebNN and the worker lane runs low-risk semantic ranking and compaction tasks before network escalation |
-| Experimental WAN scouts | Opt-in browser draft path for compatibility and benchmark work |
-| libp2p mesh networking | Multi-seed bootstrap, discovery, health sharing, and request forwarding for non-speculative routes |
-| Observability | Metrics, structured logs, speculative traces, and benchmark harnesses |
-| Python SDK | Typed client for OpenAI-compatible integrations |
+## Legacy Paths
+
+Shard still contains browser-local chat, mesh forwarding, and experimental scout research work.
+
+Those capabilities remain useful, but they are no longer the main product story. The main story is:
+
+**policy-aware agent workflows with receipt-carrying execution**
 
 ---
-
-## Architecture
-
-```text
-User prompt
-  -> browser router
-     -> local browser answer
-     -> or compacted request to verifier daemon
-        -> standard or local speculative execution
-        -> final response
-
-Experimental WAN:
-  benchmark scout browser
-    -> draft tokens
-    -> verifier validation
-    -> final response
-```
-
-### Request flow
-
-1. A user submits a prompt in the browser.
-2. The browser scores prompt complexity and decides `local_answer`, `network_route`, or `network_route_with_compaction`.
-3. If the prompt stays local, WebLLM answers directly in the browser.
-4. If the prompt escalates, the browser sends raw or compacted messages to a verifier daemon.
-5. The daemon resolves `standard`, `local_speculative`, or `experimental_wan` execution.
-   `standard` is the current default network path; `local_speculative` remains explicit opt-in until it proves a production uplift.
-6. The final response is returned through the same OpenAI-compatible API.
 
 ---
 

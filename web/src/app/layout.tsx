@@ -3,6 +3,7 @@ import { IBM_Plex_Mono, Space_Grotesk } from "next/font/google"
 import "./globals.css"
 import { ErrorBoundary } from "@/components/ErrorBoundary"
 import ServiceWorkerManager from "@/components/ServiceWorkerManager"
+import Footer from "@/components/Footer"
 import { SiteNav } from "@/components/shell/SiteNav"
 import { Providers } from "@/components/Providers"
 
@@ -14,17 +15,17 @@ export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   colorScheme: "dark",
-  themeColor: "#2c302e",
+  themeColor: "#07131d",
 }
 
 export const metadata: Metadata = {
   metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL || "https://shardnetwork.live"),
   title: {
-    default: "Shard | Receipt-First Agent Workflows",
+    default: "Shard | See Why Every Agent Step Ran There",
     template: "%s | Shard",
   },
   description:
-    "Receipt-first workflow observability for agent execution across personal, private, and public Shard capacity.",
+    "Shard helps AI teams see why each workflow step used personal, private, or public capacity with receipts, provenance graphs, and policy-aware routing.",
   icons: {
     icon: [{ url: "/brand-mark.png", type: "image/png" }],
     shortcut: [{ url: "/brand-mark.png", type: "image/png" }],
@@ -43,8 +44,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <Providers>
           <ErrorBoundary>{children}</ErrorBoundary>
         </Providers>
-
         <ServiceWorkerManager />
+        <Footer />
       </body>
     </html>
   )

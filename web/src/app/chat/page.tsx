@@ -27,7 +27,7 @@ function describeIdleMode(mode: ChatRouteMode) {
     case "experimental-wan":
       return "Experimental WAN mode"
     default:
-      return "Compatibility chat: browser when possible, network for heavier prompts"
+      return "Simple chat: local when possible, network when needed"
   }
 }
 
@@ -334,7 +334,7 @@ export default function ChatPage() {
         error: String((error as Error)?.message ?? error ?? "unknown error"),
       })
       replaceAssistantMessage(
-        "Unable to complete the request. This chat page is the compatibility surface, so verify the local browser runtime or daemon endpoint first. For workflow-level routing evidence, use the Provenance page.",
+        "Unable to complete the request. This page is the simple chat surface, so check the local browser runtime or daemon endpoint first. If you want the full routing explanation, use the Provenance page.",
       )
     } finally {
       setStreaming(false)
@@ -364,13 +364,27 @@ export default function ChatPage() {
           </select>
         </div>
 
-        <div className="grid min-h-0 flex-1 gap-4 overflow-hidden px-4 pb-4 pt-20 sm:px-6 lg:grid-cols-[minmax(0,1fr)_320px]">
+        <div className="border-b border-white/10 bg-[linear-gradient(135deg,rgba(51,208,193,0.08),rgba(255,155,104,0.06))] px-4 py-4 sm:px-6">
+          <div className="max-w-4xl">
+            <p className="text-xs uppercase tracking-[0.2em] text-accent-300">Compatibility chat</p>
+            <h1 className="mt-2 text-2xl font-semibold text-ink-50">
+              Use this page when you want simple chat.
+            </h1>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-ink-200">
+              This is the lightweight Shard surface. It still shows route traces for each message,
+              but the flagship product is the Provenance demo where you can inspect a full
+              step-by-step workflow map.
+            </p>
+          </div>
+        </div>
+
+        <div className="grid min-h-0 flex-1 gap-4 overflow-hidden px-4 pb-4 pt-6 sm:px-6 lg:grid-cols-[minmax(0,1fr)_320px]">
           <div className="min-h-0 space-y-4 overflow-y-auto pr-1">
           {messages.length === 0 ? (
             <div className="mx-auto mt-12 max-w-xl rounded-xl border border-ring bg-base-800 p-4 text-center sm:mt-16">
               <p className="text-sm text-ink-100">
-                This page keeps the familiar chat surface available. For the flagship
-                `research_brief` workflow and receipt graph, use the Provenance page.
+                This is the simple chat surface. If you want the flagship `research_brief`
+                workflow with the receipt graph and routing explanation, use the Provenance page.
               </p>
             </div>
           ) : null}
@@ -392,7 +406,7 @@ export default function ChatPage() {
 
           <aside className="min-h-0 overflow-y-auto rounded-xl border border-ring bg-base-800/70 p-3">
             <div className="mb-3 flex items-center justify-between">
-              <h2 className="text-sm font-semibold text-ink-50">Route Trace</h2>
+              <h2 className="text-sm font-semibold text-ink-50">Route trace</h2>
               <span className="text-[11px] uppercase tracking-[0.18em] text-ink-400">
                 Last {routeTraces.length}
               </span>
@@ -400,8 +414,8 @@ export default function ChatPage() {
             <div className="space-y-3">
               {routeTraces.length === 0 ? (
                 <div className="rounded-lg border border-dashed border-ring px-3 py-4 text-xs text-ink-400">
-                  Send a prompt to inspect the compatibility route. For workflow-level provenance,
-                  use the dedicated Provenance demo.
+                  Send a prompt to inspect the route chosen for one message. For the full
+                  step-by-step workflow map, use the Provenance demo.
                 </div>
               ) : (
                 routeTraces.map((trace) => (

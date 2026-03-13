@@ -18,19 +18,22 @@ export default function LeaderboardPage() {
   }, [])
 
   return (
-    <main id="main-content" className="mx-auto mb-20 mt-12 w-full max-w-4xl px-4">
-      <h1 className="mb-4 text-3xl font-bold text-ink-50">Contributor Ledger</h1>
-      <p className="mb-4 text-sm text-ink-300">
-        This page shows the legacy operator credit surface. Shard V1 is currently centered on
-        receipt-first workflow provenance, but contributor balances remain available here for
-        operators who track the network economy.
-      </p>
-      <div className="mb-8 rounded-2xl border border-amber-300/20 bg-amber-300/10 p-4 text-sm text-amber-100">
-        Use <span className="font-semibold">Provenance</span> for the flagship product flow and
-        treat this page as an operator-facing ledger view.
-      </div>
+    <main id="main-content" className="mb-20 mt-8 sm:mt-12">
+      <section className="glass-panel rounded-[2rem] px-6 py-8 sm:px-8 sm:py-10">
+        <p className="text-xs uppercase tracking-[0.24em] text-accent-300">Operator ledger</p>
+        <h1 className="mt-3 text-4xl font-semibold text-ink-50 sm:text-5xl">Contributor balances</h1>
+        <p className="mt-4 max-w-3xl text-sm leading-7 text-ink-200">
+          This page is for operators tracking the legacy credit surface. The main Shard product is
+          now the receipt-first provenance flow, so most visitors should start with the Provenance
+          demo instead.
+        </p>
+        <div className="mt-6 rounded-2xl border border-amber-300/20 bg-amber-300/10 p-4 text-sm text-amber-100">
+          If you are new here, open the Provenance page first. This ledger remains available for
+          network operators and historical balance tracking.
+        </div>
+      </section>
 
-      <div className="overflow-hidden rounded-2xl border border-ring bg-base-900">
+      <div className="mt-8 overflow-hidden rounded-2xl border border-ring bg-base-900">
         <table className="w-full border-collapse text-left">
           <thead className="border-b border-ring bg-base-800/40 text-sm text-ink-200">
             <tr>

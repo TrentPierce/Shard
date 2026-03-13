@@ -13,13 +13,13 @@ class ResearchSource(BaseModel):
 class ExecutionPolicy(BaseModel):
     model_config = ConfigDict(extra="ignore")
     allowed_supply_tiers: list[str] = ["personal", "private", "public"]
-    trust_tier: str = "local"
-    budget_limit: float | None = None
-    deadline_ms: int | None = None
-    capability_tags: list[str] = []
+    trust_tier: str = "verified_mesh"
+    budget_limit: float | None = 1.25
+    deadline_ms: int | None = 45_000
+    capability_tags: list[str] = ["planning", "summarization", "synthesis"]
     fallback_order: list[str] = ["personal", "private", "public"]
     data_residency: str | None = None
-    max_public_spend: float | None = None
+    max_public_spend: float | None = 0.35
 
 
 class CapabilityDescriptor(BaseModel):
@@ -59,10 +59,18 @@ class ResearchSourceSummary(BaseModel):
     summary: str
 
 
+class PlannerSubQuestion(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    question: str
+    relevant_source_ids: list[str] = []
+
+
 class ResearchBriefArtifact(BaseModel):
     model_config = ConfigDict(extra="ignore")
     brief: str
     planner_notes: str | None = None
+    sub_questions: list[PlannerSubQuestion] = []
+    selected_source_ids: list[str] = []
     source_summaries: list[ResearchSourceSummary] = []
 
 

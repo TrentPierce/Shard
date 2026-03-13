@@ -98,6 +98,7 @@ This is the receipt-first v1 workflow surface for cross-topology agent execution
   - `capability_tags`
   - `fallback_order`
   - optional `data_residency`
+    - omit it when you do not need a hard residency boundary
   - optional `max_public_spend`
 - `model`
   - optional model hint
@@ -129,7 +130,6 @@ curl -X POST http://127.0.0.1:9091/v1/agents/tasks \
       "deadline_ms": 45000,
       "capability_tags": ["planning", "summarization", "synthesis"],
       "fallback_order": ["personal", "private", "public"],
-      "data_residency": "us",
       "max_public_spend": 0.35
     }
   }'
@@ -153,6 +153,19 @@ curl -X POST http://127.0.0.1:9091/v1/agents/tasks \
 - each receipt carries `parent_receipt_id`
 - failed workflow submissions still return persisted `execution`, `receipts`, and `provenance` so the unhappy path remains inspectable
 - the provenance graph is reconstructed from receipt parentage rather than maintained as mutable coordinator state
+- if `policy` is omitted entirely, Shard applies the product defaults used by the web demo and SDK:
+  - `trust_tier = verified_mesh`
+  - `budget_limit = 1.25`
+  - `deadline_ms = 45000`
+  - `capability_tags = [planning, summarization, synthesis]`
+  - `fallback_order = [personal, private, public]`
+  - `max_public_spend = 0.35`
+- completed workflow artifacts include:
+  - `brief`
+  - `planner_notes`
+  - `sub_questions[]`
+  - `selected_source_ids[]`
+  - `source_summaries[]`
 
 ## `GET /v1/executions/{execution_id}`
 

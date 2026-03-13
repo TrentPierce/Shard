@@ -767,6 +767,8 @@ mod tests {
         completed.result = Some(ResearchBriefArtifact {
             brief: "Final brief".to_string(),
             planner_notes: Some("notes".to_string()),
+            sub_questions: vec![],
+            selected_source_ids: vec![],
             source_summaries: vec![],
         });
         let receipts = vec![
@@ -788,6 +790,8 @@ mod tests {
         completed.result = Some(ResearchBriefArtifact {
             brief: "Final brief".to_string(),
             planner_notes: Some("notes".to_string()),
+            sub_questions: vec![],
+            selected_source_ids: vec![],
             source_summaries: vec![],
         });
         let receipts = vec![

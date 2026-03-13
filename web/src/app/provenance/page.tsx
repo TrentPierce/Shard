@@ -42,6 +42,44 @@ const starterSources: SourceDraft[] = [
   },
 ]
 
+const policyPresets: Array<{
+  id: string
+  label: string
+  summary: string
+  build: () => ExecutionPolicy
+}> = [
+  {
+    id: "balanced",
+    label: "Balanced demo",
+    summary: "Good first run. Allows all three supply tiers with a modest public budget.",
+    build: () => defaultExecutionPolicy(),
+  },
+  {
+    id: "owned",
+    label: "Stay on my machines",
+    summary: "Keeps the workflow on personal and private capacity only.",
+    build: () => ({
+      ...defaultExecutionPolicy(),
+      allowed_supply_tiers: ["personal", "private"],
+      fallback_order: ["personal", "private"],
+      max_public_spend: 0,
+    }),
+  },
+  {
+    id: "specialist",
+    label: "Use specialists if needed",
+    summary: "Lets Shard reach public specialist capacity for the final synthesis step.",
+    build: () => ({
+      ...defaultExecutionPolicy(),
+      allowed_supply_tiers: ["personal", "private", "public"],
+      fallback_order: ["personal", "private", "public"],
+      trust_tier: "public_specialist",
+      budget_limit: 2,
+      max_public_spend: 0.75,
+    }),
+  },
+] as const
+
 function formatUsd(value?: number | null) {
   if (value == null || Number.isNaN(value)) return "n/a"
   return new Intl.NumberFormat(undefined, {
@@ -185,6 +223,10 @@ export default function ProvenancePage() {
     })
   }
 
+  function applyPreset(builder: () => ExecutionPolicy) {
+    setPolicy(builder())
+  }
+
   function moveFallbackTier(tier: SupplyTier, direction: -1 | 1) {
     setPolicy((current) => {
       const order = [...current.fallback_order]
@@ -245,18 +287,38 @@ export default function ProvenancePage() {
         <div className="grid gap-10 lg:grid-cols-[0.95fr_1.05fr]">
           <div>
             <span className="inline-flex rounded-full border border-cyan-300/30 bg-cyan-300/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.24em] text-cyan-100">
-              Workflow observability demo
+              Flagship demo
             </span>
             <h1 className="mt-5 max-w-3xl text-balance text-4xl font-semibold tracking-tight text-ink-50 sm:text-6xl">
-              Make cross-topology routing legible.
+              Ask one question. Watch Shard show its work.
             </h1>
             <p className="mt-5 max-w-2xl text-base leading-7 text-ink-200 sm:text-lg">
-              Submit one research-brief workflow, then inspect the receipt chain that explains where each step ran, what fallback fired, and how much the degraded path cost.
+              Ask one question, paste a few sources, and Shard will return the answer plus the
+              receipt trail that explains where each step ran, what failed, and what the fallback
+              cost.
             </p>
+            <div className="mt-6 grid gap-3 sm:grid-cols-3">
+              <div className="rounded-2xl border border-white/10 bg-base-950/45 p-4">
+                <p className="text-xs uppercase tracking-[0.18em] text-ink-400">1. Submit</p>
+                <p className="mt-2 text-sm text-ink-100">Add a question and a small source bundle.</p>
+              </div>
+              <div className="rounded-2xl border border-white/10 bg-base-950/45 p-4">
+                <p className="text-xs uppercase tracking-[0.18em] text-ink-400">2. Route</p>
+                <p className="mt-2 text-sm text-ink-100">Shard chooses between personal, private, and public capacity.</p>
+              </div>
+              <div className="rounded-2xl border border-white/10 bg-base-950/45 p-4">
+                <p className="text-xs uppercase tracking-[0.18em] text-ink-400">3. Explain</p>
+                <p className="mt-2 text-sm text-ink-100">Receipts and the graph explain each decision in plain language.</p>
+              </div>
+            </div>
+            <div className="mt-5 rounded-2xl border border-white/10 bg-base-950/40 p-4 text-sm leading-7 text-ink-200">
+              <span className="font-semibold text-ink-50">Plain-language translation:</span>{" "}
+              provenance is just the step-by-step map of what happened during the run.
+            </div>
           </div>
 
           <aside className="rounded-[1.75rem] border border-white/12 bg-base-950/55 p-5">
-            <p className="text-xs uppercase tracking-[0.2em] text-ink-400">Current candidate pool</p>
+            <p className="text-xs uppercase tracking-[0.2em] text-ink-400">Available machines right now</p>
             <div className="mt-4 space-y-3">
               {capabilities.slice(0, 5).map((capability) => (
                 <div key={capability.candidate_id} className="rounded-2xl border border-white/10 bg-base-900/80 p-4">
@@ -294,7 +356,7 @@ export default function ProvenancePage() {
           <div className="flex items-center justify-between gap-4">
             <div>
               <p className="text-xs uppercase tracking-[0.22em] text-ink-400">Workflow input</p>
-              <h2 className="mt-2 text-3xl font-semibold text-ink-50">Research brief task</h2>
+              <h2 className="mt-2 text-3xl font-semibold text-ink-50">Try the research brief demo</h2>
             </div>
             <button
               type="submit"
@@ -309,7 +371,7 @@ export default function ProvenancePage() {
             <div className="flex flex-wrap items-center justify-between gap-4">
               <div>
                 <p className="text-sm font-medium text-ink-100">Reload a stored execution</p>
-                <p className="text-xs text-ink-400">Use the retrieval APIs to inspect an existing receipt chain without rerunning the workflow.</p>
+                <p className="text-xs text-ink-400">Open an older run by execution ID without rerunning the workflow.</p>
               </div>
               <div className="flex w-full gap-3 sm:w-auto">
                 <input
@@ -395,10 +457,33 @@ export default function ProvenancePage() {
           </div>
 
           <div className="mt-6 rounded-2xl border border-white/10 bg-base-950/50 p-4">
+            <p className="text-sm font-medium text-ink-100">Choose a starting policy</p>
+            <p className="mt-1 text-xs text-ink-400">
+              Start with a preset, then fine-tune the rules below if you want.
+            </p>
+            <div className="mt-4 grid gap-3 md:grid-cols-3">
+              {policyPresets.map((preset) => (
+                <button
+                  key={preset.id}
+                  type="button"
+                  onClick={() => applyPreset(preset.build)}
+                  className="rounded-2xl border border-white/10 bg-base-900/70 p-4 text-left transition hover:border-accent-300/60 hover:bg-base-900"
+                >
+                  <p className="text-sm font-semibold text-ink-50">{preset.label}</p>
+                  <p className="mt-2 text-xs leading-6 text-ink-300">{preset.summary}</p>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="mt-6 rounded-2xl border border-white/10 bg-base-950/50 p-4">
             <div className="flex flex-wrap items-center justify-between gap-4">
               <div>
                 <p className="text-sm font-medium text-ink-100">Execution policy</p>
-                <p className="text-xs text-ink-400">Constrain supply tiers, trust floor, and public-spend guardrails.</p>
+                <p className="text-xs text-ink-400">
+                  Tell Shard what it is allowed to use, how careful it should be, and how much it
+                  can spend on public capacity.
+                </p>
               </div>
               <select
                 value={policy.trust_tier}
@@ -435,6 +520,20 @@ export default function ProvenancePage() {
                   </button>
                 )
               })}
+            </div>
+            <div className="mt-4 grid gap-3 sm:grid-cols-3">
+              <InfoChip
+                title="Allowed supply"
+                body="These buttons decide which machines Shard may use at all."
+              />
+              <InfoChip
+                title="Fallback order"
+                body="This order decides where Shard looks next if the first choice fails."
+              />
+              <InfoChip
+                title="Public spend cap"
+                body="This is the most Shard may spend on public capacity for one run."
+              />
             </div>
 
             <div className="mt-4 grid gap-4 sm:grid-cols-3">
@@ -507,7 +606,7 @@ export default function ProvenancePage() {
                   )
                 }
                 className="h-11 rounded-xl border border-white/10 bg-base-900/80 px-3 text-sm text-ink-50 outline-none transition focus:border-accent-300"
-                placeholder="Data residency (for example us)"
+                placeholder="Optional data residency rule (for example us)"
               />
             </div>
 
@@ -541,8 +640,11 @@ export default function ProvenancePage() {
               <div>
                 <p className="text-xs uppercase tracking-[0.22em] text-ink-400">Execution summary</p>
                 <h2 className="mt-2 text-3xl font-semibold text-ink-50">
-                  {execution ? "Research brief workflow" : "Run the demo to inspect provenance"}
+                  {execution ? "Workflow result" : "Run the demo to inspect the workflow trail"}
                 </h2>
+                <p className="mt-2 text-sm leading-6 text-ink-300">
+                  This panel shows the finished answer first, then the map of how Shard got there.
+                </p>
               </div>
               {execution ? (
                 <span className={`rounded-full border px-3 py-2 text-xs font-semibold uppercase tracking-[0.18em] ${
@@ -578,7 +680,7 @@ export default function ProvenancePage() {
               </>
             ) : (
               <div className="mt-5 rounded-[1.4rem] border border-dashed border-white/12 bg-white/[0.03] p-5 text-sm leading-6 text-ink-300">
-                The daemon returns the brief and the full receipt chain together so the trace is immediately debuggable.
+                Run the workflow to get the answer, the receipt chain, and the graph together in one place.
               </div>
             )}
           </section>
@@ -586,8 +688,8 @@ export default function ProvenancePage() {
           <section className="rounded-[1.6rem] border border-ring bg-base-900/90 p-6 shadow-panel">
             <div className="flex items-center justify-between gap-4">
               <div>
-                <p className="text-xs uppercase tracking-[0.22em] text-ink-400">Provenance graph</p>
-                <h2 className="mt-2 text-3xl font-semibold text-ink-50">Receipt-first execution trace</h2>
+                <p className="text-xs uppercase tracking-[0.22em] text-ink-400">Step-by-step map</p>
+                <h2 className="mt-2 text-3xl font-semibold text-ink-50">Why the workflow ran this way</h2>
               </div>
               {execution?.provenance.incomplete ? (
                 <span className="rounded-full border border-amber-300/25 bg-amber-300/10 px-3 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-amber-100">
@@ -597,6 +699,12 @@ export default function ProvenancePage() {
             </div>
 
             <div className="mt-5 space-y-3">
+              {sortedNodes.length > 0 ? (
+                <div className="rounded-2xl border border-white/10 bg-base-950/45 p-4 text-sm text-ink-200">
+                  Read the map from top to bottom. Green means a step finished, red means it
+                  failed, and amber means Shard had to fall back to a backup route.
+                </div>
+              ) : null}
               {sortedNodes.map((node) => {
                 const parent = node.parent_receipt_id
                   ? receiptsById.get(node.parent_receipt_id)
@@ -637,7 +745,7 @@ export default function ProvenancePage() {
 
               {sortedNodes.length === 0 ? (
                 <div className="rounded-2xl border border-dashed border-white/12 bg-white/[0.03] p-5 text-sm leading-6 text-ink-300">
-                  Run the workflow to populate the reconstructable graph built from `parent_receipt_id` links.
+                  Run the workflow to populate the receipt graph that Shard rebuilds from `parent_receipt_id` links.
                 </div>
               ) : null}
             </div>
@@ -645,7 +753,7 @@ export default function ProvenancePage() {
 
           <section className="rounded-[1.6rem] border border-ring bg-base-900/90 p-6 shadow-panel">
             <p className="text-xs uppercase tracking-[0.22em] text-ink-400">Receipts</p>
-            <h2 className="mt-2 text-3xl font-semibold text-ink-50">Raw developer artifacts</h2>
+            <h2 className="mt-2 text-3xl font-semibold text-ink-50">Raw receipts</h2>
             <div className="mt-5 space-y-3">
               {(execution?.receipts ?? []).map((receipt: ExecutionReceipt) => (
                 <details
@@ -699,6 +807,15 @@ function StatCard({
       <p className={`${compact ? "mt-1 text-sm" : "mt-2 text-lg"} font-semibold text-ink-50`}>
         {value}
       </p>
+    </div>
+  )
+}
+
+function InfoChip({ title, body }: { title: string; body: string }) {
+  return (
+    <div className="rounded-2xl border border-white/10 bg-base-900/70 p-3">
+      <p className="text-xs uppercase tracking-[0.18em] text-ink-400">{title}</p>
+      <p className="mt-2 text-xs leading-6 text-ink-200">{body}</p>
     </div>
   )
 }
