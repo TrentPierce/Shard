@@ -65,6 +65,11 @@ struct StepExecutionError {
     detail: String,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct StepExecutorContext {
+    control_port: u16,
+}
+
 #[derive(Debug, Clone)]
 struct StepRunResult {
     text: String,
@@ -118,7 +123,7 @@ struct PolicyEvaluator;
 trait StepExecutor: Send + Sync {
     async fn execute(
         &self,
-        state: &SharedState,
+        context: StepExecutorContext,
         request: &AgentTaskRequest,
         candidate: &CapabilityDescriptor,
         step: &WorkflowStep,
@@ -145,7 +150,7 @@ impl LocalChatStepExecutor {
 impl StepExecutor for LocalChatStepExecutor {
     async fn execute(
         &self,
-        state: &SharedState,
+        context: StepExecutorContext,
         request: &AgentTaskRequest,
         candidate: &CapabilityDescriptor,
         step: &WorkflowStep,
@@ -157,12 +162,7 @@ impl StepExecutor for LocalChatStepExecutor {
             .endpoint
             .clone()
             .filter(|endpoint| !endpoint.trim().is_empty())
-            .unwrap_or_else(|| {
-                format!(
-                    "http://127.0.0.1:{}",
-                    state.control_port.load(Ordering::Relaxed)
-                )
-            });
+            .unwrap_or_else(|| format!("http://127.0.0.1:{}", context.control_port));
         let url = format!("{}/v1/chat/completions", base_url.trim_end_matches('/'));
         let mut headers = reqwest::header::HeaderMap::new();
         headers.insert(
@@ -285,6 +285,287 @@ struct ExecutionController<E> {
     policy_evaluator: PolicyEvaluator,
     graph_builder: ProvenanceGraphBuilder,
     executor: E,
+}
+
+async fn execute_ranked_step<E>(
+    receipt_writer: &ReceiptWriter,
+    executor: &E,
+    executor_context: StepExecutorContext,
+    node_public_key: &str,
+    execution_id: &str,
+    workflow_kind: &str,
+    request: &AgentTaskRequest,
+    policy: &ExecutionPolicy,
+    parent_receipt_id: &str,
+    step: &WorkflowStep,
+    rankings: Vec<CapabilityDescriptor>,
+    remaining_deadline_ms: Option<u64>,
+) -> Result<StepRunResult>
+where
+    E: StepExecutor,
+{
+    let ranking_receipt = ExecutionReceipt {
+        receipt_id: new_receipt_id(),
+        execution_id: execution_id.to_string(),
+        step_id: step.step_id.clone(),
+        attempt_id: format!("{execution_id}:{}:rank", step.step_id),
+        parent_receipt_id: Some(parent_receipt_id.to_string()),
+        event_kind: ReceiptEventKind::CandidateRanked,
+        timestamp_ms: now_ms(),
+        workflow_kind: workflow_kind.to_string(),
+        step_kind: Some(step.step_kind.clone()),
+        task_context: None,
+        policy_snapshot: Some(policy.clone()),
+        candidate_rankings: rankings.clone(),
+        selected_candidate: rankings.first().cloned(),
+        supply_tier: rankings
+            .first()
+            .map(|candidate| candidate.supply_tier.clone()),
+        trust_tier: rankings
+            .first()
+            .map(|candidate| candidate.trust_tier.clone()),
+        capability_match_reason: rankings
+            .first()
+            .and_then(|candidate| candidate.selection_reason.clone()),
+        estimated_cost_usd: rankings.first().map(|candidate| {
+            estimate_step_cost_usd(
+                candidate,
+                estimate_token_count(step.prompt.as_str()),
+                step.max_tokens as usize,
+            )
+        }),
+        actual_cost_usd: None,
+        latency_ms: None,
+        outcome: Some("ranked".to_string()),
+        failure_reason: None,
+        fallback_reason: None,
+        node_identity: Some(node_public_key.to_string()),
+        agent_identity: Some(step.step_kind.clone()),
+        model_metadata: None,
+        summary: Some(format!("Ranked {} candidate(s)", rankings.len())),
+        result: None,
+    };
+    receipt_writer.append(&ranking_receipt).await?;
+
+    if rankings.is_empty() {
+        let failed = ExecutionReceipt {
+            receipt_id: new_receipt_id(),
+            execution_id: execution_id.to_string(),
+            step_id: step.step_id.clone(),
+            attempt_id: format!("{execution_id}:{}:none", step.step_id),
+            parent_receipt_id: Some(ranking_receipt.receipt_id.clone()),
+            event_kind: ReceiptEventKind::Failed,
+            timestamp_ms: now_ms(),
+            workflow_kind: workflow_kind.to_string(),
+            step_kind: Some(step.step_kind.clone()),
+            task_context: None,
+            policy_snapshot: Some(policy.clone()),
+            candidate_rankings: Vec::new(),
+            selected_candidate: None,
+            supply_tier: None,
+            trust_tier: Some(policy.trust_tier.clone()),
+            capability_match_reason: Some("no_candidate_satisfied_policy".to_string()),
+            estimated_cost_usd: None,
+            actual_cost_usd: None,
+            latency_ms: None,
+            outcome: Some("failed".to_string()),
+            failure_reason: Some("no_candidate_satisfied_policy".to_string()),
+            fallback_reason: None,
+            node_identity: Some(node_public_key.to_string()),
+            agent_identity: Some(step.step_kind.clone()),
+            model_metadata: None,
+            summary: Some("No candidate satisfied policy constraints".to_string()),
+            result: None,
+        };
+        receipt_writer.append(&failed).await?;
+        return Err(WorkflowExecutionError {
+            detail: format!("no candidate satisfied policy for step {}", step.step_kind),
+            parent_receipt_id: failed.receipt_id,
+        }
+        .into());
+    }
+
+    let mut previous_receipt_id = ranking_receipt.receipt_id.clone();
+    for (index, candidate) in rankings.iter().enumerate() {
+        let attempt_id = format!("{execution_id}:{}:attempt:{}", step.step_id, index + 1);
+        let estimated_cost = estimate_step_cost_usd(
+            candidate,
+            estimate_token_count(step.prompt.as_str()),
+            step.max_tokens as usize,
+        );
+        let dispatched = ExecutionReceipt {
+            receipt_id: new_receipt_id(),
+            execution_id: execution_id.to_string(),
+            step_id: step.step_id.clone(),
+            attempt_id: attempt_id.clone(),
+            parent_receipt_id: Some(previous_receipt_id.clone()),
+            event_kind: ReceiptEventKind::Dispatched,
+            timestamp_ms: now_ms(),
+            workflow_kind: workflow_kind.to_string(),
+            step_kind: Some(step.step_kind.clone()),
+            task_context: None,
+            policy_snapshot: Some(policy.clone()),
+            candidate_rankings: Vec::new(),
+            selected_candidate: Some(candidate.clone()),
+            supply_tier: Some(candidate.supply_tier.clone()),
+            trust_tier: Some(candidate.trust_tier.clone()),
+            capability_match_reason: candidate.selection_reason.clone(),
+            estimated_cost_usd: Some(estimated_cost),
+            actual_cost_usd: None,
+            latency_ms: None,
+            outcome: Some("dispatched".to_string()),
+            failure_reason: None,
+            fallback_reason: None,
+            node_identity: Some(node_public_key.to_string()),
+            agent_identity: Some(step.step_kind.clone()),
+            model_metadata: None,
+            summary: Some(format!(
+                "Dispatching {} via {}",
+                step.step_kind, candidate.display_name
+            )),
+            result: None,
+        };
+        receipt_writer.append(&dispatched).await?;
+
+        let request_id = format!("{execution_id}-{}", index + 1);
+        match executor
+            .execute(
+                executor_context,
+                request,
+                candidate,
+                step,
+                policy,
+                remaining_deadline_ms,
+                request_id.as_str(),
+            )
+            .await
+        {
+            Ok(output) => {
+                let completed = ExecutionReceipt {
+                    receipt_id: new_receipt_id(),
+                    execution_id: execution_id.to_string(),
+                    step_id: step.step_id.clone(),
+                    attempt_id,
+                    parent_receipt_id: Some(dispatched.receipt_id.clone()),
+                    event_kind: ReceiptEventKind::Completed,
+                    timestamp_ms: now_ms(),
+                    workflow_kind: workflow_kind.to_string(),
+                    step_kind: Some(step.step_kind.clone()),
+                    task_context: None,
+                    policy_snapshot: Some(policy.clone()),
+                    candidate_rankings: Vec::new(),
+                    selected_candidate: Some(candidate.clone()),
+                    supply_tier: Some(candidate.supply_tier.clone()),
+                    trust_tier: Some(candidate.trust_tier.clone()),
+                    capability_match_reason: candidate.selection_reason.clone(),
+                    estimated_cost_usd: Some(estimated_cost),
+                    actual_cost_usd: Some(output.actual_cost_usd),
+                    latency_ms: Some(output.latency_ms),
+                    outcome: Some("completed".to_string()),
+                    failure_reason: None,
+                    fallback_reason: None,
+                    node_identity: output
+                        .model_metadata
+                        .served_by
+                        .clone()
+                        .or_else(|| Some(node_public_key.to_string())),
+                    agent_identity: Some(step.step_kind.clone()),
+                    model_metadata: Some(output.model_metadata),
+                    summary: Some(output.summary),
+                    result: None,
+                };
+                receipt_writer.append(&completed).await?;
+                return Ok(StepRunResult {
+                    text: output.text,
+                    completed_receipt_id: completed.receipt_id,
+                    actual_cost_usd: output.actual_cost_usd,
+                    supply_tier: candidate.supply_tier.clone(),
+                });
+            }
+            Err(error) => {
+                let failed = ExecutionReceipt {
+                    receipt_id: new_receipt_id(),
+                    execution_id: execution_id.to_string(),
+                    step_id: step.step_id.clone(),
+                    attempt_id,
+                    parent_receipt_id: Some(dispatched.receipt_id.clone()),
+                    event_kind: ReceiptEventKind::Failed,
+                    timestamp_ms: now_ms(),
+                    workflow_kind: workflow_kind.to_string(),
+                    step_kind: Some(step.step_kind.clone()),
+                    task_context: None,
+                    policy_snapshot: Some(policy.clone()),
+                    candidate_rankings: Vec::new(),
+                    selected_candidate: Some(candidate.clone()),
+                    supply_tier: Some(candidate.supply_tier.clone()),
+                    trust_tier: Some(candidate.trust_tier.clone()),
+                    capability_match_reason: candidate.selection_reason.clone(),
+                    estimated_cost_usd: Some(estimated_cost),
+                    actual_cost_usd: None,
+                    latency_ms: None,
+                    outcome: Some("failed".to_string()),
+                    failure_reason: Some(error.detail.clone()),
+                    fallback_reason: None,
+                    node_identity: Some(node_public_key.to_string()),
+                    agent_identity: Some(step.step_kind.clone()),
+                    model_metadata: None,
+                    summary: Some(format!("Attempt failed on {}", candidate.display_name)),
+                    result: None,
+                };
+                receipt_writer.append(&failed).await?;
+                previous_receipt_id = failed.receipt_id.clone();
+                if index + 1 < rankings.len() {
+                    let fallback = ExecutionReceipt {
+                        receipt_id: new_receipt_id(),
+                        execution_id: execution_id.to_string(),
+                        step_id: step.step_id.clone(),
+                        attempt_id: format!(
+                            "{execution_id}:{}:fallback:{}",
+                            step.step_id,
+                            index + 1
+                        ),
+                        parent_receipt_id: Some(previous_receipt_id.clone()),
+                        event_kind: ReceiptEventKind::FallbackApplied,
+                        timestamp_ms: now_ms(),
+                        workflow_kind: workflow_kind.to_string(),
+                        step_kind: Some(step.step_kind.clone()),
+                        task_context: None,
+                        policy_snapshot: Some(policy.clone()),
+                        candidate_rankings: Vec::new(),
+                        selected_candidate: rankings.get(index + 1).cloned(),
+                        supply_tier: rankings
+                            .get(index + 1)
+                            .map(|candidate| candidate.supply_tier.clone()),
+                        trust_tier: rankings
+                            .get(index + 1)
+                            .map(|candidate| candidate.trust_tier.clone()),
+                        capability_match_reason: Some(
+                            "advancing_to_next_ranked_candidate".to_string(),
+                        ),
+                        estimated_cost_usd: None,
+                        actual_cost_usd: None,
+                        latency_ms: None,
+                        outcome: Some("fallback_applied".to_string()),
+                        failure_reason: None,
+                        fallback_reason: Some(error.detail),
+                        node_identity: Some(node_public_key.to_string()),
+                        agent_identity: Some(step.step_kind.clone()),
+                        model_metadata: None,
+                        summary: Some("Applying ranked fallback".to_string()),
+                        result: None,
+                    };
+                    receipt_writer.append(&fallback).await?;
+                    previous_receipt_id = fallback.receipt_id;
+                }
+            }
+        }
+    }
+
+    Err(WorkflowExecutionError {
+        detail: format!("all candidates failed for step {}", step.step_kind),
+        parent_receipt_id: previous_receipt_id,
+    }
+    .into())
 }
 
 impl<E> ExecutionController<E>
@@ -607,268 +888,23 @@ where
             remaining_public_budget(policy.max_public_spend, spent_public_cost_usd),
             remaining_deadline_ms,
         );
-        let ranking_receipt = ExecutionReceipt {
-            receipt_id: new_receipt_id(),
-            execution_id: execution_id.to_string(),
-            step_id: step.step_id.clone(),
-            attempt_id: format!("{execution_id}:{}:rank", step.step_id),
-            parent_receipt_id: Some(parent_receipt_id.to_string()),
-            event_kind: ReceiptEventKind::CandidateRanked,
-            timestamp_ms: now_ms(),
-            workflow_kind: workflow_kind.to_string(),
-            step_kind: Some(step.step_kind.clone()),
-            task_context: None,
-            policy_snapshot: Some(policy.clone()),
-            candidate_rankings: rankings.clone(),
-            selected_candidate: rankings.first().cloned(),
-            supply_tier: rankings
-                .first()
-                .map(|candidate| candidate.supply_tier.clone()),
-            trust_tier: rankings
-                .first()
-                .map(|candidate| candidate.trust_tier.clone()),
-            capability_match_reason: rankings
-                .first()
-                .and_then(|candidate| candidate.selection_reason.clone()),
-            estimated_cost_usd: rankings.first().map(|candidate| {
-                estimate_step_cost_usd(
-                    candidate,
-                    estimate_token_count(step.prompt.as_str()),
-                    step.max_tokens as usize,
-                )
-            }),
-            actual_cost_usd: None,
-            latency_ms: None,
-            outcome: Some("ranked".to_string()),
-            failure_reason: None,
-            fallback_reason: None,
-            node_identity: Some(self.state.node_public_key.clone()),
-            agent_identity: Some(step.step_kind.clone()),
-            model_metadata: None,
-            summary: Some(format!("Ranked {} candidate(s)", rankings.len())),
-            result: None,
-        };
-        self.receipt_writer.append(&ranking_receipt).await?;
-
-        if rankings.is_empty() {
-            let failed = ExecutionReceipt {
-                receipt_id: new_receipt_id(),
-                execution_id: execution_id.to_string(),
-                step_id: step.step_id.clone(),
-                attempt_id: format!("{execution_id}:{}:none", step.step_id),
-                parent_receipt_id: Some(ranking_receipt.receipt_id.clone()),
-                event_kind: ReceiptEventKind::Failed,
-                timestamp_ms: now_ms(),
-                workflow_kind: workflow_kind.to_string(),
-                step_kind: Some(step.step_kind.clone()),
-                task_context: None,
-                policy_snapshot: Some(policy.clone()),
-                candidate_rankings: Vec::new(),
-                selected_candidate: None,
-                supply_tier: None,
-                trust_tier: Some(policy.trust_tier.clone()),
-                capability_match_reason: Some("no_candidate_satisfied_policy".to_string()),
-                estimated_cost_usd: None,
-                actual_cost_usd: None,
-                latency_ms: None,
-                outcome: Some("failed".to_string()),
-                failure_reason: Some("no_candidate_satisfied_policy".to_string()),
-                fallback_reason: None,
-                node_identity: Some(self.state.node_public_key.clone()),
-                agent_identity: Some(step.step_kind.clone()),
-                model_metadata: None,
-                summary: Some("No candidate satisfied policy constraints".to_string()),
-                result: None,
-            };
-            self.receipt_writer.append(&failed).await?;
-            return Err(WorkflowExecutionError {
-                detail: format!("no candidate satisfied policy for step {}", step.step_kind),
-                parent_receipt_id: failed.receipt_id,
-            }
-            .into());
-        }
-
-        let mut previous_receipt_id = ranking_receipt.receipt_id.clone();
-        for (index, candidate) in rankings.iter().enumerate() {
-            let attempt_id = format!("{execution_id}:{}:attempt:{}", step.step_id, index + 1);
-            let estimated_cost = estimate_step_cost_usd(
-                candidate,
-                estimate_token_count(step.prompt.as_str()),
-                step.max_tokens as usize,
-            );
-            let dispatched = ExecutionReceipt {
-                receipt_id: new_receipt_id(),
-                execution_id: execution_id.to_string(),
-                step_id: step.step_id.clone(),
-                attempt_id: attempt_id.clone(),
-                parent_receipt_id: Some(previous_receipt_id.clone()),
-                event_kind: ReceiptEventKind::Dispatched,
-                timestamp_ms: now_ms(),
-                workflow_kind: workflow_kind.to_string(),
-                step_kind: Some(step.step_kind.clone()),
-                task_context: None,
-                policy_snapshot: Some(policy.clone()),
-                candidate_rankings: Vec::new(),
-                selected_candidate: Some(candidate.clone()),
-                supply_tier: Some(candidate.supply_tier.clone()),
-                trust_tier: Some(candidate.trust_tier.clone()),
-                capability_match_reason: candidate.selection_reason.clone(),
-                estimated_cost_usd: Some(estimated_cost),
-                actual_cost_usd: None,
-                latency_ms: None,
-                outcome: Some("dispatched".to_string()),
-                failure_reason: None,
-                fallback_reason: None,
-                node_identity: Some(self.state.node_public_key.clone()),
-                agent_identity: Some(step.step_kind.clone()),
-                model_metadata: None,
-                summary: Some(format!(
-                    "Dispatching {} via {}",
-                    step.step_kind, candidate.display_name
-                )),
-                result: None,
-            };
-            self.receipt_writer.append(&dispatched).await?;
-
-            let request_id = format!("{execution_id}-{}", index + 1);
-            match self
-                .executor
-                .execute(
-                    &self.state,
-                    request,
-                    candidate,
-                    step,
-                    policy,
-                    remaining_deadline_ms,
-                    request_id.as_str(),
-                )
-                .await
-            {
-                Ok(output) => {
-                    let completed = ExecutionReceipt {
-                        receipt_id: new_receipt_id(),
-                        execution_id: execution_id.to_string(),
-                        step_id: step.step_id.clone(),
-                        attempt_id,
-                        parent_receipt_id: Some(dispatched.receipt_id.clone()),
-                        event_kind: ReceiptEventKind::Completed,
-                        timestamp_ms: now_ms(),
-                        workflow_kind: workflow_kind.to_string(),
-                        step_kind: Some(step.step_kind.clone()),
-                        task_context: None,
-                        policy_snapshot: Some(policy.clone()),
-                        candidate_rankings: Vec::new(),
-                        selected_candidate: Some(candidate.clone()),
-                        supply_tier: Some(candidate.supply_tier.clone()),
-                        trust_tier: Some(candidate.trust_tier.clone()),
-                        capability_match_reason: candidate.selection_reason.clone(),
-                        estimated_cost_usd: Some(estimated_cost),
-                        actual_cost_usd: Some(output.actual_cost_usd),
-                        latency_ms: Some(output.latency_ms),
-                        outcome: Some("completed".to_string()),
-                        failure_reason: None,
-                        fallback_reason: None,
-                        node_identity: output
-                            .model_metadata
-                            .served_by
-                            .clone()
-                            .or_else(|| Some(self.state.node_public_key.clone())),
-                        agent_identity: Some(step.step_kind.clone()),
-                        model_metadata: Some(output.model_metadata),
-                        summary: Some(output.summary),
-                        result: None,
-                    };
-                    self.receipt_writer.append(&completed).await?;
-                    return Ok(StepRunResult {
-                        text: output.text,
-                        completed_receipt_id: completed.receipt_id,
-                        actual_cost_usd: output.actual_cost_usd,
-                        supply_tier: candidate.supply_tier.clone(),
-                    });
-                }
-                Err(error) => {
-                    let failed = ExecutionReceipt {
-                        receipt_id: new_receipt_id(),
-                        execution_id: execution_id.to_string(),
-                        step_id: step.step_id.clone(),
-                        attempt_id,
-                        parent_receipt_id: Some(dispatched.receipt_id.clone()),
-                        event_kind: ReceiptEventKind::Failed,
-                        timestamp_ms: now_ms(),
-                        workflow_kind: workflow_kind.to_string(),
-                        step_kind: Some(step.step_kind.clone()),
-                        task_context: None,
-                        policy_snapshot: Some(policy.clone()),
-                        candidate_rankings: Vec::new(),
-                        selected_candidate: Some(candidate.clone()),
-                        supply_tier: Some(candidate.supply_tier.clone()),
-                        trust_tier: Some(candidate.trust_tier.clone()),
-                        capability_match_reason: candidate.selection_reason.clone(),
-                        estimated_cost_usd: Some(estimated_cost),
-                        actual_cost_usd: None,
-                        latency_ms: None,
-                        outcome: Some("failed".to_string()),
-                        failure_reason: Some(error.detail.clone()),
-                        fallback_reason: None,
-                        node_identity: Some(self.state.node_public_key.clone()),
-                        agent_identity: Some(step.step_kind.clone()),
-                        model_metadata: None,
-                        summary: Some(format!("Attempt failed on {}", candidate.display_name)),
-                        result: None,
-                    };
-                    self.receipt_writer.append(&failed).await?;
-                    previous_receipt_id = failed.receipt_id.clone();
-                    if index + 1 < rankings.len() {
-                        let fallback = ExecutionReceipt {
-                            receipt_id: new_receipt_id(),
-                            execution_id: execution_id.to_string(),
-                            step_id: step.step_id.clone(),
-                            attempt_id: format!(
-                                "{execution_id}:{}:fallback:{}",
-                                step.step_id,
-                                index + 1
-                            ),
-                            parent_receipt_id: Some(previous_receipt_id.clone()),
-                            event_kind: ReceiptEventKind::FallbackApplied,
-                            timestamp_ms: now_ms(),
-                            workflow_kind: workflow_kind.to_string(),
-                            step_kind: Some(step.step_kind.clone()),
-                            task_context: None,
-                            policy_snapshot: Some(policy.clone()),
-                            candidate_rankings: Vec::new(),
-                            selected_candidate: rankings.get(index + 1).cloned(),
-                            supply_tier: rankings
-                                .get(index + 1)
-                                .map(|candidate| candidate.supply_tier.clone()),
-                            trust_tier: rankings
-                                .get(index + 1)
-                                .map(|candidate| candidate.trust_tier.clone()),
-                            capability_match_reason: Some(
-                                "advancing_to_next_ranked_candidate".to_string(),
-                            ),
-                            estimated_cost_usd: None,
-                            actual_cost_usd: None,
-                            latency_ms: None,
-                            outcome: Some("fallback_applied".to_string()),
-                            failure_reason: None,
-                            fallback_reason: Some(error.detail),
-                            node_identity: Some(self.state.node_public_key.clone()),
-                            agent_identity: Some(step.step_kind.clone()),
-                            model_metadata: None,
-                            summary: Some("Applying ranked fallback".to_string()),
-                            result: None,
-                        };
-                        self.receipt_writer.append(&fallback).await?;
-                        previous_receipt_id = fallback.receipt_id;
-                    }
-                }
-            }
-        }
-        Err(WorkflowExecutionError {
-            detail: format!("all candidates failed for step {}", step.step_kind),
-            parent_receipt_id: previous_receipt_id,
-        }
-        .into())
+        execute_ranked_step(
+            &self.receipt_writer,
+            &self.executor,
+            StepExecutorContext {
+                control_port: self.state.control_port.load(Ordering::Relaxed),
+            },
+            self.state.node_public_key.as_str(),
+            execution_id,
+            workflow_kind,
+            request,
+            policy,
+            parent_receipt_id,
+            step,
+            rankings,
+            remaining_deadline_ms,
+        )
+        .await
     }
 }
 
@@ -1905,6 +1941,52 @@ pub(crate) async fn execution_provenance_handler(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::VecDeque;
+    use std::sync::{Arc as StdArc, Mutex as StdMutex};
+    use tempfile::tempdir;
+
+    #[derive(Clone)]
+    struct ScriptedExecutor {
+        outcomes: StdArc<StdMutex<VecDeque<Result<StepExecutionOutput, StepExecutionError>>>>,
+    }
+
+    impl ScriptedExecutor {
+        fn new(outcomes: Vec<Result<StepExecutionOutput, StepExecutionError>>) -> Self {
+            Self {
+                outcomes: StdArc::new(StdMutex::new(outcomes.into())),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl StepExecutor for ScriptedExecutor {
+        async fn execute(
+            &self,
+            _context: StepExecutorContext,
+            _request: &AgentTaskRequest,
+            _candidate: &CapabilityDescriptor,
+            _step: &WorkflowStep,
+            _policy: &ExecutionPolicy,
+            _remaining_deadline_ms: Option<u64>,
+            _request_id: &str,
+        ) -> Result<StepExecutionOutput, StepExecutionError> {
+            self.outcomes
+                .lock()
+                .expect("executor lock")
+                .pop_front()
+                .expect("scripted outcome")
+        }
+    }
+
+    fn sample_request() -> AgentTaskRequest {
+        AgentTaskRequest {
+            workflow_kind: RESEARCH_WORKFLOW_KIND.to_string(),
+            question: "What changed?".to_string(),
+            sources: research_sources(),
+            policy: sample_policy(),
+            model: Some("meta-llama/Llama-3.2-3B-Instruct".to_string()),
+        }
+    }
 
     fn sample_policy() -> ExecutionPolicy {
         ExecutionPolicy {
@@ -2235,5 +2317,222 @@ mod tests {
             ..private_without_region
         };
         assert!(candidate_matches_residency(&private_with_region, &policy));
+    }
+
+    #[tokio::test]
+    async fn execute_ranked_step_records_policy_failure_when_no_candidates_match() {
+        let temp = tempdir().expect("tempdir");
+        let store = Arc::new(ReceiptStore::new(temp.path().join("receipts.db")));
+        store.initialize().await.expect("receipt store init");
+
+        let request = sample_request();
+        let policy = sample_policy();
+        let step = workflow_step("summarize_source", &["summarization"]);
+        let error = execute_ranked_step(
+            &ReceiptWriter::new(store.clone()),
+            &ScriptedExecutor::new(Vec::new()),
+            StepExecutorContext { control_port: 9091 },
+            "node-local",
+            "exec-test",
+            RESEARCH_WORKFLOW_KIND,
+            &request,
+            &policy,
+            "workflow-root",
+            &step,
+            Vec::new(),
+            policy.deadline_ms,
+        )
+        .await
+        .expect_err("no rankings should fail");
+
+        assert!(error
+            .to_string()
+            .contains("no candidate satisfied policy for step summarize_source"));
+        let receipts = store
+            .receipts_for_execution("exec-test")
+            .await
+            .expect("load receipts");
+        let events = receipts
+            .iter()
+            .map(|receipt| receipt.event_kind.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            events,
+            vec![ReceiptEventKind::CandidateRanked, ReceiptEventKind::Failed]
+        );
+    }
+
+    #[tokio::test]
+    async fn execute_ranked_step_emits_fallback_chain_before_second_attempt_succeeds() {
+        let temp = tempdir().expect("tempdir");
+        let store = Arc::new(ReceiptStore::new(temp.path().join("receipts.db")));
+        store.initialize().await.expect("receipt store init");
+
+        let request = sample_request();
+        let policy = sample_policy();
+        let step = workflow_step("summarize_source", &["summarization"]);
+        let rankings = vec![
+            candidate(
+                "private-fast",
+                SupplyTier::Private,
+                TrustTier::VerifiedMesh,
+                70,
+                &["summarization", "reasoning"],
+            ),
+            candidate(
+                "public-backup",
+                SupplyTier::Public,
+                TrustTier::PublicSpecialist,
+                120,
+                &["summarization", "reasoning", "specialist"],
+            ),
+        ];
+        let result = execute_ranked_step(
+            &ReceiptWriter::new(store.clone()),
+            &ScriptedExecutor::new(vec![
+                Err(StepExecutionError {
+                    detail: "request_failed:first-hop".to_string(),
+                }),
+                Ok(StepExecutionOutput {
+                    text: "Concise workflow summary".to_string(),
+                    latency_ms: 84,
+                    model_metadata: ExecutionModelMetadata {
+                        model_id: Some("test-model".to_string()),
+                        inference_mode: Some("standard".to_string()),
+                        served_by: Some("public-backup".to_string()),
+                        mesh_forwarded: Some(false),
+                        mesh_forward_target: None,
+                        mesh_target_tier: None,
+                        mesh_detail: None,
+                    },
+                    actual_cost_usd: 0.019,
+                    summary: "Summarized by backup candidate".to_string(),
+                }),
+            ]),
+            StepExecutorContext { control_port: 9091 },
+            "node-local",
+            "exec-test",
+            RESEARCH_WORKFLOW_KIND,
+            &request,
+            &policy,
+            "workflow-root",
+            &step,
+            rankings,
+            policy.deadline_ms,
+        )
+        .await
+        .expect("fallback should recover");
+
+        assert_eq!(result.text, "Concise workflow summary");
+        assert_eq!(result.supply_tier, SupplyTier::Public);
+        let receipts = store
+            .receipts_for_execution("exec-test")
+            .await
+            .expect("load receipts");
+        let events = receipts
+            .iter()
+            .map(|receipt| receipt.event_kind.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            events,
+            vec![
+                ReceiptEventKind::CandidateRanked,
+                ReceiptEventKind::Dispatched,
+                ReceiptEventKind::Failed,
+                ReceiptEventKind::FallbackApplied,
+                ReceiptEventKind::Dispatched,
+                ReceiptEventKind::Completed,
+            ]
+        );
+        assert_eq!(
+            receipts[3]
+                .selected_candidate
+                .as_ref()
+                .map(|candidate| candidate.candidate_id.as_str()),
+            Some("public-backup")
+        );
+        assert_eq!(
+            receipts[3].fallback_reason.as_deref(),
+            Some("request_failed:first-hop")
+        );
+    }
+
+    #[tokio::test]
+    async fn execute_ranked_step_returns_terminal_error_after_all_ranked_candidates_fail() {
+        let temp = tempdir().expect("tempdir");
+        let store = Arc::new(ReceiptStore::new(temp.path().join("receipts.db")));
+        store.initialize().await.expect("receipt store init");
+
+        let request = sample_request();
+        let policy = sample_policy();
+        let step = workflow_step("synthesize_brief", &["synthesis", "reasoning"]);
+        let rankings = vec![
+            candidate(
+                "private-a",
+                SupplyTier::Private,
+                TrustTier::VerifiedMesh,
+                85,
+                &["synthesis", "reasoning"],
+            ),
+            candidate(
+                "public-b",
+                SupplyTier::Public,
+                TrustTier::PublicSpecialist,
+                95,
+                &["synthesis", "reasoning", "specialist"],
+            ),
+        ];
+        let error = execute_ranked_step(
+            &ReceiptWriter::new(store.clone()),
+            &ScriptedExecutor::new(vec![
+                Err(StepExecutionError {
+                    detail: "request_failed:private-a".to_string(),
+                }),
+                Err(StepExecutionError {
+                    detail: "request_failed:public-b".to_string(),
+                }),
+            ]),
+            StepExecutorContext { control_port: 9091 },
+            "node-local",
+            "exec-test",
+            RESEARCH_WORKFLOW_KIND,
+            &request,
+            &policy,
+            "workflow-root",
+            &step,
+            rankings,
+            policy.deadline_ms,
+        )
+        .await
+        .expect_err("every attempt should fail");
+
+        assert!(error
+            .to_string()
+            .contains("all candidates failed for step synthesize_brief"));
+        let receipts = store
+            .receipts_for_execution("exec-test")
+            .await
+            .expect("load receipts");
+        let events = receipts
+            .iter()
+            .map(|receipt| receipt.event_kind.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            events,
+            vec![
+                ReceiptEventKind::CandidateRanked,
+                ReceiptEventKind::Dispatched,
+                ReceiptEventKind::Failed,
+                ReceiptEventKind::FallbackApplied,
+                ReceiptEventKind::Dispatched,
+                ReceiptEventKind::Failed,
+            ]
+        );
+        assert_eq!(
+            receipts
+                .last()
+                .and_then(|receipt| receipt.failure_reason.as_deref()),
+            Some("request_failed:public-b")
+        );
     }
 }
