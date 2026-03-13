@@ -1087,6 +1087,31 @@ fn normalize_policy(mut policy: ExecutionPolicy) -> ExecutionPolicy {
     policy
 }
 
+fn normalize_research_sources(sources: &mut [ResearchSource]) -> Result<(), String> {
+    let mut seen_ids = HashSet::new();
+    for (index, source) in sources.iter_mut().enumerate() {
+        let mut source_id = source.id.trim().to_string();
+        if source_id.is_empty() {
+            source_id = format!("source-{}", index + 1);
+        }
+        if !seen_ids.insert(source_id.clone()) {
+            return Err(format!("duplicate source id: {source_id}"));
+        }
+        source.id = source_id;
+        source.title = source
+            .title
+            .as_ref()
+            .map(|title| title.trim())
+            .filter(|title| !title.is_empty())
+            .map(str::to_string);
+        source.content = source.content.trim().to_string();
+        if source.content.is_empty() {
+            return Err(format!("source {} content is required", source.id));
+        }
+    }
+    Ok(())
+}
+
 fn preview_text(raw: &str, max_chars: usize) -> String {
     let normalized = raw.replace(['\n', '\r'], " ");
     if normalized.len() <= max_chars {
@@ -1763,6 +1788,12 @@ pub(crate) async fn agent_task_create_handler(
 ) -> impl IntoResponse {
     request.workflow_kind = request.workflow_kind.trim().to_string();
     request.question = request.question.trim().to_string();
+    request.model = request
+        .model
+        .as_ref()
+        .map(|model| model.trim())
+        .filter(|model| !model.is_empty())
+        .map(str::to_string);
     if request.workflow_kind != RESEARCH_WORKFLOW_KIND {
         return (
             StatusCode::BAD_REQUEST,
@@ -1799,6 +1830,16 @@ pub(crate) async fn agent_task_create_handler(
             Json(serde_json::json!({
                 "ok": false,
                 "detail": format!("at most {} sources are supported in v1", MAX_RESEARCH_SOURCES),
+            })),
+        )
+            .into_response();
+    }
+    if let Err(detail) = normalize_research_sources(&mut request.sources) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "ok": false,
+                "detail": detail,
             })),
         )
             .into_response();
@@ -2256,6 +2297,62 @@ mod tests {
             normalized.fallback_order,
             vec![SupplyTier::Private, SupplyTier::Public]
         );
+    }
+
+    #[test]
+    fn normalize_research_sources_trims_and_fills_blank_ids() {
+        let mut sources = vec![
+            ResearchSource {
+                id: "  ".to_string(),
+                title: Some("  First note  ".to_string()),
+                content: "  Local work stays cheap.  ".to_string(),
+            },
+            ResearchSource {
+                id: " source-two ".to_string(),
+                title: Some("   ".to_string()),
+                content: "  Public specialists handle synthesis. ".to_string(),
+            },
+        ];
+
+        normalize_research_sources(&mut sources).expect("source normalization");
+
+        assert_eq!(sources[0].id, "source-1");
+        assert_eq!(sources[0].title.as_deref(), Some("First note"));
+        assert_eq!(sources[0].content, "Local work stays cheap.");
+        assert_eq!(sources[1].id, "source-two");
+        assert_eq!(sources[1].title, None);
+        assert_eq!(sources[1].content, "Public specialists handle synthesis.");
+    }
+
+    #[test]
+    fn normalize_research_sources_rejects_duplicate_ids() {
+        let mut sources = vec![
+            ResearchSource {
+                id: "memo".to_string(),
+                title: None,
+                content: "Alpha".to_string(),
+            },
+            ResearchSource {
+                id: " memo ".to_string(),
+                title: None,
+                content: "Beta".to_string(),
+            },
+        ];
+
+        let error = normalize_research_sources(&mut sources).expect_err("duplicate ids");
+        assert_eq!(error, "duplicate source id: memo");
+    }
+
+    #[test]
+    fn normalize_research_sources_rejects_blank_content() {
+        let mut sources = vec![ResearchSource {
+            id: "memo".to_string(),
+            title: None,
+            content: "   ".to_string(),
+        }];
+
+        let error = normalize_research_sources(&mut sources).expect_err("blank content");
+        assert_eq!(error, "source memo content is required");
     }
 
     #[test]

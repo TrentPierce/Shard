@@ -72,6 +72,8 @@ This is the receipt-first v1 workflow surface for cross-topology agent execution
 - `workflow_kind` must be `research_brief`
 - live web search is out of scope for v1
 - `sources[]` are caller-provided documents or snippets
+- blank source IDs are auto-filled as `source-{n}`
+- duplicate source IDs or blank source content return `400`
 - the orchestrating daemon is the canonical receipt writer for the workflow
 - the response includes:
   - `execution` summary

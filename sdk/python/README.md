@@ -25,6 +25,7 @@ execution summary, append-only receipts, and a reconstructable provenance graph.
 workflow submissions still return the persisted receipt chain and provenance bundle so the
 unhappy path remains debuggable. Completed workflow results also include planner notes,
 sub-questions, and the source IDs selected for synthesis.
+Blank source IDs are auto-filled by the daemon, but duplicate IDs or blank source content are rejected.
 
 ```python
 from shard import ShardClient
