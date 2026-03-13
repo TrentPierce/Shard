@@ -6,6 +6,7 @@ import {
   type CapabilityDescriptor,
   type ExecutionPolicy,
   type ExecutionReceipt,
+  type PlannerSubQuestion,
   type ProvenanceNode,
   type ResearchSourceInput,
   type SupplyTier,
@@ -341,9 +342,15 @@ export default function ProvenancePage() {
                   </div>
                 </div>
               ))}
+              {loadingCapabilities ? (
+                <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 text-sm text-ink-300">
+                  Looking for connected machines and specialist capacity...
+                </div>
+              ) : null}
               {capabilities.length === 0 && !loadingCapabilities ? (
                 <div className="rounded-2xl border border-dashed border-white/12 bg-white/[0.03] p-4 text-sm text-ink-300">
-                  No capability descriptors reported yet.
+                  No capability descriptors reported yet. Start the daemon or connect a node to
+                  see live routing candidates here.
                 </div>
               ) : null}
             </div>
@@ -606,7 +613,7 @@ export default function ProvenancePage() {
                   )
                 }
                 className="h-11 rounded-xl border border-white/10 bg-base-900/80 px-3 text-sm text-ink-50 outline-none transition focus:border-accent-300"
-                placeholder="Optional data residency rule (for example us)"
+                placeholder="Leave blank unless the work must stay in one region"
               />
             </div>
 
@@ -677,6 +684,105 @@ export default function ProvenancePage() {
                     {execution.execution.result?.brief ?? "No completed artifact yet."}
                   </p>
                 </article>
+                {execution.execution.result ? (
+                  <div className="mt-5 grid gap-4 xl:grid-cols-[0.92fr_1.08fr]">
+                    <article className="rounded-[1.4rem] border border-white/10 bg-base-950/55 p-5">
+                      <p className="text-xs uppercase tracking-[0.18em] text-ink-400">
+                        Planner notes
+                      </p>
+                      <p className="mt-3 text-sm leading-7 text-ink-100">
+                        {execution.execution.result.planner_notes ??
+                          "The planner did not return extra notes for this run."}
+                      </p>
+                      <div className="mt-4">
+                        <p className="text-xs uppercase tracking-[0.18em] text-ink-400">
+                          Selected sources
+                        </p>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          {execution.execution.result.selected_source_ids.length > 0 ? (
+                            execution.execution.result.selected_source_ids.map((sourceId) => (
+                              <span
+                                key={sourceId}
+                                className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-ink-100"
+                              >
+                                {sourceId}
+                              </span>
+                            ))
+                          ) : (
+                            <span className="text-sm text-ink-300">
+                              No selected sources were recorded.
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </article>
+
+                    <article className="rounded-[1.4rem] border border-white/10 bg-base-950/55 p-5">
+                      <p className="text-xs uppercase tracking-[0.18em] text-ink-400">
+                        Planner sub-questions
+                      </p>
+                      <div className="mt-3 space-y-3">
+                        {execution.execution.result.sub_questions.length > 0 ? (
+                          execution.execution.result.sub_questions.map(
+                            (item: PlannerSubQuestion, index) => (
+                              <div
+                                key={`${item.question}-${index}`}
+                                className="rounded-2xl border border-white/10 bg-white/[0.03] p-4"
+                              >
+                                <p className="text-sm font-semibold text-ink-50">
+                                  {index + 1}. {item.question}
+                                </p>
+                                <p className="mt-2 text-xs uppercase tracking-[0.18em] text-ink-400">
+                                  Relevant sources
+                                </p>
+                                <div className="mt-2 flex flex-wrap gap-2">
+                                  {item.relevant_source_ids.length > 0 ? (
+                                    item.relevant_source_ids.map((sourceId) => (
+                                      <span
+                                        key={sourceId}
+                                        className="rounded-full border border-accent-300/25 bg-accent-300/10 px-2.5 py-1 text-[11px] text-accent-100"
+                                      >
+                                        {sourceId}
+                                      </span>
+                                    ))
+                                  ) : (
+                                    <span className="text-sm text-ink-300">
+                                      No source IDs attached.
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            ),
+                          )
+                        ) : (
+                          <div className="rounded-2xl border border-dashed border-white/12 bg-white/[0.03] p-4 text-sm text-ink-300">
+                            No planner sub-questions were recorded for this run.
+                          </div>
+                        )}
+                      </div>
+                    </article>
+                  </div>
+                ) : null}
+                {execution.execution.result?.source_summaries?.length ? (
+                  <article className="mt-5 rounded-[1.4rem] border border-white/10 bg-base-950/55 p-5">
+                    <p className="text-xs uppercase tracking-[0.18em] text-ink-400">
+                      Source summaries
+                    </p>
+                    <div className="mt-4 space-y-3">
+                      {execution.execution.result.source_summaries.map((summary) => (
+                        <div
+                          key={summary.source_id}
+                          className="rounded-2xl border border-white/10 bg-white/[0.03] p-4"
+                        >
+                          <p className="text-sm font-semibold text-ink-50">
+                            {summary.title || summary.source_id}
+                          </p>
+                          <p className="mt-2 text-sm leading-7 text-ink-200">{summary.summary}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </article>
+                ) : null}
               </>
             ) : (
               <div className="mt-5 rounded-[1.4rem] border border-dashed border-white/12 bg-white/[0.03] p-5 text-sm leading-6 text-ink-300">
