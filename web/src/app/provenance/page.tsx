@@ -842,6 +842,12 @@ export default function ProvenancePage() {
                       <StatCard label="Observed" value={formatUsd(node.actual_cost_usd)} compact />
                       <StatCard label="Candidate" value={node.selected_candidate?.display_name ?? "controller"} compact />
                     </div>
+                    {node.model_metadata?.overflow_routed ? (
+                      <div className="mt-3 flex items-center gap-2 rounded-xl border border-amber-300/25 bg-amber-300/10 px-3 py-2 text-xs font-medium text-amber-100">
+                        <span className="h-1.5 w-1.5 rounded-full bg-amber-400 animate-pulse" />
+                        <span>Overflow Routed to {node.model_metadata.overflow_destination ?? "unknown"}</span>
+                      </div>
+                    ) : null}
                     {node.summary ? <p className="mt-3 text-sm leading-6 text-ink-100">{node.summary}</p> : null}
                     {node.failure_reason ? <p className="mt-2 text-sm text-rose-100">Failure: {node.failure_reason}</p> : null}
                     {node.fallback_reason ? <p className="mt-2 text-sm text-amber-100">Fallback: {node.fallback_reason}</p> : null}

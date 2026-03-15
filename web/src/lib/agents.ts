@@ -62,6 +62,8 @@ export interface ExecutionModelMetadata {
   mesh_forward_target?: string | null
   mesh_target_tier?: string | null
   mesh_detail?: string | null
+  overflow_routed?: boolean | null
+  overflow_destination?: string | null
 }
 
 export interface ResearchSourceSummary {
