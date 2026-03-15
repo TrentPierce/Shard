@@ -84,7 +84,6 @@ export async function proxyShardJsonPost(
       timeoutMs: JSON_PROXY_TIMEOUT_MS,
       totalTimeoutMs: JSON_PROXY_TOTAL_TIMEOUT_MS,
       preferredCandidates: preferredBackendCandidatesFromHeaders(backendPath),
-      failoverOnStatuses: [500, 502, 503, 504, 521, 530],
     })
     const payload = await response.json().catch(() => ({}))
     return NextResponse.json(payload, {

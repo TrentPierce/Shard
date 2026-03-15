@@ -8,15 +8,12 @@ const DEFAULT_BACKENDS = [
 ]
 // Additional fallback: read from env so no IP is hardcoded in source
 const DEFAULT_FALLBACK = process.env.SHARD_FALLBACK_URL || ""
-const DEFAULT_LOCAL_BACKENDS =
-  process.env.NODE_ENV === "production"
-    ? []
-    : [
-        "http://127.0.0.1:9091",
-        "http://127.0.0.1:9191",
-        "http://localhost:9091",
-        "http://localhost:9191",
-      ]
+const DEFAULT_LOCAL_BACKENDS = [
+  "http://127.0.0.1:9091",
+  "http://127.0.0.1:9191",
+  "http://localhost:9091",
+  "http://localhost:9191",
+]
 
 function normalizeUrl(url: string): string {
   return url.trim().replace(/\/$/, "")
@@ -280,7 +277,7 @@ export async function fetchWithBackendFailover(
     totalTimeoutMs = 15_000,
     maxAttempts = 3,
     retryJitterMs = 250,
-    failoverOnStatuses = [500, 502, 503, 504, 521, 530],
+    failoverOnStatuses = [404, 500, 502, 503, 504, 521, 530],
     preferredCandidates,
     loadAware = true,
   } = options
