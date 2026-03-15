@@ -368,9 +368,63 @@ class OverflowRouter:
     ) -> Response:
         base = self.config.shard_url if destination == "shard" else self.config.primary_url
         destination_url = f"{base}/v1/chat/completions"
+
+        # Add overflow routing metadata to the headers
+        headers = self._copy_headers(request)
+        headers["x-shard-overflow-routed"] = "true"
+        headers["x-shard-overflow-destination"] = destination
+
         if stream:
-            return await self._proxy_streaming(destination_url, request, body)
-        return await self._proxy_non_streaming(destination_url, request, body)
+            stream_ctx = self.client.stream(
+                request.method,
+                destination_url,
+                headers=headers,
+                content=body,
+            )
+            upstream = await stream_ctx.__aenter__()
+
+            async def iterator() -> AsyncIterator[bytes]:
+                try:
+                    async for chunk in upstream.aiter_bytes():
+                        yield chunk
+                finally:
+                    await stream_ctx.__aexit__(None, None, None)
+
+            resp_headers = {
+                k: v
+                for k, v in upstream.headers.items()
+                if k.lower() not in {"transfer-encoding", "connection", "content-length"}
+            }
+            resp_headers["x-shard-overflow-routed"] = "true"
+            resp_headers["x-shard-overflow-destination"] = destination
+
+            return StreamingResponse(
+                iterator(),
+                status_code=upstream.status_code,
+                media_type=upstream.headers.get("content-type"),
+                headers=resp_headers,
+            )
+
+        upstream = await self.client.request(
+            request.method,
+            destination_url,
+            headers=headers,
+            content=body,
+        )
+        resp_headers = {
+            k: v
+            for k, v in upstream.headers.items()
+            if k.lower() not in {"transfer-encoding", "connection"}
+        }
+        resp_headers["x-shard-overflow-routed"] = "true"
+        resp_headers["x-shard-overflow-destination"] = destination
+
+        return Response(
+            content=upstream.content,
+            status_code=upstream.status_code,
+            headers=resp_headers,
+            media_type=upstream.headers.get("content-type"),
+        )
 
     @staticmethod
     def _is_stream_request(body: bytes) -> bool:

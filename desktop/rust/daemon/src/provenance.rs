@@ -153,6 +153,10 @@ pub struct ExecutionModelMetadata {
     pub mesh_target_tier: Option<String>,
     #[serde(default)]
     pub mesh_detail: Option<String>,
+    #[serde(default)]
+    pub overflow_routed: Option<bool>,
+    #[serde(default)]
+    pub overflow_destination: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

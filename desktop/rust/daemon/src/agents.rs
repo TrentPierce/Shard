@@ -274,6 +274,14 @@ impl StepExecutor for LocalChatStepExecutor {
                     .get("x-shard-mesh-detail")
                     .and_then(|value| value.to_str().ok())
                     .map(str::to_string),
+                overflow_routed: headers
+                    .get("x-shard-overflow-routed")
+                    .and_then(|value| value.to_str().ok())
+                    .map(|value| value.eq_ignore_ascii_case("true")),
+                overflow_destination: headers
+                    .get("x-shard-overflow-destination")
+                    .and_then(|value| value.to_str().ok())
+                    .map(str::to_string),
             },
         })
     }
@@ -777,7 +785,6 @@ where
         );
         let selected_sources = planner_selected_sources(&planner_plan, request.sources.as_slice());
         let mut source_summaries = Vec::new();
-        let planner_parent_receipt_id = parent_receipt_id.clone();
         for source in selected_sources {
             let summary_step = WorkflowStep {
                 step_id: format!("summarize-{}", source.id),
@@ -801,7 +808,7 @@ where
                     request.workflow_kind.as_str(),
                     request,
                     policy,
-                    planner_parent_receipt_id.as_str(),
+                    parent_receipt_id.as_str(),
                     &summary_step,
                     spent_cost_usd,
                     spent_public_cost_usd,
