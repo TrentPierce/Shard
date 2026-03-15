@@ -1,59 +1,32 @@
-BUSINESS SOURCE LICENSE 1.1
+# Functional Source License, Version 1.1, ALv2 Future License
 
-Licensor: Shard Project (Barry Trenton Pierce)
-Work: The Shard Distributed Inference Core, including P2P networking, 
-      verification algorithms, and economic protocols.
+**Licensor:** Shard Project (Barry Trenton Pierce)
+**Software:** Shard Distributed Inference Core, including P2P networking, verification algorithms, and economic protocols.
 
-================================================================================
+### License Grant
+Subject to your compliance with this License Grant and the Patents, Redistribution and Trademark clauses below, we hereby grant you the right to use, copy, modify, create derivative works, publicly perform, publicly display and redistribute the Software for any Permitted Purpose identified below.
 
-1. TERMS
---------------------------------------------------------------------------------
-The Licensor hereby grants you the right to copy, modify, create derivative 
-works, redistribute, and make non-production use of the Licensed Work. 
-The Licensor also grants you the right to make Production Use of the Licensed 
-Work, SUBJECT TO the limits defined in the "Additional Use Grant" below.
+### Permitted Purpose
+A Permitted Purpose is any purpose other than a Competing Use.
 
-2. ADDITIONAL USE GRANT
---------------------------------------------------------------------------------
-You may use the Licensed Work for any purpose (including production 
-environments) PROVIDED THAT:
+A **Competing Use** means making the Software available to others in a commercial product or service that:
+1. substitutes for the Software;
+2. substitutes for any other product or service we offer using the Software that exists as of the date we make the Software available; or
+3. is a hosted or managed service that provides distributed LLM inference or verifiable routing using the Software.
 
-(a) You do not offer the Licensed Work (or a modified version of it) as a 
-    service to third parties; and
+### Patents
+To the extent your use for a Permitted Purpose would necessarily infringe our patents, the license grant above includes a license under our patents. If you make a claim against any party that the Software infringes or contributes to the infringement of any patent, then your patent license to the Software ends immediately.
 
-(b) You do not use the Licensed Work to create a product or service that 
-    competes with the Licensor's commercial offerings; and
+### Redistribution
+You may redistribute the Software, provided that you:
+1. include this license with the Software;
+2. include any copyright and other proprietary notices that we have included with the Software; and
+3. do not use our name, logos or trademarks to promote your version of the Software without our prior written consent.
 
-(c) Your aggregate revenue derived from the use of the Licensed Work does not 
-    verify more than 10,000 inference requests per month.
+### Grant of Future License
+We hereby irrevocably grant you an additional license to use the Software under the **Apache License, Version 2.0** that is effective on the second anniversary of the date we make the Software available. On or after that date, you may use the Software under the Apache License, Version 2.0, in which case the following will apply:
 
-Any use beyond these limits requires a separate Commercial License from the 
-Licensor.
+> Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with the License. You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
 
-3. CHANGE DATE
---------------------------------------------------------------------------------
-The Change Date is: February 13, 2036.
-
-4. CHANGE LICENSE
---------------------------------------------------------------------------------
-On the Change Date, the Licensor hereby grants you rights under the terms of 
-the Apache License, Version 2.0. A copy of the Apache License, Version 2.0 
-is available at: http://www.apache.org/licenses/LICENSE-2.0
-
-5. MISCELLANEOUS
---------------------------------------------------------------------------------
-This License is governed by the laws of the State of Alabama.
-
-================================================================================
-WHY THIS WORKS FOR SHARD:
-
-• Prevents Cloning: Competitors cannot fork "Shard Core" and launch 
-  "MegaCorp AI Grid" because offering it "as a service" violates Clause 2(a).
-
-• Allows Innovation: Researchers can still read your verification code to trust 
-  it, which is vital for a crypto-economic system.
-
-• Protects Revenue: The 10,000 inference request/month limit prevents 
-  commercial use without a license while allowing small projects and 
-  personal use.
-================================================================================
+### Disclaimer
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
