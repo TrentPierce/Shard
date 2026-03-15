@@ -2992,6 +2992,7 @@ fn should_track_in_flight_path(path: &str) -> bool {
             | "/v1/scout/draft"
             | "/signed/submit-draft"
             | "/browser-layer/submit"
+            | "/v1/agents/tasks"
     )
 }
 

@@ -7,6 +7,7 @@ use crate::provenance::{
 };
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
+use std::sync::Arc;
 
 const RESEARCH_WORKFLOW_KIND: &str = "research_brief";
 const MAX_RESEARCH_SOURCES: usize = 6;
