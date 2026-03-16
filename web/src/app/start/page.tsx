@@ -52,8 +52,39 @@ export default function StartPage() {
     return "Idle"
   }, [contributionStatus])
 
+  const howToLd = {
+    "@context": "https://schema.org",
+    "@type": "HowTo",
+    "name": "How to get started with Shard Network",
+    "description": "Choose the best path to start using Shard, from running the provenance demo to adding your own compute capacity.",
+    "step": [
+      {
+        "@type": "HowToStep",
+        "name": "Run the provenance demo",
+        "text": "Ask a research question, paste source documents, and inspect the resulting provenance graph.",
+        "url": "https://shardnetwork.live/provenance"
+      },
+      {
+        "@type": "HowToStep",
+        "name": "Add your own machine",
+        "text": "Download the Shard GUI, download models, and start your local node.",
+        "url": "https://github.com/TrentPierce/Shard/releases/latest"
+      },
+      {
+        "@type": "HowToStep",
+        "name": "Integrate the API",
+        "text": "Use the workflow APIs to submit tasks and retrieve receipts and provenance data.",
+        "url": "https://github.com/TrentPierce/Shard/blob/main/docs/api.md"
+      }
+    ]
+  }
+
   return (
     <main id="main-content" className="py-8 sm:py-10">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(howToLd) }}
+      />
       <section className="glass-panel rounded-[2rem] px-6 py-8 sm:px-8 sm:py-10">
         <p className="text-xs uppercase tracking-[0.24em] text-accent-300">Quick start</p>
         <h1 className="mt-3 max-w-3xl text-balance text-4xl font-semibold text-ink-50 sm:text-5xl">

@@ -103,8 +103,69 @@ export default function HomePage() {
         : "Last known snapshot"
       : "Traffic appears here once the daemon reports workflow activity."
 
+  const articleLd = {
+    "@context": "https://schema.org",
+    "@type": "Article",
+    "headline": "Receipt-first workflow observability for AI agents",
+    "description": "Shard routes AI workflow steps across personal, private, and public capacity with transparent receipts and provenance.",
+    "author": {
+      "@type": "Person",
+      "name": "Trent Pierce",
+      "url": "https://shardnetwork.live/authors/trent-pierce"
+    },
+    "publisher": {
+      "@type": "Organization",
+      "name": "Shard Network",
+      "logo": "https://shardnetwork.live/brand-mark.png"
+    },
+    "citation": [
+      "https://www.nist.gov/itl/ai-risk-management-framework",
+      "https://gdpr.eu/tag/gdpr/",
+      "https://standards.ieee.org/ieee/7001/6966/"
+    ]
+  }
+
+  const faqLd = {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    "mainEntity": [
+      {
+        "@type": "Question",
+        "name": "What is AI workflow routing?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "AI workflow routing directs each step of an AI pipeline to the most appropriate compute capacity (personal, private, public) based on policy, cost, and trust requirements."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "How does Shard provide provenance?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Shard records durable receipts for every execution step and reconstructs a provenance graph from linked receipt IDs, providing a transparent audit trail of where and why each step ran."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "What is receipt-first execution?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Receipt-first execution means every workflow step emits a verifiable receipt containing routing details, trust tier, cost, and latency, ensuring observability is built into the runtime itself."
+        }
+      }
+    ]
+  }
+
   return (
     <main id="main-content" className="pb-16 pt-8 sm:pt-12">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(articleLd) }}
+      />
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(faqLd) }}
+      />
       <section className="glass-panel relative overflow-hidden rounded-[2.4rem] px-6 py-8 sm:px-10 sm:py-12">
         <div className="halo-orb right-[-6rem] top-[-4rem] h-40 w-40 bg-accent-400/20" />
         <div className="halo-orb bottom-[-5rem] left-[-4rem] h-36 w-36 bg-orange-300/20" />
@@ -246,45 +307,61 @@ export default function HomePage() {
         </article>
       </section>
 
-      <section className="mt-12">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <p className="text-xs uppercase tracking-[0.24em] text-accent-300">Start here</p>
-            <h2 className="mt-3 text-3xl font-semibold text-ink-50">
-              Choose the first Shard experience that fits you.
-            </h2>
-          </div>
-          <p className="max-w-xl text-sm leading-7 text-ink-300">
-            If you want the fastest explanation, open the provenance demo first. It is the clearest
-            proof of what makes Shard different from a normal AI endpoint.
+      <section className="mt-20 border-t border-white/10 pt-16">
+        <div className="max-w-3xl">
+          <p className="text-xs uppercase tracking-[0.24em] text-accent-300">Authoritative References</p>
+          <h2 className="mt-3 text-3xl font-semibold text-ink-50 sm:text-4xl">
+            Grounded in standards.
+          </h2>
+          <p className="mt-3 text-sm leading-7 text-ink-300">
+            Shard's approach to observability and verifiable execution is informed by industry
+            standards and academic research into trustworthy AI systems.
           </p>
         </div>
-        <div className="mt-6 grid gap-4 lg:grid-cols-3">
-          {nextMoves.map((item) => (
-            <article key={item.title} className="glass-panel rounded-[1.6rem] p-5">
-              <h3 className="text-2xl font-semibold text-ink-50">{item.title}</h3>
-              <p className="mt-3 text-sm leading-7 text-ink-300">{item.body}</p>
-              <Link
-                href={item.href}
-                className="mt-6 inline-flex min-h-11 items-center justify-center rounded-full border border-white/10 bg-white/5 px-5 py-3 text-sm font-semibold text-ink-50 hover:bg-white/10"
-              >
-                {item.cta}
-              </Link>
-            </article>
-          ))}
+        <div className="mt-8 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+          <Citation 
+            title="NIST AI Risk Management Framework (AI RMF 1.0)"
+            source="NIST.gov"
+            href="https://www.nist.gov/itl/ai-risk-management-framework"
+            description="Guidelines for managing risks to individuals, organizations, and society during the design, development, use, and evaluation of AI systems."
+          />
+          <Citation 
+            title="General Data Protection Regulation (GDPR)"
+            source="GDPR.eu"
+            href="https://gdpr.eu/tag/gdpr/"
+            description="The toughest privacy and security law in the world, requiring organizations to be transparent about how they process personal data."
+          />
+          <Citation 
+            title="IEEE P7001: Transparency of Autonomous Systems"
+            source="IEEE.org"
+            href="https://standards.ieee.org/ieee/7001/6966/"
+            description="Standard for the transparency of autonomous systems, ensuring they are understandable to users and stakeholders."
+          />
         </div>
       </section>
     </main>
   )
 }
 
+function Citation({ title, source, href, description }: { title: string, source: string, href: string, description: string }) {
+  return (
+    <div className="rounded-[1.6rem] border border-white/10 bg-white/5 p-6 space-y-3 hover:bg-white/10 transition-colors">
+      <div className="flex items-center justify-between">
+        <span className="text-[10px] uppercase tracking-widest text-accent-400 font-bold">{source}</span>
+        <a href={href} target="_blank" rel="noreferrer" className="text-ink-400 hover:text-accent-300">
+          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="Step 10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+          </svg>
+        </a>
+      </div>
+      <h3 className="text-lg font-semibold text-ink-50 leading-tight">{title}</h3>
+      <p className="text-sm text-ink-300 leading-relaxed">{description}</p>
+    </div>
+  )
+}
+
 function MetricCard({
-  label,
-  value,
-  detail,
-}: {
-  label: string
-  value: string
+...
   detail: string
 }) {
   return (

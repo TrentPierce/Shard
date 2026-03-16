@@ -24,6 +24,15 @@ const footerSections = [
       { name: "Python SDK", href: "https://github.com/TrentPierce/Shard/tree/main/sdk/python" },
     ],
   },
+  {
+    title: "Company",
+    links: [
+      { name: "About", href: "/about" },
+      { name: "Contact", href: "/contact" },
+      { name: "Privacy Policy", href: "/privacy" },
+      { name: "Terms of Service", href: "/terms" },
+    ],
+  },
 ] as const
 
 export default function Footer() {
@@ -31,7 +40,7 @@ export default function Footer() {
 
   return (
     <footer className="relative z-10 mt-20 border-t border-white/10 bg-[linear-gradient(180deg,rgba(9,17,27,0),rgba(9,17,27,0.92))]">
-      <div className="mx-auto grid w-full max-w-7xl gap-10 px-4 py-10 sm:px-6 lg:grid-cols-[1.2fr_0.8fr_0.8fr] lg:px-8">
+      <div className="mx-auto grid w-full max-w-7xl gap-10 px-4 py-10 sm:px-6 lg:grid-cols-[1.2fr_0.6fr_0.6fr_0.6fr] lg:px-8">
         <div className="space-y-4">
           <Link href="/" className="inline-flex items-center gap-3">
             <Image
@@ -60,6 +69,16 @@ export default function Footer() {
             </span>
             <span className="sunrise-chip rounded-full border border-white/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-100">
               Public
+            </span>
+          </div>
+          <div className="pt-4 flex items-center gap-4 text-[10px] font-medium uppercase tracking-widest text-ink-400">
+            <span className="flex items-center gap-1.5 rounded border border-white/5 bg-white/[0.02] px-2 py-1">
+              <span className="h-1.5 w-1.5 rounded-full bg-green-500/50" />
+              GDPR Compliant
+            </span>
+            <span className="flex items-center gap-1.5 rounded border border-white/5 bg-white/[0.02] px-2 py-1">
+              <span className="h-1.5 w-1.5 rounded-full bg-blue-500/50" />
+              FSL Licensed
             </span>
           </div>
         </div>
